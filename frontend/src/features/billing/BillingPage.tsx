@@ -10,6 +10,7 @@ import {
   PageHeader,
   Pagination,
   Select,
+  SegmentedControl,
   SkeletonRows,
   Table,
   TableEmpty,
@@ -23,6 +24,7 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { BillingOverview } from "./BillingOverview";
+import { CashPaymentsPanel } from "./CashPaymentsPanel";
 import {
   billingYear,
   formatBillingDate,
@@ -68,6 +70,7 @@ export function BillingPage(): JSX.Element {
   const [invoicePage, setInvoicePage] = useState(1);
   const [paymentPage, setPaymentPage] = useState(1);
   const [notice, setNotice] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<"payments" | "archive">("payments");
   const deferredInvoiceSearch = useDeferredValue(invoiceSearch);
   const invoices = account?.invoices ?? EMPTY_INVOICES;
   const payments = account?.payments ?? EMPTY_PAYMENTS;
@@ -115,14 +118,17 @@ export function BillingPage(): JSX.Element {
   };
 
   const showInvoiceHistory = () => {
-    document.getElementById("billing-invoices")?.scrollIntoView({ block: "start" });
+    setWorkspace("archive");
+    window.requestAnimationFrame(() => {
+      document.getElementById("billing-invoices")?.scrollIntoView({ block: "start" });
+    });
   };
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title="История расчётов"
-        description="Сохранённые счета и платежи. Оплата не изменяет доступ к приложению."
+        title="Расчёты с Aurum"
+        description="Оплаты услуг Aurum Pharma, подтверждающие документы и история счетов."
       />
 
       {notice ? (
@@ -157,185 +163,206 @@ export function BillingPage(): JSX.Element {
             onShowHistory={showInvoiceHistory}
           />
 
-          <section
-            id="billing-invoices"
-            className="min-w-0 space-y-3"
-            aria-labelledby="billing-invoices-heading"
-            aria-label="История счетов"
-          >
-            <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
-              <div className="min-w-0">
-                <h2
-                  id="billing-invoices-heading"
-                  className="text-base font-semibold text-foreground"
-                >
-                  История счетов
-                </h2>
-                <p className="mt-0.5 text-xs text-foreground-muted">
-                  Сумма и остаток рассчитываются по подтвержденным финансовым операциям.
-                </p>
-              </div>
-              <Badge tone="neutral" aria-live="polite">
-                {invoiceCountLabel(filteredInvoices.length)}
-              </Badge>
-            </div>
+          <SegmentedControl
+            value={workspace}
+            onChange={setWorkspace}
+            label="Раздел расчётов с Aurum"
+            options={[
+              { value: "payments", label: "Оплаты" },
+              { value: "archive", label: "Архив счетов" },
+            ]}
+          />
 
-            <ConfigurableFilterBar
-              preferenceKey={filterPreferenceKey}
-              filters={[
-                {
-                  id: "number",
-                  label: "Номер счёта",
-                  content: (
-                    <div>
-                      <Label htmlFor="billing-invoice-search">Номер счёта</Label>
-                      <Input
-                        id="billing-invoice-search"
-                        type="search"
-                        autoComplete="off"
-                        placeholder="Например, AP-2026"
-                        value={invoiceSearch}
-                        onChange={(event) => {
-                          setInvoiceSearch(event.target.value);
-                          setInvoicePage(1);
-                        }}
+          {workspace === "archive" ? (
+            <>
+              <section
+                id="billing-invoices"
+                className="min-w-0 space-y-3"
+                aria-labelledby="billing-invoices-heading"
+                aria-label="История счетов"
+              >
+                <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2
+                      id="billing-invoices-heading"
+                      className="text-base font-semibold text-foreground"
+                    >
+                      История счетов
+                    </h2>
+                    <p className="mt-0.5 text-xs text-foreground-muted">
+                      Сумма и остаток рассчитываются по подтвержденным финансовым операциям.
+                    </p>
+                  </div>
+                  <Badge tone="neutral" aria-live="polite">
+                    {invoiceCountLabel(filteredInvoices.length)}
+                  </Badge>
+                </div>
+
+                <ConfigurableFilterBar
+                  preferenceKey={filterPreferenceKey}
+                  filters={[
+                    {
+                      id: "number",
+                      label: "Номер счёта",
+                      content: (
+                        <div>
+                          <Label htmlFor="billing-invoice-search">Номер счёта</Label>
+                          <Input
+                            id="billing-invoice-search"
+                            type="search"
+                            autoComplete="off"
+                            placeholder="Например, AP-2026"
+                            value={invoiceSearch}
+                            onChange={(event) => {
+                              setInvoiceSearch(event.target.value);
+                              setInvoicePage(1);
+                            }}
+                          />
+                        </div>
+                      ),
+                      active: Boolean(invoiceSearch),
+                      onClear: () => {
+                        setInvoiceSearch("");
+                        setInvoicePage(1);
+                      },
+                      alwaysVisible: true,
+                    },
+                    {
+                      id: "status",
+                      label: "Статус",
+                      content: (
+                        <div>
+                          <Label htmlFor="billing-invoice-status">Статус</Label>
+                          <Select
+                            id="billing-invoice-status"
+                            value={statusFilter}
+                            onChange={(event) => {
+                              setStatusFilter(
+                                event.target.value as FinancialInvoiceDisplayStatus | "",
+                              );
+                              setInvoicePage(1);
+                            }}
+                            className="w-full sm:w-48"
+                          >
+                            <option value="">Все статусы</option>
+                            {FILTER_STATUSES.map((status) => (
+                              <option key={status} value={status}>
+                                {financialInvoiceStatusLabel[status]}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      ),
+                      active: Boolean(statusFilter),
+                      activeLabel: statusFilter
+                        ? `Статус: ${financialInvoiceStatusLabel[statusFilter]}`
+                        : undefined,
+                      onClear: () => {
+                        setStatusFilter("");
+                        setInvoicePage(1);
+                      },
+                      defaultVisible: true,
+                    },
+                    {
+                      id: "year",
+                      label: "Год",
+                      content: (
+                        <div>
+                          <Label htmlFor="billing-invoice-year">Год</Label>
+                          <Select
+                            id="billing-invoice-year"
+                            value={yearFilter}
+                            onChange={(event) => {
+                              setYearFilter(event.target.value);
+                              setInvoicePage(1);
+                            }}
+                            disabled={invoiceYears.length === 0}
+                            className="w-full sm:w-32"
+                          >
+                            <option value="">Все годы</option>
+                            {invoiceYears.map((year) => (
+                              <option key={year} value={year}>
+                                {year}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      ),
+                      active: Boolean(yearFilter),
+                      activeLabel: `Год: ${yearFilter}`,
+                      onClear: () => {
+                        setYearFilter("");
+                        setInvoicePage(1);
+                      },
+                      defaultVisible: true,
+                    },
+                  ]}
+                  onResetValues={resetFilters}
+                />
+
+                {filteredInvoices.length === 0 ? (
+                  <TableEmpty title={hasActiveFilters ? "Счета не найдены" : "Счетов пока нет"}>
+                    {hasActiveFilters
+                      ? "Измените или сбросьте фильтры, чтобы увидеть другие счета."
+                      : "Здесь хранится история ранее выставленных счетов."}
+                  </TableEmpty>
+                ) : (
+                  <>
+                    <InvoiceHistory invoices={visibleInvoices} onOpenInvoice={setOpenInvoiceId} />
+                    {filteredInvoices.length > PAGE_SIZE ? (
+                      <Pagination
+                        page={visibleInvoicePage}
+                        pageSize={PAGE_SIZE}
+                        total={filteredInvoices.length}
+                        onPage={setInvoicePage}
                       />
-                    </div>
-                  ),
-                  active: Boolean(invoiceSearch),
-                  onClear: () => {
-                    setInvoiceSearch("");
-                    setInvoicePage(1);
-                  },
-                  alwaysVisible: true,
-                },
-                {
-                  id: "status",
-                  label: "Статус",
-                  content: (
-                    <div>
-                      <Label htmlFor="billing-invoice-status">Статус</Label>
-                      <Select
-                        id="billing-invoice-status"
-                        value={statusFilter}
-                        onChange={(event) => {
-                          setStatusFilter(event.target.value as FinancialInvoiceDisplayStatus | "");
-                          setInvoicePage(1);
-                        }}
-                        className="w-full sm:w-48"
-                      >
-                        <option value="">Все статусы</option>
-                        {FILTER_STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {financialInvoiceStatusLabel[status]}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  ),
-                  active: Boolean(statusFilter),
-                  activeLabel: statusFilter
-                    ? `Статус: ${financialInvoiceStatusLabel[statusFilter]}`
-                    : undefined,
-                  onClear: () => {
-                    setStatusFilter("");
-                    setInvoicePage(1);
-                  },
-                  defaultVisible: true,
-                },
-                {
-                  id: "year",
-                  label: "Год",
-                  content: (
-                    <div>
-                      <Label htmlFor="billing-invoice-year">Год</Label>
-                      <Select
-                        id="billing-invoice-year"
-                        value={yearFilter}
-                        onChange={(event) => {
-                          setYearFilter(event.target.value);
-                          setInvoicePage(1);
-                        }}
-                        disabled={invoiceYears.length === 0}
-                        className="w-full sm:w-32"
-                      >
-                        <option value="">Все годы</option>
-                        {invoiceYears.map((year) => (
-                          <option key={year} value={year}>
-                            {year}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                  ),
-                  active: Boolean(yearFilter),
-                  activeLabel: `Год: ${yearFilter}`,
-                  onClear: () => {
-                    setYearFilter("");
-                    setInvoicePage(1);
-                  },
-                  defaultVisible: true,
-                },
-              ]}
-              onResetValues={resetFilters}
-            />
+                    ) : null}
+                  </>
+                )}
+              </section>
 
-            {filteredInvoices.length === 0 ? (
-              <TableEmpty title={hasActiveFilters ? "Счета не найдены" : "Счетов пока нет"}>
-                {hasActiveFilters
-                  ? "Измените или сбросьте фильтры, чтобы увидеть другие счета."
-                  : "Новые счета появятся здесь после выставления администрацией Aurum Pharma."}
-              </TableEmpty>
-            ) : (
-              <>
-                <InvoiceHistory invoices={visibleInvoices} onOpenInvoice={setOpenInvoiceId} />
-                {filteredInvoices.length > PAGE_SIZE ? (
-                  <Pagination
-                    page={visibleInvoicePage}
-                    pageSize={PAGE_SIZE}
-                    total={filteredInvoices.length}
-                    onPage={setInvoicePage}
-                  />
-                ) : null}
-              </>
-            )}
-          </section>
+              <PaymentSubmissionsPanel canWithdraw={false} online={online} onNotice={setNotice} />
+            </>
+          ) : null}
 
-          <PaymentSubmissionsPanel canWithdraw={false} online={online} onNotice={setNotice} />
-
-          <section className="min-w-0 space-y-3" aria-labelledby="billing-payments-heading">
-            <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
-              <div className="min-w-0">
-                <h2
-                  id="billing-payments-heading"
-                  className="text-base font-semibold text-foreground"
-                >
-                  Подтвержденные платежи
-                </h2>
-                <p className="mt-0.5 text-xs text-foreground-muted">
-                  Здесь отображаются только проверенные Aurum Pharma платежи.
-                </p>
-              </div>
-              <Badge tone="neutral">{paymentCountLabel(payments.length)}</Badge>
-            </div>
-            {payments.length === 0 ? (
-              <TableEmpty title="Подтвержденных платежей пока нет">
-                Платеж появится после проверки сотрудником Aurum Pharma.
-              </TableEmpty>
-            ) : (
-              <>
-                <PaymentHistory payments={visiblePayments} />
-                {payments.length > PAGE_SIZE ? (
-                  <Pagination
-                    page={visiblePaymentPage}
-                    pageSize={PAGE_SIZE}
-                    total={payments.length}
-                    onPage={setPaymentPage}
-                  />
-                ) : null}
-              </>
-            )}
-          </section>
+          {workspace === "payments" ? (
+            <>
+              <CashPaymentsPanel />
+              <section className="min-w-0 space-y-3" aria-labelledby="billing-payments-heading">
+                <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2
+                      id="billing-payments-heading"
+                      className="text-base font-semibold text-foreground"
+                    >
+                      Подтвержденные платежи
+                    </h2>
+                    <p className="mt-0.5 text-xs text-foreground-muted">
+                      Здесь отображаются только проверенные Aurum Pharma платежи.
+                    </p>
+                  </div>
+                  <Badge tone="neutral">{paymentCountLabel(payments.length)}</Badge>
+                </div>
+                {payments.length === 0 ? (
+                  <TableEmpty title="Подтвержденных платежей пока нет">
+                    Платеж появится после проверки сотрудником Aurum Pharma.
+                  </TableEmpty>
+                ) : (
+                  <>
+                    <PaymentHistory payments={visiblePayments} />
+                    {payments.length > PAGE_SIZE ? (
+                      <Pagination
+                        page={visiblePaymentPage}
+                        pageSize={PAGE_SIZE}
+                        total={payments.length}
+                        onPage={setPaymentPage}
+                      />
+                    ) : null}
+                  </>
+                )}
+              </section>
+            </>
+          ) : null}
         </>
       ) : null}
 
@@ -454,6 +481,7 @@ function PaymentHistory({ payments }: { payments: readonly TenantBillingPayment[
           <THead>
             <TR>
               <TH>Дата оплаты</TH>
+              <TH>Способ</TH>
               <TH>Подтвержден</TH>
               <TH className="text-right">Сумма</TH>
               <TH className="text-right">Зачтено в счета</TH>
@@ -465,6 +493,7 @@ function PaymentHistory({ payments }: { payments: readonly TenantBillingPayment[
             {payments.map((payment, index) => (
               <TR key={`${payment.confirmed_at}-${payment.amount}-${index}`}>
                 <TD className="whitespace-nowrap">{formatBillingDate(payment.paid_at)}</TD>
+                <TD>{payment.payment_method === "cash" ? "Наличные" : "Банковский перевод"}</TD>
                 <TD className="whitespace-nowrap">{formatBillingDateTime(payment.confirmed_at)}</TD>
                 <TD className="whitespace-nowrap text-right font-semibold tabular-nums">
                   {formatBillingMoney(payment.amount, payment.currency)}
@@ -493,6 +522,8 @@ function PaymentHistory({ payments }: { payments: readonly TenantBillingPayment[
               <div>
                 <p className="text-xs text-foreground-muted">
                   {formatBillingDate(payment.paid_at)}
+                  {" · "}
+                  {payment.payment_method === "cash" ? "Наличные" : "Банковский перевод"}
                 </p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                   {formatBillingMoney(payment.amount, payment.currency)}

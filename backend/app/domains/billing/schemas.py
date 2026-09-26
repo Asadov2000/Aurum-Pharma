@@ -367,6 +367,8 @@ class TenantBillingFinancialInvoiceRead(BaseModel):
 
 
 class TenantBillingPaymentRead(BaseModel):
+    payment_method: Literal["bank_transfer", "cash"] = "bank_transfer"
+    can_adjust: bool = False
     amount: Decimal
     allocated_amount: Decimal
     credit_amount: Decimal
@@ -685,6 +687,8 @@ class BillingPaymentApprovalCommandResult(BaseModel):
 
 class BillingPaymentHistoryRead(BaseModel):
     payment_id: UUID
+    payment_method: Literal["bank_transfer", "cash"] = "bank_transfer"
+    can_adjust: bool = True
     amount: Decimal
     allocated_amount: Decimal
     credit_amount: Decimal
@@ -903,3 +907,96 @@ class BillingFinancialAccountRead(BaseModel):
     @field_serializer("outstanding_amount", "credit_balance")
     def _serialize_money(self, value: Decimal) -> str:
         return format(value, "f")
+
+
+class CashPaymentCreate(_StrictBillingCommand):
+    operation_id: UUID
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    paid_at: datetime
+    purpose: str = Field(min_length=3, max_length=500)
+    target_invoice_id: UUID | None = None
+
+    @field_validator("paid_at")
+    @classmethod
+    def _normalize_paid_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("paid_at must include a timezone")
+        return value.astimezone(UTC)
+
+    @field_validator("purpose")
+    @classmethod
+    def _normalize_purpose(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("purpose must contain at least three characters")
+        return value
+
+
+class CashPaymentDecision(_StrictBillingCommand):
+    operation_id: UUID
+    expected_row_version: int = Field(ge=1, le=2147483647)
+
+
+class CashPaymentReject(CashPaymentDecision):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class CashPaymentRead(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    document_number: str
+    status: Literal["pending_approval", "confirmed", "rejected"]
+    row_version: int
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    purpose: str
+    target_invoice_id: UUID | None
+    created_by: UUID
+    created_at: datetime
+    confirmed_at: datetime | None
+    allocated_amount: Decimal
+    credit_amount: Decimal
+    can_approve: bool
+    can_adjust: Literal[False]
+
+    @field_serializer("amount", "allocated_amount", "credit_amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
+class CashPaymentList(BaseModel):
+    items: list[CashPaymentRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class CashReceiptAllocation(BaseModel):
+    invoice_id: UUID
+    invoice_number: str
+    amount: Decimal
+
+    @field_serializer("amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")
+
+
+class CashPaymentReceipt(BaseModel):
+    id: UUID
+    document_number: str
+    title: Literal["Подтверждение приёма наличных"]
+    tenant_id: UUID
+    tenant_name: str
+    purpose: str
+    amount: Decimal
+    currency: Literal["TJS"]
+    paid_at: datetime
+    confirmed_at: datetime
+    allocated_amount: Decimal
+    credit_amount: Decimal
+    allocations: list[CashReceiptAllocation]
+
+    @field_serializer("amount", "allocated_amount", "credit_amount")
+    def _serialize_money(self, value: Decimal) -> str:
+        return format(value, ".2f")

@@ -158,7 +158,7 @@ export function PlatformBillingPage(): JSX.Element {
     <div className="space-y-4">
       <PageHeader
         title="Расчёты Aurum"
-        description="История расчётов и финансовые корректировки. Оплата не изменяет доступ."
+        description="Оплаты услуг Aurum Pharma, авансы клиентов и подтверждающие документы."
         meta={
           workspace === "legacy" && overview.data ? (
             <>данные на {formatDateTime(overview.data.generated_at)}</>

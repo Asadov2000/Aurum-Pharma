@@ -56,6 +56,7 @@
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
 | Отчёты, выгрузки и финансовая сводка | [Проверка отчётности](reporting-audit.md), `backend/app/domains/pos/`, `backend/app/domains/dashboard/`, `frontend/src/features/reports/` | pytest POS/dashboard/billing, Vitest reports/dashboard, E2E выгрузок и закрытия смены |
+| Наличные расчёты с Aurum | [ADR-0048](adr/0048-cash-settlements-with-aurum.md), billing cash commands, `cashTypes.ts`, `CashPaymentsWorkspace.tsx`, `CashPaymentsPanel.tsx`; миграция 0159 | Независимое подтверждение, tenant RLS, повтор/баланс/документ; наличные возвраты и фискализация отдельно |
 | Публичный сайт и способы установки | `website/src/`, `website/scripts/`; [ADR-0041](adr/0041-public-website-boundary.md) | `website/scripts/test.mjs`, браузерная проверка сайта, CI gate |
 | Границы компонентов и план развития | [project-structure.md](project-structure.md), [implementation-roadmap.md](implementation-roadmap.md) | отличать реализованные пути и проверенные результаты от планов |
 | Windows-клиент / будущий установщик | `desktop/AurumPharma.Desktop/`, `desktop/AurumPharma.Desktop.Core/`; [desktop-host-implementation.md](desktop-host-implementation.md), [desktop-bridge.md](desktop-bridge.md) | desktop core tests, packaged WinUI build, `scripts/windows-host-readiness.ps1`; установщик и offline runtime ещё не выпущены |

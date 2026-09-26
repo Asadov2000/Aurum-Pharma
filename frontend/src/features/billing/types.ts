@@ -46,6 +46,7 @@ export interface TenantFinancialInvoice {
 }
 
 export interface TenantBillingPayment {
+  payment_method?: "bank_transfer" | "cash";
   amount: string;
   allocated_amount: string;
   credit_amount: string;

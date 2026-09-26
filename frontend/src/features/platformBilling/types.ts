@@ -356,6 +356,8 @@ export interface PlatformPaymentApprovalCommandResult {
 }
 
 export interface PlatformPaymentHistoryItem {
+  payment_method?: "bank_transfer" | "cash";
+  can_adjust?: boolean;
   payment_id: string;
   amount: string;
   allocated_amount: string;

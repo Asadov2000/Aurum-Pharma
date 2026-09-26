@@ -10,6 +10,7 @@ import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 import structlog
@@ -184,6 +185,70 @@ class BillingService:
         expected_row_version: int,
     ) -> PlatformPricingCommandRecord:
         raise SubscriptionsDisabledError()
+
+    async def cash_payment_command(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID,
+        operation_id: UUID,
+        tenant_id: UUID,
+        action: Literal["create", "approve", "reject"],
+        document_id: UUID | None = None,
+        expected_row_version: int | None = None,
+        amount: Decimal | None = None,
+        paid_at: datetime | None = None,
+        purpose: str | None = None,
+        target_invoice_id: UUID | None = None,
+        reason: str | None = None,
+    ) -> PlatformPricingCommandRecord:
+        payload: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "action": action,
+            "document_id": document_id,
+            "expected_row_version": expected_row_version,
+            "amount": amount,
+            "paid_at": paid_at,
+            "purpose": purpose,
+            "target_invoice_id": target_invoice_id,
+            "reason": reason,
+        }
+        try:
+            return await self.repo.cash_payment_command(
+                {
+                    **payload,
+                    "actor_user_id": actor_user_id,
+                    "actor_session_id": actor_session_id,
+                    "operation_id": operation_id,
+                    "request_hash": _pricing_request_hash("cash_payment_" + action, payload),
+                }
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
+
+    async def read_cash_payments(
+        self,
+        *,
+        actor_user_id: UUID,
+        actor_session_id: UUID | None,
+        tenant_id: UUID,
+        document_id: UUID | None = None,
+        receipt: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        try:
+            return await self.repo.read_cash_payments(
+                actor_user_id=actor_user_id,
+                actor_session_id=actor_session_id,
+                tenant_id=tenant_id,
+                document_id=document_id,
+                receipt=receipt,
+                limit=limit,
+                offset=offset,
+            )
+        except DBAPIError as exc:
+            raise _financial_error(exc) from exc
 
     async def create_bank_payment_review(
         self,

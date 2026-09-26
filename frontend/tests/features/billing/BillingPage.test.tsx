@@ -6,6 +6,8 @@ const getFinancialAccount = vi.fn();
 const listPaymentSubmissions = vi.fn();
 const createPaymentSubmission = vi.fn();
 const withdrawPaymentSubmission = vi.fn();
+const listTenantCashPayments = vi.fn();
+const getTenantCashReceipt = vi.fn();
 const authState = vi.hoisted(() => ({
   user: {
     is_developer: false,
@@ -23,6 +25,11 @@ vi.mock("@/features/billing/api", () => ({
 
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => authState,
+}));
+
+vi.mock("@/features/billing/cashApi", () => ({
+  listTenantCashPayments: (...args: unknown[]) => listTenantCashPayments(...args),
+  getTenantCashReceipt: (...args: unknown[]) => getTenantCashReceipt(...args),
 }));
 
 import { BillingPage } from "@/features/billing/BillingPage";
@@ -114,6 +121,9 @@ describe("BillingPage", () => {
     listPaymentSubmissions.mockReset();
     createPaymentSubmission.mockReset();
     withdrawPaymentSubmission.mockReset();
+    listTenantCashPayments.mockReset();
+    getTenantCashReceipt.mockReset();
+    listTenantCashPayments.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
     authState.user.permissions = [];
     listPaymentSubmissions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 });
     window.localStorage.clear();
@@ -124,7 +134,7 @@ describe("BillingPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a clear empty state when the subscription is not connected", async () => {
+  it("shows an empty payments account without a subscription call to action", async () => {
     getFinancialAccount.mockResolvedValueOnce({
       subscription: null,
       currency: "TJS",
@@ -135,8 +145,14 @@ describe("BillingPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
-    expect(screen.getAllByText(/Историческая задолженность не блокирует/i)).not.toHaveLength(0);
+    expect(await screen.findByText("Состояние расчётов")).toBeInTheDocument();
+    expect(screen.getByText("Подтвержденных платежей пока нет")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "История счетов" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/подключить подписку|продлить подписку|разблокировать доступ/i),
+    ).not.toBeInTheDocument();
+    expect(listPaymentSubmissions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть архив счетов" }));
     expect(screen.getByText("Счетов пока нет")).toBeInTheDocument();
   });
 
@@ -144,11 +160,51 @@ describe("BillingPage", () => {
     getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
     renderPage();
 
-    expect(screen.getByRole("heading", { level: 1, name: "История расчётов" })).toBeInTheDocument();
-    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Расчёты с Aurum" })).toBeInTheDocument();
+    expect(await screen.findByText("Состояние расчётов")).toBeInTheDocument();
+    expect(screen.queryByText("AP-2026-001")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Архив счетов", exact: true }));
     expect(screen.getAllByText("AP-2026-001")).not.toHaveLength(0);
     expect(screen.getAllByText("Ожидает оплаты")).not.toHaveLength(0);
     expect(screen.getAllByText(/1[\s\u00a0]100,00 TJS/)).not.toHaveLength(0);
+  });
+
+  it("keeps confirmed payments as the default and opens bank submissions only in the archive", async () => {
+    getFinancialAccount.mockResolvedValueOnce({ ...ACCOUNT, payments: [PAYMENT] });
+    renderPage();
+
+    const payments = await screen.findByRole("region", { name: "Подтвержденные платежи" });
+    expect(within(payments).getAllByText("Подтвержден")).not.toHaveLength(0);
+    expect(screen.queryByRole("region", { name: "История счетов" })).not.toBeInTheDocument();
+    expect(listPaymentSubmissions).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Архив счетов", exact: true }));
+    expect(await screen.findByText("Заявки об оплате")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Подтвержденные платежи" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Оплаты", exact: true }));
+    expect(
+      await screen.findByRole("region", { name: "Подтвержденные платежи" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "История счетов" })).not.toBeInTheDocument();
+    expect(getFinancialAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not turn a saved suspended subscription into a payment or access prompt", async () => {
+    getFinancialAccount.mockResolvedValueOnce({
+      ...ACCOUNT,
+      subscription: { ...SUBSCRIPTION, status: "suspended" },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Состояние расчётов")).toBeInTheDocument();
+    expect(screen.getByText("Остаток к оплате")).toBeInTheDocument();
+    expect(screen.getByText("Аванс")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/продлить подписку|восстановить доступ|приостановлена/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /оплатить|подтвердить/i })).not.toBeInTheDocument();
   });
 
   it("prioritizes overdue debt and shows the exact outstanding amount", async () => {
@@ -169,7 +225,8 @@ describe("BillingPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
+    expect(await screen.findByText("Состояние расчётов")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Архив счетов", exact: true }));
     expect(screen.getAllByText("AP-2026-OVERDUE")).not.toHaveLength(0);
     expect(screen.getAllByText(/250,00 TJS/)).not.toHaveLength(0);
   });
@@ -186,12 +243,18 @@ describe("BillingPage", () => {
   it("opens invoice details without a second network request", async () => {
     getFinancialAccount.mockResolvedValueOnce(ACCOUNT);
     renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     const buttons = await screen.findAllByRole("button", { name: "Открыть счет AP-2026-001" });
     fireEvent.click(buttons[0]!);
 
     expect(await screen.findByText("Счет № AP-2026-001")).toBeInTheDocument();
     expect(screen.getByText("Расчетный период")).toBeInTheDocument();
     expect(screen.getByText("Осталось оплатить")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Счет № AP-2026-001" });
+    expect(
+      within(dialog).queryByRole("button", { name: /оплатить|подтвердить|изменить/i }),
+    ).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
     expect(getFinancialAccount).toHaveBeenCalledTimes(1);
   });
 
@@ -202,6 +265,7 @@ describe("BillingPage", () => {
     });
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     const history = await screen.findByRole("region", { name: "История счетов" });
     fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "paid" } });
@@ -227,6 +291,7 @@ describe("BillingPage", () => {
     getFinancialAccount.mockResolvedValueOnce({ ...ACCOUNT, invoices });
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     const history = await screen.findByRole("region", { name: "История счетов" });
     await within(history).findAllByText("AP-2025-001");
     expect(within(history).queryAllByText("AP-2025-011")).toHaveLength(0);
@@ -262,6 +327,7 @@ describe("BillingPage", () => {
     });
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     const invoiceRow = await screen.findByRole("row", { name: /AP-2025-WRITEOFF/ });
     expect(within(invoiceRow).getByText("Списан")).toBeInTheDocument();
     expect(within(invoiceRow).queryByText("Оплачен")).not.toBeInTheDocument();
@@ -275,7 +341,7 @@ describe("BillingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
 
     await waitFor(() => expect(getFinancialAccount).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("Сохранённые расчёты")).toBeInTheDocument();
+    expect(await screen.findByText("Состояние расчётов")).toBeInTheDocument();
   });
 
   it("fully hides create and withdraw actions without tenant permissions", async () => {
@@ -288,6 +354,7 @@ describe("BillingPage", () => {
     });
     renderPage();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     expect(await screen.findByText("Заявки об оплате")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Сообщить об оплате" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отозвать" })).not.toBeInTheDocument();
@@ -306,6 +373,7 @@ describe("BillingPage", () => {
       page_size: 10,
     });
     renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Архив счетов", exact: true }));
     expect(await screen.findByText("Заявки об оплате")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Сообщить об оплате" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Отозвать" })).not.toBeInTheDocument();

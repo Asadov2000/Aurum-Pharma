@@ -25,6 +25,11 @@ const rejectPlatformPaymentSubmission = vi.fn();
 const createPlatformPaymentAdjustment = vi.fn();
 const approvePlatformPaymentAdjustment = vi.fn();
 const rejectPlatformPaymentAdjustment = vi.fn();
+const listPlatformCashPayments = vi.fn();
+const getPlatformCashReceipt = vi.fn();
+const createPlatformCashPayment = vi.fn();
+const approvePlatformCashPayment = vi.fn();
+const rejectPlatformCashPayment = vi.fn();
 const authState = vi.hoisted(() => ({
   user: {
     id: "developer-1",
@@ -66,6 +71,14 @@ vi.mock("@/features/platformBilling/api", () => ({
 
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => authState,
+}));
+
+vi.mock("@/features/billing/cashApi", () => ({
+  listPlatformCashPayments: (...args: unknown[]) => listPlatformCashPayments(...args),
+  getPlatformCashReceipt: (...args: unknown[]) => getPlatformCashReceipt(...args),
+  createPlatformCashPayment: (...args: unknown[]) => createPlatformCashPayment(...args),
+  approvePlatformCashPayment: (...args: unknown[]) => approvePlatformCashPayment(...args),
+  rejectPlatformCashPayment: (...args: unknown[]) => rejectPlatformCashPayment(...args),
 }));
 
 import { PlatformBillingPage } from "@/features/platformBilling/PlatformBillingPage";
@@ -268,6 +281,12 @@ describe("PlatformBillingPage", () => {
     createPlatformPaymentAdjustment.mockReset();
     approvePlatformPaymentAdjustment.mockReset();
     rejectPlatformPaymentAdjustment.mockReset();
+    listPlatformCashPayments.mockReset();
+    getPlatformCashReceipt.mockReset();
+    createPlatformCashPayment.mockReset();
+    approvePlatformCashPayment.mockReset();
+    rejectPlatformCashPayment.mockReset();
+    listPlatformCashPayments.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
     authState.user.platform_capabilities = ["platform.billing.view"];
     getPlatformBillingOverview.mockResolvedValue(OVERVIEW);
     listPlatformInvoices.mockResolvedValue({
@@ -404,13 +423,67 @@ describe("PlatformBillingPage", () => {
 
     expect((await screen.findAllByText("590,00 TJS")).length).toBeGreaterThan(0);
     expect(screen.getByText("Сбалансирован")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Зарегистрировать оплату" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Банковский платёж" })).not.toBeInTheDocument();
     expect(screen.queryByText("Ожидают подтверждения")).not.toBeInTheDocument();
     expect(screen.queryByText("Заявки клиентов")).not.toBeInTheDocument();
     expect(listPlatformPaymentSubmissions).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain(BILLING_TENANT.tenant_id);
+  });
+
+  it("keeps a pending cash registration separate from the confirmed account balance", async () => {
+    listPlatformCashPayments.mockResolvedValue({
+      items: [
+        {
+          id: "cash-pending-1",
+          tenant_id: BILLING_TENANT.tenant_id,
+          document_number: "AC-2026-0042",
+          status: "pending_approval",
+          row_version: 1,
+          amount: "900.00",
+          currency: "TJS",
+          paid_at: "2026-09-26T08:00:00Z",
+          purpose: "Аванс за услуги Aurum",
+          target_invoice_id: null,
+          created_by: "developer-2",
+          created_at: "2026-09-26T08:01:00Z",
+          confirmed_at: null,
+          allocated_amount: "0.00",
+          credit_amount: "0.00",
+          can_approve: false,
+          can_adjust: false,
+        },
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+
+    expect(await screen.findByText("На подтверждении")).toBeInTheDocument();
+    expect(screen.getByText("Сумма ещё не включена в баланс.")).toBeInTheDocument();
+    expect(screen.getByText("Задолженность").parentElement).toHaveTextContent("590,00 TJS");
+    expect(screen.getByText("Аванс").parentElement).toHaveTextContent("0,00 TJS");
+    expect(screen.queryByRole("button", { name: "Открыть документ" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose bank correction or refund actions for a cash payment", async () => {
+    authState.user.platform_capabilities = [
+      "platform.billing.view",
+      "platform.billing.adjustment.create",
+    ];
+    getPlatformFinancialAccount.mockResolvedValue({
+      ...FINANCIAL_ACCOUNT,
+      payments: [{ ...PAYMENT, payment_method: "cash", can_adjust: false }],
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
+
+    expect((await screen.findAllByText("700,00 TJS")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Корректировать" })).not.toBeInTheDocument();
+    expect(createPlatformPaymentAdjustment).not.toHaveBeenCalled();
   });
 
   it("shows the tenant submission queue only to reviewers and purges details on close", async () => {
@@ -575,7 +648,7 @@ describe("PlatformBillingPage", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Банковский платёж" }));
 
     const dialog = screen.getByRole("dialog", { name: "Регистрация банковского платежа" });
     fireEvent.change(within(dialog).getByLabelText("Счёт"), {
@@ -623,7 +696,7 @@ describe("PlatformBillingPage", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Клиенты и оплаты" }));
     fireEvent.click(await screen.findByRole("button", { name: /Шифо Марказ/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Банковский платёж" }));
 
     const reference = "TJ-PRIVATE-CANCELLED-001";
     const dialog = screen.getByRole("dialog", { name: "Регистрация банковского платежа" });
@@ -633,7 +706,7 @@ describe("PlatformBillingPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
     expect(document.body.textContent).not.toContain(reference);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Зарегистрировать оплату" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Банковский платёж" }));
     expect(screen.getByLabelText("Банковский номер операции")).toHaveValue("");
   });
 

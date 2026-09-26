@@ -48,6 +48,12 @@ from app.domains.billing.schemas import (
     BillingPaymentAdjustmentRequestRead,
     BillingPaymentApprovalCommandResult,
     BillingPaymentApprovalRead,
+    CashPaymentCreate,
+    CashPaymentDecision,
+    CashPaymentList,
+    CashPaymentRead,
+    CashPaymentReceipt,
+    CashPaymentReject,
     InvoiceRead,
     InvoiceWithPayments,
     PaymentRead,
@@ -1078,4 +1084,180 @@ async def reject_payment_adjustment(
     return BillingPaymentAdjustmentRejectionCommandResult(
         item=BillingPaymentAdjustmentRejectionRead.model_validate(record.result),
         applied=record.applied,
+    )
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/cash-payments",
+    response_model=CashPaymentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_cash_payment(
+    tenant_id: UUID,
+    payload: CashPaymentCreate,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_recent_platform_capability("platform.billing.payment.review"))
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> CashPaymentRead:
+    _set_financial_no_store(response)
+    record = await service.cash_payment_command(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        action="create",
+        amount=payload.amount,
+        paid_at=payload.paid_at,
+        purpose=payload.purpose,
+        target_invoice_id=payload.target_invoice_id,
+    )
+    return CashPaymentRead.model_validate(record.result)
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/cash-payments/{document_id}/approve", response_model=CashPaymentRead
+)
+async def approve_cash_payment(
+    tenant_id: UUID,
+    document_id: UUID,
+    payload: CashPaymentDecision,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_recent_platform_capability("platform.billing.payment.approve"))
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> CashPaymentRead:
+    _set_financial_no_store(response)
+    record = await service.cash_payment_command(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        action="approve",
+        document_id=document_id,
+        expected_row_version=payload.expected_row_version,
+    )
+    return CashPaymentRead.model_validate(record.result)
+
+
+@platform_router.post(
+    "/tenants/{tenant_id}/cash-payments/{document_id}/reject", response_model=CashPaymentRead
+)
+async def reject_cash_payment(
+    tenant_id: UUID,
+    document_id: UUID,
+    payload: CashPaymentReject,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_recent_platform_capability("platform.billing.payment.approve"))
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> CashPaymentRead:
+    _set_financial_no_store(response)
+    record = await service.cash_payment_command(
+        actor_user_id=user.user_id,
+        actor_session_id=_platform_session_or_401(user),
+        operation_id=payload.operation_id,
+        tenant_id=tenant_id,
+        action="reject",
+        document_id=document_id,
+        expected_row_version=payload.expected_row_version,
+        reason=payload.reason,
+    )
+    return CashPaymentRead.model_validate(record.result)
+
+
+@platform_router.get("/tenants/{tenant_id}/cash-payments", response_model=CashPaymentList)
+async def list_platform_cash_payments(
+    tenant_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_recent_platform_capability("platform.billing.view"))
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=2147483647),
+) -> CashPaymentList:
+    _set_financial_no_store(response)
+    return CashPaymentList.model_validate(
+        await service.read_cash_payments(
+            actor_user_id=user.user_id,
+            actor_session_id=_platform_session_or_401(user),
+            tenant_id=tenant_id,
+            limit=limit,
+            offset=offset,
+        )
+    )
+
+
+@platform_router.get(
+    "/tenants/{tenant_id}/cash-payments/{document_id}/receipt", response_model=CashPaymentReceipt
+)
+async def read_platform_cash_receipt(
+    tenant_id: UUID,
+    document_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_recent_platform_capability("platform.billing.view"))
+    ],
+    service: Annotated[BillingService, Depends(_service)],
+) -> CashPaymentReceipt:
+    _set_financial_no_store(response)
+    return CashPaymentReceipt.model_validate(
+        await service.read_cash_payments(
+            actor_user_id=user.user_id,
+            actor_session_id=_platform_session_or_401(user),
+            tenant_id=tenant_id,
+            document_id=document_id,
+            receipt=True,
+        )
+    )
+
+
+@tenant_router.get(
+    "/cash-payments",
+    response_model=CashPaymentList,
+    dependencies=[Depends(require_tenant_permission("billing.overview.view"))],
+)
+async def list_tenant_cash_payments(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_tenant_permission("billing.invoice.view"))],
+    service: Annotated[BillingService, Depends(_service)],
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=2147483647),
+) -> CashPaymentList:
+    _set_financial_no_store(response)
+    return CashPaymentList.model_validate(
+        await service.read_cash_payments(
+            actor_user_id=user.user_id,
+            actor_session_id=user.session_id,
+            tenant_id=_current_tenant_or_400(user),
+            limit=limit,
+            offset=offset,
+        )
+    )
+
+
+@tenant_router.get(
+    "/cash-payments/{document_id}/receipt",
+    response_model=CashPaymentReceipt,
+    dependencies=[Depends(require_tenant_permission("billing.overview.view"))],
+)
+async def read_tenant_cash_receipt(
+    document_id: UUID,
+    response: Response,
+    user: Annotated[CurrentUser, Depends(require_tenant_permission("billing.invoice.view"))],
+    service: Annotated[BillingService, Depends(_service)],
+) -> CashPaymentReceipt:
+    _set_financial_no_store(response)
+    return CashPaymentReceipt.model_validate(
+        await service.read_cash_payments(
+            actor_user_id=user.user_id,
+            actor_session_id=user.session_id,
+            tenant_id=_current_tenant_or_400(user),
+            document_id=document_id,
+            receipt=True,
+        )
     )
