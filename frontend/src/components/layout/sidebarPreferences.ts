@@ -35,7 +35,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
   {
     id: "system",
     caption: "Система",
-    routes: ["/billing", "/notifications", "/security", "/settings"],
+    routes: ["/notifications", "/security", "/settings"],
   },
   { id: "administration", caption: "Администрирование", routes: ["/admin"] },
 ];

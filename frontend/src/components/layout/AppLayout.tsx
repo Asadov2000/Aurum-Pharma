@@ -121,7 +121,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const pageTitle =
     pathname === "/admin/sync"
       ? "Синхронизация"
-      : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
+      : pathname === "/billing"
+        ? "Расчёты с Aurum"
+        : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
   const pageOwnsDesktopTitle =
     pathname === "/" ||
     pathname === "/catalog" ||

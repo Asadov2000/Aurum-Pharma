@@ -78,6 +78,7 @@ describe("AppLayout shell", () => {
     layoutState.navigate.mockReset();
     layoutState.pathname = "/pos";
     layoutState.preferences = undefined;
+    authMock.user.permissions = ["catalog.view", "pos.sell"];
     setOnlineStatus(true);
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -99,7 +100,11 @@ describe("AppLayout shell", () => {
     window.localStorage.clear();
   });
 
-  it("renders the runtime badge in the header instead of page content", async () => {
+  it.each([
+    ["/pos", "Касса"],
+    ["/billing", "Расчёты с Aurum"],
+  ])("keeps the header and runtime badge for %s", async (pathname, title) => {
+    layoutState.pathname = pathname;
     render(
       <AppLayout>
         <section>Page content</section>
@@ -114,7 +119,7 @@ describe("AppLayout shell", () => {
 
     expect(header).not.toBeNull();
     expect(
-      within(header as HTMLElement).getByRole("heading", { name: "Касса" }),
+      within(header as HTMLElement).getByRole("heading", { name: title }),
     ).toBeInTheDocument();
     expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
@@ -196,13 +201,15 @@ describe("AppLayout shell", () => {
   });
 
   it("applies account menu preferences without opening the settings page", async () => {
+    authMock.user.permissions.push("billing.overview.view", "billing.invoice.view");
+    layoutState.pathname = "/";
     layoutState.preferences = {
       workspace: {
         desktop_mode: "expanded",
         hidden_routes: ["/catalog"],
-        favorite_routes: ["/pos"],
-        route_order: ["/pos", "/catalog"],
-        start_route: "/pos",
+        favorite_routes: ["/billing", "/pos"],
+        route_order: ["/billing", "/pos", "/catalog"],
+        start_route: "/billing",
       },
     };
 
@@ -218,6 +225,13 @@ describe("AppLayout shell", () => {
         JSON.parse(window.localStorage.getItem("aurum:sidebar:v1:user-1%3Atenant-1") ?? "{}"),
       ).toMatchObject({ desktopMode: "expanded", hiddenRoutes: ["/catalog"] });
     });
+    expect(screen.queryByRole("link", { name: "Расчёты с Aurum" })).not.toBeInTheDocument();
+    expect(layoutState.navigate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
+    const dialog = await screen.findByRole("dialog", { name: "Настроить меню" });
+    expect(within(dialog).queryByText("Расчёты с Aurum")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Показать все" }));
+    expect(screen.queryByRole("link", { name: "Расчёты с Aurum" })).not.toBeInTheDocument();
   });
 
   it("opens the saved accessible start route only once per browser session", async () => {
