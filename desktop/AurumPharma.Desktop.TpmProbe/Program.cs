@@ -13,6 +13,15 @@ try
         TpmClockContinuityObservation.RawContinuityObserved;
     var counterProgressObserved = second.ClockMilliseconds > first.ClockMilliseconds &&
         second.TimeMilliseconds >= first.TimeMilliseconds;
+    bool powerGuardContinuityObserved;
+    using (var guarded = WindowsTpmClockObservationSession.Open())
+    {
+        Thread.Sleep(100);
+        powerGuardContinuityObserved = guarded.Observe() ==
+            TpmClockContinuityObservation.RawContinuityObserved;
+    }
+    // Disposal must finish before reporting success. A failed unregister cannot
+    // emit an available record followed by a contradictory failure record.
     Console.WriteLine(JsonSerializer.Serialize(new
     {
         schemaVersion = 1,
@@ -20,6 +29,7 @@ try
         safeOnBothReads = first.Safe && second.Safe,
         continuityObserved,
         counterProgressObserved,
+        powerGuardContinuityObserved,
         runtimeAdmission = false,
         hardwareAcceptance = false
     }));
