@@ -144,7 +144,7 @@ async function expectPersonalStaffPay(
   const main = page.getByRole("main");
   await expect(main.getByRole("heading", { name: "Моя работа", exact: true })).toBeVisible();
   await expect(
-    main.getByRole("heading", { name: "Зарплата и выдачи наличными", exact: true }),
+    main.getByRole("heading", { name: "Зарплата и выплаты", exact: true }),
   ).toBeVisible();
   await expect(main.locator('a[href="/staff-pay"]')).toHaveCount(0);
   await expect(

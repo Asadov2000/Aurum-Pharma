@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type PersonalShiftList } from "@/features/my-work/types";
 vi.mock("@/features/staff-pay/StaffPayPanel", () => ({ PersonalStaffPayPanel: () => null }));
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, ...props }: { to: string; children: React.ReactNode }) => <a href={to} {...props} />,
+}));
 
 const state = vi.hoisted(() => ({
   data: undefined as PersonalShiftList | undefined,
@@ -71,6 +74,8 @@ describe("my work", () => {
     expect(screen.getByText(/1\s234,50 TJS/)).toBeInTheDocument();
     expect(screen.queryByText(/Недостача|Начислить/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Отчёты/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Мой профиль" })).toHaveAttribute("href", "/profile");
+    expect(screen.getByText(/не табель рабочего времени/)).toBeInTheDocument();
   });
 
   it("shows an open shift without inventing closing time or worked hours", () => {
@@ -93,8 +98,30 @@ describe("my work", () => {
     render(<MyWorkPage />);
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText("Аптека на Рудаки")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Данные на/)).not.toBeInTheDocument();
+    expect(screen.getByText("Данные не обновлены")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(state.refetch).toHaveBeenCalledOnce();
+  });
+
+  it("labels suspended shift totals without presenting them as an open shift", () => {
+    state.data = {
+      ...shifts,
+      items: [{ ...shifts.items[0], status: "suspended", closed_at: null }],
+    };
+    render(<MyWorkPage />);
+    expect(screen.getByText("Приостановлена")).toBeInTheDocument();
+    expect(screen.getByText("Итоги приостановленной смены")).toBeInTheDocument();
+    expect(screen.queryByText("Промежуточные итоги открытой смены")).not.toBeInTheDocument();
+  });
+
+  it("does not show cached rows while another page is loading", () => {
+    state.isPending = true;
+    state.isFetching = true;
+    render(<MyWorkPage />);
+    expect(screen.getByRole("status")).toHaveTextContent("Загрузка смен…");
+    expect(screen.queryByRole("list", { name: "Ваши смены" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Обновление…" })).toBeDisabled();
   });
 
   it("refreshes explicitly and requests another page without retaining the previous rows", () => {
