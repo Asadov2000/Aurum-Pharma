@@ -26,7 +26,7 @@ const SETUP = {
   expires_in: 300,
 };
 
-function renderPanel() {
+function renderPanel(presentation: "default" | "security" = "default") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -34,13 +34,13 @@ function renderPanel() {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <MfaSettingsPanel />
+        <MfaSettingsPanel presentation={presentation} />
       </QueryClientProvider>,
     ),
   };
 }
 
-describe("voluntary MFA settings", () => {
+describe.each(["default", "security"] as const)("MFA settings (%s)", (presentation) => {
   beforeEach(() => {
     vi.resetAllMocks();
     useAuthStore
@@ -57,8 +57,28 @@ describe("voluntary MFA settings", () => {
   });
   afterEach(() => act(() => useAuthStore.getState().clear()));
 
+  it("does not show a protection status when settings cannot be loaded", async () => {
+    api.fetchMfaSettings.mockRejectedValue(new Error("unavailable"));
+    renderPanel(presentation);
+    expect(screen.getByRole("status")).toHaveTextContent("Загрузка настроек защиты…");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Не удалось загрузить настройки защиты.",
+    );
+    expect(screen.queryByText("Включена")).not.toBeInTheDocument();
+    expect(screen.queryByText("Не включена")).not.toBeInTheDocument();
+    expect(screen.queryByText("Выключена")).not.toBeInTheDocument();
+    expect(screen.queryByText("Защита подключена")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Повторить загрузку защиты" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Включить защиту" })).not.toBeInTheDocument();
+  });
+
   it("does not activate MFA until a valid code and saved-code acknowledgement are submitted", async () => {
-    const { client } = renderPanel();
+    const { client } = renderPanel(presentation);
+    expect(
+      screen.getByRole("heading", {
+        name: presentation === "security" ? "Дополнительная защита" : "Двухфакторная защита",
+      }),
+    ).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Включить защиту" }));
     fireEvent.change(screen.getByLabelText("Пароль аккаунта"), {
       target: { value: "test-password" },
@@ -91,7 +111,7 @@ describe("voluntary MFA settings", () => {
   });
 
   it("cancels enrollment without enabling MFA and removes secrets from view", async () => {
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.click(await screen.findByRole("button", { name: "Включить защиту" }));
     fireEvent.change(screen.getByLabelText("Пароль аккаунта"), {
       target: { value: "test-password" },
@@ -99,7 +119,9 @@ describe("voluntary MFA settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Продолжить настройку" }));
     await screen.findByText(SETUP.secret);
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
-    expect(screen.getByText("Выключена")).toBeInTheDocument();
+    expect(
+      screen.getByText(presentation === "security" ? "Не включена" : "Выключена"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(SETUP.secret)).not.toBeInTheDocument();
     expect(api.confirmAccountMfaEnrollment).not.toHaveBeenCalled();
   });
@@ -110,7 +132,7 @@ describe("voluntary MFA settings", () => {
       prompt_pending: false,
       has_password: true,
     });
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.click(await screen.findByRole("button", { name: "Выключить защиту" }));
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить отключение" }));
     expect(await screen.findByText("Введите пароль")).toBeInTheDocument();
@@ -133,7 +155,7 @@ describe("voluntary MFA settings", () => {
       prompt_pending: false,
       has_password: true,
     });
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.click(await screen.findByRole("button", { name: "Выключить защиту" }));
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(screen.getByText("Включена")).toBeInTheDocument();
@@ -147,7 +169,7 @@ describe("voluntary MFA settings", () => {
       has_password: true,
     });
     api.disableAccountMfa.mockRejectedValue(new Error("unavailable"));
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.click(await screen.findByRole("button", { name: "Выключить защиту" }));
     fireEvent.change(screen.getByLabelText("Пароль аккаунта"), {
       target: { value: "test-password" },
@@ -166,7 +188,7 @@ describe("voluntary MFA settings", () => {
     });
     api.requestPasswordSetupCode.mockResolvedValue({ status: "ok", dev_code: "123456" });
     api.setupAccountPassword.mockResolvedValue(undefined);
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.click(
       await screen.findByRole("button", { name: "Получить код для создания пароля" }),
     );

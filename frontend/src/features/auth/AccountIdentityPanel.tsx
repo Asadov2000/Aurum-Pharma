@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+import { Link } from "@tanstack/react-router";
+import { NavIcon } from "@/components/layout/icons";
 import {
+  Badge,
   Button,
   Card,
   CardContent,
@@ -36,7 +39,10 @@ const phoneChangeSchema = z.object({
 });
 type Fields = z.infer<typeof phoneChangeSchema>;
 
-export function AccountIdentityPanel(): JSX.Element {
+export function AccountIdentityPanel({
+  presentation = "default",
+}: { presentation?: "default" | "security" } = {}): JSX.Element {
+  const security = presentation === "security";
   const identity = useAccountIdentityQuery();
   const methods = useLoginMethodsQuery();
   const mfa = useMfaSettingsQuery();
@@ -148,11 +154,23 @@ export function AccountIdentityPanel(): JSX.Element {
   };
 
   return (
-    <Card>
+    <Card className={security ? "min-w-0 rounded-xl" : undefined}>
       <CardHeader>
-        <CardTitle>Способы входа</CardTitle>
+        <CardTitle className={security ? "flex items-center gap-2" : undefined}>
+          {security ? (
+            <span className="text-primary">
+              <NavIcon to="/security" />
+            </span>
+          ) : null}
+          Способы входа
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
+        {security ? (
+          <p className="text-sm text-foreground-muted">
+            Входите по почте и паролю или по подтверждённому телефону и коду из SMS.
+          </p>
+        ) : null}
         {identity.isPending ? (
           <p className="text-sm text-foreground-muted">Загрузка способов входа…</p>
         ) : identity.isError ? (
@@ -167,8 +185,10 @@ export function AccountIdentityPanel(): JSX.Element {
         ) : (
           identity.data && (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+              <div
+                className={`flex flex-wrap items-center justify-between gap-3 ${security ? "rounded-lg bg-foreground/[0.03] p-4" : ""}`}
+              >
+                <div className="min-w-0">
                   <p className="font-medium">Почта и пароль</p>
                   <p className="text-sm text-foreground-secondary">
                     {identity.data.has_password
@@ -194,13 +214,18 @@ export function AccountIdentityPanel(): JSX.Element {
               )}
               <div className="border-t border-border pt-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-medium">Телефон и SMS</p>
-                    <p className="text-sm text-foreground-secondary">
+                    <p className="break-words text-sm text-foreground-secondary">
                       {identity.data.phone_verified
                         ? identity.data.phone
                         : "Подтверждённый номер не добавлен"}
                     </p>
+                    {security && identity.data.phone_verified ? (
+                      <Badge className="mt-2" tone="success">
+                        Подтверждён
+                      </Badge>
+                    ) : null}
                   </div>
                   {!editing && (
                     <Button
@@ -386,6 +411,15 @@ export function AccountIdentityPanel(): JSX.Element {
             {success}
           </p>
         )}
+        {security ? (
+          <p className="border-t border-border pt-4 text-sm text-foreground-muted">
+            Почта и личные сведения находятся в разделе{" "}
+            <Link to="/profile" className="font-medium text-primary underline underline-offset-4">
+              «Мой профиль»
+            </Link>
+            .
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

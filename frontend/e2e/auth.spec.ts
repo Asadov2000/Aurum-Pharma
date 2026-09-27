@@ -10,6 +10,9 @@ import {
   OWNER,
 } from "./helpers";
 
+// Account contacts and authentication cookies must not enter browser artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test.describe("Auth", () => {
   test("login remains usable on narrow screens in both themes", async ({ page }) => {
     for (const colorScheme of ["light", "dark"] as const) {
@@ -186,7 +189,33 @@ test.describe("Auth", () => {
     await apiLogin(page.request, OWNER);
     await page.goto("/security");
 
-    await expect(page.getByRole("heading", { name: "Безопасность" })).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("heading", { name: "Безопасность", exact: true }),
+    ).toBeVisible();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("link", { name: "Мой профиль", exact: true })).toHaveAttribute(
+      "href",
+      "/profile",
+    );
+    await expect(main.getByRole("heading", { name: "Способы входа", exact: true })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: "Дополнительная защита", exact: true }),
+    ).toBeVisible();
+    await expect(main.getByText("Текущий сеанс", { exact: true })).toBeVisible();
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    await main.getByRole("link", { name: "Открыть настройки защиты", exact: true }).click();
+    await expect(page).toHaveURL(/\/security#security-mfa$/);
+    await expect(
+      main.getByRole("heading", { name: "Дополнительная защита", exact: true }),
+    ).toBeInViewport();
+    await main.getByText("Что делать", { exact: true }).click();
+    await expect(main.getByText(/На странице входа нажмите/)).toBeVisible();
     const revokeOthers = page.getByRole("button", { name: "Завершить остальные" });
     await expect(revokeOthers).toBeEnabled();
     await revokeOthers.click();
@@ -203,7 +232,7 @@ test.describe("Auth", () => {
     expect(revoked.revoked_count).toBeGreaterThan(0);
     await expect(page.getByText(/Завершено сеансов:/)).toBeVisible();
     await expect(page.getByText("Сеансы (1)")).toBeVisible();
-    await expect(page.getByText("Текущий сеанс")).toBeVisible();
+    await expect(main.getByText("Текущий сеанс", { exact: true })).toBeVisible();
   });
 
   test("warns the owner about a login from a new device", async ({ page }) => {
@@ -224,7 +253,9 @@ test.describe("Auth", () => {
     await alert.getByRole("link", { name: "Проверить сеансы" }).click();
 
     await expect(page).toHaveURL(/\/security$/);
-    await expect(page.getByRole("heading", { name: "Безопасность" })).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("heading", { name: "Безопасность", exact: true }),
+    ).toBeVisible();
   });
 
   test("retries refresh with the same operation after a lost response", async ({ page }) => {

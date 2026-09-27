@@ -56,6 +56,7 @@
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
 | Личный профиль и свои назначения | [personal-profile.md](personal-profile.md), `backend/app/domains/auth/profile_*`, `frontend/src/features/profile/` | auth profile/RLS pytest, profile Vitest, `frontend/e2e/profile.spec.ts` |
+| Личная безопасность: способы входа, защита и устройства | [account-security-page.md](account-security-page.md), `frontend/src/features/auth/SecurityPage.tsx`, `AccountIdentityPanel.tsx`, `MfaSettingsPanel.tsx`; [ADR-0033](adr/0033-optional-account-mfa.md) | auth Vitest, `frontend/e2e/auth.spec.ts`, `optional-mfa.spec.ts`; статусы и формы используют реальный API |
 | Свои кассовые смены | [my-work-shifts.md](my-work-shifts.md), POS `/shifts/mine`, `frontend/src/features/my-work/` | POS personal shifts/RLS pytest, my-work Vitest, `frontend/e2e/my-work.spec.ts` |
 | Ручные зарплатные сведения | [manual-staff-pay.md](manual-staff-pay.md), `backend/app/domains/staff_pay/`, `frontend/src/features/staff-pay/`, миграция0160 | staff_pay pytest/RLS, staff-pay Vitest, `frontend/e2e/staff-pay.spec.ts`; без автоматического начисления и движения кассы |
 | Отчёты, выгрузки и финансовая сводка | [Проверка отчётности](reporting-audit.md), `backend/app/domains/pos/`, `backend/app/domains/dashboard/`, `frontend/src/features/reports/` | pytest POS/dashboard/billing, Vitest reports/dashboard, E2E выгрузок и закрытия смены |

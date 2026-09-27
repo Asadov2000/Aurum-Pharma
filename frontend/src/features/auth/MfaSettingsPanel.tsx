@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import { describeAccountSecurityError } from "./accountSecurityErrors";
 import { useAuthStore } from "@/stores/auth";
+import { NavIcon } from "@/components/layout/icons";
 
 import {
   confirmAccountMfaEnrollment,
@@ -36,7 +37,12 @@ const enrollmentSchema = z.object({
   saved: z.boolean().refine(Boolean, "Сохраните резервные коды перед включением защиты"),
 });
 
-export function MfaSettingsPanel(): JSX.Element {
+export function MfaSettingsPanel({
+  presentation = "default",
+}: {
+  presentation?: "default" | "security";
+}): JSX.Element {
+  const securityPresentation = presentation === "security";
   const settings = useMfaSettingsQuery();
   const client = useQueryClient();
   const [mode, setMode] = useState<"idle" | "enroll" | "disable">("idle");
@@ -53,14 +59,31 @@ export function MfaSettingsPanel(): JSX.Element {
     setSuccess(enabled ? "Двухфакторная защита включена." : "Двухфакторная защита выключена.");
   };
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Двухфакторная защита</CardTitle>
+    <Card className={securityPresentation ? "min-w-0" : undefined}>
+      <CardHeader
+        className={
+          securityPresentation ? "flex flex-wrap items-center gap-3 border-b-0 pb-0" : undefined
+        }
+      >
+        {securityPresentation && (
+          <span aria-hidden="true" className="text-primary">
+            <NavIcon to="/security" />
+          </span>
+        )}
+        <CardTitle>
+          {securityPresentation ? "Дополнительная защита" : "Двухфакторная защита"}
+        </CardTitle>
+        {securityPresentation && !settings.isLoading && !settings.error && settings.data && (
+          <Badge className="ml-auto" tone={settings.data.enabled ? "success" : "neutral"}>
+            {settings.data.enabled ? "Включена" : "Не включена"}
+          </Badge>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-foreground-secondary">
-          Вы сами выбираете, нужен ли дополнительный код из приложения при входе. Защиту можно
-          включить и выключить здесь.
+          {securityPresentation
+            ? "Дополнительный код из приложения на телефоне помогает защитить вход в аккаунт."
+            : "Вы сами выбираете, нужен ли дополнительный код из приложения при входе. Защиту можно включить и выключить здесь."}
         </p>
         {settings.isLoading ? (
           <p role="status">Загрузка настроек защиты…</p>
@@ -75,9 +98,30 @@ export function MfaSettingsPanel(): JSX.Element {
           </div>
         ) : settings.data ? (
           <>
-            <Badge tone={settings.data.enabled ? "success" : "neutral"}>
-              {settings.data.enabled ? "Включена" : "Выключена"}
-            </Badge>
+            {securityPresentation ? (
+              <div className="flex items-center gap-4 rounded-lg bg-primary/5 p-4">
+                <span
+                  aria-hidden="true"
+                  className="flex h-[60px] w-[42px] shrink-0 items-center justify-center rounded-lg border-2 border-primary/60 text-primary"
+                >
+                  <NavIcon to="/security" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">
+                    {settings.data.enabled ? "Защита подключена" : "Подключается по вашему желанию"}
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-foreground-secondary">
+                    {settings.data.enabled
+                      ? "Для входа нужен код из приложения."
+                      : "Вы сможете включить или отключить её в настройках."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <Badge tone={settings.data.enabled ? "success" : "neutral"}>
+                {settings.data.enabled ? "Включена" : "Выключена"}
+              </Badge>
+            )}
             {success && (
               <p role="status" className="text-sm text-success-foreground">
                 {success}
@@ -103,6 +147,7 @@ export function MfaSettingsPanel(): JSX.Element {
             ) : (
               <Button
                 type="button"
+                className={securityPresentation ? "w-full" : undefined}
                 variant={settings.data.enabled ? "secondary" : "primary"}
                 onClick={() => {
                   setSuccess(null);
@@ -111,6 +156,11 @@ export function MfaSettingsPanel(): JSX.Element {
               >
                 {settings.data.enabled ? "Выключить защиту" : "Включить защиту"}
               </Button>
+            )}
+            {securityPresentation && (
+              <p className="text-xs leading-relaxed text-foreground-secondary">
+                При настройке сохраните резервные коды. Они помогут войти, если телефон недоступен.
+              </p>
             )}
           </>
         ) : null}
