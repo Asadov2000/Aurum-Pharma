@@ -136,6 +136,20 @@ export function RolesPage(): JSX.Element {
     [perms.data],
   );
   const [editor, setEditor] = useState<Editor>(null);
+  const currentEditorRole =
+    editor?.mode === "edit" ? roles.data?.find((role) => role.id === editor.role.id) : undefined;
+  const editorContextUnavailable = Boolean(
+    roles.error ||
+    roles.isLoading ||
+    roles.isPlaceholderData ||
+    (editor?.mode === "create"
+      ? !canCreate
+      : editor?.mode === "edit" &&
+        (!canUpdate ||
+          !currentEditorRole ||
+          !isManageableRole(currentEditorRole, tenantId) ||
+          hasUnavailableRolePermissions(currentEditorRole))),
+  );
   const [historyRole, setHistoryRole] = useState<Role | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Role | null>(null);
   const [replacementRoleId, setReplacementRoleId] = useState("");
@@ -484,6 +498,7 @@ export function RolesPage(): JSX.Element {
               <RoleBuilderModal
                 mode={editor.mode}
                 role={editor.mode === "edit" ? editor.role : undefined}
+                contextUnavailable={editorContextUnavailable}
                 onClose={closeEditor}
                 onCancel={requestEditorClose}
                 onDirtyChange={setEditorDirty}

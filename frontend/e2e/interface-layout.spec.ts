@@ -277,54 +277,95 @@ test.describe("Interface layout", () => {
   });
 
   test("keeps the role constructor usable on a narrow screen", async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 });
-    await page.addInitScript(() => {
-      window.localStorage.setItem("ui:density", "touch");
-    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await loginInBrowser(page, OWNER);
     await page.goto("/roles");
-    await selectTouchDensity(page);
-
-    const createRoleButton = page.locator("header").getByRole("button", { name: "Создать роль" });
-    await createRoleButton.click();
-    const dialog = page.getByRole("dialog", { name: "Создать роль" });
-    await expect(dialog).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
-
-    const bounds = await dialog.boundingBox();
-    expect(bounds).not.toBeNull();
-    expect(bounds!.x).toBeGreaterThanOrEqual(0);
-    expect(bounds!.y).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(568);
-    await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: /Права доступа/ }).click();
-    const groupSelect = dialog.getByLabel("Раздел функций");
-    await expect(groupSelect).toBeVisible();
-    expect(
-      await groupSelect.evaluate((element) => element.getBoundingClientRect().height),
-    ).toBeGreaterThanOrEqual(44);
-    const saveBounds = await dialog.getByRole("button", { name: "Создать роль" }).boundingBox();
-    expect(saveBounds).not.toBeNull();
-    expect(saveBounds!.y).toBeGreaterThanOrEqual(bounds!.y);
-    expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
-    await expectNoHorizontalOverflow(page, "/roles constructor touch @ 320x568");
-
-    await dialog.getByRole("button", { name: "Создать роль" }).click();
-    await expect(dialog.getByRole("button", { name: "О роли", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    const roleName = dialog.getByLabel("Название", { exact: true });
-    await expect(roleName).toBeFocused();
-    await expect(dialog.getByText("Введите название роли")).toBeVisible();
-    await roleName.fill("Новая роль");
+    await page.getByRole("button", { name: "Вид интерфейса" }).click();
+    for (const [label, field, value] of [
+      ["Система", "theme", "system"],
+      ["Сенсор", "density", "touch"],
+    ] as const) {
+      await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.endsWith("/auth/preferences") &&
+            response.request().method() === "PATCH" &&
+            response.ok() &&
+            Boolean(response.request().postData()?.includes(`"${field}":"${value}"`)),
+        ),
+        page.getByRole("button", { name: label, exact: true }).click(),
+      ]);
+    }
     await page.keyboard.press("Escape");
-    const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
-    await expect(discardDialog).toBeVisible();
-    await discardDialog.getByRole("button", { name: "Выйти без сохранения" }).click();
-    await expect(dialog).toBeHidden();
-    await expect(createRoleButton).toBeFocused();
+
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+      for (const width of [320, 390, 1440]) {
+        await test.step(`${colorScheme} @ ${width}`, async () => {
+          const height = width < 1440 ? 568 : 900;
+          await page.setViewportSize({ width, height });
+          await page.goto("/roles");
+          await expect(page.locator("html")).toHaveAttribute("data-theme", colorScheme);
+          await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+          const createRoleButton = page.locator("header").getByRole("button", {
+            name: "Создать роль",
+            exact: true,
+          });
+          await createRoleButton.click();
+          const dialog = page.getByRole("dialog", { name: "Создать роль", exact: true });
+          await expect(dialog).toBeVisible();
+          const bounds = await dialog.boundingBox();
+          expect(bounds).not.toBeNull();
+          expect(bounds!.x).toBeGreaterThanOrEqual(0);
+          expect(bounds!.y).toBeGreaterThanOrEqual(0);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+          await expect(dialog.getByLabel("Название", { exact: true })).toBeVisible();
+          if (width < 1280) {
+            await dialog.getByRole("button", { name: /^Права доступа · / }).click();
+            const groupSelect = dialog.getByLabel("Раздел функций");
+            await expect(groupSelect).toBeVisible();
+            expect(
+              await groupSelect.evaluate((element) => element.getBoundingClientRect().height),
+            ).toBeGreaterThanOrEqual(44);
+          }
+          for (const name of ["Отмена", "Создать роль"]) {
+            const footerButton = dialog.getByRole("button", { name, exact: true });
+            await expect(footerButton).toBeVisible();
+            const footerBounds = await footerButton.boundingBox();
+            expect(footerBounds).not.toBeNull();
+            expect(footerBounds!.height).toBeGreaterThanOrEqual(44);
+            expect(footerBounds!.y).toBeGreaterThanOrEqual(bounds!.y);
+            expect(footerBounds!.y + footerBounds!.height).toBeLessThanOrEqual(
+              bounds!.y + bounds!.height,
+            );
+          }
+          await expectNoHorizontalOverflow(page, `/roles constructor ${colorScheme} @ ${width}`);
+          await dialog.getByRole("button", { name: "Создать роль", exact: true }).click();
+          if (width < 1280) {
+            await expect(
+              dialog.getByRole("button", { name: "О роли", exact: true }),
+            ).toHaveAttribute("aria-pressed", "true");
+          }
+          const roleName = dialog.getByLabel("Название", { exact: true });
+          await expect(roleName).toBeFocused();
+          await expect(dialog.getByText("Введите название роли")).toBeVisible();
+          await roleName.fill("Новая роль");
+          await expect(
+            dialog.getByText("Есть неопубликованные изменения", { exact: true }),
+          ).toBeVisible();
+          await expect(
+            dialog.getByRole("button", { name: "Создать роль", exact: true }),
+          ).toBeEnabled();
+          await page.keyboard.press("Escape");
+          const discardDialog = page.getByRole("dialog", { name: "Отменить изменения?" });
+          await expect(discardDialog).toBeVisible();
+          await discardDialog.getByRole("button", { name: "Выйти без сохранения" }).click();
+          await expect(dialog).toBeHidden();
+          await expect(createRoleButton).toBeFocused();
+        });
+      }
+    }
   });
 
   test("keeps the employee directory and profile actions usable with touch", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,6 +23,7 @@ vi.mock("@/features/roles/api", () => ({
 }));
 
 import { RoleBuilderModal } from "@/features/roles/RoleBuilderModal";
+import { rolesKeys } from "@/features/roles/queries";
 
 const PERMISSIONS = [
   {
@@ -53,13 +54,27 @@ const PERMISSIONS = [
   },
 ];
 
+const EDITABLE_ROLE = {
+  id: "role-1",
+  tenant_id: "tenant-1",
+  name: "Кассир",
+  description: "Работа на кассе",
+  is_system: false,
+  is_protected: false,
+  protected_kind: null,
+  is_active: true,
+  version: 7,
+  permissions: ["pos.sell"],
+  has_hidden_permissions: false,
+};
+
 function renderModal(
   props: ComponentProps<typeof RoleBuilderModal> = {
     mode: "create",
     onClose: () => {},
   },
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
 ) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <RoleBuilderModal {...props} />
@@ -76,6 +91,7 @@ describe("RoleBuilderModal", () => {
     listPermissions.mockResolvedValue(PERMISSIONS);
     listTemplates.mockResolvedValue([]);
     createRole.mockResolvedValue({});
+    updateRole.mockResolvedValue({});
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -218,6 +234,192 @@ describe("RoleBuilderModal", () => {
     expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeInTheDocument();
     expect(
       screen.queryByRole("checkbox", { name: /Увольнение сотрудника/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows additions and removals and applies a changes-group toggle only to shown functions", async () => {
+    const returnPermission = {
+      ...PERMISSIONS[1],
+      code: "pos.return",
+      name: "Возврат",
+      description: "Оформление возврата товара.",
+    };
+    const receiptPermission = {
+      ...PERMISSIONS[1],
+      code: "pos.receipt",
+      name: "Печать чека",
+      description: "Печать копии чека.",
+    };
+    listPermissions.mockResolvedValue([PERMISSIONS[1], returnPermission, receiptPermission]);
+    renderModal({
+      mode: "edit",
+      role: { ...EDITABLE_ROLE, permissions: ["pos.sell", "pos.return"] },
+      onClose: () => {},
+    });
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Продажа/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Печать чека/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Изменения/ }));
+
+    const removed = screen.getByRole("checkbox", { name: /Продажа/ });
+    const added = screen.getByRole("checkbox", { name: /Печать чека/ });
+    const removedRow = removed.closest("label");
+    const addedRow = added.closest("label");
+    if (!removedRow || !addedRow) throw new Error("Permissions must have labeled catalogue rows");
+    expect(removed).not.toBeChecked();
+    expect(within(removedRow).getByText("Убрано")).toBeInTheDocument();
+    expect(added).toBeChecked();
+    expect(within(addedRow).getByText("Добавлено")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Возврат/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать показанные" }));
+
+    expect(screen.queryByRole("checkbox", { name: /Продажа/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Убрано")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Печать чека/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Снять показанные" }));
+    expect(screen.queryByText("Добавлено")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Все ·/ }));
+
+    expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Возврат/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Печать чека/ })).not.toBeChecked();
+  });
+
+  it.each([0, 17])(
+    "publishes metadata-only edits with the real assignment count %i",
+    async (count) => {
+      renderModal({
+        mode: "edit",
+        role: { ...EDITABLE_ROLE, active_assignment_count: count },
+        onClose: () => {},
+      });
+      await screen.findByRole("checkbox", { name: /Продажа/ });
+      const assignmentMetric = screen.getByText("Активных назначений").parentElement;
+      expect(assignmentMetric).toHaveTextContent(String(count));
+      fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Старший кассир" } });
+      fireEvent.change(screen.getByLabelText(/Описание/), { target: { value: "Контроль кассы" } });
+      fireEvent.click(screen.getByRole("button", { name: "Проверить и опубликовать" }));
+
+      const review = await screen.findByRole("dialog", { name: "Опубликовать версию 8?" });
+      expect(
+        within(review).getByText(`Затронуто активных назначений: ${count}`),
+      ).toBeInTheDocument();
+      expect(within(review).getByText(/Права:/)).toHaveTextContent("+0 / −0");
+      expect(updateRole).not.toHaveBeenCalled();
+      fireEvent.click(within(review).getByRole("button", { name: "Опубликовать версию" }));
+
+      await waitFor(() => expect(updateRole).toHaveBeenCalledTimes(1));
+      expect(updateRole).toHaveBeenCalledWith("role-1", {
+        expected_version: 7,
+        name: "Старший кассир",
+        description: "Контроль кассы",
+        permissions: ["pos.sell"],
+      });
+    },
+  );
+
+  it.each(["publication", "critical"] as const)(
+    "preserves the draft and blocks an open %s confirmation after a catalogue refresh fails",
+    async (confirmationKind) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      renderModal(
+        {
+          mode: confirmationKind === "publication" ? "edit" : "create",
+          role: confirmationKind === "publication" ? EDITABLE_ROLE : undefined,
+          onClose: () => {},
+        },
+        queryClient,
+      );
+      fireEvent.change(await screen.findByLabelText("Название"), {
+        target: { value: "Черновик управляющего" },
+      });
+      const selectedName = confirmationKind === "publication" ? /Продажа/ : /Увольнение сотрудника/;
+      const selected = await screen.findByRole("checkbox", { name: selectedName });
+      if (confirmationKind === "critical") fireEvent.click(selected);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: confirmationKind === "publication" ? "Проверить и опубликовать" : "Создать роль",
+        }),
+      );
+      const confirmation = await screen.findByRole("dialog", {
+        name:
+          confirmationKind === "publication"
+            ? "Опубликовать версию 8?"
+            : "Подтвердите расширение доступа",
+      });
+
+      listPermissions.mockRejectedValueOnce(new Error("catalogue unavailable"));
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: rolesKeys.permissions });
+      });
+      await screen.findByText(/Не удалось загрузить доступные функции/i);
+      fireEvent.click(
+        within(confirmation).getByRole("button", {
+          name:
+            confirmationKind === "publication" ? "Опубликовать версию" : "Подтвердить и сохранить",
+        }),
+      );
+
+      expect(createRole).not.toHaveBeenCalled();
+      expect(updateRole).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Название")).toHaveValue("Черновик управляющего");
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: rolesKeys.permissions });
+      });
+      expect(await screen.findByRole("checkbox", { name: selectedName })).toBeChecked();
+      expect(screen.getByLabelText("Название")).toHaveValue("Черновик управляющего");
+    },
+  );
+
+  it("rejects an open publication review when selected permission risk metadata changes", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderModal({ mode: "edit", role: EDITABLE_ROLE, onClose: () => {} }, queryClient);
+    const sale = await screen.findByRole("checkbox", { name: /Продажа/ });
+    fireEvent.change(screen.getByLabelText("Название"), {
+      target: { value: "Черновик кассира" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и опубликовать" }));
+    const review = await screen.findByRole("dialog", { name: "Опубликовать версию 8?" });
+
+    act(() => {
+      queryClient.setQueryData(rolesKeys.permissions, [
+        PERMISSIONS[0],
+        { ...PERMISSIONS[1], risk_level: "critical", requires_confirmation: true },
+      ]);
+    });
+    const saleRow = sale.closest("label");
+    if (!saleRow) throw new Error("Permission must have a labeled catalogue row");
+    await within(saleRow).findByText("критично");
+    fireEvent.click(within(review).getByRole("button", { name: "Опубликовать версию" }));
+
+    expect(
+      await screen.findByText(
+        "Доступные функции или роль изменились. Обновите данные и проверьте изменения ещё раз.",
+      ),
+    ).toBeInTheDocument();
+    expect(updateRole).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Название")).toHaveValue("Черновик кассира");
+    expect(screen.getByRole("checkbox", { name: /Продажа/ })).toBeChecked();
+  });
+
+  it("blocks a protected role even when the builder is opened directly", async () => {
+    renderModal({
+      mode: "edit",
+      role: { ...EDITABLE_ROLE, is_protected: true },
+      onClose: () => {},
+    });
+    await screen.findByText(
+      "Роль содержит функции, недоступные для изменения. Редактирование заблокировано.",
+    );
+    expect(screen.getByLabelText("Название")).toBeDisabled();
+    expect(screen.getByLabelText(/Описание/)).toBeDisabled();
+    const publish = screen.getByRole("button", { name: "Проверить и опубликовать" });
+    expect(publish).toBeDisabled();
+    fireEvent.click(publish);
+    expect(updateRole).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("dialog", { name: "Опубликовать версию 8?" }),
     ).not.toBeInTheDocument();
   });
 

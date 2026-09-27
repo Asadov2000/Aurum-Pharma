@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -19,7 +19,11 @@ import { describeApiError } from "@/features/foundation/errors";
 
 import { groupLabel } from "./labels";
 import { useCreateRole, usePermissionsQuery, useTemplatesQuery, useUpdateRole } from "./queries";
-import { hasUnavailableRolePermissions, ROLE_EDIT_BLOCKED_MESSAGE } from "./roleAccess";
+import {
+  hasUnavailableRolePermissions,
+  isProtectedRole,
+  ROLE_EDIT_BLOCKED_MESSAGE,
+} from "./roleAccess";
 import { type Permission, type Role } from "./types";
 
 interface Props {
@@ -28,6 +32,7 @@ interface Props {
   onClose: () => void;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  contextUnavailable?: boolean;
 }
 
 const roleFormSchema = z.object({
@@ -40,13 +45,14 @@ const roleFormSchema = z.object({
 });
 
 type RoleFormValues = z.infer<typeof roleFormSchema>;
-type CatalogueView = "all" | "selected" | "risk";
+type CatalogueView = "all" | "selected" | "risk" | "changes";
 type MobilePane = "details" | "permissions";
 
 interface RoleSubmission {
   name: string;
   description: string | null;
   permissions: string[];
+  catalogueFingerprint: string;
 }
 
 interface PendingDangerousSubmission {
@@ -80,6 +86,7 @@ export function RoleBuilderModal({
   onClose,
   onCancel = onClose,
   onDirtyChange,
+  contextUnavailable = false,
 }: Props): JSX.Element {
   const permsQuery = usePermissionsQuery();
   const templatesQuery = useTemplatesQuery(mode === "create");
@@ -122,6 +129,7 @@ export function RoleBuilderModal({
     [visible],
   );
   const catalogGroups = useMemo(() => groupBy(visible), [visible]);
+  const initialPermissions = useMemo(() => new Set(role?.permissions ?? []), [role?.permissions]);
   const normalizedSearch = deferredPermissionSearch.trim().toLocaleLowerCase("ru-RU");
   const filteredVisible = useMemo(
     () =>
@@ -129,6 +137,11 @@ export function RoleBuilderModal({
         if (activeGroup !== "all" && permission.group_code !== activeGroup) return false;
         if (catalogueView === "selected" && !checked.has(permission.code)) return false;
         if (catalogueView === "risk" && !isRiskPermission(permission)) return false;
+        if (
+          catalogueView === "changes" &&
+          checked.has(permission.code) === initialPermissions.has(permission.code)
+        )
+          return false;
         if (!normalizedSearch) return true;
         const haystack = [
           permission.name,
@@ -140,7 +153,7 @@ export function RoleBuilderModal({
           .toLocaleLowerCase("ru-RU");
         return haystack.includes(normalizedSearch);
       }),
-    [activeGroup, catalogueView, checked, normalizedSearch, visible],
+    [activeGroup, catalogueView, checked, initialPermissions, normalizedSearch, visible],
   );
   const groups = useMemo(() => groupBy(filteredVisible), [filteredVisible]);
   const containsUnknownRolePermission =
@@ -150,9 +163,10 @@ export function RoleBuilderModal({
     role.permissions.some((code) => !visibleCodes.has(code));
   const editBlocked =
     mode === "edit" &&
-    role !== undefined &&
-    permsQuery.isSuccess &&
-    (hasUnavailableRolePermissions(role) || containsUnknownRolePermission);
+    (!role ||
+      isProtectedRole(role) ||
+      (permsQuery.isSuccess &&
+        (hasUnavailableRolePermissions(role) || containsUnknownRolePermission)));
 
   const toggle = (code: string) => {
     setChecked((previous) => {
@@ -195,18 +209,40 @@ export function RoleBuilderModal({
   };
 
   const saveRole = async (values: RoleSubmission): Promise<void> => {
+    if (
+      !permsQuery.isSuccess ||
+      contextUnavailable ||
+      editBlocked ||
+      createRole.isPending ||
+      updateRole.isPending ||
+      values.permissions.length === 0 ||
+      values.permissions.some((code) => !visibleCodes.has(code)) ||
+      values.catalogueFingerprint !== permissionFingerprint(visible, values.permissions)
+    ) {
+      setPendingDangerousSubmission(null);
+      setPendingPublication(null);
+      setTopError(
+        "Доступные функции или роль изменились. Обновите данные и проверьте изменения ещё раз.",
+      );
+      return;
+    }
     setTopError(null);
+    const payload = {
+      name: values.name,
+      description: values.description,
+      permissions: values.permissions,
+    };
     try {
       if (mode === "edit" && role) {
         await updateRole.mutateAsync({
           id: role.id,
           payload: {
             expected_version: role.version,
-            ...values,
+            ...payload,
           },
         });
       } else {
-        await createRole.mutateAsync(values);
+        await createRole.mutateAsync(payload);
       }
       setPendingDangerousSubmission(null);
       setPendingPublication(null);
@@ -220,7 +256,12 @@ export function RoleBuilderModal({
 
   const onSubmit = form.handleSubmit(async (values) => {
     form.clearErrors();
-    if (!permsQuery.isSuccess || createRole.isPending || updateRole.isPending) {
+    if (
+      !permsQuery.isSuccess ||
+      contextUnavailable ||
+      createRole.isPending ||
+      updateRole.isPending
+    ) {
       setTopError("Дождитесь загрузки доступных функций и повторите сохранение.");
       return;
     }
@@ -261,6 +302,7 @@ export function RoleBuilderModal({
       name: parsed.data.name,
       description: parsed.data.description.trim() || null,
       permissions: codes,
+      catalogueFingerprint: permissionFingerprint(visible, codes),
     };
     const originalCodes = new Set(role?.permissions ?? []);
     const newlyAddedDangerousPermissions = visible.filter(
@@ -291,7 +333,6 @@ export function RoleBuilderModal({
   const selectedCount = selectedPermissions.length;
   const selectedRiskCount = selectedPermissions.filter(isRiskPermission).length;
   const selectedConfirmationCount = selectedPermissions.filter(requiresExplicitConfirmation).length;
-  const initialPermissions = useMemo(() => new Set(role?.permissions ?? []), [role?.permissions]);
   const selectionDirty = !setsEqual(checked, initialPermissions);
   const editorDirty = form.formState.isDirty || selectionDirty;
   const addedCount = selectedPermissions.filter(
@@ -315,6 +356,7 @@ export function RoleBuilderModal({
     permsQuery.isLoading ||
     permsQuery.isError ||
     editBlocked ||
+    contextUnavailable ||
     submitting ||
     (mode === "edit" && !editorDirty);
 
@@ -332,7 +374,7 @@ export function RoleBuilderModal({
         }
       }}
       noValidate
-      className="flex h-full min-h-0 min-w-0 flex-col"
+      className="role-builder-improved flex h-full min-h-0 min-w-0 flex-col"
     >
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="mb-4 xl:hidden">
@@ -350,12 +392,17 @@ export function RoleBuilderModal({
         </div>
 
         <div className="mb-5 hidden overflow-hidden rounded-lg border border-border bg-background xl:grid xl:grid-cols-4 xl:divide-x xl:divide-border">
-          <BuilderMetric
-            label="Режим"
-            value={mode === "edit" ? `Версия ${role?.version ?? 1}` : "Новая роль"}
-          />
           <BuilderMetric label="Выбрано функций" value={selectedCount} />
           <BuilderMetric label="Разделов" value={selectedGroupCount} />
+          <BuilderMetric
+            label="Изменения функций"
+            value={
+              <>
+                <span className="text-success">+{addedCount}</span> /{" "}
+                <span className="text-danger">−{removedCount}</span>
+              </>
+            }
+          />
           <BuilderMetric
             label="С подтверждением"
             value={selectedConfirmationCount}
@@ -466,6 +513,17 @@ export function RoleBuilderModal({
                 </div>
               ) : null}
             </div>
+            {mode === "edit" ? (
+              <div className="rounded-lg border border-border bg-primary/5 p-3 text-xs">
+                <SummaryRow
+                  label="Активных назначений"
+                  value={role?.active_assignment_count ?? 0}
+                />
+                <p className="mt-2 leading-5 text-foreground-muted">
+                  Новая версия применится к действующим назначениям сразу после публикации.
+                </p>
+              </div>
+            ) : null}
           </aside>
 
           <nav
@@ -549,7 +607,7 @@ export function RoleBuilderModal({
                   value={catalogueView}
                   label="Фильтр функций"
                   size="sm"
-                  className="grid min-w-0 flex-1 grid-cols-3 sm:flex-none"
+                  className="grid min-w-0 flex-1 grid-cols-2 sm:grid-cols-4 sm:flex-none"
                   options={[
                     { value: "all", label: `Все · ${visible.length}` },
                     { value: "selected", label: `Выбрано · ${selectedCount}` },
@@ -557,6 +615,7 @@ export function RoleBuilderModal({
                       value: "risk",
                       label: `Риск · ${visible.filter(isRiskPermission).length}`,
                     },
+                    { value: "changes", label: `Изменения · ${addedCount + removedCount}` },
                   ]}
                   onChange={setCatalogueView}
                 />
@@ -660,6 +719,12 @@ export function RoleBuilderModal({
                               <span className="min-w-0 flex-1 leading-tight">
                                 <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
                                   {permission.name}
+                                  {selected && !initialPermissions.has(permission.code) ? (
+                                    <Badge tone="success">Добавлено</Badge>
+                                  ) : null}
+                                  {!selected && initialPermissions.has(permission.code) ? (
+                                    <Badge tone="warning">Убрано</Badge>
+                                  ) : null}
                                   <Badge tone="neutral">{scopeLabel(permission.scope_type)}</Badge>
                                   {permission.risk_level !== "normal" || permission.is_dangerous ? (
                                     <Badge tone={permissionRiskTone(permission)}>
@@ -708,13 +773,23 @@ export function RoleBuilderModal({
           {topError}
         </p>
       ) : null}
+      {contextUnavailable ? (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          Обновите список ролей перед публикацией. Ваши изменения сохранены в этом окне.
+        </p>
+      ) : null}
 
-      <div className="-mx-4 -mb-4 mt-4 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-raised px-4 pb-4 pt-3 sm:-mx-5 sm:px-5">
+      <div
+        className="-mx-4 -mb-4 mt-4 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-raised px-4 pb-4 pt-3 sm:-mx-5 sm:px-5"
+        aria-label="Проверка публикации"
+        role="group"
+      >
         <p className="mr-auto text-xs text-foreground-muted" aria-live="polite">
           {editorDirty ? (
             <>
               Изменения: <strong className="font-mono text-success">+{addedCount}</strong> /{" "}
               <strong className="font-mono text-danger">−{removedCount}</strong>
+              <span className="mt-1 block">Есть неопубликованные изменения</span>
             </>
           ) : (
             <>
@@ -770,6 +845,16 @@ export function RoleBuilderModal({
           if (!pendingDangerousSubmission) return;
           const submission = pendingDangerousSubmission.values;
           setPendingDangerousSubmission(null);
+          if (
+            !permsQuery.isSuccess ||
+            contextUnavailable ||
+            editBlocked ||
+            submission.catalogueFingerprint !==
+              permissionFingerprint(visible, submission.permissions)
+          ) {
+            void saveRole(submission);
+            return;
+          }
           if (mode === "edit") {
             setPendingPublication(submission);
             return;
@@ -796,6 +881,37 @@ export function RoleBuilderModal({
                   Затронуто активных назначений: {role?.active_assignment_count ?? 0}
                 </p>
               </div>
+              <ul
+                className="max-h-48 space-y-1 overflow-y-auto text-sm"
+                aria-label="Изменения перед публикацией"
+              >
+                {visible
+                  .filter(
+                    (permission) =>
+                      pendingPublication.permissions.includes(permission.code) !==
+                      initialPermissions.has(permission.code),
+                  )
+                  .map((permission) => (
+                    <li key={permission.code} className="break-words">
+                      <span
+                        className={
+                          pendingPublication.permissions.includes(permission.code)
+                            ? "text-success"
+                            : "text-danger"
+                        }
+                      >
+                        {pendingPublication.permissions.includes(permission.code)
+                          ? "Добавлено: "
+                          : "Убрано: "}
+                      </span>
+                      {permission.name}
+                    </li>
+                  ))}
+              </ul>
+              {pendingPublication.name !== role?.name ? <p>Название роли изменено.</p> : null}
+              {pendingPublication.description !== (role?.description ?? null) ? (
+                <p>Описание роли изменено.</p>
+              ) : null}
             </div>
           ) : null
         }
@@ -811,13 +927,35 @@ export function RoleBuilderModal({
   );
 }
 
+function permissionFingerprint(
+  permissions: readonly Permission[],
+  codes: readonly string[],
+): string {
+  const selected = new Set(codes);
+  return JSON.stringify(
+    permissions
+      .filter((permission) => selected.has(permission.code))
+      .map((permission) => [
+        permission.code,
+        permission.is_active,
+        permission.target_role_type,
+        permission.scope_type,
+        permission.risk_level,
+        permission.is_dangerous,
+        permission.requires_confirmation,
+        permission.requires_step_up,
+      ])
+      .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+  );
+}
+
 function BuilderMetric({
   label,
   value,
   tone = "neutral",
 }: {
   label: string;
-  value: string | number;
+  value: ReactNode;
   tone?: "neutral" | "warning";
 }): JSX.Element {
   return (
@@ -909,6 +1047,7 @@ function emptyCatalogueMessage(view: CatalogueView, normalizedSearch: string): s
   if (normalizedSearch) return "По этому запросу функций нет.";
   if (view === "selected") return "В этом разделе пока ничего не выбрано.";
   if (view === "risk") return "В этом разделе нет функций повышенного риска.";
+  if (view === "changes") return "В этом разделе нет изменённых функций.";
   return "Нет доступных функций.";
 }
 
