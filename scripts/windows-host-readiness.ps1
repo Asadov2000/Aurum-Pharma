@@ -1,5 +1,6 @@
 param(
-    [switch]$FailOnMissing
+    [switch]$FailOnMissing,
+    [switch]$CheckTpm
 )
 
 $ErrorActionPreference = "Stop"
@@ -233,6 +234,27 @@ if (Test-Command "winget") {
 }
 else {
     Add-Recommended "Install WinGet before automated WinUI prerequisite setup."
+}
+
+if ($CheckTpm) {
+    . (Join-Path $PSScriptRoot 'lib/windows-tpm-readiness.ps1')
+    $tpmReadiness = Get-WindowsTpmReadiness -RepoRoot $RepoRoot.Path
+    switch ($tpmReadiness.Status) {
+        'observed' {
+            Add-Present 'Read-only TPM clock and power-guard observations passed under the current account.'
+        }
+        'not-built' {
+            Add-Missing 'TPM probe Release win-x64 build is missing; preflight does not build or restore it.'
+        }
+        'not-supported' { Add-Missing 'Read-only TPM preflight requires Windows.' }
+        'runtime-missing' { Add-Missing '.NET runtime command is unavailable for the TPM preflight.' }
+        'timeout' { Add-Missing 'Read-only TPM preflight timed out; hardware availability is unconfirmed.' }
+        default { Add-Missing 'Read-only TPM observations could not be verified; hardware availability is unconfirmed.' }
+    }
+    Add-Uncertain 'TPM observations do not establish trusted UTC, device attestation, service permissions, hardware acceptance or offline login admission.'
+}
+else {
+    Add-Recommended 'TPM was not checked. Use -CheckTpm explicitly after building the read-only probe.'
 }
 
 Write-Section "present" $present
