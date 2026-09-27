@@ -6,8 +6,10 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
@@ -33,7 +35,57 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+        staff_tables = ("staff_pay_period", "staff_pay_entry", "staff_pay_revision")
+        # This is a selective 0155-0157 rehearsal, not a production rollback past
+        # 0160. Preserve committed staff history and every immutable/audit guard.
+        connection.execute(text("""
+            LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
+              public.staff_pay_revision IN ACCESS EXCLUSIVE MODE
+        """))
+        trigger_sql = text("""
+            SELECT c.relname, t.tgname, t.tgenabled::text AS tgenabled,
+              pg_get_triggerdef(t.oid) AS definition,
+              pg_get_functiondef(t.tgfoid) AS function_definition
+            FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+            WHERE t.tgrelid IN ('public.staff_pay_period'::regclass,
+              'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass)
+              AND NOT t.tgisinternal
+            ORDER BY c.relname, t.tgname
+        """)
+        security_sql = text("""
+            SELECT relname, relrowsecurity, relforcerowsecurity, relacl::text
+            FROM pg_class WHERE oid IN ('public.staff_pay_period'::regclass,
+              'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass)
+            ORDER BY relname
+        """)
+        policies_sql = text("""
+            SELECT polrelid::regclass::text, polname, polcmd, polpermissive, polroles,
+              pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid)
+            FROM pg_policy WHERE polrelid IN ('public.staff_pay_period'::regclass,
+              'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass)
+            ORDER BY polrelid::regclass::text, polname
+        """)
+        triggers_before = connection.execute(trigger_sql).all()
+        security_before = connection.execute(security_sql).all()
+        policies_before = connection.execute(policies_sql).all()
+        counts_before = [
+            connection.scalar(text(f"SELECT count(*) FROM public.{table}"))
+            for table in staff_tables
+        ]
+        access_triggers = [row for row in triggers_before if row.tgname == "a00_tenant_access"]
+        assert {row.relname for row in access_triggers} == set(staff_tables)
+        assert all(row.tgenabled == "O" for row in access_triggers)
         with Operations.context(MigrationContext.configure(connection)):
+            if counts_before[0]:
+                with pytest.raises(DBAPIError) as error:
+                    with connection.begin_nested():
+                        _migration("0160_manual_staff_pay.py").downgrade()
+                assert error.value.orig.sqlstate == "55000"
+            # These later triggers depend on the 0155 function. Drop only those
+            # dependencies under the table locks; the outer transaction always
+            # rolls back, including when any rehearsal assertion fails.
+            for table in staff_tables:
+                connection.execute(text(f"DROP TRIGGER a00_tenant_access ON public.{table}"))
             for migration in reversed(migrations):
                 migration.downgrade()
             for table in ("tenant_access_policy", "tenant_launch_activation"):
@@ -45,6 +97,15 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
                 )
             for migration in migrations:
                 migration.upgrade()
+            for trigger in access_triggers:
+                connection.execute(text(trigger.definition))
+            assert connection.execute(trigger_sql).all() == triggers_before
+            assert connection.execute(security_sql).all() == security_before
+            assert connection.execute(policies_sql).all() == policies_before
+            assert [
+                connection.scalar(text(f"SELECT count(*) FROM public.{table}"))
+                for table in staff_tables
+            ] == counts_before
             for table in ("tenant_access_policy", "tenant_launch_activation"):
                 assert connection.scalar(
                     text("""

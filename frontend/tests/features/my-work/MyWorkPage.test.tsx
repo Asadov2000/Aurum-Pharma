@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type PersonalShiftList } from "@/features/my-work/types";
+vi.mock("@/features/staff-pay/StaffPayPanel", () => ({ PersonalStaffPayPanel: () => null }));
 
 const state = vi.hoisted(() => ({
   data: undefined as PersonalShiftList | undefined,
@@ -68,7 +69,7 @@ describe("my work", () => {
     }).format(new Date(shifts.items[0].opened_at));
     expect(screen.getByText(opened)).toBeInTheDocument();
     expect(screen.getByText(/1\s234,50 TJS/)).toBeInTheDocument();
-    expect(screen.queryByText(/Зарплата|Недостача|Начислить/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Недостача|Начислить/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Отчёты/ })).not.toBeInTheDocument();
   });
 

@@ -12,6 +12,7 @@ import {
   SkeletonRows,
 } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
+import { PersonalStaffPayPanel } from "@/features/staff-pay/StaffPayPanel";
 
 import { usePersonalShiftsQuery } from "./queries";
 import { type PersonalShift } from "./types";
@@ -24,7 +25,7 @@ export function MyWorkPage(): JSX.Element {
       <PageHeader
         title="Моя работа"
         showTitleOnDesktop
-        description="Ваши кассовые смены и итоги работы кассы."
+        description="Ваши кассовые смены, сведения о зарплате и выдачах наличными."
       />
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
@@ -90,6 +91,7 @@ export function MyWorkPage(): JSX.Element {
           ) : null}
         </CardContent>
       </Card>
+      <PersonalStaffPayPanel />
     </div>
   );
 }

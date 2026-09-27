@@ -99,6 +99,9 @@ READ_ONLY_TABLES = {
     "register_receipt_counter",
     "role_template",
     "role_template_permission",
+    "staff_pay_entry",
+    "staff_pay_period",
+    "staff_pay_revision",
     "subscription_plan",
     "sync_activation_bootstrap",
     "sync_activation_bootstrap_chunk",
@@ -203,6 +206,13 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "command_staff_pay",
+    "staff_pay_can_read",
+    "staff_pay_employees",
+    "staff_pay_manager",
+    "staff_pay_member",
+    "trg_staff_pay_audit",
+    "trg_staff_pay_period_guard",
     "billing_cash_document_json",
     "command_billing_cash_payment",
     "read_billing_cash_payments",
@@ -526,6 +536,11 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "command_staff_pay",
+    "staff_pay_can_read",
+    "staff_pay_employees",
+    "staff_pay_manager",
+    "staff_pay_member",
     "read_billing_cash_payments",
     "launch_tenant",
     "analyze_ready_sync_read_catalog",
@@ -802,6 +817,30 @@ WHERE schemas.nspname = 'public'
 ORDER BY relations.relname, checks.privilege
 """
 
+STAFF_PAY_SUPPORT_PRIVILEGES_SQL = """
+SELECT
+  relations.relname,
+  pg_catalog.has_table_privilege(
+    'aurum_support', relations.oid, checks.privilege
+  ) AS support_has_privilege
+FROM pg_catalog.pg_class AS relations
+JOIN pg_catalog.pg_namespace AS schemas
+  ON schemas.oid = relations.relnamespace
+CROSS JOIN (
+  VALUES
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE'),
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
+) AS checks(privilege)
+WHERE schemas.nspname = 'public'
+  AND relations.relname IN ('staff_pay_period', 'staff_pay_entry', 'staff_pay_revision')
+ORDER BY relations.relname, checks.privilege
+"""
+
 LEGACY_BILLING_SUPPORT_PRIVILEGES_SQL = """
 SELECT
   relations.relname,
@@ -1020,6 +1059,21 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_USER_SAFE_COLUMNS
     assert all(row["can_update"] is False for row in app_user_column_privileges)
     _assert_tenant_account_support_privileges(tenant_account_privileges)
+
+
+async def test_support_role_cannot_access_private_staff_pay_tables(
+    support_engine_privileges: AsyncEngine,
+) -> None:
+    async with support_engine_privileges.connect() as conn:
+        result = await conn.execute(text(STAFF_PAY_SUPPORT_PRIVILEGES_SQL))
+        rows = list(result.mappings())
+
+    assert {row["relname"] for row in rows} == {
+        "staff_pay_period",
+        "staff_pay_entry",
+        "staff_pay_revision",
+    }
+    assert all(row["support_has_privilege"] is False for row in rows)
 
 
 async def test_support_role_can_only_read_legacy_billing_archive(

@@ -92,6 +92,10 @@ const ProfilePage = lazyRouteComponent(
   "ProfilePage",
 );
 const MyWorkPage = lazyRouteComponent(() => import("@/features/my-work/MyWorkPage"), "MyWorkPage");
+const StaffPayPage = lazyRouteComponent(
+  () => import("@/features/staff-pay/StaffPayPage"),
+  "StaffPayPage",
+);
 const ReportsPage = lazyRouteComponent(
   () => import("@/features/reports/ReportsPage"),
   "ReportsPage",
@@ -261,6 +265,7 @@ const profileRoute = createRoute({
   component: ProfilePage,
 });
 const myWorkRoute = createRoute({ getParentRoute, path: "/my-work", component: MyWorkPage });
+const staffPayRoute = createRoute({ getParentRoute, path: "/staff-pay", component: StaffPayPage });
 
 const reportsRoute = createRoute({
   getParentRoute,
@@ -310,6 +315,7 @@ const routeTree = rootRoute.addChildren([
   securityRoute,
   profileRoute,
   myWorkRoute,
+  staffPayRoute,
   reportsRoute,
   loginRoute,
   platformActivationRoute,

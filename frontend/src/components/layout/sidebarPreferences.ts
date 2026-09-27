@@ -31,7 +31,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
   {
     id: "management",
     caption: "Управление",
-    routes: ["/users", "/roles", "/branches", "/registers"],
+    routes: ["/users", "/staff-pay", "/roles", "/branches", "/registers"],
   },
   {
     id: "system",
@@ -117,9 +117,7 @@ export function saveSidebarPreferences(scope: string, preferences: SidebarPrefer
   } catch {
     // The current session remains usable when the browser blocks preferences.
   }
-  window.dispatchEvent(
-    new CustomEvent(SIDEBAR_PREFERENCES_CHANGED_EVENT, { detail: { scope } }),
-  );
+  window.dispatchEvent(new CustomEvent(SIDEBAR_PREFERENCES_CHANGED_EVENT, { detail: { scope } }));
 }
 
 export function orderSidebarItems<T extends { to: string }>(
@@ -129,8 +127,7 @@ export function orderSidebarItems<T extends { to: string }>(
   const rank = new Map(preferences.routeOrder.map((route, index) => [route, index]));
   const unranked = preferences.routeOrder.length;
   return [...items].sort(
-    (left, right) =>
-      (rank.get(left.to) ?? unranked) - (rank.get(right.to) ?? unranked),
+    (left, right) => (rank.get(left.to) ?? unranked) - (rank.get(right.to) ?? unranked),
   );
 }
 

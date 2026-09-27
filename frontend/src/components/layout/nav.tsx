@@ -61,6 +61,7 @@ export function buildNav(
     { to: "/audit", label: "Аудит" },
     { to: "/notifications", label: "Уведомления" },
     { to: "/my-work", label: "Моя работа" },
+    { to: "/staff-pay", label: "Выплаты сотрудникам" },
     { to: "/security", label: "Безопасность" },
     { to: "/settings", label: "Настройки" },
   ];

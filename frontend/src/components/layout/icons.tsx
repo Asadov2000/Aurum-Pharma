@@ -128,6 +128,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M7 3v4M17 3v4M3 11h18M8 15h3M8 18h5" />
     </Svg>
   ),
+  "/staff-pay": (
+    <Svg>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M6 9h1M17 15h1" />
+    </Svg>
+  ),
   "/notifications": (
     <Svg>
       <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />

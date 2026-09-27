@@ -56,7 +56,8 @@
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
 | Личный профиль и свои назначения | [personal-profile.md](personal-profile.md), `backend/app/domains/auth/profile_*`, `frontend/src/features/profile/` | auth profile/RLS pytest, profile Vitest, `frontend/e2e/profile.spec.ts` |
-| Свои кассовые смены | [my-work-shifts.md](my-work-shifts.md), POS `/shifts/mine`, `frontend/src/features/my-work/` | POS personal shifts/RLS pytest, my-work Vitest, `frontend/e2e/my-work.spec.ts`; ручные зарплатные сведения — следующий этап |
+| Свои кассовые смены | [my-work-shifts.md](my-work-shifts.md), POS `/shifts/mine`, `frontend/src/features/my-work/` | POS personal shifts/RLS pytest, my-work Vitest, `frontend/e2e/my-work.spec.ts` |
+| Ручные зарплатные сведения | [manual-staff-pay.md](manual-staff-pay.md), `backend/app/domains/staff_pay/`, `frontend/src/features/staff-pay/`, миграция0160 | staff_pay pytest/RLS, staff-pay Vitest, `frontend/e2e/staff-pay.spec.ts`; без автоматического начисления и движения кассы |
 | Отчёты, выгрузки и финансовая сводка | [Проверка отчётности](reporting-audit.md), `backend/app/domains/pos/`, `backend/app/domains/dashboard/`, `frontend/src/features/reports/` | pytest POS/dashboard/billing, Vitest reports/dashboard, E2E выгрузок и закрытия смены |
 | Наличные расчёты с Aurum | [ADR-0048](adr/0048-cash-settlements-with-aurum.md), billing cash commands, `cashTypes.ts`, `CashPaymentsWorkspace.tsx`, `CashPaymentsPanel.tsx`; миграция 0159 | Независимое подтверждение, tenant RLS, повтор/баланс/документ; наличные возвраты и фискализация отдельно |
 | Публичный сайт и способы установки | `website/src/`, `website/scripts/`; [ADR-0041](adr/0041-public-website-boundary.md) | `website/scripts/test.mjs`, браузерная проверка сайта, CI gate |

@@ -1,6 +1,7 @@
 /** Russian section titles for the permission groups (permission.group_code). */
 export const GROUP_LABEL: Record<string, string> = {
   users: "Сотрудники",
+  staff_pay: "Выплаты сотрудникам",
   roles: "Роли",
   branches: "Точки",
   registers: "Кассы",
