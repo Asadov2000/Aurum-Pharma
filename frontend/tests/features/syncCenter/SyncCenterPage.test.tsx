@@ -153,7 +153,6 @@ describe("SyncCenterPage", () => {
   it("sends server filters and supports manual refresh", () => {
     render(<SyncCenterPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Состояние"), {
       target: { value: "critical" },
     });

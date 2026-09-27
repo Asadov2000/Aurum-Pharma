@@ -53,11 +53,31 @@ function filters(onClear = vi.fn()): ConfigurableFilter[] {
 
 function StatefulFilters() {
   const [status, setStatus] = useState("");
+  const [branch, setBranch] = useState("");
   return (
     <ConfigurableFilterBar
       preferenceKey="stateful"
-      onResetValues={() => setStatus("")}
+      onResetValues={() => {
+        setStatus("");
+        setBranch("");
+      }}
       filters={[
+        {
+          id: "branch",
+          label: "Точка",
+          active: branch !== "",
+          onClear: () => setBranch(""),
+          defaultVisible: true,
+          content: (
+            <label>
+              Точка
+              <select value={branch} onChange={(event) => setBranch(event.target.value)}>
+                <option value="">Все</option>
+                <option value="rudaki">Рудаки</option>
+              </select>
+            </label>
+          ),
+        },
         {
           id: "status",
           label: "Статус",
@@ -134,15 +154,16 @@ describe("ConfigurableFilterBar", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("keeps search in the toolbar and exposes every optional condition in the panel", () => {
+  it("shows quick conditions inline and only the remaining conditions in the panel", () => {
     render(
       <ConfigurableFilterBar preferenceKey="test" filters={filters()} onResetValues={vi.fn()} />,
     );
     expect(screen.getByLabelText("Поиск")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Статус")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    expect(screen.getByLabelText("Статус")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Точка")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     const dialog = screen.getByRole("dialog", { name: "Фильтры" });
-    expect(within(dialog).getByLabelText("Статус")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Статус")).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText("Точка")).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Поиск")).not.toBeInTheDocument();
     expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
@@ -155,7 +176,7 @@ describe("ConfigurableFilterBar", () => {
       render(
         <ConfigurableFilterBar preferenceKey="test" filters={filters()} onResetValues={vi.fn()} />,
       );
-      fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
       expect(screen.getByLabelText("Статус")).toBeInTheDocument();
       expect(screen.getByLabelText("Точка")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Готово" }));
@@ -167,7 +188,7 @@ describe("ConfigurableFilterBar", () => {
     "retains a changed value after closing with %s",
     (close) => {
       render(<StatefulFilters />);
-      const trigger = screen.getByRole("button", { name: /^Фильтры/ });
+      const trigger = screen.getByRole("button", { name: /^Ещё условия/ });
       trigger.focus();
       fireEvent.click(trigger);
       expect(document.body.style.overflow).toBe("hidden");
@@ -187,31 +208,45 @@ describe("ConfigurableFilterBar", () => {
 
   it("clears one condition through its chip and resets all values from the panel", () => {
     render(<StatefulFilters />);
-    const open = () => fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    const open = () => fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     open();
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "Активен" } });
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтр «Статус»" }));
-    expect(screen.getByRole("button", { name: /^Фильтры/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Ещё условия/ })).toHaveFocus();
     expect(
       screen.queryByRole("button", { name: "Сбросить фильтр «Статус»" }),
     ).not.toBeInTheDocument();
     open();
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "Активен" } });
     fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Сбросить (1)" }),
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Сбросить всё (1)" }),
     );
     expect(screen.getByLabelText("Статус")).toHaveValue("");
     expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Сбросить" }),
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Сбросить всё" }),
     ).toBeDisabled();
+  });
+
+  it("resets quick and advanced conditions together", () => {
+    render(<StatefulFilters />);
+    fireEvent.change(screen.getByLabelText("Точка"), { target: { value: "rudaki" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "Активен" } });
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    expect(screen.getAllByRole("button", { name: /^Сбросить фильтр/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё (2)" }));
+    expect(screen.getByLabelText("Точка")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /^Сбросить фильтр/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
+    expect(screen.getByLabelText("Статус")).toHaveValue("");
   });
 
   it("traps keyboard focus inside the panel including its footer", () => {
     render(
       <ConfigurableFilterBar preferenceKey="test" filters={filters()} onResetValues={vi.fn()} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     const close = screen.getByRole("button", { name: "Закрыть" });
     const done = screen.getByRole("button", { name: "Готово" });
     expect(close).toHaveFocus();
@@ -229,7 +264,7 @@ describe("ConfigurableFilterBar", () => {
         onResetValues={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     view.rerender(
       <ConfigurableFilterBar
         preferenceKey="user-b:tenant-b"
@@ -250,7 +285,7 @@ describe("ConfigurableFilterBar", () => {
         onResetValues={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     const restricted = filters(onClear).map((filter) =>
       filter.id === "status" ? { ...filter, available: false } : filter,
     );

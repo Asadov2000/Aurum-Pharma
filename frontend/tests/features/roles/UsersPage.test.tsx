@@ -294,7 +294,7 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Телефон (необязательно)"), {
       target: { value: "+992 90 000 00 00" },
     });
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
@@ -344,7 +344,7 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Email для входа"), {
       target: { value: "existing@aurum.tj" },
     });
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
@@ -380,7 +380,9 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Email для входа"), {
       target: { value: "saida@aurum.tj" },
     });
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
     fireEvent.change(screen.getByLabelText("Доступ к торговым точкам"), {
       target: { value: "__all_branches__" },
     });
@@ -417,7 +419,7 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Email для входа"), {
       target: { value: "farrukh@aurum.tj" },
     });
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.click(screen.getByRole("button", { name: "Проверить данные" }));
@@ -726,7 +728,7 @@ describe("UsersPage", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
     expect(screen.queryByRole("option", { name: "Aurum Administrator" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
@@ -792,7 +794,9 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
     fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
     fireEvent.click(screen.getByLabelText("Аптека Рудаки"));
     fireEvent.click(screen.getByLabelText("Аптека Сино"));
@@ -835,7 +839,9 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: MANAGED_ROLE.id } });
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
     fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
     fireEvent.click(screen.getByLabelText("Аптека Сино"));
     fireEvent.click(screen.getByLabelText("Оставить только выбранный доступ"));
@@ -953,7 +959,9 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), { target: { value: reviewRole.id } });
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
+      target: { value: reviewRole.id },
+    });
     fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
     fireEvent.click(screen.getByLabelText("Аптека Рудаки"));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
@@ -1036,7 +1044,7 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.click(screen.getByLabelText("Запрашивать пароль при входе с этой ролью"));
@@ -1068,7 +1076,7 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
@@ -1100,7 +1108,7 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
-    fireEvent.change(screen.getByLabelText("Роль"), {
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: replacementRole.id },
     });
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
@@ -1548,7 +1556,6 @@ describe("UsersPage", () => {
     fireEvent.change(screen.getByLabelText("Поиск"), {
       target: { value: "  Иван  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Статус"), {
       target: { value: "active" },
     });

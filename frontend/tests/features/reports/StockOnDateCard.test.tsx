@@ -101,7 +101,7 @@ describe("StockOnDateCard", () => {
     fireEvent.change(screen.getByLabelText("Товар, МНН или партия"), {
       target: { value: "парацетамол" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ещё условия" }));
     fireEvent.change(screen.getByLabelText("Срок закончится"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(screen.getByRole("button", { name: /Скачать в Excel/i })).toBeDisabled();
@@ -131,7 +131,6 @@ describe("StockOnDateCard", () => {
 
   it("keeps the all-branches option when no branches are available", () => {
     renderCard();
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     expect(screen.getByLabelText("Аптечная точка")).toHaveValue("");
   });
 
@@ -139,7 +138,7 @@ describe("StockOnDateCard", () => {
     renderCard();
     await screen.findByText("Остатков по этим условиям нет");
     fireEvent.change(screen.getByLabelText("Дата остатка"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ещё условия" }));
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
 
@@ -159,7 +158,7 @@ describe("StockOnDateCard", () => {
     expect(getStockOnDate).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByLabelText("Дата остатка"), { target: { value: "2026-05-31" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Ещё условия" }));
     fireEvent.change(screen.getByLabelText("Срок закончится"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(getStockOnDate).toHaveBeenCalledTimes(1);

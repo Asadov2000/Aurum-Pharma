@@ -122,10 +122,9 @@ test.describe("Reports export", () => {
 
     await page.getByRole("tab", { name: /^Товары/ }).click();
     const topProducts = page.getByRole("region", { name: "Товары-лидеры" });
-    await topProducts.getByRole("button", { name: /^Фильтры/ }).click();
-    const productFilters = page.getByRole("dialog", { name: "Фильтры", exact: true });
-    await productFilters.getByLabel("Аптечная точка").selectOption({ label: branch.name });
-    await productFilters.getByRole("button", { name: "Готово" }).click();
+    await expect(topProducts.getByLabel("Аптечная точка")).toBeVisible();
+    await expect(topProducts.getByRole("button", { name: /^Ещё условия/ })).toBeVisible();
+    await topProducts.getByLabel("Аптечная точка").selectOption({ label: branch.name });
     await topProducts.getByRole("button", { name: "Показать" }).click();
     await expect(
       topProducts.getByRole("table", { name: "Товары-лидеры за выбранный период" }),

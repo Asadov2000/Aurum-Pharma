@@ -358,7 +358,6 @@ describe("PlatformBillingPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Архив прежних счетов" }));
     await screen.findByText("Только чтение");
 
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "paid" } });
     fireEvent.change(screen.getByLabelText("Аптека или номер счёта"), {
       target: { value: "Шифо" },

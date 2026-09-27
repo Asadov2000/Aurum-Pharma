@@ -587,9 +587,10 @@ test.describe("Interface layout", () => {
     const searchBounds = await invoiceSearch.boundingBox();
     expect(searchBounds).not.toBeNull();
     expect(searchBounds!.height).toBeGreaterThanOrEqual(48);
-    const filterBounds = await page.getByRole("button", { name: "Фильтры" }).boundingBox();
-    expect(filterBounds).not.toBeNull();
-    expect(filterBounds!.height).toBeGreaterThanOrEqual(44);
+    const statusBounds = await page.getByRole("combobox", { name: "Статус" }).boundingBox();
+    expect(statusBounds).not.toBeNull();
+    expect(statusBounds!.height).toBeGreaterThanOrEqual(44);
+    await expect(page.getByRole("button", { name: /^Ещё условия/ })).toHaveCount(0);
     await expectNoHorizontalOverflow(page, "/billing touch @ 390x844");
   });
 

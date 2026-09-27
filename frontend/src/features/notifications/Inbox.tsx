@@ -8,11 +8,13 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  ConfigurableFilterBar,
   Label,
   SegmentedControl,
   Select,
   TableEmpty,
 } from "@/components/ui";
+import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +25,7 @@ import { type Notification, type Severity } from "./types";
 const PAGE_SIZE = 100;
 
 export function Inbox(): JSX.Element {
+  const filterPreferenceKey = useFilterPreferenceKey("notifications");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [severity, setSeverity] = useState<Severity | "">("");
   const [page, setPage] = useState(1);
@@ -74,49 +77,89 @@ export function Inbox(): JSX.Element {
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <SegmentedControl
-            label="Сообщения"
-            value={unreadOnly ? "unread" : "all"}
-            options={[
-              { value: "all", label: "Все" },
-              { value: "unread", label: "Непрочитанные" },
-            ]}
-            onChange={(value) => {
-              setUnreadOnly(value === "unread");
-              setPage(1);
-              setActionError(null);
-            }}
-          />
-          <div className="min-w-0 flex-1 sm:max-w-52">
-            <Label htmlFor="notification-severity">Уровень</Label>
-            <Select
-              id="notification-severity"
-              value={severity}
-              onChange={(e) => {
-                setSeverity(e.target.value as Severity | "");
+        <ConfigurableFilterBar
+          preferenceKey={filterPreferenceKey}
+          filters={[
+            {
+              id: "messages",
+              label: "Сообщения",
+              alwaysVisible: true,
+              active: unreadOnly,
+              activeLabel: "Сообщения: Непрочитанные",
+              onClear: () => {
+                setUnreadOnly(false);
                 setPage(1);
                 setActionError(null);
-              }}
+              },
+              content: (
+                <SegmentedControl
+                  label="Сообщения"
+                  className="grid w-full grid-cols-2"
+                  value={unreadOnly ? "unread" : "all"}
+                  options={[
+                    { value: "all", label: "Все" },
+                    { value: "unread", label: "Непрочитанные" },
+                  ]}
+                  onChange={(value) => {
+                    setUnreadOnly(value === "unread");
+                    setPage(1);
+                    setActionError(null);
+                  }}
+                />
+              ),
+            },
+            {
+              id: "severity",
+              label: "Уровень",
+              defaultVisible: true,
+              active: Boolean(severity),
+              activeLabel: severity ? `Уровень: ${severityLabel[severity]}` : undefined,
+              onClear: () => {
+                setSeverity("");
+                setPage(1);
+                setActionError(null);
+              },
+              content: (
+                <div>
+                  <Label htmlFor="notification-severity">Уровень</Label>
+                  <Select
+                    id="notification-severity"
+                    value={severity}
+                    onChange={(e) => {
+                      setSeverity(e.target.value as Severity | "");
+                      setPage(1);
+                      setActionError(null);
+                    }}
+                  >
+                    <option value="">Вся важность</option>
+                    {severityOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {severityLabel[s]}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ),
+            },
+          ]}
+          onResetValues={() => {
+            setUnreadOnly(false);
+            setSeverity("");
+            setPage(1);
+            setActionError(null);
+          }}
+          actions={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void onMarkAll()}
+              disabled={unreadCount === 0 || busy || loading || Boolean(query.error)}
+              isLoading={markAll.isPending}
             >
-              <option value="">Вся важность</option>
-              {severityOptions.map((s) => (
-                <option key={s} value={s}>
-                  {severityLabel[s]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void onMarkAll()}
-            disabled={unreadCount === 0 || busy || loading || Boolean(query.error)}
-            isLoading={markAll.isPending}
-          >
-            Отметить все
-          </Button>
-        </div>
+              Отметить все
+            </Button>
+          }
+        />
         <div className="space-y-1 text-xs leading-relaxed text-foreground-muted">
           <p>
             В текущей подборке непрочитанных: {unreadCount}. Страница {page}.

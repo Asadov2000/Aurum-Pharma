@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listCustomerReturns = vi.fn();
@@ -124,14 +124,9 @@ describe("CustomerReturnsPanel", () => {
     renderPanel();
     await screen.findAllByText("Парацетамол");
     expect(screen.getByLabelText("Поиск")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Статус")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
-    const panel = within(screen.getByRole("dialog", { name: "Фильтры" }));
-    expect(panel.getByLabelText("Статус")).toHaveValue("pending");
-    expect(panel.queryByLabelText("Точка")).not.toBeInTheDocument();
-    fireEvent.change(panel.getByLabelText("Статус"), { target: { value: "resolved" } });
-    fireEvent.click(panel.getByRole("button", { name: "Готово" }));
+    expect(screen.getByLabelText("Статус")).toHaveValue("pending");
+    expect(screen.queryByLabelText("Точка")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "resolved" } });
 
     await waitFor(() =>
       expect(listCustomerReturns).toHaveBeenLastCalledWith(

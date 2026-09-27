@@ -533,6 +533,7 @@ export function UsersPage(): JSX.Element {
           {
             id: "role",
             label: "Роль",
+            defaultVisible: true,
             content: (
               <div>
                 <Label htmlFor="user_role_filter">Роль</Label>
