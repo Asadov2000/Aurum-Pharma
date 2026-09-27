@@ -252,6 +252,28 @@ class ShiftRead(BaseModel):
     notes: str | None
 
 
+class PersonalShiftItem(BaseModel):
+    id: UUID
+    branch_id: UUID
+    branch_name: str
+    register_id: UUID
+    register_name: str
+    opened_at: datetime
+    closed_at: datetime | None
+    status: Literal["open", "closed", "suspended"]
+    sales_total: Decimal
+    returns_total: Decimal
+    currency: str
+
+
+class PersonalShiftList(BaseModel):
+    items: list[PersonalShiftItem]
+    total: int
+    page: int
+    page_size: int
+    timezone: str
+
+
 class ShiftHistoryItem(BaseModel):
     id: UUID
     branch_id: UUID

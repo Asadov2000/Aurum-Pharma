@@ -27,6 +27,7 @@ export const SIDEBAR_SECTIONS: readonly SidebarSection[] = [
     routes: ["/catalog", "/batches", "/incoming", "/suppliers"],
   },
   { id: "analytics", caption: "Аналитика", routes: ["/reports", "/audit"] },
+  { id: "personal", caption: "Личное", routes: ["/my-work"] },
   {
     id: "management",
     caption: "Управление",

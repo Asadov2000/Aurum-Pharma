@@ -54,6 +54,7 @@ export type AppRoutePath =
   | "/notifications"
   | "/security"
   | "/profile"
+  | "/my-work"
   | "/settings";
 
 export interface RouteAccessContext {
@@ -92,6 +93,7 @@ const KNOWN_APP_ROUTES: readonly AppRoutePath[] = [
   "/notifications",
   "/security",
   "/profile",
+  "/my-work",
   "/settings",
 ];
 
@@ -178,6 +180,14 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
   // tenant role, so a cashier can protect their own account as well.
   if (isPath(pathname, "/security")) return true;
   if (isPath(pathname, "/profile")) return true;
+  if (isPath(pathname, "/my-work")) {
+    return (
+      context.hasTenant &&
+      !context.isDeveloper &&
+      !context.isAdministrator &&
+      !context.isSupportScoped
+    );
+  }
   // Personal and device preferences belong to the authenticated account.
   // Owner-only categories are filtered again inside the page and on the API.
   if (isPath(pathname, "/settings")) return true;

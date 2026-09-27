@@ -60,6 +60,7 @@ export function buildNav(
     { to: "/reports", label: "Отчёты" },
     { to: "/audit", label: "Аудит" },
     { to: "/notifications", label: "Уведомления" },
+    { to: "/my-work", label: "Моя работа" },
     { to: "/security", label: "Безопасность" },
     { to: "/settings", label: "Настройки" },
   ];

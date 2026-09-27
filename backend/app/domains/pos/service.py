@@ -69,6 +69,8 @@ from app.domains.pos.repository import (
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.schemas import (
     PAYMENT_METHODS,
+    PersonalShiftItem,
+    PersonalShiftList,
     POSCommandRead,
     POSItemAddCommandResult,
     POSItemUpdateCommandResult,
@@ -1312,6 +1314,43 @@ class POSService:
             page=page,
             page_size=page_size,
             tz=await self._report_tz(tenant_id),
+        )
+
+    async def list_personal_shifts(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> PersonalShiftList:
+        """Own register history survives assignment changes within an active membership.
+
+        This is cash-register history, not attendance or personal sales attribution.
+        The caller must be an authenticated tenant member, never a support actor.
+        """
+        timezone = await self._report_tz(tenant_id)
+        rows, total = await self.repo.list_shifts(
+            tenant_id=tenant_id,
+            status=None,
+            branch_id=None,
+            register_id=None,
+            cashier_id=user_id,
+            cashier_query=None,
+            date_from=None,
+            date_to=None,
+            # Historical ownership is independent of today's assigned branches.
+            branch_ids=None,
+            page=page,
+            page_size=page_size,
+            tz=timezone,
+        )
+        return PersonalShiftList(
+            items=[PersonalShiftItem.model_validate(row) for row in rows],
+            total=total,
+            page=page,
+            page_size=page_size,
+            timezone=timezone,
         )
 
     async def close_shift(
