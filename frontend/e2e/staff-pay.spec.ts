@@ -251,6 +251,7 @@ async function recordEntry(
   await form.getByLabel("Дата выдачи", { exact: true }).fill(paidOn);
   await form.getByLabel("Сумма выдачи, TJS", { exact: true }).fill(amount);
   await form.getByLabel("Комментарий", { exact: true }).fill(note);
+  await form.getByRole("checkbox", { name: "Наличные уже выданы сотруднику", exact: true }).check();
   const saved = waitForStaffPayResponse(page, "POST", `/staff-pay/${periodId}/entries`);
   await form.getByRole("button", { name: "Сохранить", exact: true }).click();
   const response = await saved;
@@ -346,12 +347,34 @@ test("owner records manual staff pay while employees can reveal only their own r
       advance: 200,
       remaining: 500,
     });
-    const card = main
-      .getByRole("list", { name: "Периоды зарплаты", exact: true })
-      .getByRole("listitem");
+    const card = main.getByRole("region", { name: "Выбранный период зарплаты", exact: true });
     await expectUiTotal(card, "Выдано наличными", 500);
     await expectUiTotal(card, "Из них авансы", 200);
     await expectUiTotal(card, "Осталось выдать", 500);
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate(
+        (value) => document.documentElement.setAttribute("data-theme", value),
+        theme,
+      );
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 844 });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await expect(
+          card.getByRole("button", { name: "Записать выдачу", exact: true }),
+        ).toBeVisible();
+      }
+    }
+    const inlineHistory = main.getByRole("region", {
+      name: "Выдачи за выбранный период",
+      exact: true,
+    });
+    await expect(inlineHistory.getByText("Тестовый аванс", { exact: true })).toBeVisible();
+    await expect(inlineHistory.getByText("Тестовая выплата", { exact: true })).toBeVisible();
+    await expect(
+      inlineHistory.getByRole("button", { name: "Отменить запись", exact: true }),
+    ).toHaveCount(0);
 
     await card.getByRole("button", { name: "История выдач", exact: true }).click();
     const history = page.getByRole("dialog", { name: "История выдач", exact: true });

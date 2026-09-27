@@ -8,12 +8,13 @@ import { type StaffPayPeriod } from "@/features/staff-pay/types";
 
 vi.mock("@/features/staff-pay/api", () => ({
   listStaffPay: vi.fn(),
+  listStaffPayEntries: vi.fn(),
   createStaffPayEntry: vi.fn(),
   createStaffPayPeriod: vi.fn(),
   updateStaffPayPeriod: vi.fn(),
   reverseStaffPayEntry: vi.fn(),
 }));
-import { createStaffPayEntry, listStaffPay } from "@/features/staff-pay/api";
+import { createStaffPayEntry, listStaffPay, listStaffPayEntries } from "@/features/staff-pay/api";
 import { StaffPayPanel } from "@/features/staff-pay/StaffPayPanel";
 
 const original = useAuthStore.getState();
@@ -63,6 +64,7 @@ it("keeps the identical cash intent through lost POST and failed background GET 
     updated_at: "2026-09-27T00:00:00Z",
   };
   const data = { items: [period], total: 1, page: 1, page_size: 10, timezone: "Asia/Dushanbe" };
+  vi.mocked(listStaffPayEntries).mockResolvedValue({ ...data, items: [], total: 0 });
   vi.mocked(listStaffPay)
     .mockResolvedValueOnce(data)
     .mockRejectedValueOnce(new Error("offline"))
@@ -86,6 +88,7 @@ it("keeps the identical cash intent through lost POST and failed background GET 
   );
   fireEvent.click(await screen.findByRole("button", { name: "Записать выдачу" }));
   fireEvent.change(screen.getByLabelText("Сумма выдачи, TJS"), { target: { value: "200,50" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Наличные уже выданы сотруднику" }));
   fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
   await screen.findByRole("button", { name: "Повторить запрос" });
   await waitFor(() => expect(listStaffPay).toHaveBeenCalledTimes(2));
