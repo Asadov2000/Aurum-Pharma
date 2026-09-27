@@ -4,13 +4,15 @@ import { Link } from "@tanstack/react-router";
 import {
   Badge,
   Button,
-  ConfigurableFilterBar,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
   Label,
+  SegmentedControl,
   Select,
-  Switch,
   TableEmpty,
 } from "@/components/ui";
-import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { describeApiError } from "@/features/foundation/errors";
 import { cn } from "@/lib/utils";
 
@@ -18,24 +20,37 @@ import { knownEvents, severityLabel, severityOptions, severityTone } from "./lab
 import { useMarkAllRead, useMarkRead, useNotificationsQuery } from "./queries";
 import { type Notification, type Severity } from "./types";
 
+const PAGE_SIZE = 100;
+
 export function Inbox(): JSX.Element {
-  const filterPreferenceKey = useFilterPreferenceKey("notifications");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [severity, setSeverity] = useState<Severity | "">("");
+  const [page, setPage] = useState(1);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const { data, isLoading, error } = useNotificationsQuery({
+  const query = useNotificationsQuery({
     unread_only: unreadOnly,
     severity: severity || undefined,
-    page: 1,
-    page_size: 100,
+    page,
+    page_size: PAGE_SIZE,
   });
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
+  const items = query.error || query.isPlaceholderData ? [] : (query.data ?? []);
+  const unreadCount = items.filter((n) => n.read_at === null).length;
+  const busy = markRead.isPending || markAll.isPending;
+  const loading = query.isLoading || query.isPlaceholderData;
 
-  const unreadCount = (data ?? []).filter((n) => n.read_at === null).length;
-
+  const onMark = async (id: string) => {
+    if (busy || query.error || loading) return;
+    setActionError(null);
+    try {
+      await markRead.mutateAsync(id);
+    } catch (err) {
+      setActionError(describeApiError(err, "Не удалось отметить уведомление"));
+    }
+  };
   const onMarkAll = async () => {
+    if (busy || query.error || loading || unreadCount === 0) return;
     setActionError(null);
     try {
       await markAll.mutateAsync();
@@ -45,101 +60,132 @@ export function Inbox(): JSX.Element {
   };
 
   return (
-    <div className="space-y-4">
-      <ConfigurableFilterBar
-        preferenceKey={filterPreferenceKey}
-        filters={[
-          {
-            id: "unread",
-            label: "Только непрочитанные",
-            content: (
-              <div className="flex h-10 items-center">
-                <Switch
-                  label="Только непрочитанные"
-                  checked={unreadOnly}
-                  onChange={(e) => setUnreadOnly(e.target.checked)}
-                />
-              </div>
-            ),
-            active: unreadOnly,
-            onClear: () => setUnreadOnly(false),
-            defaultVisible: true,
-          },
-          {
-            id: "severity",
-            label: "Уровень",
-            content: (
-              <div>
-                <Label htmlFor="severity">Уровень</Label>
-                <Select
-                  id="severity"
-                  value={severity}
-                  onChange={(e) => setSeverity(e.target.value as Severity | "")}
-                  className="w-52"
-                >
-                  <option value="">Все</option>
-                  {severityOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {severityLabel[s]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ),
-            active: Boolean(severity),
-            activeLabel: severity ? `Уровень: ${severityLabel[severity]}` : undefined,
-            onClear: () => setSeverity(""),
-            defaultVisible: true,
-          },
-        ]}
-        onResetValues={() => {
-          setUnreadOnly(false);
-          setSeverity("");
-        }}
-        actions={
-          <div className="ml-auto flex items-center gap-3">
-            <span className="text-sm text-foreground-muted">
-              непрочитанных: <span className="font-mono">{unreadCount}</span>
-            </span>
+    <Card className="min-w-0" aria-labelledby="notifications-overview-heading">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+        <CardTitle id="notifications-overview-heading">Входящие</CardTitle>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void query.refetch()}
+          disabled={query.isFetching || busy}
+          isLoading={query.isFetching}
+        >
+          Обновить
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <SegmentedControl
+            label="Сообщения"
+            value={unreadOnly ? "unread" : "all"}
+            options={[
+              { value: "all", label: "Все" },
+              { value: "unread", label: "Непрочитанные" },
+            ]}
+            onChange={(value) => {
+              setUnreadOnly(value === "unread");
+              setPage(1);
+              setActionError(null);
+            }}
+          />
+          <div className="min-w-0 flex-1 sm:max-w-52">
+            <Label htmlFor="notification-severity">Уровень</Label>
+            <Select
+              id="notification-severity"
+              value={severity}
+              onChange={(e) => {
+                setSeverity(e.target.value as Severity | "");
+                setPage(1);
+                setActionError(null);
+              }}
+            >
+              <option value="">Вся важность</option>
+              {severityOptions.map((s) => (
+                <option key={s} value={s}>
+                  {severityLabel[s]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void onMarkAll()}
+            disabled={unreadCount === 0 || busy || loading || Boolean(query.error)}
+            isLoading={markAll.isPending}
+          >
+            Отметить все
+          </Button>
+        </div>
+        <div className="space-y-1 text-xs leading-relaxed text-foreground-muted">
+          <p>
+            В текущей подборке непрочитанных: {unreadCount}. Страница {page}.
+          </p>
+          <p>Время указано для Душанбе (UTC+5).</p>
+          <p>
+            «Отметить все» помечает прочитанными все ваши уведомления, включая скрытые фильтрами.
+          </p>
+        </div>
+        {actionError && (
+          <p role="alert" className="text-sm text-danger">
+            {actionError}
+          </p>
+        )}
+        {query.error ? (
+          <div className="space-y-3">
+            <p role="alert" className="text-sm text-danger">
+              {describeApiError(query.error, "Не удалось загрузить уведомления")}
+            </p>
+            <Button
+              variant="secondary"
+              onClick={() => void query.refetch()}
+              disabled={query.isFetching}
+              isLoading={query.isFetching}
+            >
+              Повторить
+            </Button>
+          </div>
+        ) : loading ? (
+          <p role="status" className="text-sm text-foreground-muted">
+            Загрузка…
+          </p>
+        ) : items.length === 0 ? (
+          <TableEmpty>
+            {page > 1
+              ? "На этой странице уведомлений нет"
+              : unreadOnly || severity
+                ? "По фильтрам ничего нет"
+                : "Пока нет уведомлений"}
+          </TableEmpty>
+        ) : (
+          <ul className="space-y-3" aria-label="Входящие уведомления">
+            {items.map((n) => (
+              <Item key={n.id} n={n} onMark={() => void onMark(n.id)} isPending={busy} />
+            ))}
+          </ul>
+        )}
+        {(page > 1 || items.length === PAGE_SIZE) && !query.error && (
+          <nav className="flex flex-wrap gap-2" aria-label="Страницы уведомлений">
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void onMarkAll()}
-              disabled={unreadCount === 0}
-              isLoading={markAll.isPending}
+              disabled={page === 1 || loading || busy}
+              onClick={() => setPage((current) => current - 1)}
             >
-              Отметить все
+              Назад
             </Button>
-          </div>
-        }
-      />
-
-      {error && (
-        <p className="text-sm text-danger">
-          {describeApiError(error, "Не удалось загрузить уведомления")}
-        </p>
-      )}
-      {actionError && <p className="text-sm text-danger">{actionError}</p>}
-
-      {isLoading ? (
-        <p className="text-sm text-foreground-muted">Загрузка…</p>
-      ) : !data || data.length === 0 ? (
-        <TableEmpty>
-          {unreadOnly || severity ? "По фильтрам ничего нет" : "Пока нет уведомлений"}
-        </TableEmpty>
-      ) : (
-        <ul className="space-y-2">
-          {data.map((n) => (
-            <Item
-              key={n.id}
-              n={n}
-              onMark={() => void markRead.mutateAsync(n.id).catch(() => {})}
-              isPending={markRead.isPending}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={items.length < PAGE_SIZE || loading || busy}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Далее
+            </Button>
+          </nav>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -158,45 +204,51 @@ function Item({
   return (
     <li
       className={cn(
-        "rounded-md border px-4 py-3",
-        isUnread ? "border-input bg-surface" : "border-border bg-foreground/[0.03]",
+        "min-w-0 rounded-lg border p-4",
+        isUnread
+          ? "border-primary/20 border-l-[3px] border-l-primary bg-primary/5"
+          : "border-border bg-surface",
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={severityTone[n.severity]}>{severityLabel[n.severity]}</Badge>
-            {eventTitle !== n.title && (
-              <span className="text-xs text-foreground-muted">{eventTitle}</span>
-            )}
-            {isUnread && <Badge tone="info">новое</Badge>}
-          </div>
+      <div className="min-w-0 space-y-3 break-words">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={severityTone[n.severity]}>{severityLabel[n.severity]}</Badge>
+          <time dateTime={n.created_at} className="text-xs text-foreground-muted">
+            {new Date(n.created_at).toLocaleString("ru-RU", {
+              dateStyle: "short",
+              timeStyle: "short",
+              timeZone: "Asia/Dushanbe",
+            })}
+          </time>
+          {isUnread && <Badge tone="info">новое</Badge>}
+        </div>
+        <div className="space-y-1">
           <p
             className={cn(
               "text-sm",
-              isUnread ? "font-medium text-foreground" : "text-foreground-secondary",
+              isUnread ? "font-semibold text-foreground" : "text-foreground-secondary",
             )}
           >
             {n.title}
           </p>
-          {n.body && <p className="text-sm text-foreground-secondary">{n.body}</p>}
-          <p className="text-xs text-foreground-muted">
-            {new Date(n.created_at).toLocaleString("ru-RU")}
-          </p>
+          {eventTitle !== n.title && <p className="text-xs text-foreground-muted">{eventTitle}</p>}
+          {n.body && <p className="text-sm leading-relaxed text-foreground-secondary">{n.body}</p>}
         </div>
-        <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           {isNewDeviceAlert && (
             <Link
               to="/security"
-              className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-surface px-3 text-sm font-semibold text-foreground transition-colors duration-fast hover:bg-foreground/5"
+              className="inline-flex min-h-10 items-center rounded-md px-2 text-sm font-semibold text-primary hover:bg-primary/5"
             >
               Проверить сеансы
             </Link>
           )}
-          {isUnread && (
-            <Button variant="ghost" size="sm" onClick={onMark} isLoading={isPending}>
+          {isUnread ? (
+            <Button variant="ghost" size="sm" onClick={onMark} disabled={isPending}>
               Прочитано
             </Button>
+          ) : (
+            <span className="text-xs text-foreground-muted">Прочитано</span>
           )}
         </div>
       </div>
