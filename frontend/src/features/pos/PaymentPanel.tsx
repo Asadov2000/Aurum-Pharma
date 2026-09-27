@@ -209,10 +209,10 @@ export function PaymentPanel({
   return (
     <section
       aria-labelledby="payment-panel-title"
-      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
+      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border border-t-[3px] border-t-primary bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
     >
       <header className={cn("border-b border-border px-3 py-2", touch && "px-4 py-3")}>
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col gap-2">
           <div className="min-w-0">
             <h2
               id="payment-panel-title"
@@ -220,6 +220,17 @@ export function PaymentPanel({
             >
               К оплате
             </h2>
+            <p
+              className={cn(
+                "mt-1 font-mono text-3xl font-bold tabular-nums text-foreground",
+                touch && "text-4xl",
+              )}
+            >
+              {totalDue.toFixed(2)}{" "}
+              <span className="font-sans text-sm font-semibold text-foreground-secondary">
+                {currency}
+              </span>
+            </p>
             {totalDue > 0 ? (
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                 <span className="text-foreground-muted">
@@ -239,17 +250,6 @@ export function PaymentPanel({
               </div>
             ) : null}
           </div>
-          <p
-            className={cn(
-              "shrink-0 text-right font-mono text-3xl font-bold tabular-nums text-foreground",
-              touch && "text-4xl",
-            )}
-          >
-            {totalDue.toFixed(2)}{" "}
-            <span className="font-sans text-sm font-semibold text-foreground-secondary">
-              {currency}
-            </span>
-          </p>
         </div>
       </header>
 
@@ -271,7 +271,7 @@ export function PaymentPanel({
             </div>
           ) : (
             <div
-              className="grid border-b border-border"
+              className="grid gap-1.5 border-b border-border p-2"
               style={{
                 gridTemplateColumns: `repeat(${Math.max(1, paymentMethods.length)}, minmax(0, 1fr))`,
               }}
@@ -295,10 +295,10 @@ export function PaymentPanel({
                       (pendingPaymentMethod !== null && pendingPaymentMethod !== method)
                     }
                     className={cn(
-                      "pos-tile flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 border-r border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast last:border-r-0 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
+                      "pos-tile flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-md border border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
                       touch && "min-h-14 text-base",
                       selectedMethod === method
-                        ? "bg-primary text-primary-foreground"
+                        ? "border-primary bg-primary/10 text-primary"
                         : "bg-surface hover:bg-primary/5",
                       "disabled:cursor-not-allowed disabled:opacity-50",
                     )}
@@ -369,12 +369,12 @@ export function PaymentPanel({
                     }
                   }}
                   className={cn(
-                    "h-10 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground shadow-sm focus:border-ring",
+                    "h-10 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground focus:border-ring",
                     touch && "h-12 text-2xl",
                   )}
                 />
 
-                <div className="mt-2 grid flex-1 grid-cols-4 overflow-hidden rounded-md border border-border bg-surface">
+                <div className="mt-2 grid flex-1 grid-cols-4 gap-1 bg-surface">
                   {cashKeys.map((key) => (
                     <button
                       key={key}
@@ -383,9 +383,10 @@ export function PaymentPanel({
                       onClick={() => pressCashKey(key)}
                       disabled={interactionBlocked || completing || completionUncertain}
                       className={cn(
-                        "min-h-9 border-b border-r border-border bg-surface text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
+                        "min-h-9 rounded border border-border bg-background text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
                         touch && "min-h-11 text-xl",
-                        (key === "+50" || key === "+100") && "text-primary",
+                        (key === "+50" || key === "+100" || key === "backspace") &&
+                          "bg-primary/5 text-primary",
                         key === "clear" && "text-danger",
                       )}
                     >

@@ -11,20 +11,20 @@ type QuickView = "grid" | "list";
 
 const productAccents = [
   {
-    shell: "border-[#d9c9ef] bg-[#f4effb] text-[#6f3fa0]",
-    stripe: "bg-[#8a5ab8]",
+    shell: "border-primary/20 bg-primary/5 text-primary",
+    stripe: "bg-primary/60",
   },
   {
-    shell: "border-[#c9d9ef] bg-[#eef4fb] text-[#315f9c]",
-    stripe: "bg-[#477ab8]",
+    shell: "border-info/20 bg-info-subtle text-info",
+    stripe: "bg-info/60",
   },
   {
-    shell: "border-[#f0c9c5] bg-[#fff1ef] text-[#a43f35]",
-    stripe: "bg-[#d95347]",
+    shell: "border-warning/20 bg-warning-subtle text-warning",
+    stripe: "bg-warning/60",
   },
   {
-    shell: "border-[#bcdfe3] bg-[#edf9fa] text-[#126b76]",
-    stripe: "bg-[#2795a2]",
+    shell: "border-success/20 bg-success-subtle text-success-foreground",
+    stripe: "bg-success/60",
   },
 ] as const;
 
@@ -113,9 +113,9 @@ export function QuickProducts({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
         {favorites.isLoading ? (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2.5">
+          <div className="grid grid-cols-1 gap-2">
             {Array.from({ length: 4 }, (_, index) => (
-              <Skeleton key={index} className="h-56 rounded-md" />
+              <Skeleton key={index} className="h-36 rounded-md" />
             ))}
           </div>
         ) : favorites.error ? (
@@ -134,12 +134,7 @@ export function QuickProducts({
             </Button>
           </div>
         ) : products.length ? (
-          <div
-            className={cn(
-              "grid gap-2.5",
-              view === "grid" ? "grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]" : "grid-cols-1",
-            )}
-          >
+          <div className="grid grid-cols-1 gap-2">
             {products.map((item, index) => {
               const accent = productAccents[index % productAccents.length] ?? productAccents[0];
               const stock = item.stock_available == null ? null : Number(item.stock_available);
@@ -149,12 +144,7 @@ export function QuickProducts({
               return (
                 <article
                   key={item.id}
-                  className={cn(
-                    "relative grid min-w-0 overflow-hidden rounded-md border border-border bg-surface-raised",
-                    view === "grid"
-                      ? "grid-rows-[minmax(8.5rem,1fr)_auto]"
-                      : "grid-cols-[minmax(0,1fr)_9rem]",
-                  )}
+                  className="relative flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-surface"
                 >
                   <button
                     type="button"
@@ -166,16 +156,24 @@ export function QuickProducts({
                   >
                     <StarIcon />
                   </button>
-                  <div className="grid min-w-0 grid-cols-[5rem_minmax(0,1fr)] gap-3 p-3 pr-11">
+                  <div
+                    className={cn(
+                      "grid min-w-0 gap-3 p-3 pr-11",
+                      view === "grid"
+                        ? "grid-cols-[2.75rem_minmax(0,1fr)]"
+                        : "grid-cols-[2rem_minmax(0,1fr)] gap-2 py-2.5",
+                    )}
+                  >
                     <div
                       aria-hidden="true"
                       className={cn(
-                        "relative my-auto flex h-24 w-20 shrink-0 items-center justify-center overflow-hidden rounded border shadow-sm",
+                        "relative my-auto flex shrink-0 items-center justify-center overflow-hidden rounded border",
+                        view === "grid" ? "h-[60px] w-11" : "h-11 w-8",
                         accent.shell,
                       )}
                     >
-                      <span className={cn("absolute inset-y-0 right-0 w-2", accent.stripe)} />
-                      <span className="max-w-[3.75rem] break-words text-center text-[11px] font-bold leading-tight">
+                      <span className={cn("absolute inset-y-0 right-0 w-1", accent.stripe)} />
+                      <span className="max-w-full break-words px-1.5 text-center text-[8px] font-bold leading-tight">
                         {shortProductName(item.brand_name)}
                       </span>
                     </div>
@@ -191,7 +189,7 @@ export function QuickProducts({
                       </p>
                       <p
                         className={cn(
-                          "mt-2 text-xs font-medium",
+                          "mt-1 text-xs font-medium",
                           unavailable ? "text-danger" : "text-success-foreground",
                         )}
                       >
@@ -203,35 +201,36 @@ export function QuickProducts({
                               ? "Нет в наличии"
                               : `В наличии: ${formatStock(stock)} шт.`}
                       </p>
-                      <div className="mt-auto pt-2">
-                        <p className="text-[10px] font-medium text-foreground-muted">
-                          Базовая цена
-                        </p>
-                        <p className="font-mono text-xl font-bold tabular-nums text-foreground">
-                          {item.base_price ? Number(item.base_price).toFixed(2) : "—"}{" "}
-                          <span className="font-sans text-xs font-semibold text-foreground-secondary">
-                            {item.currency}
-                          </span>
-                        </p>
-                      </div>
                     </div>
                   </div>
 
-                  <Button
-                    type="button"
-                    className={cn(
-                      "m-1.5 mt-0",
-                      view === "list" && "m-2 self-center",
-                      touch && "min-h-12",
-                    )}
-                    aria-label={`Добавить ${item.brand_name}`}
-                    isLoading={adding}
-                    disabled={busy || unavailable}
-                    onClick={() => void addProduct(item)}
-                  >
-                    <CartIcon />
-                    Добавить
-                  </Button>
+                  <div className="flex items-center justify-between gap-2 border-t border-border bg-background px-3 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-medium text-foreground-muted">Базовая цена</p>
+                      <p className="font-mono text-sm font-bold tabular-nums text-foreground">
+                        {item.base_price ? Number(item.base_price).toFixed(2) : "—"}{" "}
+                        <span className="font-sans text-[10px] font-semibold text-foreground-secondary">
+                          {item.currency}
+                        </span>
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        "shrink-0 text-primary hover:bg-primary/5",
+                        touch && "min-h-12",
+                      )}
+                      aria-label={`Добавить ${item.brand_name}`}
+                      isLoading={adding}
+                      disabled={busy || unavailable}
+                      onClick={() => void addProduct(item)}
+                    >
+                      <CartIcon />
+                      Добавить
+                    </Button>
+                  </div>
                 </article>
               );
             })}
