@@ -57,13 +57,36 @@ describe("private manual salary", () => {
   it("requires explicit reveal, never grants own manager actions, and hides details again", () => {
     render(<PersonalStaffPayPanel />);
     expect(state.query).toHaveBeenLastCalledWith(true, null, 1, false);
+    expect(screen.getByRole("heading", { name: "Зарплата и выплаты" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Сведения скрыты" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Показать сведения" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
     expect(screen.queryByText(period.note)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Показать сведения" }));
     expect(state.query).toHaveBeenLastCalledWith(true, null, 1, true);
     expect(screen.getByText(period.note)).toBeInTheDocument();
+    expect(screen.getByText("Осталось выдать").nextElementSibling).toHaveTextContent(
+      payMoney(period.remaining_amount),
+    );
+    expect(screen.getByRole("button", { name: "История выдач" })).toBeInTheDocument();
+    expect(screen.queryByText("Последние выдачи")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Записать выдачу" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Скрыть сведения" }));
     expect(screen.queryByText(period.note)).not.toBeInTheDocument();
+  });
+  it("hides revealed personal amounts after a failed refresh", () => {
+    const view = render(<PersonalStaffPayPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Показать сведения" }));
+    expect(screen.getByText(period.note)).toBeInTheDocument();
+    state.isError = true;
+    view.rerender(<PersonalStaffPayPanel />);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(period.note)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "История выдач" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть сведения" }));
+    expect(screen.getByRole("heading", { name: "Сведения скрыты" })).toBeInTheDocument();
   });
   it("shows server totals without adding advance twice and describes overpayment separately", () => {
     render(

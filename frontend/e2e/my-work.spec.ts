@@ -86,7 +86,14 @@ async function expectOwnShiftPage(
     timeZone: timezone,
   }).format(new Date(ownShift.opened_at));
   await expect(shiftList.getByText(openedAt, { exact: true }).first()).toBeVisible();
-  await expect(main.getByText(/табель/i)).toHaveCount(0);
+  await expect(main.getByText(/не табель рабочего времени/i)).toBeVisible();
+  await expect(main.getByRole("link", { name: "Мой профиль", exact: true })).toHaveAttribute(
+    "href",
+    "/profile",
+  );
+  await expect(main.getByText("Нужна проверка сведений?", { exact: true })).toBeVisible();
+  await main.getByText("Как читать выплаты", { exact: true }).click();
+  await expect(main.getByText(/Превышение суммы не создаёт долг сотрудника/)).toBeVisible();
   await expect(main.getByRole("button", { name: "Показать сведения" })).toBeVisible();
   await expect(main.getByRole("list", { name: "Периоды зарплаты" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -230,7 +237,25 @@ test("employee without reports permission sees only their own register shifts af
       settings.report_timezone,
     );
 
-    await page.getByRole("link", { name: "Открыть мой профиль", exact: true }).click();
+    await page.setViewportSize({ width: 320, height: 720 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    const main = page.getByRole("main");
+    const shiftCard = main.getByRole("heading", { name: "Мои кассовые смены", exact: true });
+    const salaryCard = main.getByRole("heading", { name: "Зарплата и выплаты", exact: true });
+    const shiftBox = await shiftCard.boundingBox();
+    const salaryBox = await salaryCard.boundingBox();
+    expect(shiftBox).not.toBeNull();
+    expect(salaryBox).not.toBeNull();
+    expect(salaryBox!.x).toBeGreaterThan(shiftBox!.x + shiftBox!.width);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+
+    await main.getByRole("link", { name: "Мой профиль", exact: true }).click();
     const profileWorkLink = page
       .getByRole("main")
       .getByRole("link", { name: "Моя работа", exact: true });
