@@ -5,7 +5,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { BrandMark } from "./BrandMark";
-import { NavIcon } from "./icons";
+import { ExpandNavigationIcon, NavigationSettingsIcon, NavIcon } from "./icons";
 import { isActiveNavPath } from "./nav";
 import { SIDEBAR_SECTIONS } from "./sidebarPreferences";
 
@@ -177,43 +177,6 @@ export function Sidebar({
         </div>
       )}
     </nav>
-  );
-}
-
-function ExpandNavigationIcon({ expanded }: { expanded: boolean }): JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
-      <path d={expanded ? "m16 8-4 4 4 4" : "m14 8 4 4-4 4"} />
-      <path d={expanded ? "M12 12h7" : "M18 12H9"} />
-    </svg>
-  );
-}
-
-function NavigationSettingsIcon(): JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-    >
-      <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
-    </svg>
   );
 }
 
