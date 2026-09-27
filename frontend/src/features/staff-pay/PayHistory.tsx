@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -37,11 +37,40 @@ export function PayHistory({
   );
 }
 
-function EntryHistory({ own, periodId }: { own: boolean; periodId: string }): JSX.Element {
+export function PayHistoryPreview({ periodId }: { periodId: string }): JSX.Element {
+  return (
+    <section
+      aria-label="Выдачи за выбранный период"
+      className="space-y-5 rounded-xl border border-border bg-surface p-5 sm:p-6"
+    >
+      <h3 className="font-semibold">Выдачи за выбранный период</h3>
+      <EntryHistory own={false} periodId={periodId} preview />
+      <p className="rounded-lg bg-primary/5 p-3 text-xs leading-relaxed text-foreground-muted">
+        Аванс входит в «Выдано наличными». Его не нужно прибавлять ещё раз. Для исправления записи
+        откройте историю выдач.
+      </p>
+    </section>
+  );
+}
+
+function EntryHistory({
+  own,
+  periodId,
+  preview = false,
+}: {
+  own: boolean;
+  periodId: string;
+  preview?: boolean;
+}): JSX.Element {
   const [page, setPage] = useState(1);
   const query = useStaffPayEntries(own, periodId, page);
   const access = useStaffPayAccess();
   const [reversing, setReversing] = useState<StaffPayEntry | null>(null);
+  useEffect(() => {
+    if (!access.manage) setReversing(null);
+  }, [access.manage]);
+  if (!(own ? access.ordinary : access.view))
+    return <p role="alert">Нет доступа к истории выдач.</p>;
   if (query.isPending) return <p role="status">Загрузка истории…</p>;
   if (query.isError) return <ReadError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <></>;
@@ -50,18 +79,28 @@ function EntryHistory({ own, periodId }: { own: boolean; periodId: string }): JS
       {query.data.items.length === 0 ? (
         <p>Выдач пока нет.</p>
       ) : (
-        <ul className="space-y-3" aria-label="Выдачи наличными">
+        <ul
+          className={preview ? "divide-y divide-border" : "space-y-3"}
+          aria-label="Выдачи наличными"
+        >
           {query.data.items.map((entry) => (
-            <li key={entry.id} className="space-y-2 rounded-md border border-border p-3">
+            <li
+              key={entry.id}
+              className={
+                preview
+                  ? "space-y-2 py-4 first:pt-0 last:pb-0"
+                  : "space-y-2 rounded-md border border-border p-3"
+              }
+            >
               <div className="flex flex-wrap justify-between gap-2">
-                <strong>
+                <strong className={preview ? "text-sm font-medium" : undefined}>
                   {entry.kind === "advance"
                     ? "Аванс"
                     : entry.kind === "payment"
                       ? "Выплата"
                       : "Отмена выдачи"}
                 </strong>
-                <span>
+                <span className={preview ? "text-sm font-semibold tabular-nums" : undefined}>
                   {entry.kind === "reversal" ? "−" : ""}
                   {payMoney(entry.amount)}
                 </span>
@@ -69,7 +108,11 @@ function EntryHistory({ own, periodId }: { own: boolean; periodId: string }): JS
               <p className="text-sm text-foreground-muted">{payDate(entry.paid_on)}</p>
               {entry.is_reversed ? <Badge tone="warning">Отменена</Badge> : null}
               {entry.note ? <p className="break-words text-sm">{entry.note}</p> : null}
-              {!own && access.manage && entry.kind !== "reversal" && !entry.is_reversed ? (
+              {!preview &&
+              !own &&
+              access.manage &&
+              entry.kind !== "reversal" &&
+              !entry.is_reversed ? (
                 <Button variant="secondary" onClick={() => setReversing(entry)}>
                   Отменить запись
                 </Button>
@@ -84,7 +127,7 @@ function EntryHistory({ own, periodId }: { own: boolean; periodId: string }): JS
         total={query.data.total}
         onPage={setPage}
       />
-      {reversing ? (
+      {reversing && !preview && !own && access.manage ? (
         <ReverseForm
           key={reversing.id}
           periodId={periodId}
@@ -99,6 +142,9 @@ function EntryHistory({ own, periodId }: { own: boolean; periodId: string }): JS
 function RevisionHistory({ own, periodId }: { own: boolean; periodId: string }): JSX.Element {
   const [page, setPage] = useState(1);
   const query = useStaffPayRevisions(own, periodId, page);
+  const access = useStaffPayAccess();
+  if (!(own ? access.ordinary : access.view))
+    return <p role="alert">Нет доступа к изменениям суммы.</p>;
   if (query.isPending) return <p role="status">Загрузка изменений…</p>;
   if (query.isError) return <ReadError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <></>;

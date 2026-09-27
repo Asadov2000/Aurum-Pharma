@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { NavIcon } from "@/components/layout/icons";
 import { Button, Card, CardContent, CardHeader, CardTitle, Pagination } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
-import { payDate, payDateTime, payMoney } from "./format";
+import { payDate, payDateTime, payMoney, pharmacyToday } from "./format";
 import { PayForm, type PayIntent } from "./PayForm";
-import { PayHistory, ReadError } from "./PayHistory";
+import { PayHistory, PayHistoryPreview, ReadError } from "./PayHistory";
 import { useStaffPayAccess, useStaffPayPeriods } from "./queries";
 import { type StaffPayPeriod } from "./types";
 
@@ -18,12 +18,15 @@ export function PersonalStaffPayPanel(): JSX.Element {
 export function StaffPayPanel({
   own,
   employeeId,
+  contextUnavailable = false,
 }: {
   own: boolean;
   employeeId: string | null;
+  contextUnavailable?: boolean;
 }): JSX.Element {
   const [visible, setVisible] = useState(!own);
   const [page, setPage] = useState(1);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const query = useStaffPayPeriods(own, employeeId, page, visible);
   const access = useStaffPayAccess();
   const [intent, setIntent] = useState<PayIntent | null>(null);
@@ -31,6 +34,12 @@ export function StaffPayPanel({
     null,
   );
   const canManage = !own && access.manage;
+  const canRead = own ? access.ordinary : access.view;
+  const unavailable = query.isError || contextUnavailable;
+  useEffect(() => {
+    if (!canManage) setIntent(null);
+    if (unavailable || !canRead) setHistory(null);
+  }, [unavailable, canRead, canManage]);
   const close = () => {
     setIntent(null);
     void query.refetch();
@@ -62,7 +71,7 @@ export function StaffPayPanel({
         >
           {canManage ? (
             <Button
-              disabled={!query.data || query.isError}
+              disabled={!query.data || unavailable}
               onClick={() => setIntent({ kind: "create" })}
             >
               Добавить период
@@ -101,7 +110,9 @@ export function StaffPayPanel({
             общую выданную сумму.
           </p>
         ) : null}
-        {!visible ? (
+        {!canRead ? (
+          <p role="alert">Нет доступа к сведениям о выплатах.</p>
+        ) : !visible ? (
           <div className="flex flex-col items-center rounded-xl border border-dashed border-border bg-foreground/[0.03] px-5 py-7 text-center">
             <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface text-primary">
               <LockIcon />
@@ -115,6 +126,8 @@ export function StaffPayPanel({
               Показать сведения
             </Button>
           </div>
+        ) : contextUnavailable ? (
+          <p role="status">Сведения временно недоступны. Обновите список сотрудников.</p>
         ) : query.isPending ? (
           <p role="status">Загрузка сведений…</p>
         ) : query.isError ? (
@@ -127,6 +140,16 @@ export function StaffPayPanel({
                   ? "Сведений за периоды пока нет."
                   : "На этой странице записей нет."}
               </p>
+            ) : !own ? (
+              <ManagementPeriods
+                periods={query.data.items}
+                timezone={query.data.timezone}
+                manage={canManage}
+                selectedId={selectedPeriodId}
+                onSelect={setSelectedPeriodId}
+                onIntent={setIntent}
+                onHistory={(id, mode) => setHistory({ id, mode })}
+              />
             ) : (
               <ul
                 className={cn(
@@ -170,10 +193,11 @@ export function StaffPayPanel({
             intent={intent}
             employeeId={employeeId}
             timezone={query.data.timezone}
+            contextUnavailable={unavailable}
             onClose={close}
           />
         ) : null}
-        {history && visible && !query.isError ? (
+        {history && visible && canRead && !unavailable ? (
           <PayHistory
             own={own}
             periodId={history.id}
@@ -183,6 +207,80 @@ export function StaffPayPanel({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function ManagementPeriods({
+  periods,
+  timezone,
+  manage,
+  selectedId,
+  onSelect,
+  onIntent,
+  onHistory,
+}: {
+  periods: StaffPayPeriod[];
+  timezone: string;
+  manage: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onIntent: (intent: PayIntent) => void;
+  onHistory: (id: string, mode: "entries" | "revisions") => void;
+}): JSX.Element {
+  const today = pharmacyToday(timezone);
+  const selected =
+    periods.find((period) => period.id === selectedId) ??
+    periods.find((period) => period.period_from <= today && period.period_to >= today) ??
+    periods[0];
+  if (!selected) return <></>;
+  const otherPeriods = periods.filter((period) => period.id !== selected.id);
+  return (
+    <div className="space-y-5">
+      <section aria-label="Выбранный период зарплаты">
+        <PeriodCard
+          period={selected}
+          timezone={timezone}
+          manage={manage}
+          onIntent={onIntent}
+          onHistory={(mode) => onHistory(selected.id, mode)}
+        />
+      </section>
+      <PayHistoryPreview key={selected.id} periodId={selected.id} />
+      {otherPeriods.length ? (
+        <section aria-label="Другие периоды зарплаты" className="space-y-3">
+          <h3 className="text-sm font-semibold text-foreground-muted">Другие периоды</h3>
+          <ul className="space-y-3" aria-label="Периоды зарплаты">
+            {otherPeriods.map((period) => (
+              <li key={period.id}>
+                <button
+                  type="button"
+                  className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  onClick={() => onSelect(period.id)}
+                  aria-label={`Открыть период ${payDate(period.period_from)} — ${payDate(period.period_to)}`}
+                >
+                  <span className="space-y-1">
+                    <span className="block text-sm font-semibold">
+                      {payDate(period.period_from)} — {payDate(period.period_to)}
+                    </span>
+                    <span className="block text-xs text-foreground-muted">
+                      Сумма {payMoney(period.amount)} · Выдано {payMoney(period.paid_amount)}
+                    </span>
+                  </span>
+                  <span className="rounded-md bg-primary/5 px-2.5 py-1 text-xs text-primary">
+                    {period.remaining_amount.startsWith("-")
+                      ? "Выдано сверх суммы"
+                      : Number(period.remaining_amount) === 0
+                        ? "Выдано полностью"
+                        : `Осталось ${payMoney(period.remaining_amount)}`}
+                  </span>
+                  <span className="text-xs font-medium text-primary">Открыть →</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -202,6 +300,82 @@ export function PeriodCard({
   onHistory: (mode: "entries" | "revisions") => void;
 }): JSX.Element {
   const overpaid = period.remaining_amount.startsWith("-");
+  if (!personal) {
+    return (
+      <article className="min-w-0 space-y-5 rounded-xl border border-border bg-surface p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
+          <div>
+            <h3 className="text-lg font-semibold">
+              {payDate(period.period_from)} — {payDate(period.period_to)}
+            </h3>
+            <p className="mt-1 text-xs text-foreground-muted">Период сотрудника</p>
+          </div>
+          <span className="rounded-md bg-primary/5 px-2.5 py-1 text-xs text-primary">
+            {overpaid
+              ? "Выдано сверх суммы"
+              : Number(period.remaining_amount) === 0
+                ? "Выдано полностью"
+                : "Осталось выдать"}
+          </span>
+        </div>
+        <dl className="grid gap-5 sm:grid-cols-3">
+          <div>
+            <dt className="text-xs text-foreground-muted">Сумма за период</dt>
+            <dd className="mt-2 text-xl font-semibold tabular-nums">{payMoney(period.amount)}</dd>
+          </div>
+          <div>
+            <div>
+              <dt className="text-xs text-foreground-muted">Выдано наличными</dt>
+              <dd className="mt-2 text-xl font-semibold tabular-nums">
+                {payMoney(period.paid_amount)}
+              </dd>
+            </div>
+            <dl className="mt-2 flex flex-wrap gap-1 text-xs text-foreground-muted">
+              <dt>Из них авансы</dt>
+              <dd>{payMoney(period.advance_amount)}</dd>
+            </dl>
+          </div>
+          <div>
+            <dt className="text-xs text-foreground-muted">Учёт суммы</dt>
+            <dd className="mt-2 inline-block rounded-md bg-primary/5 px-2.5 py-1 text-xs text-primary">
+              Указана вручную
+            </dd>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-primary/5 p-4 text-primary sm:col-span-3">
+            <dt className="text-sm font-semibold">
+              {overpaid ? "Выдано сверх суммы" : "Осталось выдать"}
+            </dt>
+            <dd className="text-2xl font-semibold tabular-nums">
+              {payMoney(overpaid ? period.remaining_amount.slice(1) : period.remaining_amount)}
+            </dd>
+            <p className="w-full text-xs text-foreground-muted">
+              Авансы уже включены в выданную сумму
+            </p>
+          </div>
+        </dl>
+        <div className="flex flex-wrap gap-2">
+          {manage ? (
+            <>
+              <Button onClick={() => onIntent({ kind: "entry", period })}>Записать выдачу</Button>
+              <Button variant="secondary" onClick={() => onIntent({ kind: "edit", period })}>
+                Изменить сумму
+              </Button>
+            </>
+          ) : null}
+          <Button variant="secondary" onClick={() => onHistory("entries")}>
+            История выдач
+          </Button>
+          <Button variant="ghost" onClick={() => onHistory("revisions")}>
+            Изменения суммы
+          </Button>
+        </div>
+        <div className="space-y-2 border-t border-border pt-4 text-xs text-foreground-muted">
+          {period.note ? <p className="break-words">{period.note}</p> : null}
+          <p>Обновлено: {payDateTime(period.updated_at, timezone)}</p>
+        </div>
+      </article>
+    );
+  }
   return (
     <article
       className={cn("h-full min-w-0 space-y-4", !personal && "rounded-lg border border-border p-4")}
