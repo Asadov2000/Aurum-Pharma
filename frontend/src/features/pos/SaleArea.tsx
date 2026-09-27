@@ -239,7 +239,7 @@ export function SaleArea({
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 xl:h-full xl:min-h-0">
       {hasShift && canSell && storageScope ? (
         <RegisterWorkspaceGate
           key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
@@ -1989,7 +1989,7 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(16rem,0.95fr)_minmax(22rem,1.15fr)_minmax(18rem,0.85fr)] xl:gap-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(16rem,0.95fr)_minmax(22rem,1.15fr)_minmax(18rem,0.85fr)] xl:grid-rows-[minmax(0,1fr)] xl:gap-3">
           <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
             <Suspense
               fallback={
