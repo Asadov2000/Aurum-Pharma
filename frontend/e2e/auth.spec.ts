@@ -245,11 +245,50 @@ test.describe("Auth", () => {
     }
 
     await page.goto("/notifications");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Входящие", exact: true })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: "Настройки уведомлений", exact: true }),
+    ).toBeVisible();
+    await expect(main.getByText("Обязательно", { exact: true })).toBeVisible();
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate(
+        (value) => document.documentElement.setAttribute("data-theme", value),
+        theme,
+      );
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        await expect(
+          main.getByRole("button", { name: "Сохранить настройки", exact: true }),
+        ).toBeVisible();
+      }
+    }
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/notifications/subscriptions") &&
+        response.request().method() === "PATCH",
+    );
+    await main.getByRole("button", { name: "Сохранить настройки", exact: true }).click();
+    expect((await saved).status()).toBe(200);
+    await expect(
+      main.getByRole("status").filter({ hasText: "Настройки уведомлений сохранены." }),
+    ).toBeVisible();
     const alert = page
       .getByRole("listitem")
       .filter({ hasText: "Вход с нового устройства" })
       .first();
     await expect(alert).toBeVisible();
+    const read = page.waitForResponse(
+      (response) =>
+        /\/notifications\/[^/]+\/read$/.test(response.url()) &&
+        response.request().method() === "POST",
+    );
+    await alert.getByRole("button", { name: "Прочитано", exact: true }).click();
+    expect((await read).status()).toBe(200);
+    await expect(alert.getByRole("button", { name: "Прочитано", exact: true })).toHaveCount(0);
     await alert.getByRole("link", { name: "Проверить сеансы" }).click();
 
     await expect(page).toHaveURL(/\/security$/);
