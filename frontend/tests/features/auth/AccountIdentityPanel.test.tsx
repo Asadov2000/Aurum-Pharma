@@ -12,6 +12,9 @@ const requestCode = vi.fn();
 const verifyCode = vi.fn();
 const requestReauth = vi.fn();
 let mfaEnabled = false;
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ to, ...props }: { to: string; children: React.ReactNode }) => <a href={to} {...props} />,
+}));
 vi.mock("@/features/auth/identityQueries", () => ({
   accountIdentityQueryKey: ["auth", "identity"],
   useAccountIdentityQuery: () => ({ data: identity, isPending: false, isError: false }),
@@ -28,11 +31,11 @@ vi.mock("@/features/auth/identityApi", () => ({
 }));
 import { AccountIdentityPanel } from "@/features/auth/AccountIdentityPanel";
 
-function renderPanel() {
+function renderPanel(presentation: "default" | "security") {
   const client = new QueryClient();
   render(
     <QueryClientProvider client={client}>
-      <AccountIdentityPanel />
+      <AccountIdentityPanel presentation={presentation} />
     </QueryClientProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Изменить номер" }));
@@ -41,7 +44,7 @@ function renderPanel() {
   });
 }
 
-describe("phone binding settings", () => {
+describe.each(["default", "security"] as const)("phone binding settings (%s)", (presentation) => {
   beforeEach(() => {
     identity.has_password = true;
     mfaEnabled = false;
@@ -51,7 +54,7 @@ describe("phone binding settings", () => {
   });
 
   it("requires current password and sends SMS only to the normalized new number", async () => {
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.submit(
       screen.getByRole("button", { name: "Отправить SMS на новый номер" }).closest("form")!,
     );
@@ -80,7 +83,7 @@ describe("phone binding settings", () => {
 
   it("requires enabled MFA in addition to the password", async () => {
     mfaEnabled = true;
-    renderPanel();
+    renderPanel(presentation);
     fireEvent.change(screen.getByLabelText("Текущий пароль"), {
       target: { value: "current-password" },
     });
@@ -100,7 +103,7 @@ describe("phone binding settings", () => {
 
   it("supports existing-contact proof when the account has no password", async () => {
     identity.has_password = false;
-    renderPanel();
+    renderPanel(presentation);
     expect(screen.queryByLabelText("Текущий пароль")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить личность через почту" }));
     await waitFor(() => expect(screen.getByLabelText("Код из письма")).toHaveValue("654321"));

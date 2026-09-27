@@ -11,6 +11,9 @@ import {
   uniqueName,
 } from "./helpers";
 
+// Enrollment secrets, recovery codes and account contacts must not enter browser artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test("new owner may skip MFA, enable and disable it in settings, and confirm a critical action by password", async ({
   page,
 }) => {
