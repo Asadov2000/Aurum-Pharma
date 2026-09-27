@@ -500,6 +500,9 @@ describe("support access request context", () => {
 
     await api.get("/roles");
     await api.get("/auth/me");
+    await api.get("/auth/profile");
+    await api.post("/auth/profile");
+    await api.patch("/auth/profile");
     await api.get("/branches");
     await api.get("/tenant/settings");
     await api.post("/branches", { name: "Forbidden support write" });
@@ -514,6 +517,9 @@ describe("support access request context", () => {
     expect(headers).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "11111111-1111-4111-8111-111111111111",
+      "11111111-1111-4111-8111-111111111111",
+      undefined,
+      undefined,
       "11111111-1111-4111-8111-111111111111",
       undefined,
       undefined,

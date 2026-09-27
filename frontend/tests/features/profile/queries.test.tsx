@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -69,6 +69,7 @@ describe("personal profile query scope", () => {
   });
 
   afterEach(() => {
+    cleanup();
     client.clear();
     useAuthStore.setState({
       accessToken: previousAuth.accessToken,
