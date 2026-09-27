@@ -55,6 +55,7 @@ export type AppRoutePath =
   | "/security"
   | "/profile"
   | "/my-work"
+  | "/staff-pay"
   | "/settings";
 
 export interface RouteAccessContext {
@@ -94,6 +95,7 @@ const KNOWN_APP_ROUTES: readonly AppRoutePath[] = [
   "/security",
   "/profile",
   "/my-work",
+  "/staff-pay",
   "/settings",
 ];
 
@@ -186,6 +188,15 @@ export function canAccessPath(pathname: string, context: RouteAccessContext): bo
       !context.isDeveloper &&
       !context.isAdministrator &&
       !context.isSupportScoped
+    );
+  }
+  if (isPath(pathname, "/staff-pay")) {
+    return (
+      context.hasTenant &&
+      !context.isDeveloper &&
+      !context.isAdministrator &&
+      !context.isSupportScoped &&
+      (context.isTenantOwner || hasAnyPermission(context, ["staff_pay.view", "staff_pay.manage"]))
     );
   }
   // Personal and device preferences belong to the authenticated account.

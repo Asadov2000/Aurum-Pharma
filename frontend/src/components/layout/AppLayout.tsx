@@ -130,6 +130,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     pathname === "/" ||
     pathname === "/profile" ||
     pathname === "/my-work" ||
+    pathname === "/staff-pay" ||
     pathname === "/catalog" ||
     pathname === "/sales" ||
     pathname === "/suppliers" ||

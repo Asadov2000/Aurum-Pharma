@@ -86,7 +86,9 @@ async function expectOwnShiftPage(
     timeZone: timezone,
   }).format(new Date(ownShift.opened_at));
   await expect(shiftList.getByText(openedAt, { exact: true }).first()).toBeVisible();
-  await expect(main.getByText(/зарплата|табель/i)).toHaveCount(0);
+  await expect(main.getByText(/табель/i)).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "Показать сведения" })).toBeVisible();
+  await expect(main.getByRole("list", { name: "Периоды зарплаты" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );

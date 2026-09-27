@@ -20,6 +20,19 @@ const SELLER: RouteAccessContext = {
 };
 
 describe("route access", () => {
+  it("requires owner or explicit pay permission and denies platform access to staff salaries", () => {
+    const employee = { ...SELLER, permissions: [] };
+    expect(canAccessPath("/staff-pay", employee)).toBe(false);
+    expect(canAccessPath("/staff-pay", { ...employee, isTenantOwner: true })).toBe(true);
+    for (const code of ["staff_pay.view", "staff_pay.manage"]) {
+      const granted = { ...employee, permissions: [code] };
+      expect(canAccessPath("/staff-pay", granted)).toBe(true);
+      expect(canAccessPath("/staff-pay", { ...granted, isDeveloper: true })).toBe(false);
+      expect(canAccessPath("/staff-pay", { ...granted, isAdministrator: true })).toBe(false);
+      expect(canAccessPath("/staff-pay", { ...granted, isSupportScoped: true })).toBe(false);
+      expect(canAccessPath("/staff-pay", { ...granted, hasTenant: false })).toBe(false);
+    }
+  });
   it("allows personal shifts without reports permissions only in an ordinary workplace", () => {
     const employee = { ...SELLER, permissions: [] };
     expect(canAccessPath("/my-work", employee)).toBe(true);
