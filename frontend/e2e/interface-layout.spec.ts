@@ -136,7 +136,9 @@ test.describe("Interface layout", () => {
     }
   });
 
-  test("uses a customizable desktop sidebar and a contained mobile drawer", async ({ page }) => {
+  test("uses a customizable desktop sidebar and a contained mobile drawer", async ({
+    page,
+  }, testInfo) => {
     await loginInBrowser(page, OWNER);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/pos");
@@ -149,12 +151,39 @@ test.describe("Interface layout", () => {
     await expect(desktopNavigation.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
 
+    // External SVG symbols must actually load and fit, not just exist in the DOM.
+    await expect
+      .poll(() =>
+        desktopNavigation.locator("svg use").evaluateAll(
+          (icons) =>
+            icons.length > 0 &&
+            icons.every((icon) => {
+              const bounds = (icon as SVGGraphicsElement).getBBox();
+              return (
+                bounds.width > 0 &&
+                bounds.height > 0 &&
+                bounds.x >= -0.5 &&
+                bounds.y >= -0.5 &&
+                bounds.x + bounds.width <= 20.5 &&
+                bounds.y + bounds.height <= 20.5
+              );
+            }),
+        ),
+      )
+      .toBe(true);
+    await desktopNavigation.screenshot({
+      path: testInfo.outputPath("sidebar-selected-expanded.png"),
+    });
+
     await page.getByRole("button", { name: "Свернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
     const compactBounds = await desktopNavigation.boundingBox();
     expect(compactBounds).not.toBeNull();
     expect(compactBounds!.width).toBeGreaterThanOrEqual(68);
     expect(compactBounds!.width).toBeLessThanOrEqual(76);
+    await desktopNavigation.screenshot({
+      path: testInfo.outputPath("sidebar-selected-compact.png"),
+    });
 
     await page.getByRole("button", { name: "Развернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");

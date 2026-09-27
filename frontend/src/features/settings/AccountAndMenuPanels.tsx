@@ -194,6 +194,14 @@ export function MenuSettingsPanel(): JSX.Element {
         >
           Настроить меню
         </Button>
+        <a
+          href="/licenses/sidebar-icons.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-foreground-muted underline underline-offset-2 hover:text-foreground"
+        >
+          Иконки: Flaticon, Google, Phosphor
+        </a>
         <div className="flex items-center gap-3">
           {!dirty && !update.isPending ? (
             <span className="text-xs text-success-foreground">Синхронизировано</span>
