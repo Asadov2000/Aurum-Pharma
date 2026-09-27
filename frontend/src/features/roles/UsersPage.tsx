@@ -33,6 +33,7 @@ import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
 
 import { EmployeeDirectory } from "./EmployeeDirectory";
+import { EmployeeDetails } from "./EmployeeDetails";
 import {
   useCreateOwnershipTransfer,
   useOffboardUser,
@@ -143,6 +144,10 @@ export function UsersPage(): JSX.Element {
   const [branchFilter, setBranchFilter] = useState("");
   const [assignmentUserId, setAssignmentUserId] = useState<string | null>(null);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [detailsUserId, setDetailsUserId] = useState<string | null>(null);
+  const detailsTrigger = useRef<HTMLButtonElement | null>(null);
+  const profileFromDetails = useRef(false);
+  const assignmentTrigger = useRef<HTMLButtonElement | null>(null);
   const [profileDirty, setProfileDirty] = useState(false);
   const [profileDiscardOpen, setProfileDiscardOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -186,6 +191,9 @@ export function UsersPage(): JSX.Element {
   const ownershipTransferMutation = useCreateOwnershipTransfer();
 
   const rows = users.data?.items ?? [];
+  const directoryReady = !users.error && !users.isPlaceholderData && !users.isLoading;
+  const visibleBranches = branches.error ? [] : (branches.data ?? []);
+  const detailsUser = rows.find((candidate) => candidate.id === detailsUserId) ?? null;
   const total = users.data?.total ?? 0;
   const hasFilters = Boolean(q || status || roleFilter || branchFilter);
   const assignmentUser = assignmentUserId
@@ -206,11 +214,20 @@ export function UsersPage(): JSX.Element {
     requestAnimationFrame(() => actionTriggers.current.get(targetId)?.focus());
   }, []);
 
+  const closeDetails = useCallback(() => {
+    setDetailsUserId(null);
+    requestAnimationFrame(() => detailsTrigger.current?.focus());
+  }, []);
+
   const closeProfile = useCallback(() => {
     setProfileDiscardOpen(false);
     setProfileDirty(false);
     setProfileUserId(null);
-    restoreActionFocus();
+    if (profileFromDetails.current) {
+      profileFromDetails.current = false;
+      actionFocusUserId.current = null;
+      requestAnimationFrame(() => detailsTrigger.current?.focus());
+    } else restoreActionFocus();
   }, [restoreActionFocus]);
 
   const requestProfileClose = useCallback(() => {
@@ -223,10 +240,17 @@ export function UsersPage(): JSX.Element {
 
   const closeAssignments = useCallback(() => {
     setAssignmentUserId(null);
-    restoreActionFocus();
+    const trigger = assignmentTrigger.current;
+    assignmentTrigger.current = null;
+    if (trigger) {
+      actionFocusUserId.current = null;
+      requestAnimationFrame(() => trigger.focus());
+    } else restoreActionFocus();
   }, [restoreActionFocus]);
 
-  const openProfile = (member: Row) => {
+  const openProfile = (member: Row, fromDetails = false) => {
+    if (!directoryReady || !canUpdate || member.status === "offboarded") return;
+    profileFromDetails.current = fromDetails;
     actionFocusUserId.current = member.id;
     setActionError(null);
     setActionNotice(null);
@@ -234,7 +258,16 @@ export function UsersPage(): JSX.Element {
     setProfileUserId(member.id);
   };
 
-  const openAssignments = (member: Row) => {
+  const openAssignments = (member: Row, trigger?: HTMLButtonElement) => {
+    if (
+      !directoryReady ||
+      !canAssign ||
+      !["pending", "active"].includes(member.status) ||
+      member.is_tenant_owner ||
+      member.id === user?.id
+    )
+      return;
+    assignmentTrigger.current = trigger ?? null;
     actionFocusUserId.current = member.id;
     setActionError(null);
     setActionNotice(null);
@@ -242,6 +275,7 @@ export function UsersPage(): JSX.Element {
   };
 
   const ask = (type: PendingAction["type"], target: Row) => {
+    if (!directoryReady) return;
     actionFocusUserId.current = target.id;
     setActionError(null);
     setActionNotice(null);
@@ -249,6 +283,7 @@ export function UsersPage(): JSX.Element {
   };
 
   const askOwnershipTransfer = (target: Row) => {
+    if (!directoryReady || !canTransferOwnership) return;
     actionFocusUserId.current = target.id;
     setActionError(null);
     setActionNotice(null);
@@ -257,6 +292,18 @@ export function UsersPage(): JSX.Element {
 
   const runOwnershipTransfer = async () => {
     if (!ownershipTransfer) return;
+    const target = rows.find((candidate) => candidate.id === ownershipTransfer.user.id);
+    if (
+      !directoryReady ||
+      !canTransferOwnership ||
+      !target ||
+      target.status !== "active" ||
+      target.is_tenant_owner ||
+      target.id === user?.id
+    ) {
+      setActionError("Обновите список сотрудников перед выполнением действия.");
+      return;
+    }
     setActionError(null);
     try {
       await ownershipTransferMutation.mutateAsync({
@@ -275,6 +322,22 @@ export function UsersPage(): JSX.Element {
 
   const runPending = async () => {
     if (!pending) return;
+    const target = rows.find((candidate) => candidate.id === pending.user.id);
+    const protectedMember = !target || target.id === user?.id || target.is_tenant_owner;
+    const allowed =
+      target &&
+      (pending.type === "sessions"
+        ? canRevokeSessions &&
+          target.id !== user?.id &&
+          target.status === "active" &&
+          (!target.is_tenant_owner || user?.is_developer === true)
+        : pending.type === "suspend"
+          ? canSuspend && !protectedMember && target.status === "active"
+          : canOffboard && !protectedMember && target.status !== "offboarded");
+    if (!directoryReady || !allowed) {
+      setActionError("Обновите список сотрудников перед выполнением действия.");
+      return;
+    }
     setActionError(null);
     const targetName = pending.user.full_name;
     try {
@@ -310,6 +373,14 @@ export function UsersPage(): JSX.Element {
   };
 
   const activateMembership = async (member: Row) => {
+    if (
+      !directoryReady ||
+      !canUpdate ||
+      member.status !== "suspended" ||
+      member.is_tenant_owner ||
+      member.id === user?.id
+    )
+      return;
     actionFocusUserId.current = member.id;
     setActionError(null);
     setActionNotice(null);
@@ -329,6 +400,15 @@ export function UsersPage(): JSX.Element {
   };
 
   const reissueInvitation = async (member: Row) => {
+    if (
+      !directoryReady ||
+      !canInvite ||
+      member.status !== "pending" ||
+      member.invitation_status !== "expired" ||
+      member.is_tenant_owner ||
+      member.id === user?.id
+    )
+      return;
     actionFocusUserId.current = member.id;
     setActionError(null);
     setActionNotice(null);
@@ -364,10 +444,10 @@ export function UsersPage(): JSX.Element {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="employees-cards-page space-y-5">
       <PageHeader
         title="Сотрудники"
-        description="Сотрудники аптеки, их статусы и назначенные роли."
+        description="Команда аптеки, статусы и доступ к торговым точкам."
         meta={
           users.data && !users.isPlaceholderData
             ? hasFilters
@@ -640,6 +720,12 @@ export function UsersPage(): JSX.Element {
             ) : null}
             <EmployeeDirectory
               rows={rows}
+              branches={visibleBranches}
+              actionsDisabled={!directoryReady}
+              onDetails={(member, trigger) => {
+                detailsTrigger.current = trigger;
+                setDetailsUserId(member.id);
+              }}
               currentUserId={user?.id}
               currentUserIsDeveloper={user?.is_developer === true}
               canUpdate={canUpdate}
@@ -670,6 +756,43 @@ export function UsersPage(): JSX.Element {
           </>
         )}
       </section>
+
+      <Modal
+        open={detailsUser !== null}
+        onClose={closeDetails}
+        title={detailsUser ? `Сотрудник: ${detailsUser.full_name}` : ""}
+        className="sm:max-w-2xl"
+      >
+        {detailsUser ? (
+          <div className="space-y-5">
+            {!directoryReady ? (
+              <InlineNotice tone="warning" role="alert">
+                Показаны последние загруженные данные. Обновите список перед изменениями.
+              </InlineNotice>
+            ) : null}
+            <EmployeeDetails
+              member={detailsUser}
+              currentUserId={user?.id}
+              branches={visibleBranches}
+            />
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+              <Button variant="secondary" onClick={closeDetails}>
+                Закрыть
+              </Button>
+              {canUpdate && directoryReady && detailsUser.status !== "offboarded" ? (
+                <Button
+                  onClick={() => {
+                    setDetailsUserId(null);
+                    openProfile(detailsUser, true);
+                  }}
+                >
+                  Изменить профиль
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={inviteOpen}
@@ -709,6 +832,7 @@ export function UsersPage(): JSX.Element {
             <Suspense fallback={<SkeletonRows rows={3} />}>
               <UserProfileForm
                 user={profileUser}
+                editingAllowed={directoryReady && canUpdate && profileUser.status !== "offboarded"}
                 onSaved={closeProfile}
                 onCancel={requestProfileClose}
                 onDirtyChange={setProfileDirty}
@@ -730,7 +854,13 @@ export function UsersPage(): JSX.Element {
               <AssignmentsPanel
                 user={assignmentUser}
                 tenantId={tenantId}
-                canManage={canAssign}
+                canManage={
+                  canAssign &&
+                  directoryReady &&
+                  ["pending", "active"].includes(assignmentUser.status) &&
+                  !assignmentUser.is_tenant_owner &&
+                  assignmentUser.id !== user?.id
+                }
                 onClose={closeAssignments}
               />
             </Suspense>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AxiosError, type AxiosResponse } from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ const updateUser = vi.fn();
 const suspendUser = vi.fn();
 const offboardUser = vi.fn();
 const revokeUserSessions = vi.fn();
+const revokeAssignment = vi.fn();
 const reissueUserInvitation = vi.fn();
 const inviteEmployee = vi.fn();
 const createAssignment = vi.fn();
@@ -39,7 +40,7 @@ vi.mock("@/features/roles/api", () => ({
   listOwnershipTransfers: vi.fn().mockResolvedValue([]),
   cancelOwnershipTransfer: vi.fn(),
   acceptOwnershipTransfer: vi.fn(),
-  revokeAssignment: vi.fn(),
+  revokeAssignment: (...args: unknown[]) => revokeAssignment(...args),
 }));
 
 vi.mock("@/features/foundation/api", () => ({
@@ -66,9 +67,11 @@ vi.mock("@/features/auth/hooks", () => ({
 }));
 
 import { UsersPage } from "@/features/roles/UsersPage";
+import { rolesKeys } from "@/features/roles/queries";
 
-function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <QueryClientProvider client={queryClient}>
       <UsersPage />
@@ -202,6 +205,7 @@ describe("UsersPage", () => {
     suspendUser.mockReset();
     offboardUser.mockReset();
     revokeUserSessions.mockReset();
+    revokeAssignment.mockReset();
     reissueUserInvitation.mockReset();
     inviteEmployee.mockReset();
     createAssignment.mockReset();
@@ -216,6 +220,7 @@ describe("UsersPage", () => {
     suspendUser.mockResolvedValue(undefined);
     offboardUser.mockResolvedValue(undefined);
     revokeUserSessions.mockResolvedValue({ status: "ok", revoked_count: 1 });
+    revokeAssignment.mockResolvedValue(undefined);
     reissueUserInvitation.mockResolvedValue({
       invitation_id: "invitation-2",
       invitation_status: "pending",
@@ -492,6 +497,97 @@ describe("UsersPage", () => {
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
+  });
+
+  it("opens employee details with view-only access and restores focus after closing", async () => {
+    mockUser = {
+      id: "regular-user",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["users.view"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    const detailsTrigger = await screen.findByRole("button", {
+      name: "Открыть профиль: Иван Сотрудник",
+    });
+    fireEvent.click(detailsTrigger);
+
+    const details = await screen.findByRole("dialog", { name: "Сотрудник: Иван Сотрудник" });
+    expect(within(details).getByText(USER_ACTIVE.email)).toBeInTheDocument();
+    expect(within(details).getByText("Кассир")).toBeInTheDocument();
+    expect(within(details).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(details).queryByRole("button", { name: "Изменить профиль" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
+
+    fireEvent.click(within(details).getByText("Закрыть"));
+
+    await waitFor(() => expect(detailsTrigger).toHaveFocus());
+    expect(
+      screen.queryByRole("dialog", { name: "Сотрудник: Иван Сотрудник" }),
+    ).not.toBeInTheDocument();
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps offboarded employee details read-only even with profile update permission", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.update", "users.block", "users.delete", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, status: "offboarded" }]));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть профиль: Иван Сотрудник" }));
+
+    const details = await screen.findByRole("dialog", { name: "Сотрудник: Иван Сотрудник" });
+    expect(within(details).getByText(USER_ACTIVE.email)).toBeInTheDocument();
+    expect(within(details).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(details).queryByRole("button", { name: "Изменить профиль" }),
+    ).not.toBeInTheDocument();
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(suspendUser).not.toHaveBeenCalled();
+    expect(offboardUser).not.toHaveBeenCalled();
+  });
+
+  it("shows actual branch names in the employee card and access details", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "branches.view"],
+    };
+    listBranches.mockResolvedValue([
+      { id: "branch-1", name: "Аптека Рудаки", is_active: true },
+      { id: "branch-2", name: "Аптека Сино", is_active: true },
+    ]);
+    const assignments = ["branch-1", "branch-2"].map((branchId, index) => ({
+      ...USER_ACTIVE.assignments[0],
+      id: `assignment-${index}`,
+      branch_id: branchId,
+    }));
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments }]));
+    renderPage();
+
+    const detailsTrigger = await screen.findByRole("button", {
+      name: "Открыть профиль: Иван Сотрудник",
+    });
+    const card = detailsTrigger.closest("li");
+    expect(card).not.toBeNull();
+    if (!card) throw new Error("Employee profile button must belong to its directory card");
+    expect(await within(card).findByText(/Аптека Рудаки/)).toBeInTheDocument();
+    expect(within(card).getByText(/Аптека Сино/)).toBeInTheDocument();
+    fireEvent.click(detailsTrigger);
+
+    const details = await screen.findByRole("dialog", { name: "Сотрудник: Иван Сотрудник" });
+    expect(within(details).getByText(/Аптека Рудаки/)).toBeInTheDocument();
+    expect(within(details).getByText(/Аптека Сино/)).toBeInTheDocument();
+    expect(within(details).queryByText("branch-1")).not.toBeInTheDocument();
   });
 
   it("lets only the owner request ownership transfer after explicit confirmation", async () => {
@@ -784,7 +880,8 @@ describe("UsersPage", () => {
     await openUserActions();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
     expect(await screen.findByText("приостановлена", {}, LAZY_PANEL_WAIT)).toBeInTheDocument();
-    expect(screen.getByText(/Аптека Закрытая · точка отключена/)).toBeInTheDocument();
+    const accessDialog = screen.getByRole("dialog", { name: "Доступ сотрудника: Иван Сотрудник" });
+    expect(within(accessDialog).getByText(/Аптека Закрытая · точка отключена/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Назначить роль" }));
     fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
     expect(screen.queryByLabelText("Аптека Закрытая")).not.toBeInTheDocument();
@@ -1176,6 +1273,271 @@ describe("UsersPage", () => {
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
     expect(listUsers).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks cached employee mutations after a failed refresh until retry succeeds", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.update", "users.block", "users.delete", "roles.assign"],
+    };
+    listUsers
+      .mockResolvedValueOnce(usersResponse([USER_ACTIVE]))
+      .mockRejectedValueOnce(new Error("network unavailable"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    const actionTrigger = await screen.findByRole("button", {
+      name: "Действия для Иван Сотрудник",
+    });
+    expect(actionTrigger).toBeEnabled();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
+    });
+
+    expect(
+      await screen.findByText("Показаны последние загруженные данные. Обновить список не удалось."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Иван Сотрудник")).toBeInTheDocument();
+    expect(actionTrigger).toBeDisabled();
+    const assignmentTrigger = screen.getByRole("button", { name: "Настроить доступ" });
+    expect(assignmentTrigger).toBeDisabled();
+    fireEvent.click(actionTrigger);
+    expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть профиль: Иван Сотрудник" }));
+
+    const details = await screen.findByRole("dialog", { name: "Сотрудник: Иван Сотрудник" });
+    expect(within(details).getByText(/последние загруженные данные/i)).toBeInTheDocument();
+    const editButton = within(details).queryByRole("button", { name: "Изменить профиль" });
+    if (editButton) expect(editButton).toBeDisabled();
+    fireEvent.click(within(details).getByText("Закрыть"));
+
+    let finishRetry: ((value: ReturnType<typeof usersResponse>) => void) | undefined;
+    listUsers.mockImplementationOnce(
+      () =>
+        new Promise<ReturnType<typeof usersResponse>>((resolve) => {
+          finishRetry = resolve;
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(listUsers).toHaveBeenCalledTimes(3));
+    expect(actionTrigger).toBeDisabled();
+    expect(assignmentTrigger).toBeDisabled();
+
+    await act(async () => {
+      finishRetry?.(usersResponse([USER_ACTIVE]));
+    });
+
+    await waitFor(() => expect(actionTrigger).toBeEnabled());
+    expect(assignmentTrigger).toBeEnabled();
+    expect(screen.queryByText(/Обновить список не удалось/)).not.toBeInTheDocument();
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(suspendUser).not.toHaveBeenCalled();
+    expect(offboardUser).not.toHaveBeenCalled();
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(createAssignment).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm an employee lifecycle action after a failed background refresh", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.block"],
+    };
+    listUsers
+      .mockResolvedValueOnce(usersResponse([USER_ACTIVE]))
+      .mockRejectedValueOnce(new Error("network unavailable"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Приостановить" }));
+    const confirmation = screen.getByRole("button", { name: "Приостановить" });
+    expect(confirmation).toBeEnabled();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
+    });
+    await screen.findByText("Показаны последние загруженные данные. Обновить список не удалось.");
+    fireEvent.click(confirmation);
+
+    expect(suspendUser).not.toHaveBeenCalled();
+    expect(offboardUser).not.toHaveBeenCalled();
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  it("preserves profile edits and blocks saving after a failed background refresh", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.update"],
+    };
+    listUsers
+      .mockResolvedValueOnce(usersResponse([USER_ACTIVE]))
+      .mockRejectedValueOnce(new Error("network unavailable"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Профиль" }));
+    const fullNameInput = await screen.findByLabelText("ФИО", undefined, LAZY_PANEL_WAIT);
+    fireEvent.change(fullNameInput, { target: { value: "Иван Несохранённый" } });
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
+    });
+
+    const profile = screen.getByRole("dialog", { name: "Профиль: Иван Сотрудник" });
+    expect(fullNameInput).toHaveValue("Иван Несохранённый");
+    await waitFor(() => {
+      expect(within(profile).getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    });
+    const profileForm = fullNameInput.closest("form");
+    if (!profileForm) throw new Error("Profile input must belong to its form");
+    fireEvent.submit(profileForm);
+
+    expect(
+      await within(profile).findByText("Обновите список сотрудников перед сохранением."),
+    ).toBeInTheDocument();
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(fullNameInput).toHaveValue("Иван Несохранённый");
+  });
+
+  it("blocks an already confirmed role revocation after a failed background refresh", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers
+      .mockResolvedValueOnce(usersResponse([USER_ACTIVE]))
+      .mockRejectedValueOnce(new Error("network unavailable"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    const accessDialog = await screen.findByRole("dialog", {
+      name: "Доступ сотрудника: Иван Сотрудник",
+    });
+    fireEvent.click(
+      await within(accessDialog).findByRole("button", { name: "Отозвать" }, LAZY_PANEL_WAIT),
+    );
+    const confirmation = await screen.findByRole("dialog", { name: "Отозвать роль" });
+    expect(within(confirmation).getByRole("button", { name: "Отозвать" })).toBeEnabled();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
+    });
+    await screen.findByText("Показаны последние загруженные данные. Обновить список не удалось.");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Отозвать" }));
+
+    expect(
+      await within(confirmation).findByText(
+        "Обновите список сотрудников перед изменением доступа.",
+      ),
+    ).toBeInTheDocument();
+    expect(revokeAssignment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      reason: "suspended",
+      member: { ...USER_ACTIVE, status: "suspended" },
+      viewerId: "current-owner",
+    },
+    {
+      reason: "offboarded",
+      member: { ...USER_ACTIVE, status: "offboarded" },
+      viewerId: "current-owner",
+    },
+    {
+      reason: "owner",
+      member: { ...USER_ACTIVE, is_tenant_owner: true },
+      viewerId: "current-owner",
+    },
+    { reason: "self", member: USER_ACTIVE, viewerId: USER_ACTIVE.id },
+  ])(
+    "blocks open access mutations when refreshed membership becomes $reason",
+    async ({ member, viewerId }) => {
+      mockUser = {
+        id: "current-owner",
+        home_tenant_id: "tenant-1",
+        is_tenant_owner: true,
+        permissions: ["users.view", "roles.assign"],
+      };
+      listUsers.mockResolvedValueOnce(usersResponse([USER_ACTIVE]));
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      renderPage(queryClient);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Настроить доступ" }));
+      const accessDialog = await screen.findByRole("dialog", {
+        name: "Доступ сотрудника: Иван Сотрудник",
+      });
+      expect(
+        await within(accessDialog).findByRole(
+          "button",
+          { name: "Назначить роль" },
+          LAZY_PANEL_WAIT,
+        ),
+      ).toBeInTheDocument();
+      fireEvent.click(await within(accessDialog).findByRole("button", { name: "Отозвать" }));
+      const confirmation = await screen.findByRole("dialog", { name: "Отозвать роль" });
+
+      mockUser = { ...mockUser, id: viewerId };
+      listUsers.mockResolvedValueOnce(usersResponse([member]));
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
+      });
+      await waitFor(() => {
+        expect(
+          within(accessDialog).queryByRole("button", { name: "Назначить роль" }),
+        ).not.toBeInTheDocument();
+      });
+      expect(
+        within(accessDialog)
+          .queryAllByRole("button", { name: "Отозвать" })
+          .filter((button) => !confirmation.contains(button)),
+      ).toHaveLength(0);
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Отозвать" }));
+
+      expect(
+        await within(confirmation).findByText(
+          "Обновите список сотрудников перед изменением доступа.",
+        ),
+      ).toBeInTheDocument();
+      expect(revokeAssignment).not.toHaveBeenCalled();
+      expect(replaceAssignments).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns focus to the direct access button after closing the access panel", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    renderPage();
+
+    const directTrigger = await screen.findByRole("button", { name: "Настроить доступ" });
+    fireEvent.click(directTrigger);
+    const accessDialog = await screen.findByRole("dialog", {
+      name: "Доступ сотрудника: Иван Сотрудник",
+    });
+    fireEvent.click(await within(accessDialog).findByText("Закрыть", undefined, LAZY_PANEL_WAIT));
+
+    await waitFor(() => expect(directTrigger).toHaveFocus());
+    expect(
+      screen.queryByRole("dialog", { name: "Доступ сотрудника: Иван Сотрудник" }),
+    ).not.toBeInTheDocument();
   });
 
   it("debounces private search values and sends filters in the request body contract", async () => {

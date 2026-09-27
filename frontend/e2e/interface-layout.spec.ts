@@ -23,6 +23,9 @@ async function expectNoHorizontalOverflow(page: Page, workspace: string) {
   ).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
+// Account contacts and authentication cookies must not enter browser artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test.describe("Interface layout", () => {
   test.beforeEach(() => {
     clearLoginRateLimit(OWNER.email);
@@ -325,46 +328,102 @@ test.describe("Interface layout", () => {
   });
 
   test("keeps the employee directory and profile actions usable with touch", async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 568 });
-    await page.addInitScript(() => {
-      window.localStorage.setItem("ui:density", "touch");
-    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await loginInBrowser(page, OWNER);
     await page.goto("/users");
-    await selectTouchDensity(page);
-
-    const directory = page.getByRole("table", { name: "Сотрудники аптеки" });
-    await expect(directory).toBeVisible();
-    expect(
-      await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-    ).toBe(true);
-
-    const ownerRow = directory.getByRole("row", { name: /Demo Owner/ });
-    const actionButton = ownerRow.getByRole("button", { name: "Действия для Demo Owner" });
-    const actionBounds = await actionButton.boundingBox();
-    expect(actionBounds).not.toBeNull();
-    expect(actionBounds!.width).toBeGreaterThanOrEqual(44);
-    expect(actionBounds!.height).toBeGreaterThanOrEqual(44);
-
-    await actionButton.click();
-    await page.getByRole("menuitem", { name: "Профиль" }).click();
-    const profileDialog = page.getByRole("dialog", { name: "Профиль: Demo Owner" });
-    await expect(profileDialog).toBeVisible();
-    const dialogBounds = await profileDialog.boundingBox();
-    expect(dialogBounds).not.toBeNull();
-    expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
-    expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(320);
+    // Persist appearance through the same settings flow as the user. Local-only
+    // preferences can be replaced by the initial server preference response.
+    await page.getByRole("button", { name: "Вид интерфейса" }).click();
+    for (const [label, field, value] of [
+      ["Система", "theme", "system"],
+      ["Сенсор", "density", "touch"],
+    ] as const) {
+      await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname.endsWith("/auth/preferences") &&
+            response.request().method() === "PATCH" &&
+            response.ok() &&
+            Boolean(response.request().postData()?.includes(`"${field}":"${value}"`)),
+        ),
+        page.getByRole("button", { name: label, exact: true }).click(),
+      ]);
+    }
     await page.keyboard.press("Escape");
-    await expect(profileDialog).toBeHidden();
-    await expect(actionButton).toBeFocused();
-    await expectNoHorizontalOverflow(page, "/users touch @ 320x568");
 
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(directory.getByRole("columnheader", { name: "Сотрудник" })).toBeVisible();
-    await expect(directory.getByRole("columnheader", { name: "Доступ" })).toBeVisible();
-    expect(
-      await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-    ).toBe(true);
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+      for (const width of [320, 390, 1440]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/users");
+        await expect(page.locator("html")).toHaveAttribute("data-theme", colorScheme);
+        await expect(page.locator("html")).toHaveAttribute("data-density", "touch");
+
+        const directory = page.getByRole("list", { name: "Сотрудники аптеки" });
+        await expect(directory).toBeVisible();
+        expect(
+          await directory.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+        ).toBe(true);
+        const profileButton = directory.getByRole("button", {
+          name: "Открыть профиль: Demo Owner",
+          exact: true,
+        });
+        const ownerCard = directory.getByRole("listitem").filter({
+          has: page.getByRole("button", { name: "Открыть профиль: Demo Owner", exact: true }),
+        });
+        const actionButton = ownerCard.getByRole("button", {
+          name: "Действия для Demo Owner",
+          exact: true,
+        });
+        for (const button of [profileButton, actionButton]) {
+          const bounds = await button.boundingBox();
+          expect(bounds).not.toBeNull();
+          expect(bounds!.width).toBeGreaterThanOrEqual(44);
+          expect(bounds!.height).toBeGreaterThanOrEqual(44);
+        }
+        expect(
+          await ownerCard.evaluate((element) =>
+            [...element.querySelectorAll("dd")].some((contact) => {
+              if (!contact.textContent?.includes("@")) return false;
+              const style = getComputedStyle(contact);
+              return (
+                (style.overflowWrap === "anywhere" || style.wordBreak === "break-all") &&
+                contact.scrollWidth <= contact.clientWidth + 1
+              );
+            }),
+          ),
+        ).toBe(true);
+
+        await profileButton.click();
+        const detailsDialog = page.getByRole("dialog", { name: "Сотрудник: Demo Owner" });
+        await expect(detailsDialog).toBeVisible();
+        await expect(detailsDialog.getByRole("textbox")).toHaveCount(0);
+        await expect(
+          detailsDialog.getByRole("button", { name: "Изменить профиль", exact: true }),
+        ).toBeVisible();
+        const detailsBounds = await detailsDialog.boundingBox();
+        expect(detailsBounds).not.toBeNull();
+        expect(detailsBounds!.x).toBeGreaterThanOrEqual(0);
+        expect(detailsBounds!.x + detailsBounds!.width).toBeLessThanOrEqual(width);
+        await expectNoHorizontalOverflow(page, `/users profile ${colorScheme} @ ${width}`);
+        await detailsDialog.getByRole("button", { name: "Закрыть", exact: true }).last().click();
+        await expect(detailsDialog).toBeHidden();
+        await expect(profileButton).toBeFocused();
+
+        await actionButton.click();
+        await page.getByRole("menuitem", { name: "Профиль", exact: true }).click();
+        const profileDialog = page.getByRole("dialog", { name: "Профиль: Demo Owner" });
+        await expect(profileDialog).toBeVisible();
+        const dialogBounds = await profileDialog.boundingBox();
+        expect(dialogBounds).not.toBeNull();
+        expect(dialogBounds!.x).toBeGreaterThanOrEqual(0);
+        expect(dialogBounds!.x + dialogBounds!.width).toBeLessThanOrEqual(width);
+        await page.keyboard.press("Escape");
+        await expect(profileDialog).toBeHidden();
+        await expect(actionButton).toBeFocused();
+        await expectNoHorizontalOverflow(page, `/users touch ${colorScheme} @ ${width}`);
+      }
+    }
   });
 
   test("restores page scrolling after discarding a mobile profile edit and closing the menu", async ({
@@ -376,8 +435,11 @@ test.describe("Interface layout", () => {
     await selectTouchDensity(page);
 
     const actionButton = page
-      .getByRole("table", { name: "Сотрудники аптеки" })
-      .getByRole("row", { name: /Demo Owner/ })
+      .getByRole("list", { name: "Сотрудники аптеки" })
+      .getByRole("listitem")
+      .filter({
+        has: page.getByRole("button", { name: "Открыть профиль: Demo Owner", exact: true }),
+      })
       .getByRole("button", { name: "Действия для Demo Owner" });
     await expect(actionButton).toBeVisible();
     const initialOverflow = await page.evaluate(() => document.body.style.overflow);

@@ -1,21 +1,15 @@
-import { type ReactNode } from "react";
+import { ActionMenu, type ActionMenuItem, Badge, Button } from "@/components/ui";
+import { type Branch } from "@/features/foundation/types";
 
-import { ActionMenu, type ActionMenuItem, Badge } from "@/components/ui";
-import { cn } from "@/lib/utils";
-
+import { EmployeeAssignmentScope, EmployeeStatus } from "./EmployeeDetails";
 import { type UserWithAssignments } from "./types";
-import {
-  employeeInitials,
-  formatLastLogin,
-  formatInvitationDeadline,
-  userStatusLabel,
-  userStatusTone,
-} from "./userPresentation";
+import { employeeInitials, formatLastLogin } from "./userPresentation";
 
 type Row = UserWithAssignments;
 
 interface EmployeeDirectoryProps {
   rows: Row[];
+  branches?: Branch[];
   currentUserId: string | undefined;
   currentUserIsDeveloper: boolean;
   canUpdate: boolean;
@@ -26,12 +20,14 @@ interface EmployeeDirectoryProps {
   canInvite: boolean;
   canTransferOwnership: boolean;
   showActions: boolean;
+  actionsDisabled?: boolean;
   activatingUserId: string | null;
   registerActionTrigger: (userId: string, element: HTMLButtonElement | null) => void;
+  onDetails: (member: Row, trigger: HTMLButtonElement) => void;
   onProfile: (member: Row) => void;
   onActivate: (member: Row) => void;
   onReissueInvitation: (member: Row) => void;
-  onAssignments: (member: Row) => void;
+  onAssignments: (member: Row, trigger?: HTMLButtonElement) => void;
   onTransferOwnership: (member: Row) => void;
   onRevokeSessions: (member: Row) => void;
   onSuspend: (member: Row) => void;
@@ -40,6 +36,7 @@ interface EmployeeDirectoryProps {
 
 export function EmployeeDirectory({
   rows,
+  branches = [],
   currentUserId,
   currentUserIsDeveloper,
   canUpdate,
@@ -50,8 +47,10 @@ export function EmployeeDirectory({
   canInvite,
   canTransferOwnership,
   showActions,
+  actionsDisabled = false,
   activatingUserId,
   registerActionTrigger,
+  onDetails,
   onProfile,
   onActivate,
   onReissueInvitation,
@@ -61,69 +60,47 @@ export function EmployeeDirectory({
   onSuspend,
   onOffboard,
 }: EmployeeDirectoryProps): JSX.Element {
-  const columns = showActions
-    ? "xl:grid-cols-[minmax(12rem,1.2fr)_minmax(12rem,1fr)_minmax(9rem,0.7fr)_minmax(12rem,1.1fr)_minmax(10rem,0.8fr)_3rem]"
-    : "xl:grid-cols-[minmax(12rem,1.25fr)_minmax(12rem,1fr)_minmax(9rem,0.7fr)_minmax(12rem,1.1fr)_minmax(10rem,0.8fr)]";
-
   return (
-    <div
-      role="table"
+    <ul
       aria-label="Сотрудники аптеки"
-      className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-surface"
+      className="grid w-full min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
     >
-      <div
-        role="row"
-        className={cn(
-          "hidden gap-3 border-b border-border bg-background/70 px-4 py-3 xl:grid",
-          columns,
-        )}
-      >
-        <DirectoryColumnHeader>Сотрудник</DirectoryColumnHeader>
-        <DirectoryColumnHeader>Контакты</DirectoryColumnHeader>
-        <DirectoryColumnHeader>Статус</DirectoryColumnHeader>
-        <DirectoryColumnHeader>Доступ</DirectoryColumnHeader>
-        <DirectoryColumnHeader>Последний вход</DirectoryColumnHeader>
-        {showActions ? (
-          <DirectoryColumnHeader className="text-right">
-            <span className="sr-only">Действия</span>
-          </DirectoryColumnHeader>
-        ) : null}
-      </div>
-      <ul role="rowgroup" className="min-w-0 max-w-full divide-y divide-border overflow-hidden">
-        {rows.map((member) => (
-          <EmployeeDirectoryRow
-            key={member.id}
-            member={member}
-            currentUserId={currentUserId}
-            currentUserIsDeveloper={currentUserIsDeveloper}
-            canUpdate={canUpdate}
-            canSuspend={canSuspend}
-            canRevokeSessions={canRevokeSessions}
-            canOffboard={canOffboard}
-            canAssign={canAssign}
-            canInvite={canInvite}
-            canTransferOwnership={canTransferOwnership}
-            showActions={showActions}
-            columns={columns}
-            activating={activatingUserId === member.id}
-            actionRef={(element) => registerActionTrigger(member.id, element)}
-            onProfile={() => onProfile(member)}
-            onActivate={() => onActivate(member)}
-            onReissueInvitation={() => onReissueInvitation(member)}
-            onAssignments={() => onAssignments(member)}
-            onTransferOwnership={() => onTransferOwnership(member)}
-            onRevokeSessions={() => onRevokeSessions(member)}
-            onSuspend={() => onSuspend(member)}
-            onOffboard={() => onOffboard(member)}
-          />
-        ))}
-      </ul>
-    </div>
+      {rows.map((member) => (
+        <EmployeeDirectoryRow
+          key={member.id}
+          member={member}
+          branches={branches}
+          currentUserId={currentUserId}
+          currentUserIsDeveloper={currentUserIsDeveloper}
+          canUpdate={canUpdate}
+          canSuspend={canSuspend}
+          canRevokeSessions={canRevokeSessions}
+          canOffboard={canOffboard}
+          canAssign={canAssign}
+          canInvite={canInvite}
+          canTransferOwnership={canTransferOwnership}
+          showActions={showActions}
+          actionsDisabled={actionsDisabled}
+          activating={activatingUserId === member.id}
+          actionRef={(element) => registerActionTrigger(member.id, element)}
+          onDetails={(trigger) => onDetails(member, trigger)}
+          onProfile={() => onProfile(member)}
+          onActivate={() => onActivate(member)}
+          onReissueInvitation={() => onReissueInvitation(member)}
+          onAssignments={(trigger) => onAssignments(member, trigger)}
+          onTransferOwnership={() => onTransferOwnership(member)}
+          onRevokeSessions={() => onRevokeSessions(member)}
+          onSuspend={() => onSuspend(member)}
+          onOffboard={() => onOffboard(member)}
+        />
+      ))}
+    </ul>
   );
 }
 
 function EmployeeDirectoryRow({
   member,
+  branches,
   currentUserId,
   currentUserIsDeveloper,
   canUpdate,
@@ -134,9 +111,10 @@ function EmployeeDirectoryRow({
   canInvite,
   canTransferOwnership,
   showActions,
-  columns,
+  actionsDisabled,
   activating,
   actionRef,
+  onDetails,
   onProfile,
   onActivate,
   onReissueInvitation,
@@ -147,6 +125,7 @@ function EmployeeDirectoryRow({
   onOffboard,
 }: {
   member: Row;
+  branches: Branch[];
   currentUserId: string | undefined;
   currentUserIsDeveloper: boolean;
   canUpdate: boolean;
@@ -157,13 +136,14 @@ function EmployeeDirectoryRow({
   canInvite: boolean;
   canTransferOwnership: boolean;
   showActions: boolean;
-  columns: string;
+  actionsDisabled: boolean;
   activating: boolean;
   actionRef: (element: HTMLButtonElement | null) => void;
+  onDetails: (trigger: HTMLButtonElement) => void;
   onProfile: () => void;
   onActivate: () => void;
   onReissueInvitation: () => void;
-  onAssignments: () => void;
+  onAssignments: (trigger?: HTMLButtonElement) => void;
   onTransferOwnership: () => void;
   onRevokeSessions: () => void;
   onSuspend: () => void;
@@ -204,7 +184,9 @@ function EmployeeDirectoryRow({
   if (canReissueInvitation) {
     actions.push({ label: "Обновить приглашение", onSelect: onReissueInvitation });
   }
-  if (canAssignMember) actions.push({ label: "Настроить доступ", onSelect: onAssignments });
+  if (canAssignMember) {
+    actions.push({ label: "Настроить доступ", onSelect: () => onAssignments() });
+  }
   if (canRevokeMemberSessions) {
     actions.push({ label: "Завершить сеансы", onSelect: onRevokeSessions });
   }
@@ -221,147 +203,108 @@ function EmployeeDirectoryRow({
   }
 
   return (
-    <li
-      role="row"
-      className={cn(
-        "relative grid w-full min-w-0 max-w-full grid-cols-1 gap-x-5 gap-y-3 overflow-hidden p-4 transition-colors duration-fast hover:bg-foreground/[0.02] sm:grid-cols-2 xl:items-center xl:gap-3 xl:overflow-visible xl:px-4 xl:py-3",
-        columns,
-      )}
-    >
-      <div
-        role="cell"
-        className={cn(
-          "flex min-w-0 items-center gap-3 sm:col-span-2 xl:col-span-1",
-          showActions && "pr-12 xl:pr-0",
-        )}
-      >
+    <li className="relative flex min-w-0 flex-col gap-5 rounded-xl border border-border bg-surface p-5 shadow-sm">
+      <div className="flex min-w-0 items-start gap-3 pr-8">
         <span
           aria-hidden="true"
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-sm font-semibold text-primary"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-primary/10 bg-primary/5 text-sm font-semibold text-primary"
         >
           {employeeInitials(member.full_name)}
         </span>
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span
-              className="min-w-0 break-words font-semibold text-foreground"
-              title={member.full_name}
-            >
-              {member.full_name}
-            </span>
-            {isOwnerMembership ? <Badge tone="info">владелец</Badge> : null}
-            {member.id === currentUserId ? <Badge tone="neutral">вы</Badge> : null}
-          </div>
+        <div className="min-w-0 space-y-2">
+          <h3 className="break-words font-semibold text-foreground" title={member.full_name}>
+            {member.full_name}
+          </h3>
+          {isOwnerMembership || member.id === currentUserId ? (
+            <div className="flex flex-wrap gap-1.5">
+              {isOwnerMembership ? <Badge tone="info">владелец</Badge> : null}
+              {member.id === currentUserId ? <Badge tone="neutral">вы</Badge> : null}
+            </div>
+          ) : null}
+          <EmployeeStatus member={member} />
         </div>
       </div>
 
-      <DirectoryCell label="Контакты">
-        <span className="block break-all text-sm text-foreground-secondary" title={member.email}>
-          {member.email}
-        </span>
-        <span className="mt-0.5 block text-xs text-foreground-muted">
-          {member.phone || "Телефон не указан"}
-        </span>
-      </DirectoryCell>
-
-      <DirectoryCell label="Статус">
-        {member.status === "pending" && member.invitation_status === "expired" ? (
-          <>
-            <Badge tone="warning">Приглашение истекло</Badge>
-            <span className="mt-1 block text-xs text-foreground-muted">
-              Обновите срок, чтобы сотрудник мог войти
-            </span>
-          </>
-        ) : (
-          <>
-            <Badge tone={userStatusTone[member.status]}>{userStatusLabel[member.status]}</Badge>
-            {member.status === "pending" ? (
-              <span className="mt-1 block text-xs text-foreground-muted">
-                {formatInvitationDeadline(member.invitation_expires_at)}
-              </span>
-            ) : null}
-          </>
-        )}
-      </DirectoryCell>
-
-      <DirectoryCell label="Доступ">
+      <div className="space-y-2">
         {activeAssignments.length === 0 ? (
-          <span className="text-sm text-foreground-muted">Роли не назначены</span>
+          <p className="text-sm text-foreground-muted">Роли не назначены</p>
         ) : (
-          <div className="flex min-w-0 flex-wrap gap-1.5">
-            {shownAssignments.map((assignment) => {
-              const name = assignment.role_name || "Недоступная роль";
-              return (
-                <Badge key={assignment.id} tone="neutral" className="max-w-full" title={name}>
-                  <span className="max-w-48 truncate">{name}</span>
-                </Badge>
-              );
-            })}
-            {hiddenAssignmentCount > 0 ? (
-              <Badge tone="neutral" title={`Ещё назначений: ${hiddenAssignmentCount}`}>
-                +{hiddenAssignmentCount}
-              </Badge>
-            ) : null}
-          </div>
+          <ul aria-label={`Доступ: ${member.full_name}`} className="space-y-2">
+            {shownAssignments.map((assignment) => (
+              <li key={assignment.id} className="space-y-1 rounded-lg bg-primary/5 p-3">
+                <span className="block break-words text-sm font-medium text-foreground">
+                  {assignment.role_name || "Недоступная роль"}
+                </span>
+                <EmployeeAssignmentScope assignment={assignment} branches={branches} />
+                {member.status === "suspended" ? (
+                  <p className="text-xs text-foreground-muted">Вход приостановлен</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )}
-        {member.status === "pending" ? (
-          <span className="mt-1 block text-xs text-foreground-muted">
-            Начнёт действовать после первого подтверждённого входа
-          </span>
+        {hiddenAssignmentCount > 0 ? (
+          <Badge tone="neutral" title={`Ещё назначений: ${hiddenAssignmentCount}`}>
+            +{hiddenAssignmentCount}
+          </Badge>
         ) : null}
-      </DirectoryCell>
+        {member.status === "pending" ? (
+          <p className="text-xs text-foreground-muted">
+            Начнёт действовать после первого подтверждённого входа
+          </p>
+        ) : null}
+      </div>
 
-      <DirectoryCell label="Последний вход">
-        <span className="text-sm text-foreground-secondary">
-          {formatLastLogin(member.last_login_at)}
-        </span>
-      </DirectoryCell>
+      <dl className="mt-auto space-y-3">
+        <div className="min-w-0">
+          <dt className="sr-only">Контакты</dt>
+          <dd className="break-all text-sm text-foreground-secondary" title={member.email}>
+            {member.email}
+          </dd>
+          <dd className="mt-1 text-xs text-foreground-muted">
+            {member.phone || "Телефон не указан"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-foreground-muted">Последний вход</dt>
+          <dd className="mt-1 text-xs text-foreground-secondary">
+            {formatLastLogin(member.last_login_at)}
+          </dd>
+        </div>
+      </dl>
 
-      {showActions ? (
-        <div
-          role="cell"
-          className="absolute right-3 top-3 flex justify-end sm:right-4 sm:top-4 xl:static xl:self-center"
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={`Открыть профиль: ${member.full_name}`}
+          onClick={(event) => onDetails(event.currentTarget)}
         >
-          {actions.length > 0 ? (
-            <ActionMenu
-              ref={actionRef}
-              label={`Действия для ${member.full_name}`}
-              items={actions}
-              isLoading={activating}
-            />
-          ) : (
-            <span className="hidden text-foreground-muted xl:inline">—</span>
-          )}
+          Открыть профиль
+        </Button>
+        {showActions && canAssignMember ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={actionsDisabled}
+            onClick={(event) => onAssignments(event.currentTarget)}
+          >
+            Настроить доступ
+          </Button>
+        ) : null}
+      </div>
+
+      {showActions && actions.length > 0 ? (
+        <div className="absolute right-3 top-3">
+          <ActionMenu
+            ref={actionRef}
+            label={`Действия для ${member.full_name}`}
+            items={actions}
+            isLoading={activating}
+            disabled={actionsDisabled}
+          />
         </div>
       ) : null}
     </li>
-  );
-}
-
-function DirectoryColumnHeader({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}): JSX.Element {
-  return (
-    <div
-      role="columnheader"
-      className={cn("text-xs font-semibold uppercase text-foreground-muted", className)}
-    >
-      {children}
-    </div>
-  );
-}
-
-function DirectoryCell({ label, children }: { label: string; children: ReactNode }): JSX.Element {
-  return (
-    <div role="cell" className="min-w-0">
-      <span className="mb-1 block text-xs font-medium text-foreground-muted xl:hidden">
-        {label}
-      </span>
-      {children}
-    </div>
   );
 }

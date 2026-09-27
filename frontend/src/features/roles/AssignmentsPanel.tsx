@@ -206,6 +206,10 @@ export function AssignmentsPanel({
     setRevokeError(null);
     setSuccessMessage(null);
     const assignment = user.assignments.find((item) => item.id === pendingRevokeId) ?? null;
+    if (!canManage || !assignment?.is_active || !canRevokeRole(assignment.role_id)) {
+      setRevokeError("Обновите список сотрудников перед изменением доступа.");
+      return;
+    }
     try {
       await revokeAssignment.mutateAsync({ userId: user.id, assignmentId: pendingRevokeId });
       setPendingRevokeId(null);

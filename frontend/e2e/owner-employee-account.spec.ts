@@ -26,6 +26,9 @@ interface EmployeeAssignment {
   user_id: string;
 }
 
+// Account contacts and authentication cookies must not enter browser artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test.describe("Owner employee accounts", () => {
   test.beforeEach(() => {
     clearLoginRateLimit(OWNER.email);
@@ -101,9 +104,14 @@ test.describe("Owner employee accounts", () => {
       await expect(
         page.getByRole("status").filter({ hasText: `Доступ для «${fullName}» создан` }),
       ).toBeVisible();
-      await expect(page.getByRole("row", { name: new RegExp(fullName) })).toContainText(
-        "Ожидает активации",
-      );
+      await expect(
+        page
+          .getByRole("list", { name: "Сотрудники аптеки" })
+          .getByRole("listitem")
+          .filter({
+            has: page.getByRole("button", { name: `Открыть профиль: ${fullName}`, exact: true }),
+          }),
+      ).toContainText("Ожидает активации");
 
       const employeeTokens = await apiLogin(employeeLoginApi, { email, password: "" });
       employeeApi = await apiContext(employeeTokens.access_token);
@@ -127,7 +135,12 @@ test.describe("Owner employee accounts", () => {
       expect(employeeBranches.map((branch) => branch.id)).not.toContain(unassignedBranch.id);
 
       await page.reload();
-      let employeeRow = page.getByRole("row", { name: new RegExp(fullName) });
+      let employeeRow = page
+        .getByRole("list", { name: "Сотрудники аптеки" })
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("button", { name: `Открыть профиль: ${fullName}`, exact: true }),
+        });
       await expect(employeeRow).toContainText("Активен");
       await employeeRow.getByRole("button", { name: `Действия для ${fullName}` }).click();
       await page.getByRole("menuitem", { name: "Приостановить" }).click();
@@ -159,7 +172,12 @@ test.describe("Owner employee accounts", () => {
       resumedEmployeeApi = await apiContext(resumedTokens.access_token);
       expect((await resumedEmployeeApi.get("auth/me")).status()).toBe(200);
 
-      employeeRow = page.getByRole("row", { name: new RegExp(fullName) });
+      employeeRow = page
+        .getByRole("list", { name: "Сотрудники аптеки" })
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("button", { name: `Открыть профиль: ${fullName}`, exact: true }),
+        });
       await employeeRow.getByRole("button", { name: `Действия для ${fullName}` }).click();
       await page.getByRole("menuitem", { name: "Уволить" }).click();
       lifecycleDialog = page.getByRole("dialog", { name: "Уволить сотрудника" });
