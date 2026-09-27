@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +38,10 @@ GRANT_SCOPED_PLATFORM_CODES = {
     "platform.accounts.manage",
 }
 
+# Staff pay is private tenant data. Platform seniority does not grant payroll
+# access; only owners and explicitly delegated tenant-wide roles receive it.
+STAFF_PAY_CODES = {"staff_pay.view", "staff_pay.manage"}
+
 
 async def _template_codes(db_session: AsyncSession, template_name: str) -> list[str]:
     stmt = (
@@ -50,12 +55,12 @@ async def _template_codes(db_session: AsyncSession, template_name: str) -> list[
 async def test_seed_permissions_count(db_session: AsyncSession) -> None:
     """The migrated permission catalogue remains complete and duplicate-free."""
     count = (await db_session.execute(select(func.count()).select_from(Permission))).scalar_one()
-    assert count == 77
+    assert count == 79
 
     groups = (
         await db_session.execute(select(func.count(func.distinct(Permission.group_code))))
     ).scalar_one()
-    assert groups == 23
+    assert groups == 24
 
 
 async def test_every_permission_has_a_description(db_session: AsyncSession) -> None:
@@ -100,6 +105,7 @@ async def test_kassir_template_has_only_min_level_4_permissions(
     for _, mlr in perms:
         assert mlr == 4, f"Кассир template has perm with min_level_required={mlr}"
     assert "pos.refund_external_confirm" not in codes
+    assert STAFF_PAY_CODES.isdisjoint(codes)
 
 
 async def test_vladelec_template_excludes_global_audit(db_session: AsyncSession) -> None:
@@ -112,9 +118,12 @@ async def test_vladelec_template_excludes_global_audit(db_session: AsyncSession)
     assert "pos.refund_external_confirm" in codes
     assert "billing.overview.view" in codes
     assert "billing.invoice.view" in codes
+    assert STAFF_PAY_CODES <= codes
 
 
-async def test_developer_has_everything(db_session: AsyncSession, system_roles) -> None:
+async def test_developer_excludes_grant_scoped_and_private_permissions(
+    db_session: AsyncSession, system_roles
+) -> None:
     dev = system_roles["developer"]
     dev_codes = set(
         (
@@ -129,5 +138,21 @@ async def test_developer_has_everything(db_session: AsyncSession, system_roles) 
     # Platform capabilities are attached to immutable access grants, never to
     # tenant/system roles. The legacy global-audit permission remains on the
     # developer role until its separate compatibility migration is removed.
-    assert dev_codes == all_codes - GRANT_SCOPED_PLATFORM_CODES
+    # Private staff-pay permissions are a separate tenant-only exception.
+    assert dev_codes == all_codes - GRANT_SCOPED_PLATFORM_CODES - STAFF_PAY_CODES
     assert dev_codes.isdisjoint(GRANT_SCOPED_PLATFORM_CODES)
+
+
+@pytest.mark.parametrize("role_name", ["developer", "administrator"])
+async def test_platform_system_roles_exclude_private_staff_pay(
+    db_session: AsyncSession, system_roles, role_name: str
+) -> None:
+    role = system_roles[role_name]
+    codes = set(
+        (
+            await db_session.execute(
+                select(RolePermission.permission_code).where(RolePermission.role_id == role.id)
+            )
+        ).scalars()
+    )
+    assert STAFF_PAY_CODES.isdisjoint(codes)
