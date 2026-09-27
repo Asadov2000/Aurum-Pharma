@@ -122,6 +122,12 @@ const ICONS: Record<string, ReactNode> = {
     </Svg>
   ),
   // Уведомления — bell
+  "/my-work": (
+    <Svg>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M7 3v4M17 3v4M3 11h18M8 15h3M8 18h5" />
+    </Svg>
+  ),
   "/notifications": (
     <Svg>
       <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />

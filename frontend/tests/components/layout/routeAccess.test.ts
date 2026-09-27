@@ -20,6 +20,16 @@ const SELLER: RouteAccessContext = {
 };
 
 describe("route access", () => {
+  it("allows personal shifts without reports permissions only in an ordinary workplace", () => {
+    const employee = { ...SELLER, permissions: [] };
+    expect(canAccessPath("/my-work", employee)).toBe(true);
+    expect(accessibleInternalPath("/my-work", employee)).toBe("/my-work");
+    expect(canAccessPath("/reports", employee)).toBe(false);
+    expect(canAccessPath("/my-work", { ...employee, hasTenant: false })).toBe(false);
+    expect(canAccessPath("/my-work", { ...employee, isDeveloper: true })).toBe(false);
+    expect(canAccessPath("/my-work", { ...employee, isAdministrator: true })).toBe(false);
+    expect(canAccessPath("/my-work", { ...employee, isSupportScoped: true })).toBe(false);
+  });
   it("keeps platform activation public", () => {
     expect(canAccessPath("/activate-platform", SELLER)).toBe(true);
   });

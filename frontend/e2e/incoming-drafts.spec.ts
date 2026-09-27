@@ -15,7 +15,8 @@ import {
 } from "./helpers";
 
 // Proxied API failures may include authorization headers in their call log.
-test.use({ trace: "off" });
+// Service Worker frame requests bypass page.route; this test must drop real API replies.
+test.use({ trace: "off", serviceWorkers: "block" });
 
 async function fetchDraftRequest(route: Route): Promise<APIResponse> {
   try {

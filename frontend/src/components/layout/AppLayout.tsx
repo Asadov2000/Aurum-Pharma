@@ -129,6 +129,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const pageOwnsDesktopTitle =
     pathname === "/" ||
     pathname === "/profile" ||
+    pathname === "/my-work" ||
     pathname === "/catalog" ||
     pathname === "/sales" ||
     pathname === "/suppliers" ||

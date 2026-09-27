@@ -17,6 +17,8 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.core.time import utc_now
+from app.domains.pos.repository import POSRepository
+from app.domains.pos.service import POSService
 from app.domains.sync.repository import SyncOutboxRepository
 
 
@@ -42,6 +44,37 @@ async def app_engine_iso() -> AsyncIterator[AsyncEngine]:
 
 async def _set_tenant(conn: AsyncConnection, tid: str) -> None:
     await conn.execute(text("SELECT set_config('app.tenant_id', :v, false)"), {"v": tid})
+
+
+async def _assert_personal_shift_scope(
+    connection: AsyncConnection,
+    *,
+    tenant_ids: list[str],
+    user_ids: list[str],
+    shift_ids: list[str],
+) -> None:
+    assert (await connection.scalar(text("SELECT current_user"))) == "aurum_app"
+    await connection.execute(
+        text("SELECT set_config('app.user_id', :actor, true)"),
+        {"actor": user_ids[0]},
+    )
+    async with AsyncSession(bind=connection) as session:
+        personal = POSService(POSRepository(session))
+        own_history = await personal.list_personal_shifts(
+            tenant_id=UUID(tenant_ids[0]),
+            user_id=UUID(user_ids[0]),
+            page=1,
+            page_size=25,
+        )
+        assert [item.id for item in own_history.items] == [UUID(shift_ids[0])]
+        foreign_history = await personal.list_personal_shifts(
+            tenant_id=UUID(tenant_ids[1]),
+            user_id=UUID(user_ids[1]),
+            page=1,
+            page_size=25,
+        )
+        assert foreign_history.total == 0
+        assert foreign_history.items == []
 
 
 async def test_sale_invisible_across_tenants(
@@ -220,6 +253,12 @@ async def test_sale_invisible_across_tenants(
             ).fetchall()
             assert {row[0] for row in outbox_rows} >= {app_event_id}
             assert len(outbox_rows) == 2, "Tenant A must see only its own outbox events"
+            await _assert_personal_shift_scope(
+                app_conn,
+                tenant_ids=tenant_ids,
+                user_ids=user_ids,
+                shift_ids=shift_ids,
+            )
     finally:
         if tenant_ids:
             async with support_engine_iso.begin() as conn:

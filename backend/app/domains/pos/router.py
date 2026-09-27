@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import (
     CurrentUser,
+    current_user,
     get_db,
     require_any_branch_permission,
     require_branch_permission,
@@ -32,6 +33,7 @@ from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
     PaymentAdd,
     PaymentRead,
+    PersonalShiftList,
     POSCommandRead,
     POSFavoriteCatalogRead,
     POSFavoriteCreate,
@@ -752,6 +754,32 @@ async def get_current_shift(
         allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
     return ShiftRead.model_validate(shift) if shift is not None else None
+
+
+@router.get("/shifts/mine", response_model=PersonalShiftList)
+async def list_personal_shifts(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    service: Annotated[POSService, Depends(_service)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=50)] = 25,
+) -> PersonalShiftList:
+    if (
+        user.tenant_id is None
+        or user.membership_status != "active"
+        or user.is_developer
+        or user.is_administrator
+        or user.support_access_session_id is not None
+    ):
+        raise PermissionDeniedError("Personal shifts require an active tenant membership")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return await service.list_personal_shifts(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/shifts", response_model=ShiftHistoryList)

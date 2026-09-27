@@ -12,6 +12,8 @@ import {
 } from "@/components/ui";
 import { AccountIdentityPanel } from "@/features/auth/AccountIdentityPanel";
 import { describeApiError } from "@/lib/errorMessages";
+import { canAccessPath, getRouteAccessContext } from "@/components/layout/routeAccess";
+import { useAuthStore } from "@/stores/auth";
 
 import { usePersonalProfileQuery } from "./queries";
 import { type PersonalProfile } from "./types";
@@ -24,6 +26,7 @@ const personalLinks = [
 
 export function ProfilePage(): JSX.Element {
   const profile = usePersonalProfileQuery();
+  const user = useAuthStore((state) => state.user);
   return (
     <div className="max-w-5xl space-y-5">
       <PageHeader
@@ -32,6 +35,14 @@ export function ProfilePage(): JSX.Element {
         description="Ваши данные, способы входа и назначенный рабочий доступ."
       />
       <nav aria-label="Личные настройки" className="flex flex-wrap gap-2">
+        {canAccessPath("/my-work", getRouteAccessContext(user)) ? (
+          <Link
+            to="/my-work"
+            className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground hover:bg-foreground/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            Моя работа
+          </Link>
+        ) : null}
         {personalLinks.map((link) => (
           <Link
             key={link.to}

@@ -91,6 +91,7 @@ const ProfilePage = lazyRouteComponent(
   () => import("@/features/profile/ProfilePage"),
   "ProfilePage",
 );
+const MyWorkPage = lazyRouteComponent(() => import("@/features/my-work/MyWorkPage"), "MyWorkPage");
 const ReportsPage = lazyRouteComponent(
   () => import("@/features/reports/ReportsPage"),
   "ReportsPage",
@@ -259,6 +260,7 @@ const profileRoute = createRoute({
   path: "/profile",
   component: ProfilePage,
 });
+const myWorkRoute = createRoute({ getParentRoute, path: "/my-work", component: MyWorkPage });
 
 const reportsRoute = createRoute({
   getParentRoute,
@@ -307,6 +309,7 @@ const routeTree = rootRoute.addChildren([
   notificationsRoute,
   securityRoute,
   profileRoute,
+  myWorkRoute,
   reportsRoute,
   loginRoute,
   platformActivationRoute,
