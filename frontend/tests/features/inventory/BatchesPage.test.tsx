@@ -159,10 +159,12 @@ describe("BatchesPage", () => {
     expect(await screen.findByText("Парацетамол")).toBeInTheDocument();
     expect(screen.getByText("Аптека Рудаки")).toBeInTheDocument();
     expect(screen.getByText("LOT-2026-001")).toBeInTheDocument();
-    expect(screen.getByText("Срок под контролем")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    expect(
+      await within(screen.getByRole("region", { name: "Карточка партии LOT-2026-001" })).findByText(
+        "Срок под контролем",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Срок под контролем" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(screen.getByText("Требуют внимания")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Открыть партию LOT-2026-001 товара Парацетамол/ }),

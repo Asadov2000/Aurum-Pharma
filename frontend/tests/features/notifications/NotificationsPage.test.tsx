@@ -26,7 +26,11 @@ vi.mock("@/features/notifications/api", () => ({
 }));
 
 import { NotificationsPage } from "@/features/notifications/NotificationsPage";
-import { type Notification, type Subscription } from "@/features/notifications/types";
+import {
+  type Notification,
+  type NotificationsListParams,
+  type Subscription,
+} from "@/features/notifications/types";
 
 function renderPageWithClient() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -194,6 +198,9 @@ describe("NotificationsPage", () => {
     listNotifications.mockResolvedValue([]);
     renderPage();
     await screen.findByText(/Пока нет уведомлений/i);
+    expect(screen.getByRole("group", { name: "Сообщения" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Уровень" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Ещё условия/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Непрочитанные", exact: true }));
     fireEvent.change(screen.getByRole("combobox", { name: "Уровень" }), {
@@ -210,6 +217,51 @@ describe("NotificationsPage", () => {
     });
     expect(screen.getByRole("heading", { name: "Настройки уведомлений" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Сохранить настройки" })).toBeInTheDocument();
+  });
+
+  it("resets both quick filters and pagination together", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      ...UNREAD,
+      id: `n-reset-${index}`,
+      title: `Уведомление для сброса ${index}`,
+    }));
+    listNotifications.mockImplementation((params: NotificationsListParams) =>
+      Promise.resolve(params.page === 2 ? [UNREAD] : firstPage),
+    );
+    renderPage();
+    await screen.findByText(firstPage[0]!.title);
+
+    fireEvent.click(screen.getByRole("button", { name: "Непрочитанные", exact: true }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Уровень" }), {
+      target: { value: "critical" },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Далее" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText(UNREAD.title);
+    expect(listNotifications).toHaveBeenLastCalledWith({
+      unread_only: true,
+      severity: "critical",
+      page: 2,
+      page_size: 100,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё (2)" }));
+
+    await waitFor(() => {
+      expect(listNotifications).toHaveBeenLastCalledWith({
+        unread_only: false,
+        severity: undefined,
+        page: 1,
+        page_size: 100,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Все", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("combobox", { name: "Уровень" })).toHaveValue("");
+    expect(screen.getByText(/Страница 1\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сбросить всё" })).toBeDisabled();
   });
 
   it("hides cached notifications after a list error and retries the request", async () => {

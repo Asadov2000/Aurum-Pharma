@@ -180,6 +180,7 @@ export function StockOnDatePanel({
             {
               id: "branch",
               label: "Аптечная точка",
+              defaultVisible: true,
               activeLabel: branches.data?.find((branch) => branch.id === watched.branch_id)?.name,
               active: Boolean(watched.branch_id),
               onClear: () => {

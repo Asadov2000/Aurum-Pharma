@@ -132,7 +132,8 @@ test.describe("Incoming flow (owner)", () => {
     // freshly-made batch. Branch options are loaded separately and can lag
     // under full-suite load; the catalog picker searches the exact seeded item.
     await page.goto("/batches");
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Фильтры", exact: true })).toHaveCount(0);
     const batchCatalogPicker = page.getByRole("combobox", { name: "Товар" });
     await batchCatalogPicker.fill(searchKey);
     const batchCatalogOption = page.getByRole("option", {
@@ -140,10 +141,6 @@ test.describe("Incoming flow (owner)", () => {
     });
     await expect(batchCatalogOption).toBeVisible({ timeout: 15_000 });
     await batchCatalogOption.click();
-    await page
-      .getByRole("dialog", { name: "Фильтры", exact: true })
-      .getByRole("button", { name: "Готово" })
-      .click();
 
     const batchCard = page.getByRole("article", {
       name: new RegExp(`${item.brand_name}, партия без номера`),
@@ -224,7 +221,7 @@ test.describe("Incoming flow (owner)", () => {
     await expect(returnEntry).toContainText("4,00 TJS");
 
     await page.goto("/batches");
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeVisible();
     const refreshedBatchPicker = page.getByRole("combobox", { name: "Товар" });
     await refreshedBatchPicker.fill(searchKey);
     const refreshedItemOption = page.getByRole("option", {
@@ -232,10 +229,6 @@ test.describe("Incoming flow (owner)", () => {
     });
     await expect(refreshedItemOption).toBeVisible({ timeout: 15_000 });
     await refreshedItemOption.click();
-    await page
-      .getByRole("dialog", { name: "Фильтры", exact: true })
-      .getByRole("button", { name: "Готово" })
-      .click();
     const refreshedBatchCard = page.getByRole("article", {
       name: new RegExp(`${item.brand_name}, партия без номера`),
     });

@@ -133,6 +133,7 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
             {
               id: "branch",
               label: "Аптечная точка",
+              defaultVisible: true,
               activeLabel: branches.data?.find((branch) => branch.id === watched.branch_id)?.name,
               active: Boolean(watched.branch_id),
               onClear: () => {
@@ -156,6 +157,7 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
             {
               id: "sort",
               label: "Рейтинг по",
+              defaultVisible: true,
               activeLabel: watched.sort_by === "quantity" ? "Количеству" : "Выручке",
               active: watched.sort_by !== defaults.sort_by,
               onClear: () => {

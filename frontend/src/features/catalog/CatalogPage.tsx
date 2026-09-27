@@ -583,7 +583,6 @@ function CloudCatalogPage(): JSX.Element {
               setDispensing("");
               setPage(1);
             },
-            defaultVisible: true,
           },
           {
             id: "image",
@@ -612,6 +611,7 @@ function CloudCatalogPage(): JSX.Element {
               setImageState("any");
               setPage(1);
             },
+            defaultVisible: true,
           },
           {
             id: "barcode",
@@ -640,6 +640,7 @@ function CloudCatalogPage(): JSX.Element {
               setBarcodeState("any");
               setPage(1);
             },
+            defaultVisible: true,
           },
           {
             id: "manufacturer",

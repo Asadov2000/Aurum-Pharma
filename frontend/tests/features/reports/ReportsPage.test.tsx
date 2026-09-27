@@ -217,11 +217,9 @@ describe("ReportsPage", () => {
         expect.objectContaining({ branch_id: "branch-a" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     const select = await screen.findByLabelText("Аптечная точка");
     expect(within(select).queryByRole("option", { name: "Точка Б" })).not.toBeInTheDocument();
     expect(within(select).queryByRole("option", { name: "Все доступные" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     for (const [tab, request] of [
       ["Товары", getTopProducts],
       ["Остатки", getStockOnDate],
@@ -360,11 +358,9 @@ describe("ReportsPage", () => {
     await screen.findByText("Малика Саидова");
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
     fireEvent.change(screen.getByLabelText("Кассир"), {
       target: { value: "Малика" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     expect(listShiftHistory).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Показать" }));
@@ -443,9 +439,9 @@ describe("ReportsPage", () => {
     await screen.findByText("Продаж за выбранный период нет");
     expect(getTopProducts).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Фильтры/ }));
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Ещё условия/ }));
     const panel = within(screen.getByRole("dialog", { name: "Фильтры" }));
-    fireEvent.change(panel.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
     fireEvent.change(panel.getByLabelText("Показать"), { target: { value: "50" } });
     fireEvent.click(panel.getByRole("button", { name: "Готово" }));
     expect(getTopProducts).toHaveBeenCalledTimes(1);

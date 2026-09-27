@@ -66,10 +66,11 @@ test("platform billing workspace remains read-only and usable on desktop and tou
   expect(searchBounds).not.toBeNull();
   expect(searchBounds!.height).toBeGreaterThanOrEqual(44);
 
-  const filters = page.getByRole("button", { name: "Фильтры" });
-  const filterBounds = await filters.boundingBox();
-  expect(filterBounds).not.toBeNull();
-  expect(filterBounds!.height).toBeGreaterThanOrEqual(44);
+  const status = page.getByRole("combobox", { name: "Статус", exact: true });
+  const statusBounds = await status.boundingBox();
+  expect(statusBounds).not.toBeNull();
+  expect(statusBounds!.height).toBeGreaterThanOrEqual(44);
+  await expect(page.getByRole("button", { name: /^Ещё условия/ })).toHaveCount(0);
 });
 
 test("platform pricing archive exposes no subscription commands", async ({ page }) => {

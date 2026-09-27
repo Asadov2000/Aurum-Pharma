@@ -18,8 +18,11 @@ test.describe("Configurable filters", () => {
       exact: true,
     });
     await expect(dispensingSelect).toHaveCount(0);
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
-    const panel = page.getByRole("dialog", { name: "Фильтры", exact: true });
+    await expect(page.locator('[data-filter-id="lifecycle"]')).toBeVisible();
+    await expect(page.locator('[data-filter-id="image"]')).toBeVisible();
+    await expect(page.locator('[data-filter-id="barcode"]')).toBeVisible();
+    await page.getByRole("button", { name: /^Ещё условия/ }).click();
+    const panel = page.getByRole("dialog", { name: "Фильтры" });
     await expect(dispensingSelect).toBeVisible();
 
     const filteredResponse = page.waitForResponse((response) => {
@@ -36,12 +39,12 @@ test.describe("Configurable filters", () => {
     await expect(
       page.getByRole("button", { name: "Сбросить фильтр «Условия отпуска»" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await page.getByRole("button", { name: /^Ещё условия/ }).click();
     await expect(dispensingSelect).toHaveValue("prescription");
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("button", { name: /^Фильтры/ })).toBeFocused();
+    await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeFocused();
     await page.getByRole("button", { name: "Сбросить фильтр «Условия отпуска»" }).click();
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await page.getByRole("button", { name: /^Ещё условия/ }).click();
     await expect(dispensingSelect).toHaveValue("");
     await dispensingSelect.selectOption("prescription");
     await panel.getByRole("button", { name: "Готово", exact: true }).click();
@@ -55,7 +58,7 @@ test.describe("Configurable filters", () => {
     expect(storedPreferences).toHaveLength(0);
 
     await page.reload();
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
+    await page.getByRole("button", { name: /^Ещё условия/ }).click();
     await expect(dispensingSelect).toBeVisible();
     await expect(dispensingSelect).toHaveValue("");
   });
@@ -67,8 +70,12 @@ test.describe("Configurable filters", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/catalog");
 
-    await page.getByRole("button", { name: /^Фильтры/ }).click();
-    const settings = page.getByRole("dialog", { name: "Фильтры", exact: true });
+    await expect(page.locator('[data-filter-id="barcode"]')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+    await page.getByRole("button", { name: /^Ещё условия/ }).click();
+    const settings = page.getByRole("dialog", { name: "Фильтры" });
     await expect(settings).toBeVisible();
 
     const bounds = await settings.boundingBox();
@@ -84,7 +91,7 @@ test.describe("Configurable filters", () => {
     await settings.getByRole("button", { name: "Готово", exact: true }).click();
     await expect(settings).toHaveCount(0);
     await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
-    await expect(page.getByRole("button", { name: /^Фильтры/ })).toBeFocused();
+    await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeFocused();
   });
 
   test("sends employee search privately and never persists its value", async ({ page }) => {
