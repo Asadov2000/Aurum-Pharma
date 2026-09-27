@@ -239,7 +239,7 @@ export function SaleArea({
   const hasShift = Boolean(shiftQuery.data);
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 xl:h-full xl:min-h-0">
       {hasShift && canSell && storageScope ? (
         <RegisterWorkspaceGate
           key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
@@ -1989,7 +1989,7 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(18rem,1.15fr)_minmax(22rem,1fr)_minmax(18rem,0.78fr)] xl:gap-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(16rem,0.95fr)_minmax(22rem,1.15fr)_minmax(18rem,0.85fr)] xl:grid-rows-[minmax(0,1fr)] xl:gap-3">
           <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
             <Suspense
               fallback={
@@ -2019,7 +2019,7 @@ function ActiveWorkspace({
               isDraft && totalDue > 0 && "mb-20 xl:mb-0",
             )}
           >
-            <header className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-4">
+            <header className="flex min-h-[3.75rem] items-center justify-between gap-3 border-b border-border px-4">
               <div className="min-w-0">
                 <h2
                   id="current-receipt-title"
@@ -2104,7 +2104,7 @@ function ActiveWorkspace({
                 <span className="text-xs text-foreground-muted">
                   {items.length} {productCountLabel(items.length)}
                 </span>
-                <strong className="font-mono text-xl tabular-nums text-foreground">
+                <strong className="font-mono text-xl tabular-nums text-primary">
                   {totalDue.toFixed(2)}{" "}
                   <span className="font-sans text-xs font-semibold text-foreground-secondary">
                     {currency}

@@ -78,7 +78,7 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="relative grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-2 border-primary bg-surface p-1 shadow-sm sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
+    <div className="relative grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border border-border bg-surface p-1 focus-within:border-primary sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
       <div className="relative col-span-2 min-w-0 sm:col-span-1">
         <Label htmlFor="pos-product-search" className="sr-only">
           Товар

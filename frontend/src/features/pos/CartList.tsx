@@ -188,7 +188,7 @@ export function CartList({
               data-testid="cart-item"
               className={cn(
                 "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
-                touch ? "py-4" : "py-3",
+                touch ? "py-5" : "py-4",
                 windowed && "pos-cv",
               )}
             >
