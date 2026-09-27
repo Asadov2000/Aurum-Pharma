@@ -1815,6 +1815,14 @@ jobs:
       - name: Test encrypted backup and isolated restore
         run: sh ./scripts/test-recovery-tooling.sh
 
+      - name: Test encrypted read-only Edge recovery
+        shell: pwsh
+        run: >-
+          ./scripts/smoke-edge-cold-read.ps1
+          -BackendImage aurum-backend:ci
+          -BackupImage aurum-pharma-backup:ci
+          -VerifyRestore
+
       - name: Scan repository for committed secrets
         run: >-
           docker run --rm

@@ -2,7 +2,8 @@
 param(
     [string]$BackendImage = "aurum-pharma-e2e-backend:local",
     [switch]$VerifyMigration0151Downgrade,
-    [switch]$VerifyRestore
+    [switch]$VerifyRestore,
+    [string]$BackupImage = "aurum-pharma-backup:ci"
 )
 
 # Disposable read-only Edge smoke. Unique labels and exact ownership checks
@@ -133,8 +134,83 @@ function Wait-Postgres {
     throw "Isolated Edge PostgreSQL did not become ready."
 }
 
+function New-RecoveryContainer {
+    param([string]$Name, [string]$NetworkName, [string]$KeyPath)
+    $containers.Add($Name)
+    $arguments = @(
+        "run", "--detach", "--name", $Name, "--label", $label,
+        "--network", $NetworkName, "--env-file", $databaseEnv,
+        "--env", "RESTIC_PASSWORD_FILE=/run/recovery-key",
+        "--mount", "type=bind,source=$KeyPath,target=/run/recovery-key,readonly",
+        "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
+        "--mount", "type=bind,source=$workspace/scripts/edge-read-recovery-drill.sh,target=/drill.sh,readonly",
+        "--memory=1g", "--cpus=1", "--entrypoint", "sleep"
+    )
+    foreach ($path in @("workspace", "payload", "repository", "transfer", "corrupt", "restored")) {
+        $arguments += @("--tmpfs", "/${path}:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0700")
+    }
+    $arguments += @($BackupImage, "infinity")
+    Invoke-SmokeDocker -Arguments $arguments -Quiet
+}
+
+function Copy-RecoveryArchive {
+    param([string]$Name, [string]$Path, [switch]$ToContainer)
+    Test-OwnedResource -Kind "container" -Name $Name
+    # The invocation prefix is generated locally; prohibit shell metacharacters.
+    if ($Name -cnotmatch '^aurum-edge-smoke-[a-f0-9]{12}-(backup|restore-backup)$') {
+        throw "Refusing binary transfer for an unexpected recovery container."
+    }
+    $expectedPath = [IO.Path]::GetFullPath((Join-Path $scratch "$prefix-read-backup.tar"))
+    if ([IO.Path]::GetFullPath($Path) -cne $expectedPath) {
+        throw "Refusing binary transfer outside the invocation archive path."
+    }
+    # Docker Desktop cannot docker-cp tmpfs files. Stream native bytes through
+    # exec instead of PowerShell's text pipeline (which corrupts binary on 5.1).
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = "docker"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = [bool]$ToContainer
+    $start.Arguments = if ($ToContainer) {
+        "exec -i $Name sh -c `"umask 077; cat > /transfer/repository.tar`""
+    } else { "exec $Name cat /transfer/repository.tar" }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    $stream = $null
+    $started = $false
+    try {
+        $mode = if ($ToContainer) { [IO.FileMode]::Open } else { [IO.FileMode]::CreateNew }
+        $access = if ($ToContainer) { [IO.FileAccess]::Read } else { [IO.FileAccess]::Write }
+        $stream = [IO.File]::Open($Path, $mode, $access, [IO.FileShare]::None)
+        $started = $process.Start()
+        if (-not $started) { throw "Could not start isolated binary transfer." }
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if ($ToContainer) {
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stream.CopyTo($process.StandardInput.BaseStream)
+            $process.StandardInput.Close()
+        } else {
+            $process.StandardOutput.BaseStream.CopyTo($stream)
+        }
+        $process.WaitForExit()
+        [void]$stderr.GetAwaiter().GetResult()
+        if ($ToContainer) { [void]$stdout.GetAwaiter().GetResult() }
+        if ($process.ExitCode -ne 0) { throw "Isolated binary recovery transfer failed." }
+    }
+    finally {
+        if ($stream) { $stream.Dispose() }
+        if ($started -and -not $process.HasExited) { $process.Kill() }
+        $process.Dispose()
+    }
+}
+
 try {
     Invoke-SmokeDocker -Arguments @("image", "inspect", $BackendImage) -Quiet
+    if ($VerifyRestore) {
+        Invoke-SmokeDocker -Arguments @("image", "inspect", $BackupImage) -Quiet
+    }
     $database = @{
         POSTGRES_HOST = "edge-benchmark-postgres"
         POSTGRES_DB = "aurum_edge_read_benchmark_test"
@@ -253,29 +329,33 @@ try {
     Wait-Health -Status 200 -Edge "true"
     Invoke-Driver -Phase "read_recovered"
     if ($VerifyRestore) {
-        # The archive contains synthetic data only. Both PostgreSQL instances use
-        # private, labelled networks; the source is stopped before restored reads.
-        $backupPath = Join-Path $scratch "$prefix-read-backup.dump"
+        # Reuse the shipped restic tool without exposing plaintext on the host.
+        # Synthetic keys travel separately from the encrypted repository archive.
+        $backupPath = Join-Path $scratch "$prefix-read-backup.tar"
         $temporaryFiles.Add($backupPath)
+        $recoveryKeyPath = Join-Path $scratch "$prefix-recovery.key"
+        $temporaryFiles.Add($recoveryKeyPath)
+        [IO.File]::WriteAllText($recoveryKeyPath, (New-SmokeSecret), [Text.UTF8Encoding]::new($false))
+        $backupName = "$prefix-backup"
         Test-OwnedResource -Kind "container" -Name $postgresName
-        Invoke-SmokeDocker -Arguments @(
-            "exec", $postgresName, "pg_dump", "--username=postgres",
-            "--dbname=$($database.POSTGRES_DB)", "--format=custom",
-            "--file=/tmp/edge-read-backup.dump"
-        ) -Quiet
-        $sourceHashLine = (& docker exec $postgresName sha256sum /tmp/edge-read-backup.dump).Trim()
+        New-RecoveryContainer -Name $backupName -NetworkName $network -KeyPath $recoveryKeyPath
+        Invoke-SmokeDocker -Arguments @("exec", $backupName, "sh", "/drill.sh", "backup")
+        $snapshotId = (& docker exec $backupName cat /transfer/snapshot-id).Trim()
+        if ($LASTEXITCODE -ne 0 -or $snapshotId -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Could not obtain the completed isolated Edge backup snapshot."
+        }
+        $sourceHashLine = (& docker exec $backupName sha256sum /transfer/repository.tar).Trim()
         if ($LASTEXITCODE -ne 0 -or $sourceHashLine -notmatch '^([0-9a-f]{64})\s') {
             throw "Could not verify the isolated Edge archive checksum."
         }
         $sourceHash = $Matches[1]
-        Invoke-SmokeDocker -Arguments @(
-            "cp", "${postgresName}:/tmp/edge-read-backup.dump", $backupPath
-        ) -Quiet
+        Copy-RecoveryArchive -Name $backupName -Path $backupPath
         $copiedHash = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($copiedHash -cne $sourceHash) {
             throw "Isolated Edge archive checksum changed during copy."
         }
-        Invoke-SmokeDocker -Arguments @("stop", $apiName, $redisName, $postgresName) -Quiet
+        Invoke-SmokeDocker -Arguments @("stop", $apiName, $redisName, $postgresName, $backupName) -Quiet
+        $restoreTimer = [Diagnostics.Stopwatch]::StartNew()
 
         Invoke-SmokeDocker -Arguments @(
             "network", "create", "--internal", "--label", $label, $restoreNetwork
@@ -296,20 +376,16 @@ try {
             "--memory=1g", "--cpus=1", $postgresImage
         ) -Quiet
         Wait-Postgres -ContainerName $restorePostgresName
-        Invoke-SmokeDocker -Arguments @(
-            "cp", $backupPath, "${restorePostgresName}:/tmp/edge-read-backup.dump"
-        ) -Quiet
-        $restoredHashLine = (& docker exec $restorePostgresName sha256sum /tmp/edge-read-backup.dump).Trim()
+        $restoreBackupName = "$prefix-restore-backup"
+        New-RecoveryContainer -Name $restoreBackupName -NetworkName $restoreNetwork -KeyPath $recoveryKeyPath
+        Copy-RecoveryArchive -Name $restoreBackupName -Path $backupPath -ToContainer
+        $restoredHashLine = (& docker exec $restoreBackupName sha256sum /transfer/repository.tar).Trim()
         if ($LASTEXITCODE -ne 0 -or $restoredHashLine -notmatch '^([0-9a-f]{64})\s' -or
             $Matches[1] -cne $sourceHash) {
             throw "Isolated Edge archive checksum changed before restore."
         }
         Test-OwnedResource -Kind "container" -Name $restorePostgresName
-        Invoke-SmokeDocker -Arguments @(
-            "exec", $restorePostgresName, "pg_restore", "--exit-on-error",
-            "--clean", "--if-exists", "--username=postgres",
-            "--dbname=$($database.POSTGRES_DB)", "/tmp/edge-read-backup.dump"
-        ) -Quiet
+        Invoke-SmokeDocker -Arguments @("exec", $restoreBackupName, "sh", "/drill.sh", "restore", $snapshotId)
 
         $restoreRedisName = "$prefix-restore-redis"
         $containers.Add($restoreRedisName)
@@ -332,10 +408,11 @@ try {
         Invoke-SmokeDocker -Arguments $arguments -Quiet
         Wait-Health -Status 200 -Edge "true"
         Invoke-Driver -Phase "read_recovered" -NetworkName $restoreNetwork
+        $restoreTimer.Stop()
         Invoke-SmokeDocker -Arguments @("restart", $apiName) -Quiet
         Wait-Health -Status 200 -Edge "true"
         Invoke-Driver -Phase "read_recovered" -NetworkName $restoreNetwork
-        Write-Host "isolated_edge_read_restore=verified archive_sha256=$sourceHash"
+        Write-Host "isolated_edge_encrypted_read_restore=verified recovery_seconds=$([Math]::Round($restoreTimer.Elapsed.TotalSeconds, 1))"
     }
     Write-Host "[OK] Isolated Edge read-only cold/interrupted-install/restart smoke passed."
 }
@@ -377,7 +454,12 @@ finally {
         if (-not $resolved.StartsWith("$scratch$([IO.Path]::DirectorySeparatorChar)$prefix-", [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing cleanup of a file outside the isolated scratch prefix."
         }
-        try { Remove-Item -LiteralPath $resolved -Force -ErrorAction Stop }
+        try {
+            # A preceding step may fail before creating a registered output file.
+            if (Test-Path -LiteralPath $resolved) {
+                Remove-Item -LiteralPath $resolved -Force -ErrorAction Stop
+            }
+        }
         catch { $cleanupFailed = $true }
     }
     if ($cleanupFailed) {
