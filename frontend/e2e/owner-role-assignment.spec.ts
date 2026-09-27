@@ -95,7 +95,15 @@ test.describe("Owner employee access assignment", () => {
 
       await loginInBrowser(page, OWNER);
       await page.goto("/users");
-      const employeeRow = page.getByRole("row", { name: new RegExp(cashier!.full_name) });
+      const employeeRow = page
+        .getByRole("list", { name: "Сотрудники аптеки" })
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("button", {
+            name: `Открыть профиль: ${cashier!.full_name}`,
+            exact: true,
+          }),
+        });
       await expect(employeeRow).toBeVisible();
       await employeeRow.getByRole("button", { name: `Действия для ${cashier!.full_name}` }).click();
       await page.getByRole("menuitem", { name: "Настроить доступ" }).click();

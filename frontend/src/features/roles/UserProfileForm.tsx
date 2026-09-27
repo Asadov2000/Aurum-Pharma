@@ -21,9 +21,16 @@ interface Props {
   onSaved: () => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  editingAllowed?: boolean;
 }
 
-export function UserProfileForm({ user, onSaved, onCancel, onDirtyChange }: Props): JSX.Element {
+export function UserProfileForm({
+  user,
+  onSaved,
+  onCancel,
+  onDirtyChange,
+  editingAllowed = true,
+}: Props): JSX.Element {
   const updateUser = useUpdateUser();
   const [topError, setTopError] = useState<string | null>(null);
   const form = useForm<FormValues>({
@@ -39,6 +46,10 @@ export function UserProfileForm({ user, onSaved, onCancel, onDirtyChange }: Prop
   }, [isDirty, onDirtyChange]);
 
   const onSubmit = form.handleSubmit(async (values) => {
+    if (!editingAllowed) {
+      setTopError("Обновите список сотрудников перед сохранением.");
+      return;
+    }
     const parsed = schema.safeParse(values);
     if (!parsed.success) {
       const seen = new Set<string>();
@@ -125,7 +136,11 @@ export function UserProfileForm({ user, onSaved, onCancel, onDirtyChange }: Prop
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
-        <Button type="submit" isLoading={form.formState.isSubmitting} disabled={!isDirty}>
+        <Button
+          type="submit"
+          isLoading={form.formState.isSubmitting}
+          disabled={!isDirty || !editingAllowed}
+        >
           Сохранить
         </Button>
       </div>

@@ -90,7 +90,15 @@ test("new owner may skip MFA, enable and disable it in settings, and confirm a c
     await loginInBrowser(page, { email: ownerEmail, password });
     await page.goto("/users");
     await expect(suggestion).toBeHidden();
-    const successor = page.getByRole("row", { name: /Получатель владения/ });
+    const successor = page
+      .getByRole("list", { name: "Сотрудники аптеки" })
+      .getByRole("listitem")
+      .filter({
+        has: page.getByRole("button", {
+          name: "Открыть профиль: Получатель владения",
+          exact: true,
+        }),
+      });
     await successor.getByRole("button", { name: "Действия для Получатель владения" }).click();
     await page.getByRole("menuitem", { name: "Передать владение" }).click();
     await page

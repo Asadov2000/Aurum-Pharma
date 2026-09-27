@@ -24,6 +24,7 @@ interface ActionMenuProps {
   label: string;
   items: ActionMenuItem[];
   isLoading?: boolean;
+  disabled?: boolean;
 }
 
 const MENU_WIDTH = 224;
@@ -32,7 +33,7 @@ const MENU_ITEM_HEIGHT = 48;
 const VIEWPORT_GUTTER = 8;
 
 export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(function ActionMenu(
-  { label, items, isLoading = false },
+  { label, items, isLoading = false, disabled = false },
   forwardedRef,
 ): JSX.Element {
   const menuId = useId();
@@ -40,6 +41,9 @@ export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(functio
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   const setTriggerRef = useCallback(
     (element: HTMLButtonElement | null) => {
       triggerRef.current = element;
@@ -56,6 +60,7 @@ export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(functio
   };
 
   const openMenu = () => {
+    if (disabled) return;
     const trigger = triggerRef.current;
     if (!trigger) return;
 
@@ -150,12 +155,14 @@ export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(functio
         aria-controls={open ? menuId : undefined}
         title={label}
         isLoading={isLoading}
+        disabled={disabled}
         onClick={() => (open ? closeMenu() : openMenu())}
       >
         <span aria-hidden="true">⋮</span>
       </Button>
 
       {open &&
+        !disabled &&
         createPortal(
           <div
             ref={menuRef}

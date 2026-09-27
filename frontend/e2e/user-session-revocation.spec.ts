@@ -2,6 +2,9 @@ import { request, test } from "@playwright/test";
 
 import { apiContext, apiLogin, DEV, expect, loginInBrowser, OWNER, uniqueName } from "./helpers";
 
+// Account contacts and authentication cookies must not enter browser artifacts.
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 test.describe("Employee session security", () => {
   test("owner ends an employee's sessions but cannot target the owner account", async ({
     page,
@@ -31,13 +34,23 @@ test.describe("Employee session security", () => {
       await page.goto("/users");
       await expect(page.getByRole("heading", { name: "Сотрудники" })).toBeVisible();
 
-      const ownerRow = page.getByRole("row", { name: /Demo Owner/ });
+      const ownerRow = page
+        .getByRole("list", { name: "Сотрудники аптеки" })
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("button", { name: "Открыть профиль: Demo Owner", exact: true }),
+        });
       await ownerRow.getByRole("button", { name: "Действия для Demo Owner" }).click();
       const ownerMenu = page.getByRole("menu", { name: "Действия для Demo Owner" });
       await expect(ownerMenu.getByRole("menuitem", { name: "Завершить сеансы" })).toHaveCount(0);
       await page.keyboard.press("Escape");
 
-      const employeeRow = page.getByRole("row", { name: new RegExp(fullName) });
+      const employeeRow = page
+        .getByRole("list", { name: "Сотрудники аптеки" })
+        .getByRole("listitem")
+        .filter({
+          has: page.getByRole("button", { name: `Открыть профиль: ${fullName}`, exact: true }),
+        });
       const employeeActions = employeeRow.getByRole("button", {
         name: `Действия для ${fullName}`,
       });

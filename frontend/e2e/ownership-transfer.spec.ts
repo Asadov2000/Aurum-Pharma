@@ -92,7 +92,15 @@ test.describe("Protected ownership transfer", () => {
 
         await installBrowserSession(page, ownerEnrollment.tokens);
         await page.goto("/users");
-        const successorRow = page.getByRole("row", { name: new RegExp(successorName) });
+        const successorRow = page
+          .getByRole("list", { name: "Сотрудники аптеки" })
+          .getByRole("listitem")
+          .filter({
+            has: page.getByRole("button", {
+              name: `Открыть профиль: ${successorName}`,
+              exact: true,
+            }),
+          });
         await expect(successorRow).toBeVisible();
         await successorRow.getByRole("button", { name: `Действия для ${successorName}` }).click();
         await page.getByRole("menuitem", { name: "Передать владение" }).click();
