@@ -88,12 +88,18 @@ async function expectPersonalProfile(page: Page, response: Response, selfId: str
   await expect(main.getByRole("heading", { name: "Способы входа", exact: true })).toBeVisible();
   // Use counts rather than locator failure output to avoid printing account data.
   await expect
-    .poll(() => main.getByText(profile.full_name, { exact: true }).count())
-    .toBeGreaterThan(0);
+    .poll(() =>
+      main.getByRole("heading", { name: profile.full_name, exact: true, level: 2 }).count(),
+    )
+    .toBe(1);
+  await expect
+    .poll(() => main.locator("dl").getByText(profile.full_name, { exact: true }).count())
+    .toBe(1);
   await expect(main.getByRole("textbox", { name: /^(?:Имя|ФИО|Полное имя)$/ })).toHaveCount(0);
 
   for (const [name, href] of [
     ["Безопасность аккаунта", "/security"],
+    ["Открыть безопасность", "/security"],
     ["Настройки интерфейса", "/settings"],
     ["Уведомления", "/notifications"],
   ] as const) {
