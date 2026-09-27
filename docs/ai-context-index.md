@@ -64,6 +64,7 @@
 | Границы компонентов и план развития | [project-structure.md](project-structure.md), [implementation-roadmap.md](implementation-roadmap.md) | отличать реализованные пути и проверенные результаты от планов |
 | Windows-клиент / будущий установщик | `desktop/AurumPharma.Desktop/`, `desktop/AurumPharma.Desktop.Core/`; [desktop-host-implementation.md](desktop-host-implementation.md), [desktop-bridge.md](desktop-bridge.md) | desktop core tests, packaged WinUI build, `scripts/windows-host-readiness.ps1`; установщик и offline runtime ещё не выпущены |
 | Автономность точки до 30 дней | [ADR-0043](adr/0043-thirty-day-branch-edge-continuity.md), [контракт автономной работы](offline-operations-contract.md), `backend/app/domains/sync/` | fault matrix, Edge integration, Windows и recovery-тесты; текущий runtime остаётся fail-closed |
+| Зашифрованная репетиция read-only Edge recovery | [edge-encrypted-recovery-drill.md](edge-encrypted-recovery-drill.md), `scripts/smoke-edge-cold-read.ps1 -VerifyRestore`, `scripts/edge-read-recovery-drill.sh` | Restic, точный snapshot ID, неверный ключ и повреждённый ciphertext; синтетика на одном хосте, не production backup или TPM-перенос |
 | Общий UI | `frontend/src/components/` | `frontend/tests/components/` |
 | Общие frontend-механизмы | `frontend/src/lib/`, `frontend/src/stores/` | `frontend/tests/lib/`, тесты фичи |
 | Browser flow | `frontend/e2e/*.spec.ts` | изолированный `scripts/e2e-isolated.ps1` |
