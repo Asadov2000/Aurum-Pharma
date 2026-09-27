@@ -34,6 +34,9 @@ from app.domains.auth.identity_schemas import (
 )
 from app.domains.auth.identity_service import IdentityService
 from app.domains.auth.models import UserPreferences
+from app.domains.auth.profile_repository import ProfileRepository
+from app.domains.auth.profile_schemas import ProfileResponse
+from app.domains.auth.profile_service import ProfileService
 from app.domains.auth.repository import AuthRepository
 from app.domains.auth.schemas import (
     AccountMfaDisableRequest,
@@ -844,6 +847,23 @@ async def revoke_session(
         current_session_id=user.session_id,
     )
     return SessionRevokeResponse(revoked_count=1)
+
+
+@router.get("/profile", response_model=ProfileResponse)
+async def profile(
+    response: Response,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> ProfileResponse:
+    _set_auth_no_store(response)
+    service = ProfileService(ProfileRepository(db), AuthRepository(db))
+    return await service.get_profile(
+        user_id=user.user_id,
+        tenant_id=user.tenant_id,
+        branch_assignments=user.branch_assignments,
+        is_tenant_owner=user.is_tenant_owner,
+        is_support_access=user.support_access_session_id is not None,
+    )
 
 
 @router.get("/me", response_model=MeResponse)

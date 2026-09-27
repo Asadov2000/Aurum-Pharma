@@ -30,6 +30,7 @@ describe("route access", () => {
     expect(canAccessPath("/sales", SELLER)).toBe(true);
     expect(canAccessPath("/payment-reconciliation", SELLER)).toBe(false);
     expect(canAccessPath("/audit", SELLER)).toBe(true);
+    expect(canAccessPath("/profile", SELLER)).toBe(true);
     expect(canAccessPath("/security", SELLER)).toBe(true);
     expect(canAccessPath("/settings", SELLER)).toBe(true);
     expect(canAccessPath("/branches", SELLER)).toBe(false);
@@ -62,6 +63,22 @@ describe("route access", () => {
 
   it("uses the POS as the primary fallback for a cashier", () => {
     expect(firstAccessiblePath(SELLER)).toBe("/pos");
+  });
+
+  it("keeps the personal profile accessible without tenant or user-management permissions", () => {
+    const personalAccount: RouteAccessContext = {
+      ...SELLER,
+      hasTenant: false,
+      permissions: [],
+    };
+
+    expect(canAccessPath("/profile", personalAccount)).toBe(true);
+    expect(accessibleInternalPath("/profile", personalAccount)).toBe("/profile");
+    expect(accessibleInternalPath("/profile?section=contacts", SELLER)).toBe(
+      "/profile?section=contacts",
+    );
+    expect(canAccessPath("/users", SELLER)).toBe(false);
+    expect(canAccessPath("/roles", SELLER)).toBe(false);
   });
 
   it("keeps an accessible internal return path including its search and hash", () => {
@@ -121,6 +138,8 @@ describe("route access", () => {
     expect(canAccessPath("/admin", support)).toBe(true);
     expect(canAccessPath("/admin/tenants", support)).toBe(true);
     expect(canAccessPath("/notifications", support)).toBe(true);
+    expect(canAccessPath("/profile", support)).toBe(true);
+    expect(accessibleInternalPath("/profile", support)).toBe("/profile");
     expect(canAccessPath("/security", support)).toBe(true);
     expect(canAccessPath("/catalog", support)).toBe(false);
     expect(canAccessPath("/roles", support)).toBe(false);
@@ -160,6 +179,8 @@ describe("route access", () => {
 
     expect(canAccessPath("/roles", scopedSupport)).toBe(true);
     expect(canAccessPath("/users", scopedSupport)).toBe(true);
+    expect(canAccessPath("/profile", scopedSupport)).toBe(true);
+    expect(accessibleInternalPath("/profile", scopedSupport)).toBe("/profile");
     expect(canAccessPath("/", scopedSupport)).toBe(false);
     expect(canAccessPath("/catalog", scopedSupport)).toBe(false);
     expect(

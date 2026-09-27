@@ -123,9 +123,12 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       ? "Синхронизация"
       : pathname === "/billing"
         ? "Расчёты с Aurum"
-        : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
+        : pathname === "/profile"
+          ? "Мой профиль"
+          : (activeItem?.pageTitle ?? activeItem?.label ?? "Aurum Pharma");
   const pageOwnsDesktopTitle =
     pathname === "/" ||
+    pathname === "/profile" ||
     pathname === "/catalog" ||
     pathname === "/sales" ||
     pathname === "/suppliers" ||
@@ -381,14 +384,19 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
               >
                 <NotificationIcon />
               </Link>
-              <div className="hidden min-w-0 items-center gap-2 border-l border-border pl-3 xl:flex">
+              <Link
+                to="/profile"
+                aria-label="Открыть мой профиль"
+                title="Мой профиль"
+                className="flex min-h-9 min-w-9 items-center justify-center gap-2 rounded-md xl:border-l xl:border-border xl:px-3 hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              >
                 <span
                   aria-hidden="true"
                   className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-xs font-semibold text-primary"
                 >
                   {initial}
                 </span>
-                <span className="min-w-0 max-w-44 leading-tight">
+                <span className="hidden min-w-0 max-w-44 leading-tight xl:block">
                   <span className="block truncate text-sm font-semibold text-foreground">
                     {name}
                   </span>
@@ -396,7 +404,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
                     <span className="block truncate text-xs text-foreground-muted">{caption}</span>
                   )}
                 </span>
-              </div>
+              </Link>
               <Suspense fallback={<div aria-hidden="true" className="h-9 w-9 shrink-0" />}>
                 <AppearanceMenu />
               </Suspense>
@@ -451,7 +459,9 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         >
           <Suspense fallback={null}>
             <AccountSecuritySurface
-              showPrompt={pathname !== "/security" && pathname !== "/settings"}
+              showPrompt={
+                pathname !== "/security" && pathname !== "/settings" && pathname !== "/profile"
+              }
             />
           </Suspense>
           {children}

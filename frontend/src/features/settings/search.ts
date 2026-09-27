@@ -3,7 +3,7 @@ export const settingsCategories = [
     id: "account",
     group: "personal",
     title: "Мой аккаунт",
-    description: "Профиль и уровень доступа",
+    description: "Личные данные и контакты",
     keywords: "профиль пользователь учётная запись email доступ",
     source: "app_user",
   },

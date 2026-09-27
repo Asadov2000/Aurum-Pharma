@@ -120,7 +120,7 @@ function supportContextPath(config: InternalAxiosRequestConfig): string | null {
 function acceptsSupportContext(pathname: string | null, method: string | undefined): boolean {
   if (pathname === null) return false;
   const normalizedMethod = (method ?? "GET").toUpperCase();
-  if (pathname === "/auth/me") return normalizedMethod === "GET";
+  if (pathname === "/auth/me" || pathname === "/auth/profile") return normalizedMethod === "GET";
   if (pathname === "/permissions" || pathname === "/templates") {
     return normalizedMethod === "GET";
   }

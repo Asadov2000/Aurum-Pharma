@@ -21,7 +21,7 @@ from app.core.security import decode_token
 
 
 def _accepts_support_access(path: str, method: str) -> bool:
-    if path == "/api/v1/auth/me":
+    if path in {"/api/v1/auth/me", "/api/v1/auth/profile"}:
         return method == "GET"
     if path in {"/api/v1/permissions", "/api/v1/templates"}:
         return method == "GET"

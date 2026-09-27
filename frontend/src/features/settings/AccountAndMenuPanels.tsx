@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 
-import { Badge, Button, Select } from "@/components/ui";
+import { Button, Select } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { buildNav } from "@/components/layout/nav";
@@ -19,19 +19,11 @@ import { SettingRow, SettingsNotice, SettingsSectionHeader } from "./SettingsPri
 
 export function AccountSettingsPanel(): JSX.Element {
   const { user } = useAuth();
-  const accessLabel = user?.is_developer
-    ? "Разработчик Aurum"
-    : user?.is_administrator
-      ? "Администратор Aurum"
-      : user?.is_tenant_owner
-        ? "Владелец аптеки"
-        : "Сотрудник аптеки";
-
   return (
     <div className="space-y-4">
       <SettingsSectionHeader
         title="Мой аккаунт"
-        description="Данные текущей учётной записи и быстрый доступ к личной безопасности."
+        description="Личные данные, контакты и назначенные роли собраны в вашем профиле."
       />
 
       <div>
@@ -43,27 +35,20 @@ export function AccountSettingsPanel(): JSX.Element {
         <SettingRow title="Email">
           <div className="break-all text-sm text-foreground-secondary">{user?.email ?? "—"}</div>
         </SettingRow>
-        <SettingRow title="Уровень доступа">
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge tone={user?.is_tenant_owner ? "success" : "neutral"}>{accessLabel}</Badge>
-            <span className="text-xs text-foreground-muted">Уровень {user?.level ?? "—"}</span>
-          </div>
-        </SettingRow>
-        <SettingRow title="Состояние аккаунта">
-          <div>
-            <Badge tone={user?.status === "active" ? "success" : "warning"}>
-              {user?.status === "active" ? "Активен" : "Требует внимания"}
-            </Badge>
-          </div>
-        </SettingRow>
       </div>
 
       <div className="flex flex-wrap gap-3 border-t border-border pt-4">
         <Link
+          to="/profile"
+          className="inline-flex h-[var(--control-height-md)] items-center rounded-md border border-border bg-surface px-4 text-sm font-medium text-foreground hover:bg-foreground/[0.04]"
+        >
+          Открыть мой профиль
+        </Link>
+        <Link
           to="/security"
           className="inline-flex h-[var(--control-height-md)] items-center rounded-md border border-border bg-surface px-4 text-sm font-medium text-foreground hover:bg-foreground/[0.04]"
         >
-          Активные сеансы
+          Безопасность аккаунта
         </Link>
         <Link
           to="/notifications"
