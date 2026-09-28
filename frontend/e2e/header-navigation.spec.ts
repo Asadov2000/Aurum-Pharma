@@ -276,7 +276,7 @@ test.describe("Header navigation", () => {
 
   test("contains the header and its dialogs at 320px and aligns the desktop sidebar", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await loginInBrowser(page, OWNER);
     await openWorkspace(page);
     const header = page.getByTestId("app-shell-header");
@@ -294,12 +294,16 @@ test.describe("Header navigation", () => {
       .toBeLessThanOrEqual(1);
     await expectNoHorizontalOverflow(page);
 
+    // This crop contains no contact details or business records.
+    await header.screenshot({ path: testInfo.outputPath("header-desktop.png") });
+
     await page.setViewportSize({ width: 320, height: 568 });
     await expectNoHorizontalOverflow(page);
     const headerBounds = await header.boundingBox();
     expect(headerBounds).not.toBeNull();
     expect(headerBounds!.x).toBeGreaterThanOrEqual(0);
     expect(headerBounds!.x + headerBounds!.width).toBeLessThanOrEqual(320);
+    await header.screenshot({ path: testInfo.outputPath("header-mobile.png") });
     for (const name of ["Перейти в раздел", "Меню профиля", "Состояние соединения"] as const) {
       await header.getByRole("button", { name, exact: true }).click();
       const dialog = page.getByRole("dialog", { name, exact: true });
