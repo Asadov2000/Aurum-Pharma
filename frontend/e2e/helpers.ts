@@ -191,6 +191,14 @@ export async function loginInBrowser(page: Page, creds: Creds): Promise<TokenPai
   }
 }
 
+export async function logoutInBrowser(page: Page): Promise<void> {
+  const profileMenu = page.getByRole("dialog", { name: "Меню профиля", exact: true });
+  if (!(await profileMenu.isVisible())) {
+    await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+  }
+  await profileMenu.getByRole("button", { name: "Выйти", exact: true }).click();
+}
+
 export async function selectTouchDensity(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Вид интерфейса" }).click();
   await page.getByRole("button", { name: "Сенсор", exact: true }).click();

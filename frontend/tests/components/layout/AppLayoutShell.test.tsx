@@ -70,6 +70,7 @@ vi.mock("@/features/settings/queries", () => ({
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Modal } from "@/components/ui/Modal";
+import { ConnectivityContext } from "@/lib/connectivityContext";
 
 describe("AppLayout shell", () => {
   beforeEach(() => {
@@ -79,6 +80,7 @@ describe("AppLayout shell", () => {
     layoutState.pathname = "/pos";
     layoutState.preferences = undefined;
     authMock.user.permissions = ["catalog.view", "pos.sell"];
+    authMock.logout.mockReset();
     setOnlineStatus(true);
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -113,13 +115,15 @@ describe("AppLayout shell", () => {
     await waitFor(() => expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument());
 
     expect(await screen.findByTestId("tenant-access-banner")).toBeInTheDocument();
-    const badge = screen.getByTestId("runtime-surface-badge");
-    const header = badge.closest("header");
+    const header = screen.getByTestId("app-shell-header");
+    fireEvent.click(within(header).getByRole("button", { name: "Меню профиля" }));
+    const profileMenu = screen.getByRole("dialog", { name: "Меню профиля" });
+    const badge = await within(profileMenu).findByTestId("runtime-surface-badge");
     const main = screen.getByRole("main");
 
     expect(header).not.toBeNull();
     expect(within(header as HTMLElement).getByRole("heading", { name: title })).toBeInTheDocument();
-    expect(within(header as HTMLElement).getByTestId("runtime-surface-badge")).toBe(badge);
+    expect(within(profileMenu).getByTestId("runtime-surface-badge")).toBe(badge);
     expect(within(main).queryByTestId("runtime-surface-badge")).not.toBeInTheDocument();
     expect(within(main).getByText("Page content")).toBeInTheDocument();
     expect(within(main).queryByTestId("tenant-access-banner")).not.toBeInTheDocument();
@@ -135,13 +139,77 @@ describe("AppLayout shell", () => {
     );
 
     const header = screen.getByTestId("app-shell-header");
-    const profile = await within(header).findByRole("link", {
-      name: "Открыть мой профиль",
+    fireEvent.click(within(header).getByRole("button", { name: "Меню профиля" }));
+    const menu = screen.getByRole("dialog", { name: "Меню профиля" });
+    const profile = await within(menu).findByRole("link", {
+      name: "Мой профиль",
       exact: true,
     });
     expect(profile).toHaveAttribute("href", "/profile");
-    expect(within(profile).getByText(authMock.user.full_name)).toBeInTheDocument();
+    expect(within(menu).getByText(authMock.user.full_name)).toBeInTheDocument();
+    expect(within(header).queryByText(authMock.user.email)).not.toBeInTheDocument();
     expect(within(screen.getByRole("main")).getByText("Personal profile content")).toBeVisible();
+  });
+
+  it("filters quick links and search results when permissions are withdrawn", async () => {
+    const view = render(<AppLayout>Content</AppLayout>);
+    const shortcuts = screen.getByRole("navigation", { name: "Быстрые переходы" });
+    expect(within(shortcuts).getByRole("link", { name: "Каталог" })).toBeInTheDocument();
+    expect(within(shortcuts).queryByRole("link", { name: "Отчёты" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    const finder = await screen.findByRole("dialog", { name: "Перейти в раздел" });
+    expect(within(finder).getByRole("button", { name: "Каталог" })).toBeInTheDocument();
+
+    authMock.user.permissions = ["pos.sell"];
+    view.rerender(<AppLayout>Content</AppLayout>);
+    expect(within(shortcuts).queryByRole("link", { name: "Каталог" })).not.toBeInTheDocument();
+    expect(within(finder).queryByRole("button", { name: "Каталог" })).not.toBeInTheDocument();
+    fireEvent.click(within(finder).getByRole("button", { name: "Касса" }));
+    expect(layoutState.navigate).toHaveBeenCalledWith({ to: "/pos" });
+    expect(screen.queryByRole("dialog", { name: "Перейти в раздел" })).not.toBeInTheDocument();
+  });
+
+  it("uses saved favorites without restoring hidden or unavailable routes", () => {
+    window.localStorage.setItem(
+      "aurum:sidebar:v1:user-1%3Atenant-1",
+      JSON.stringify({
+        hiddenRoutes: ["/catalog"],
+        favoriteRoutes: ["/pos", "/catalog", "/reports"],
+      }),
+    );
+    render(<AppLayout>Content</AppLayout>);
+    const shortcuts = screen.getByRole("navigation", { name: "Быстрые переходы" });
+    expect(
+      within(shortcuts)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/pos"]);
+  });
+
+  it("checks real connection state and restores focus after closing the profile menu", () => {
+    const checkNow = vi.fn();
+    render(
+      <ConnectivityContext.Provider
+        value={{ status: "server-unavailable", canUseServer: false, checkNow }}
+      >
+        <AppLayout>Content</AppLayout>
+      </ConnectivityContext.Provider>,
+    );
+    const connection = screen.getByRole("button", { name: "Состояние соединения" });
+    fireEvent.click(connection);
+    const details = screen.getByRole("dialog", { name: "Состояние соединения" });
+    expect(within(details).getByText(/Сервис недоступен/)).toBeInTheDocument();
+    fireEvent.click(within(details).getByRole("button", { name: "Проверить соединение" }));
+    expect(checkNow).toHaveBeenCalledOnce();
+
+    const profile = screen.getByRole("button", { name: "Меню профиля" });
+    fireEvent.click(profile);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Меню профиля" })).not.toBeInTheDocument();
+    expect(profile).toHaveFocus();
+    fireEvent.click(profile);
+    fireEvent.click(screen.getByRole("button", { name: "Выйти", exact: true }));
+    expect(authMock.logout).toHaveBeenCalledOnce();
   });
 
   it("keeps the page locked when the mobile drawer closes before another modal", async () => {

@@ -74,15 +74,25 @@ test.describe("Owner onboarding (dev)", () => {
 
     // The «Владелец» role gives the full owner permission set → tenant items
     // appear (POS + role management), and the owner is NOT a support user.
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Роли" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Управление", exact: true }),
+    ).toHaveCount(0);
 
     // ---- the owner gets a concrete, actionable launch checklist ----
     await page.goto("/onboarding");
     await expect(page.getByRole("heading", { level: 1, name: "Старт" })).toBeVisible();
     await expect(page.getByText("Профиль аптеки")).toBeVisible();
-    await expect(page.getByText("Владелец аптеки")).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("heading", { name: "Владелец аптеки", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Настроить точку" }).first()).toBeVisible();
 
     await page.getByRole("link", { name: "Настроить точку" }).first().click();

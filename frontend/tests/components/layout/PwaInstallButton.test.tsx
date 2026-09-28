@@ -2,15 +2,27 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { PwaInstallButton } from "@/components/layout/PwaInstallButton";
-import { type BeforeInstallPromptEvent } from "@/lib/pwa";
+import { registerPwaServiceWorker, type BeforeInstallPromptEvent } from "@/lib/pwa";
 
 describe("PwaInstallButton", () => {
+  it("keeps the browser install prompt until the profile menu mounts", async () => {
+    registerPwaServiceWorker({ isDev: true });
+    const prompt = vi.fn().mockResolvedValue(undefined);
+    const event = createBeforeInstallPromptEvent(prompt, "accepted");
+    window.dispatchEvent(event);
+    const firstMenu = render(<PwaInstallButton surface="browser" />);
+    expect(screen.getByRole("button", { name: "Установить приложение" })).toBeVisible();
+    firstMenu.unmount();
+    render(<PwaInstallButton surface="browser" />);
+    fireEvent.click(screen.getByRole("button", { name: "Установить приложение" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("stays hidden until the browser allows installation", () => {
     render(<PwaInstallButton surface="browser" />);
 
-    expect(
-      screen.queryByRole("button", { name: "Установить приложение" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Установить приложение" })).not.toBeInTheDocument();
   });
 
   it("captures beforeinstallprompt and opens the browser install prompt", async () => {
@@ -71,9 +83,7 @@ describe("PwaInstallButton", () => {
       window.dispatchEvent(createBeforeInstallPromptEvent(prompt, "accepted"));
     });
 
-    expect(
-      screen.queryByRole("button", { name: "Установить приложение" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Установить приложение" })).not.toBeInTheDocument();
     expect(prompt).not.toHaveBeenCalled();
   });
 });

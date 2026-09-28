@@ -6,6 +6,7 @@ import {
   currentTotp,
   DEV,
   loginInBrowser,
+  logoutInBrowser,
   makeSupportSessionRequireStepUp,
   OWNER,
 } from "./helpers";
@@ -71,7 +72,11 @@ test.describe("Auth", () => {
     await page.getByLabel("Код подтверждения").fill(currentTotp(DEV.totpSecret!));
     await page.getByRole("button", { name: "Подтвердить" }).click();
 
-    await expect(page.getByRole("link", { name: "Управление", exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Управление", exact: true }),
+    ).toBeVisible();
   });
 
   test("owner completes MFA in the UI and keeps tenant access", async ({ page }) => {
@@ -83,8 +88,16 @@ test.describe("Auth", () => {
     await page.getByLabel("Код подтверждения").fill(currentTotp(OWNER.totpSecret!));
     await page.getByRole("button", { name: "Подтвердить" }).click();
 
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Управление", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("retries a protected request after password confirmation", async ({ page }) => {
@@ -97,7 +110,11 @@ test.describe("Auth", () => {
     );
     await page.goto("/audit");
     await deniedRequest;
-    await expect(page.getByRole("link", { name: "Управление", exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Управление", exact: true }),
+    ).toBeVisible();
     await expect(page.locator("#scope")).toHaveValue("global");
 
     const dialog = page.getByRole("dialog", { name: "Подтверждение действия" });
@@ -118,8 +135,16 @@ test.describe("Auth", () => {
     await page.goto("/");
 
     await expect(page.getByRole("link", { name: "Точки" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Управление", exact: true })).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Управление", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("independent desktop and mobile owner sessions keep the same branches after reload", async ({
@@ -319,7 +344,11 @@ test.describe("Auth", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
     expect(operationIds.length).toBeGreaterThanOrEqual(2);
     expect(new Set(operationIds).size).toBe(1);
     await expect(page).not.toHaveURL(/\/login/);
@@ -328,7 +357,11 @@ test.describe("Auth", () => {
   test("skip link moves keyboard users straight to main content", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
     await page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
@@ -387,7 +420,7 @@ test.describe("Auth", () => {
   test("logout returns to /login", async ({ page }) => {
     await loginInBrowser(page, OWNER);
     await page.goto("/");
-    await page.getByRole("button", { name: /Выйти/ }).click();
+    await logoutInBrowser(page);
     await expect(page).toHaveURL(/\/login/);
 
     const access = await page.evaluate(() => window.localStorage.getItem("aurum.access_token"));

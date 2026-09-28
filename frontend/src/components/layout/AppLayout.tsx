@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
   useCallback,
@@ -9,20 +10,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
+import { useConnectivity } from "@/lib/connectivityContext";
 
-import { BrandMark } from "./BrandMark";
-import { ConnectivityIndicator } from "./ConnectivityIndicator";
+import { AppHeader } from "./AppHeader";
 import { ConnectivityStatusBanner } from "./ConnectivityStatusBanner";
-import { PwaInstallButton } from "./PwaInstallButton";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
-import { RuntimeSurfaceBadge } from "./RuntimeSurfaceBadge";
 import { Sidebar } from "./Sidebar";
 import { buildNav, findActiveNavItem } from "./nav";
 import {
@@ -38,10 +37,69 @@ import {
 } from "./sidebarPreferences";
 import { type AppRoutePath } from "./routeAccess";
 
-const AppearanceMenu = lazy(async () => {
-  const module = await import("@/components/AppearanceMenu");
-  return { default: module.AppearanceMenu };
-});
+let loadedSectionSearch: typeof import("./SectionSearchDialog") | undefined;
+
+function createSectionSearchDialog() {
+  return lazy(async () => {
+    if (loadedSectionSearch) return loadedSectionSearch;
+    // A failed ESM fetch can remain cached until reload; never initiate one offline.
+    if (!navigator.onLine) return { default: SectionSearchUnavailable };
+    return import("./SectionSearchDialog")
+      .then((module) => {
+        loadedSectionSearch = module;
+        return module;
+      })
+      .catch(() => ({ default: SectionSearchUnavailable }));
+  });
+}
+
+function SectionSearchUnavailable({
+  open,
+  onClose,
+}: ComponentProps<(typeof import("./SectionSearchDialog"))["default"]>): JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { status } = useConnectivity();
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    const previousFocus = document.activeElement;
+    dialog.showModal();
+    const releaseScrollLock = acquireBodyScrollLock();
+    return () => {
+      dialog.close();
+      releaseScrollLock();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected)
+        previousFocus.focus({ preventScroll: true });
+    };
+  }, [open]);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="Перейти в раздел"
+      data-aurum-modal
+      className="app-section-search-unavailable"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <h2 className="app-search-error-title">Перейти в раздел</h2>
+      <p role="alert" className="app-header-detail">
+        Поиск не загрузился. Используйте боковое меню или обновите страницу при наличии сети.
+      </p>
+      <Button className="mt-4" variant="secondary" onClick={onClose}>
+        Закрыть
+      </Button>
+      <Button
+        className="ml-2 mt-4"
+        disabled={status === "offline"}
+        onClick={() => window.location.reload()}
+      >
+        Обновить страницу
+      </Button>
+    </dialog>
+  );
+}
 const SupportAccessBanner = lazy(async () => {
   const module = await import("@/features/supportAccess/SupportAccessBanner");
   return { default: module.SupportAccessBanner };
@@ -67,6 +125,12 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const preferencesQuery = useUserPreferencesQuery();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [SectionSearchDialog, setSectionSearchDialog] = useState(createSectionSearchDialog);
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSectionSearchDialog(createSectionSearchDialog());
+  };
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
@@ -141,19 +205,23 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const workspaceLabel =
     user?.support_access?.tenant_name ?? (hasTenant ? "Рабочая область аптеки" : "Платформа Aurum");
 
-  // Clean identity: a recognizable name + a quiet caption. We have no role name
-  // in the payload, so the caption is the support role (dev/admin) when set, or
-  // the email for tenant users (what they recognize) — never the English "Account".
-  const fullName = user?.full_name?.trim();
-  const name = fullName || user?.email || "—";
+  const name = user?.full_name?.trim() || "Мой аккаунт";
   const caption = user?.is_developer
     ? "Разработчик"
     : user?.is_administrator
       ? "Администратор"
-      : fullName
-        ? (user?.email ?? null)
-        : null;
-  const initial = name.charAt(0).toUpperCase();
+      : isTenantOwner
+        ? "Владелец аптеки"
+        : "Сотрудник аптеки";
+  const quickFavorites = sidebarItems.filter((item) =>
+    sidebarPreferences.favoriteRoutes.includes(item.to),
+  );
+  const defaultQuickRoutes =
+    isSupport && !hasTenant ? ["/", "/admin"] : ["/", "/pos", "/catalog", "/incoming", "/reports"];
+  const quickItems =
+    quickFavorites.length > 0
+      ? quickFavorites
+      : defaultQuickRoutes.flatMap((to) => sidebarItems.filter((item) => item.to === to));
   const serverSidebarPreferences = useMemo(
     () =>
       preferencesQuery.data
@@ -301,12 +369,21 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     };
   }, [navigationOpen]);
 
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k") return;
+      if (document.querySelector("[data-aurum-modal]") || navigationOpen) return;
+      event.preventDefault();
+      setNavigationOpen(false);
+      setSearchOpen(true);
+    };
+    document.addEventListener("keydown", onShortcut);
+    return () => document.removeEventListener("keydown", onShortcut);
+  }, [navigationOpen]);
+
   return (
     <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
-      >
+      <a href="#main-content" className="app-shell-skip-link">
         Перейти к содержимому
       </a>
       {navigationOpen && (
@@ -341,88 +418,37 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
         </div>
       )}
 
-      <header
-        data-testid="app-shell-header"
-        className="sticky top-0 z-sticky border-b border-border bg-surface"
-      >
-        <div className="flex min-h-[var(--app-header-height)] items-stretch">
-          <div className="hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-shell-sidebar-border bg-shell-sidebar px-4 lg:flex">
-            <BrandMark tone="inverse" showName={sidebarExpanded} />
-          </div>
-
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 sm:px-4 xl:px-5">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-9 w-9 shrink-0 px-0 lg:hidden"
-                aria-label="Открыть меню"
-                aria-expanded={navigationOpen}
-                onClick={(event) => openNavigation(event.currentTarget)}
-              >
-                <MenuIcon />
-              </Button>
-              <BrandMark showName className="w-[150px] lg:hidden" />
-              {pageOwnsDesktopTitle ? (
-                <span className="hidden min-h-9 items-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground-secondary lg:inline-flex">
-                  {workspaceLabel}
-                </span>
-              ) : (
-                <h1 className="hidden truncate font-display text-xl font-semibold leading-none text-foreground lg:block">
-                  {pageTitle}
-                </h1>
-              )}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-              <ConnectivityIndicator />
-              <PwaInstallButton />
-              <RuntimeSurfaceBadge />
-              <Link
-                to="/notifications"
-                aria-label="Открыть уведомления"
-                title="Уведомления"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground-secondary transition-colors duration-fast hover:bg-foreground/5 hover:text-foreground"
-              >
-                <NotificationIcon />
-              </Link>
-              <Link
-                to="/profile"
-                aria-label="Открыть мой профиль"
-                title="Мой профиль"
-                className="flex min-h-9 min-w-9 items-center justify-center gap-2 rounded-md xl:border-l xl:border-border xl:px-3 hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-              >
-                <span
-                  aria-hidden="true"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary/10 font-display text-xs font-semibold text-primary"
-                >
-                  {initial}
-                </span>
-                <span className="hidden min-w-0 max-w-44 leading-tight xl:block">
-                  <span className="block truncate text-sm font-semibold text-foreground">
-                    {name}
-                  </span>
-                  {caption && (
-                    <span className="block truncate text-xs text-foreground-muted">{caption}</span>
-                  )}
-                </span>
-              </Link>
-              <Suspense fallback={<div aria-hidden="true" className="h-9 w-9 shrink-0" />}>
-                <AppearanceMenu />
-              </Suspense>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-9 w-9 px-0 xl:w-auto xl:px-3"
-                onClick={() => void logout()}
-              >
-                <LogoutIcon />
-                <span className="sr-only xl:not-sr-only">Выйти</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader
+        workspaceLabel={workspaceLabel}
+        pageTitle={pageTitle}
+        showPageTitle={!pageOwnsDesktopTitle}
+        name={name}
+        caption={caption}
+        sidebarExpanded={sidebarExpanded}
+        quickItems={quickItems}
+        hasFavorites={quickFavorites.length > 0}
+        canOpenMyWork={items.some((item) => item.to === "/my-work")}
+        pathname={pathname}
+        navigationOpen={navigationOpen}
+        onOpenNavigation={openNavigation}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenSettings={openSidebarSettings}
+        onLogout={() => void logout()}
+      />
+      {searchOpen ? (
+        <Suspense fallback={null}>
+          <SectionSearchDialog
+            open
+            items={orderedItems}
+            onClose={closeSearch}
+            onSelect={(to) => {
+              if (!items.some((item) => item.to === to)) return;
+              closeSearch();
+              void navigate({ to });
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <div className="lg:pl-[var(--app-sidebar-width)]">
         {user?.support_access ? (
@@ -454,11 +480,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             onOpenSettings={openSidebarSettings}
           />
         </div>
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="min-h-[calc(100dvh-var(--app-header-height))] min-w-0 px-3 py-4 sm:px-4 sm:py-5 xl:px-5"
-        >
+        <main id="main-content" tabIndex={-1} className="app-shell-main">
           <Suspense fallback={null}>
             <AccountSecuritySurface
               showPrompt={
@@ -531,60 +553,4 @@ function setSessionMarker(key: string): void {
   } catch {
     // The component ref prevents repeated redirects for this mounted session.
   }
-}
-
-function MenuIcon(): JSX.Element {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M4 7h16M4 12h16M4 17h16" />
-    </svg>
-  );
-}
-
-function LogoutIcon(): JSX.Element {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <path d="m16 17 5-5-5-5" />
-      <path d="M21 12H9" />
-    </svg>
-  );
-}
-
-function NotificationIcon(): JSX.Element {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M10.5 21a2 2 0 0 0 3 0" />
-    </svg>
-  );
 }
