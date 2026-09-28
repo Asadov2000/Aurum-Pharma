@@ -10,6 +10,7 @@ import {
   completePosSale,
   expect,
   loginInBrowser,
+  logoutInBrowser,
   OWNER,
   payPosSaleCash,
   seedAcceptedBatch,
@@ -145,7 +146,11 @@ test.describe("POS sale (branch-scoped cashier)", () => {
     await loginInBrowser(page, CASHIER);
     await page.goto("/pos");
 
-    await expect(page.getByRole("link", { name: "Касса" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса" }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Пользователи" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Роли" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Расчёты", exact: true })).toHaveCount(0);
@@ -178,7 +183,7 @@ test.describe("POS sale (branch-scoped cashier)", () => {
     }, assignedRegister.id);
     expect(savedDraft).not.toBeNull();
 
-    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await logoutInBrowser(page);
     await expect(page).toHaveURL(/\/login/);
     await loginInBrowser(page, OWNER);
     await page.goto("/pos");
@@ -190,7 +195,7 @@ test.describe("POS sale (branch-scoped cashier)", () => {
       savedDraft!.raw,
     );
 
-    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await logoutInBrowser(page);
     await expect(page).toHaveURL(/\/login/);
     await loginInBrowser(page, CASHIER);
     await page.goto("/pos");

@@ -134,8 +134,11 @@ test.describe("Personal profile", () => {
 
     const managementRequests = trackManagementRequests(page);
     const profileResponse = waitForSelfResponse(page, "/api/v1/auth/profile");
-    await page.getByRole("link", { name: "Открыть мой профиль", exact: true }).click();
+    await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+    const profileMenu = page.getByRole("dialog", { name: "Меню профиля", exact: true });
+    await profileMenu.getByRole("link", { name: "Мой профиль", exact: true }).click();
     await expect(page).toHaveURL(/\/profile(?:\?|$)/);
+    await expect(profileMenu).toBeHidden();
     const profile = await expectPersonalProfile(page, await profileResponse, identity.id);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -171,9 +174,13 @@ test.describe("Personal profile", () => {
     const profile = await expectPersonalProfile(page, await profileResponse, identity.id);
     expect(profile.is_tenant_owner).toBe(true);
     expect(profile.platform_role).toBeNull();
+    await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+    const profileMenu = page.getByRole("dialog", { name: "Меню профиля", exact: true });
     await expect(
-      page.getByRole("link", { name: "Открыть мой профиль", exact: true }),
+      profileMenu.getByRole("link", { name: "Мой профиль", exact: true }),
     ).toHaveAttribute("href", "/profile");
+    await page.keyboard.press("Escape");
+    await expect(profileMenu).toBeHidden();
 
     const reloadedProfile = waitForSelfResponse(page, "/api/v1/auth/profile");
     await page.reload({ waitUntil: "domcontentloaded" });

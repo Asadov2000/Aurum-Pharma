@@ -10,18 +10,20 @@ test.describe("Runtime surface", () => {
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(
-      page
-        .getByRole("status")
-        .filter({ has: page.getByRole("button", { name: "Проверить" }) }),
+      page.getByRole("status").filter({ has: page.getByRole("button", { name: "Проверить" }) }),
     ).toHaveCount(0);
 
     await expect(page.locator("html")).toHaveAttribute("data-runtime-surface", "browser");
 
-    const badge = page.getByTestId("runtime-surface-badge");
+    await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+    const badge = page
+      .getByRole("dialog", { name: "Меню профиля", exact: true })
+      .getByTestId("runtime-surface-badge");
     await expect(badge).toBeVisible();
     await expect(badge).toHaveText("Веб");
     await expect(badge).toHaveAccessibleName("Режим запуска: Открыто в браузере");
     await expect(badge).toHaveAttribute("title", "Открыто в браузере");
+    await page.keyboard.press("Escape");
     await expect(
       page.locator("main#main-content").getByTestId("runtime-surface-badge"),
     ).toHaveCount(0);
@@ -127,7 +129,13 @@ test.describe("Runtime surface", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await loginInBrowser(page, OWNER);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByTestId("runtime-surface-badge")).toBeVisible();
+    await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "Меню профиля", exact: true })
+        .getByTestId("runtime-surface-badge"),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
     const offlineBanner = page.getByRole("status").filter({ hasText: "Нет интернета" });
     const serverBanner = page
       .getByRole("status")
@@ -193,7 +201,13 @@ test.describe("Runtime surface", () => {
 
 async function expectWindowsDesktopShell(page: Page): Promise<void> {
   await expect(page.locator("html")).toHaveAttribute("data-runtime-surface", "windows-desktop");
-  await expect(page.getByTestId("runtime-surface-badge")).toHaveText("Windows");
+  await page.getByRole("button", { name: "Меню профиля", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Меню профиля", exact: true })
+      .getByTestId("runtime-surface-badge"),
+  ).toHaveText("Windows");
+  await page.keyboard.press("Escape");
 }
 
 async function expectDesktopMessageType(page: Page, expectedType: string): Promise<void> {

@@ -1,6 +1,12 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-import { clearLoginRateLimit, currentTotp, loginInBrowser, OWNER } from "./helpers";
+import {
+  clearLoginRateLimit,
+  currentTotp,
+  loginInBrowser,
+  logoutInBrowser,
+  OWNER,
+} from "./helpers";
 
 // Authentication credentials and cookies must not enter captured artifacts.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -13,14 +19,22 @@ async function hasRefreshCookie(context: BrowserContext): Promise<boolean> {
 }
 
 async function expectSignedIn(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "Касса", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Выйти", exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Основная навигация" })
+      .getByRole("link", { name: "Касса", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Меню профиля", exact: true })).toBeVisible();
 }
 
 async function expectSignedOut(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Касса", exact: true })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Основная навигация" })
+      .getByRole("link", { name: "Касса", exact: true }),
+  ).toHaveCount(0);
 }
 
 async function loginExplicitly(page: Page): Promise<void> {
@@ -78,7 +92,7 @@ test.describe("Durable browser logout", () => {
       else await route.continue();
     });
 
-    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await logoutInBrowser(page);
     await expectSignedOut(page);
     await expect.poll(() => logoutAttempts).toBeGreaterThanOrEqual(1);
     // A failed request leaves the real httpOnly cookie in the browser.
@@ -129,7 +143,7 @@ test.describe("Durable browser logout", () => {
       await route.continue();
     });
     try {
-      await page.getByRole("button", { name: "Выйти", exact: true }).click();
+      await logoutInBrowser(page);
       await expectSignedOut(page);
       await expectSignedOut(otherPage);
       expect(await hasRefreshCookie(page.context())).toBe(true);
@@ -158,7 +172,7 @@ test.describe("Durable browser logout", () => {
 
     try {
       await page.context().setOffline(true);
-      await page.getByRole("button", { name: "Выйти", exact: true }).click();
+      await logoutInBrowser(page);
       await expectSignedOut(page);
       expect(await hasRefreshCookie(page.context())).toBe(true);
     } finally {

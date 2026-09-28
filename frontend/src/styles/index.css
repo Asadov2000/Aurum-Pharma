@@ -185,7 +185,9 @@
   }
 
   :root {
-    --app-header-height: 3.5rem;
+    --app-header-row-height: 3.5rem;
+    --app-quick-links-height: 2.75rem;
+    --app-header-height: calc(var(--app-header-row-height) + var(--app-quick-links-height) + 1px);
     --app-sidebar-width: 15rem;
   }
 
@@ -317,7 +319,7 @@
 
 @media (min-width: 64rem) {
   :root {
-    --app-header-height: 4rem;
+    --app-header-row-height: 4rem;
   }
 }
 

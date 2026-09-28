@@ -2,7 +2,15 @@ import { randomInt } from "node:crypto";
 import { expect, request, test } from "@playwright/test";
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
-import { API, DEV, apiContext, apiLogin, clearLoginRateLimit, uniqueName } from "./helpers";
+import {
+  API,
+  DEV,
+  apiContext,
+  apiLogin,
+  clearLoginRateLimit,
+  logoutInBrowser,
+  uniqueName,
+} from "./helpers";
 
 // Login credentials and OTPs must not enter captured browser artifacts.
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -70,7 +78,7 @@ test("first login offers a password, phone login preserves the account, and rese
     await expect(page.getByLabel("Код на новый номер")).not.toHaveValue("");
     await page.getByRole("button", { name: "Подтвердить номер", exact: true }).click();
     await expect(page.getByText("Телефон подтверждён. Теперь можно входить по SMS.")).toBeVisible();
-    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await logoutInBrowser(page);
 
     advanceCodeCooldown(phone);
     await page.getByRole("button", { name: "Телефон", exact: true }).click();
@@ -92,7 +100,7 @@ test("first login offers a password, phone login preserves the account, and rese
       expect(previousMe.status()).toBe(200);
       const identity = (await previousMe.json()) as { id: string; home_tenant_id: string };
       expect(identity.home_tenant_id).toBe(tenant.id);
-      await page.getByRole("button", { name: "Выйти", exact: true }).click();
+      await logoutInBrowser(page);
       await page.getByRole("button", { name: "Забыли пароль?", exact: true }).click();
       await page.getByLabel("Email", { exact: true }).fill(email);
       advanceCodeCooldown(email);

@@ -50,11 +50,19 @@ test("new owner may skip MFA, enable and disable it in settings, and confirm a c
     await page.goto("/");
     const suggestion = page.getByRole("region", { name: "Предложение защиты аккаунта" });
     await expect(suggestion).toBeVisible();
-    await expect(page.getByRole("link", { name: "Касса", exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса", exact: true }),
+    ).toBeVisible();
     await suggestion.getByRole("button", { name: "Пока пропустить" }).click();
     await expect(suggestion).toBeHidden();
     await page.reload();
-    await expect(page.getByRole("link", { name: "Касса", exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .getByRole("link", { name: "Касса", exact: true }),
+    ).toBeVisible();
     await expect(suggestion).toBeHidden();
 
     await page.goto("/settings?section=security");
