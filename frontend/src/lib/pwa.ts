@@ -24,9 +24,29 @@ interface RegisterPwaServiceWorkerOptions {
   readonly serviceWorker?: ServiceWorkerContainer;
 }
 
-export function registerPwaServiceWorker(
-  options: RegisterPwaServiceWorkerOptions = {},
-): void {
+let installPrompt: BeforeInstallPromptEvent | null = null;
+let capturingInstallPrompt = false;
+
+export function getPwaInstallPrompt(): BeforeInstallPromptEvent | null {
+  return installPrompt;
+}
+
+export function clearPwaInstallPrompt(): void {
+  installPrompt = null;
+}
+
+function capturePwaInstallPrompt(): void {
+  if (capturingInstallPrompt || typeof window === "undefined") return;
+  capturingInstallPrompt = true;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    installPrompt = event;
+  });
+  window.addEventListener("appinstalled", clearPwaInstallPrompt);
+}
+
+export function registerPwaServiceWorker(options: RegisterPwaServiceWorkerOptions = {}): void {
+  capturePwaInstallPrompt();
   if (options.isDev ?? import.meta.env.DEV) {
     return;
   }

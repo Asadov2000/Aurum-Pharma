@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { type BeforeInstallPromptEvent } from "@/lib/pwa";
+import {
+  clearPwaInstallPrompt,
+  getPwaInstallPrompt,
+  type BeforeInstallPromptEvent,
+} from "@/lib/pwa";
 import { detectRuntimeSurface, type RuntimeSurface } from "@/lib/runtime";
 
 export function PwaInstallButton({
@@ -9,8 +13,9 @@ export function PwaInstallButton({
 }: {
   surface?: RuntimeSurface;
 }): JSX.Element | null {
-  const [installPrompt, setInstallPrompt] =
-    useState<BeforeInstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(
+    getPwaInstallPrompt,
+  );
   const [installed, setInstalled] = useState(surface !== "browser");
 
   useEffect(() => {
@@ -46,6 +51,7 @@ export function PwaInstallButton({
 
   const onInstall = () => {
     const promptEvent = installPrompt;
+    clearPwaInstallPrompt();
     setInstallPrompt(null);
 
     void promptEvent

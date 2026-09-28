@@ -1,4 +1,29 @@
 import sidebarIcons from "@/assets/sidebar-icons.svg";
+import { type ReactNode } from "react";
+
+export function HeaderLineIcon({
+  children,
+  size = 20,
+}: {
+  children: ReactNode;
+  size?: number;
+}): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
 
 // Approved local vectors; original licenses: /licenses/sidebar-icons.html.
 // One cached sprite keeps SVG paths out of the startup JavaScript bundle.

@@ -90,7 +90,9 @@ test.describe("Owner onboarding (dev)", () => {
     await page.goto("/onboarding");
     await expect(page.getByRole("heading", { level: 1, name: "Старт" })).toBeVisible();
     await expect(page.getByText("Профиль аптеки")).toBeVisible();
-    await expect(page.getByText("Владелец аптеки")).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("heading", { name: "Владелец аптеки", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "Настроить точку" }).first()).toBeVisible();
 
     await page.getByRole("link", { name: "Настроить точку" }).first().click();

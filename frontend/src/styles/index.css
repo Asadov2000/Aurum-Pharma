@@ -323,6 +323,188 @@
   }
 }
 
+@layer components {
+  .app-shell-skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground;
+  }
+
+  .app-shell-main {
+    @apply min-h-[calc(100dvh-var(--app-header-height))] min-w-0 px-3 py-4 sm:px-4 sm:py-5 xl:px-5;
+  }
+
+  .app-search-error-title {
+    @apply mb-3 text-lg font-semibold;
+  }
+
+  .app-header-context {
+    @apply min-w-0 flex-1 leading-tight;
+  }
+
+  .app-header-dialog-title {
+    @apply text-sm font-semibold text-foreground;
+  }
+
+  .app-header-detail {
+    @apply text-sm text-foreground-secondary;
+  }
+
+  .app-header-note {
+    @apply text-xs text-foreground-muted;
+  }
+
+  .app-section-search-unavailable {
+    @apply fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[min(30rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-surface p-6 text-foreground shadow-xl backdrop:bg-black/40;
+  }
+
+  .app-header-profile-details {
+    @apply border-b border-border px-4 py-3;
+  }
+
+  .app-header-profile-links {
+    @apply space-y-0.5 p-2;
+  }
+
+  .app-header-logout-row {
+    @apply border-t border-border p-2;
+  }
+
+  .app-header {
+    @apply sticky top-0 z-sticky border-b border-border bg-surface;
+  }
+
+  .app-header-row {
+    @apply flex h-[var(--app-header-row-height)] items-stretch;
+  }
+
+  .app-header-brand {
+    @apply hidden w-[var(--app-sidebar-width)] shrink-0 items-center border-r border-shell-sidebar-border bg-shell-sidebar px-4 lg:flex;
+  }
+
+  .app-header-main {
+    @apply flex min-w-0 flex-1 items-center gap-1.5 px-3 sm:gap-3 sm:px-4 xl:px-5;
+  }
+
+  .app-header-menu {
+    @apply grid h-11 w-11 shrink-0 place-items-center rounded-md text-foreground-secondary hover:bg-foreground/5 lg:hidden;
+  }
+
+  .app-header-title {
+    @apply hidden truncate font-display text-lg font-semibold text-foreground lg:block;
+  }
+
+  .app-header-name {
+    @apply block truncate text-sm font-semibold text-foreground;
+  }
+
+  .app-header-workspace-caption {
+    @apply lg:text-xs lg:font-normal lg:text-foreground-muted;
+  }
+
+  .app-header-mobile-title {
+    @apply block truncate text-xs text-foreground-muted lg:hidden;
+  }
+
+  .app-header-desktop-caption {
+    @apply hidden text-xs text-foreground-muted lg:block;
+  }
+
+  .app-header-search {
+    @apply hidden h-10 min-w-0 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm text-foreground-muted transition-colors hover:border-primary/40 hover:text-primary md:inline-flex;
+  }
+
+  .app-header-shortcut {
+    @apply hidden rounded border border-border bg-surface px-1 text-[10px] xl:inline;
+  }
+
+  .app-header-notifications {
+    @apply grid h-11 w-11 shrink-0 place-items-center rounded-md text-foreground-secondary hover:bg-foreground/5 hover:text-primary;
+  }
+
+  .app-header-profile {
+    @apply flex h-11 shrink-0 items-center gap-2 rounded-md px-1 text-foreground-secondary hover:bg-foreground/5 xl:px-2;
+  }
+
+  .app-header-avatar {
+    @apply grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary;
+  }
+
+  .app-header-profile-label {
+    @apply hidden max-w-40 text-left leading-tight xl:block;
+  }
+
+  .app-header-caption {
+    @apply block truncate text-xs text-foreground-muted;
+  }
+
+  .app-header-quick-row {
+    @apply flex h-[var(--app-quick-links-height)] min-w-0 border-t border-border bg-background/60;
+  }
+
+  .app-header-quick-brand {
+    @apply hidden w-[var(--app-sidebar-width)] shrink-0 border-r border-shell-sidebar-border bg-shell-sidebar lg:block;
+  }
+
+  .app-header-quick-nav {
+    @apply flex min-w-0 flex-1 items-center gap-2 px-3 sm:px-4 xl:px-5;
+  }
+
+  .app-header-quick-caption {
+    @apply hidden shrink-0 text-[11px] font-medium text-foreground-muted xl:inline;
+  }
+
+  .app-header-mobile-search {
+    @apply grid h-11 w-9 shrink-0 place-items-center rounded-md text-foreground-muted hover:text-primary md:hidden;
+  }
+
+  .app-header-quick-scroll {
+    @apply flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain;
+  }
+
+  .app-header-quick-link {
+    @apply inline-flex min-h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 text-xs font-medium transition-colors;
+  }
+
+  .app-header-quick-link-idle {
+    @apply text-foreground-secondary hover:bg-foreground/5 hover:text-primary;
+  }
+
+  .app-header-settings {
+    @apply grid h-11 w-9 shrink-0 place-items-center rounded-md text-foreground-muted hover:bg-foreground/5 hover:text-primary;
+  }
+
+  .app-header-connection {
+    @apply flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 text-[11px] font-medium text-foreground-secondary sm:px-3 sm:text-xs;
+  }
+
+  .app-header-popover {
+    @apply fixed z-popover w-[min(19rem,calc(100vw-1rem))] overflow-y-auto rounded-lg border border-border bg-surface-raised shadow-lg;
+  }
+
+  .app-header-popover-heading {
+    @apply flex items-center justify-between border-b border-border py-1 pl-4 pr-1;
+  }
+
+  .app-header-popover-close {
+    @apply grid h-11 w-11 place-items-center rounded-md text-foreground-muted hover:bg-foreground/5;
+  }
+
+  .app-header-profile-name {
+    @apply break-words text-sm font-semibold text-foreground;
+  }
+
+  .app-header-profile-link {
+    @apply flex min-h-11 items-center gap-3 rounded-md px-3 text-sm text-foreground-secondary hover:bg-primary/5 hover:text-primary;
+  }
+
+  .app-header-logout {
+    @apply flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-sm text-danger hover:bg-danger/5;
+  }
+
+  .app-header-check-connection {
+    @apply min-h-11 rounded-md border border-border px-3 text-sm font-medium text-primary hover:bg-primary/5 disabled:opacity-50;
+  }
+}
+
 @layer utilities {
   /* Translucent modal scrim built from the themed overlay token. */
   .bg-overlay {

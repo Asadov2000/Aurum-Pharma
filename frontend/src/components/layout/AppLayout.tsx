@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  type ComponentProps,
   type CSSProperties,
   type ReactNode,
   useCallback,
@@ -16,6 +17,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
+import { useConnectivity } from "@/lib/connectivityContext";
 
 import { AppHeader } from "./AppHeader";
 import { ConnectivityStatusBanner } from "./ConnectivityStatusBanner";
@@ -35,7 +37,69 @@ import {
 } from "./sidebarPreferences";
 import { type AppRoutePath } from "./routeAccess";
 
-const SectionSearchDialog = lazy(() => import("./SectionSearchDialog"));
+let loadedSectionSearch: typeof import("./SectionSearchDialog") | undefined;
+
+function createSectionSearchDialog() {
+  return lazy(async () => {
+    if (loadedSectionSearch) return loadedSectionSearch;
+    // A failed ESM fetch can remain cached until reload; never initiate one offline.
+    if (!navigator.onLine) return { default: SectionSearchUnavailable };
+    return import("./SectionSearchDialog")
+      .then((module) => {
+        loadedSectionSearch = module;
+        return module;
+      })
+      .catch(() => ({ default: SectionSearchUnavailable }));
+  });
+}
+
+function SectionSearchUnavailable({
+  open,
+  onClose,
+}: ComponentProps<(typeof import("./SectionSearchDialog"))["default"]>): JSX.Element {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { status } = useConnectivity();
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    const previousFocus = document.activeElement;
+    dialog.showModal();
+    const releaseScrollLock = acquireBodyScrollLock();
+    return () => {
+      dialog.close();
+      releaseScrollLock();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected)
+        previousFocus.focus({ preventScroll: true });
+    };
+  }, [open]);
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-label="Перейти в раздел"
+      data-aurum-modal
+      className="app-section-search-unavailable"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <h2 className="app-search-error-title">Перейти в раздел</h2>
+      <p role="alert" className="app-header-detail">
+        Поиск не загрузился. Используйте боковое меню или обновите страницу при наличии сети.
+      </p>
+      <Button className="mt-4" variant="secondary" onClick={onClose}>
+        Закрыть
+      </Button>
+      <Button
+        className="ml-2 mt-4"
+        disabled={status === "offline"}
+        onClick={() => window.location.reload()}
+      >
+        Обновить страницу
+      </Button>
+    </dialog>
+  );
+}
 const SupportAccessBanner = lazy(async () => {
   const module = await import("@/features/supportAccess/SupportAccessBanner");
   return { default: module.SupportAccessBanner };
@@ -62,6 +126,11 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   const preferencesQuery = useUserPreferencesQuery();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [SectionSearchDialog, setSectionSearchDialog] = useState(createSectionSearchDialog);
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSectionSearchDialog(createSectionSearchDialog());
+  };
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const navigationTriggerRef = useRef<HTMLButtonElement | null>(null);
   const isSupport = Boolean(user?.is_developer || user?.is_administrator);
@@ -314,10 +383,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
 
   return (
     <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground"
-      >
+      <a href="#main-content" className="app-shell-skip-link">
         Перейти к содержимому
       </a>
       {navigationOpen && (
@@ -374,10 +440,10 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
           <SectionSearchDialog
             open
             items={orderedItems}
-            onClose={() => setSearchOpen(false)}
+            onClose={closeSearch}
             onSelect={(to) => {
               if (!items.some((item) => item.to === to)) return;
-              setSearchOpen(false);
+              closeSearch();
               void navigate({ to });
             }}
           />
@@ -414,11 +480,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
             onOpenSettings={openSidebarSettings}
           />
         </div>
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="min-h-[calc(100dvh-var(--app-header-height))] min-w-0 px-3 py-4 sm:px-4 sm:py-5 xl:px-5"
-        >
+        <main id="main-content" tabIndex={-1} className="app-shell-main">
           <Suspense fallback={null}>
             <AccountSecuritySurface
               showPrompt={

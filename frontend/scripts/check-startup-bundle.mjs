@@ -22,7 +22,9 @@ const routeBudgets = [
   {
     label: "Dashboard /",
     source: "src/features/dashboard/DashboardPage.tsx",
-    maxRawBytes: 435 * 1024,
+    // The unified header keeps the entire profile menu available on its first
+    // offline opening. Bound its ~2 KiB eager cost; gzip and request caps stay fixed.
+    maxRawBytes: 438 * 1024,
     maxGzipBytes: 145 * 1024,
     maxRequests: 6,
   },

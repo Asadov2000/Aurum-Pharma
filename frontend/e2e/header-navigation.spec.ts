@@ -1,4 +1,4 @@
-import { request, test, type Page } from "@playwright/test";
+import { request, test, type Page, type Route } from "@playwright/test";
 
 import {
   apiContext,
@@ -33,6 +33,10 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
       ),
     )
     .toBeLessThanOrEqual(1);
+}
+
+function isSectionSearchModule(url: URL): boolean {
+  return /\/SectionSearchDialog(?:\.tsx|-[^/]+\.js)$/.test(url.pathname);
 }
 
 async function seedCashierNavigationAccess(): Promise<void> {
@@ -255,7 +259,7 @@ test.describe("Header navigation", () => {
     try {
       await page.context().setOffline(true);
       await expect(trigger.getByRole("status")).toHaveText("Нет сети");
-      await expect(connection).toContainText("Нет интернет-соединения.");
+      await expect(connection).toContainText("Нет интернета.");
       await page.context().setOffline(false);
       await expect(trigger.getByRole("status")).toHaveText("Онлайн");
       const healthResponse = page.waitForResponse(
@@ -295,7 +299,9 @@ test.describe("Header navigation", () => {
     await expectNoHorizontalOverflow(page);
 
     // This crop contains no contact details or business records.
-    await header.screenshot({ path: testInfo.outputPath("header-desktop.png") });
+    const desktopCapture = testInfo.outputPath("header-desktop.png");
+    await header.screenshot({ path: desktopCapture });
+    await testInfo.attach("header-desktop", { path: desktopCapture, contentType: "image/png" });
 
     await page.setViewportSize({ width: 320, height: 568 });
     await expectNoHorizontalOverflow(page);
@@ -303,7 +309,9 @@ test.describe("Header navigation", () => {
     expect(headerBounds).not.toBeNull();
     expect(headerBounds!.x).toBeGreaterThanOrEqual(0);
     expect(headerBounds!.x + headerBounds!.width).toBeLessThanOrEqual(320);
-    await header.screenshot({ path: testInfo.outputPath("header-mobile.png") });
+    const mobileCapture = testInfo.outputPath("header-mobile.png");
+    await header.screenshot({ path: mobileCapture });
+    await testInfo.attach("header-mobile", { path: mobileCapture, contentType: "image/png" });
     for (const name of ["Перейти в раздел", "Меню профиля", "Состояние соединения"] as const) {
       await header.getByRole("button", { name, exact: true }).click();
       const dialog = page.getByRole("dialog", { name, exact: true });
@@ -317,5 +325,161 @@ test.describe("Header navigation", () => {
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
     }
+  });
+
+  test("contains the first offline finder load and recovers without losing the shell or logout", async ({
+    page,
+  }) => {
+    await loginInBrowser(page, OWNER);
+    await openWorkspace(page);
+    const header = page.getByTestId("app-shell-header");
+    const connection = header.getByRole("button", { name: "Состояние соединения", exact: true });
+    const finder = page.getByRole("dialog", { name: "Перейти в раздел", exact: true });
+    const search = finder.getByRole("searchbox", { name: "Найти раздел", exact: true });
+
+    try {
+      // No search or profile opening has warmed their optional modules in this session.
+      await page.context().setOffline(true);
+      await expect(connection.getByRole("status")).toHaveText("Нет сети");
+      await page.keyboard.press("Control+k");
+      await expect(finder).toBeVisible();
+      await expect
+        .poll(
+          async () => (await search.isVisible()) || (await finder.getByRole("alert").isVisible()),
+        )
+        .toBe(true);
+      await expect(header).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(finder).toBeHidden();
+      await expect(header).toBeVisible();
+
+      await page.context().setOffline(false);
+      await expect(connection.getByRole("status")).toHaveText("Онлайн");
+      await page.keyboard.press("Control+k");
+      await expect(search).toBeVisible();
+      await expect(search).toBeFocused();
+      await expect(finder.getByRole("alert")).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(finder).toBeHidden();
+
+      await page.context().setOffline(true);
+      await expect(connection.getByRole("status")).toHaveText("Нет сети");
+      await header.getByRole("button", { name: "Меню профиля", exact: true }).click();
+      const profileMenu = page.getByRole("dialog", { name: "Меню профиля", exact: true });
+      await expect(profileMenu).toBeVisible();
+      const logout = profileMenu.getByRole("button", { name: "Выйти", exact: true });
+      await expect(logout).toBeVisible();
+      await expect(logout).toBeEnabled();
+      await expect(header).toBeVisible();
+
+      await page.context().setOffline(false);
+      await expect(connection.getByRole("status")).toHaveText("Онлайн");
+      await logout.click();
+      await expect(page).toHaveURL(/\/login(?:\?|$)/);
+      await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+    } finally {
+      await page.context().setOffline(false);
+    }
+  });
+
+  test("opens the complete profile offline without fetching additional JavaScript", async ({
+    page,
+  }) => {
+    await loginInBrowser(page, OWNER);
+    await openWorkspace(page);
+    const header = page.getByTestId("app-shell-header");
+    const trigger = header.getByRole("button", { name: "Меню профиля", exact: true });
+    const profileMenu = page.getByRole("dialog", { name: "Меню профиля", exact: true });
+    const connection = header.getByRole("button", { name: "Состояние соединения", exact: true });
+    await expect(connection.getByRole("status")).toHaveText("Онлайн");
+    await expect(header.getByRole("button", { name: "Вид интерфейса", exact: true })).toBeVisible();
+
+    let javascriptRequests = 0;
+    page.on("request", (browserRequest) => {
+      if (browserRequest.resourceType() === "script") javascriptRequests += 1;
+    });
+    const blockJavaScript = async (route: Route): Promise<void> => {
+      if (route.request().resourceType() === "script") await route.abort("failed");
+      else await route.continue();
+    };
+    await page.route("**/*", blockJavaScript);
+
+    try {
+      await page.context().setOffline(true);
+      await expect(connection.getByRole("status")).toHaveText("Нет сети");
+      await trigger.click();
+      await expect(profileMenu).toBeVisible();
+      for (const name of ["Мой профиль", "Безопасность", "Внешний вид и настройки"] as const) {
+        await expect(profileMenu.getByRole("link", { name, exact: true })).toBeVisible();
+      }
+      const runtimeBadge = profileMenu.getByTestId("runtime-surface-badge");
+      await expect(runtimeBadge).toBeVisible();
+      await expect(runtimeBadge).toHaveText("Веб");
+      const logout = profileMenu.getByRole("button", { name: "Выйти", exact: true });
+      await expect(logout).toBeVisible();
+      await expect(logout).toBeEnabled();
+      await expect(header).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(profileMenu).toBeHidden();
+      await expect(trigger).toBeFocused();
+      expect(javascriptRequests).toBe(0);
+    } finally {
+      await page.unroute("**/*", blockJavaScript);
+      await page.context().setOffline(false);
+    }
+  });
+
+  test.describe("Finder module loading", () => {
+    // Service workers can serve a cached module before page.route sees its request.
+    test.use({ serviceWorkers: "block" });
+
+    test("contains an online finder module failure and recovers after explicit refresh", async ({
+      page,
+    }) => {
+      await loginInBrowser(page, OWNER);
+      await openWorkspace(page);
+      await page.waitForLoadState("load");
+      const header = page.getByTestId("app-shell-header");
+      await expect(
+        header
+          .getByRole("button", { name: "Состояние соединения", exact: true })
+          .getByRole("status"),
+      ).toHaveText("Онлайн");
+
+      let blockedRequest = false;
+      await page.route(isSectionSearchModule, async (route) => {
+        await route.abort("failed");
+        blockedRequest = true;
+      });
+      let documentLoads = 0;
+      page.on("load", () => {
+        documentLoads += 1;
+      });
+      await page.keyboard.press("Control+k");
+      await expect.poll(() => blockedRequest).toBe(true);
+      const finder = page.getByRole("dialog", { name: "Перейти в раздел", exact: true });
+      await expect(finder).toBeVisible();
+      await expect(finder.getByRole("alert")).toBeVisible();
+      await expect(
+        finder.getByRole("searchbox", { name: "Найти раздел", exact: true }),
+      ).toHaveCount(0);
+      const refresh = finder.getByRole("button", { name: "Обновить страницу", exact: true });
+      await expect(refresh).toBeVisible();
+      await expect(refresh).toBeEnabled();
+      await expect(header).toBeVisible();
+      expect(documentLoads).toBe(0);
+
+      await page.unroute(isSectionSearchModule);
+      const loaded = page.waitForEvent("load");
+      await refresh.click();
+      await loaded;
+      expect(documentLoads).toBe(1);
+      await expect(header).toBeVisible();
+      await page.keyboard.press("Control+k");
+      const search = finder.getByRole("searchbox", { name: "Найти раздел", exact: true });
+      await expect(search).toBeVisible();
+      await expect(search).toBeFocused();
+      await expect(finder.getByRole("alert")).toHaveCount(0);
+    });
   });
 });
