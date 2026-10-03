@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { defaultQuickActionPreferences } from "@/features/settings/quickActions";
+import {
+  defaultQuickActionPreferences,
+  type QuickActionSection,
+} from "@/features/settings/quickActions";
 
 const state = vi.hoisted(() => ({ save: vi.fn() }));
 vi.mock("@/features/settings/useQuickActionPreferences", () => ({
-  useQuickActionPreferences: (section: "catalog" | "batches") => ({
+  useQuickActionPreferences: (section: QuickActionSection) => ({
     config: defaultQuickActionPreferences(section),
     scope: "user-1:tenant-1",
     save: state.save,
@@ -17,6 +20,24 @@ vi.mock("@/features/settings/useQuickActionPreferences", () => ({
 import { QuickActionsSettingsPanel } from "@/features/settings/QuickActionsSettingsPanel";
 
 describe("QuickActionsSettingsPanel", () => {
+  it("opens the originating section and labels document commands correctly", () => {
+    render(<QuickActionsSettingsPanel initialSection="incoming" />);
+    expect(screen.getByRole("button", { name: "Приёмка товаров" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Показывать в меню: Скопировать номер документа" }),
+    ).toBeChecked();
+    expect(screen.queryByText("Изменить товар")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сотрудники" }));
+    expect(
+      screen.queryByRole("button", { name: "Выше: Уволить / отозвать приглашение" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Показывать в меню: Настроить доступ" }),
+    ).toBeChecked();
+  });
   beforeEach(() => {
     state.save.mockReset();
   });

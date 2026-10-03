@@ -78,6 +78,13 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 import { IncomingPage } from "@/features/incoming/IncomingPage";
+import { defaultQuickActionPreferences } from "@/features/settings/quickActions";
+vi.mock("@/features/settings/useQuickActionPreferences", () => ({
+  useQuickActionPreferences: () => ({
+    config: defaultQuickActionPreferences("incoming"),
+    scope: "user:tenant",
+  }),
+}));
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -163,6 +170,82 @@ function stubViewport(split = false, mobile = false): void {
 }
 
 describe("IncomingPage", () => {
+  it("closes and blocks an old document menu while the next page loads", async () => {
+    listIncoming
+      .mockResolvedValueOnce({ items: [DOC], total: 26, page: 1, page_size: 25, summary: SUMMARY })
+      .mockReturnValue(new Promise(() => undefined));
+    listBranches.mockResolvedValue([BRANCH]);
+    renderPage();
+    const row = (await screen.findByText("INV-001")).closest("tr")!;
+    // Let the initial search debounce settle before testing pagination itself.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    fireEvent.contextMenu(row);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Действия для приёмки INV-001" })).toBeDisabled(),
+    );
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(fireEvent.contextMenu(row)).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+  it("opens the right-clicked document and exposes no finalize or reject shortcut", async () => {
+    listIncoming.mockResolvedValue({
+      items: [DOC, { ...DOC, id: "d-2", document_number: "INV-002" }],
+      total: 2,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    listBranches.mockResolvedValue([BRANCH]);
+    renderPage();
+    const row = (await screen.findByText("INV-002")).closest("tr")!;
+    fireEvent.contextMenu(row);
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("Приёмка № INV-002")).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /Принять|Отклонить|Удалить/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Открыть документ" }));
+    expect(navigate).toHaveBeenCalledWith({ to: "/incoming/$id", params: { id: "d-2" } });
+    expect(getIncoming).not.toHaveBeenCalled();
+  });
+
+  it("copies an explicit document number from a card without opening another document", async () => {
+    stubViewport(false, true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    listIncoming.mockResolvedValue({
+      items: [DOC],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    listBranches.mockResolvedValue([BRANCH]);
+    renderPage();
+    const row = (await screen.findByText("Приход № INV-001")).closest("article")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Скопировать номер документа" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("INV-001"));
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("omits copying when the document has no number", async () => {
+    listIncoming.mockResolvedValue({
+      items: [{ ...DOC, document_number: null }],
+      total: 1,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    listBranches.mockResolvedValue([BRANCH]);
+    renderPage();
+    fireEvent.contextMenu((await screen.findByText("Без номера")).closest("tr")!);
+    expect(
+      screen.queryByRole("menuitem", { name: "Скопировать номер документа" }),
+    ).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     listIncoming.mockReset();
     getIncoming.mockReset();

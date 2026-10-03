@@ -29,6 +29,8 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermissionForBranch, permissionBranchScope } from "@/features/auth/branchPermissions";
 import { hasAnyPermission, hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { RecordActionMenu } from "@/features/foundation/RecordActionMenu";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { SupplierPicker } from "@/features/suppliers/SupplierPicker";
 import { shouldOpenRecord } from "@/lib/record";
@@ -52,6 +54,7 @@ type IncomingView = "table" | "cards";
 
 export function IncomingPage(): JSX.Element {
   const { user } = useAuth();
+  const quickActions = useQuickActionPreferences("incoming");
   const navigate = useNavigate();
   const filterPreferenceKey = useFilterPreferenceKey("incoming");
   const canCreate = hasPermission(user, "incoming.create");
@@ -406,6 +409,7 @@ export function IncomingPage(): JSX.Element {
               {rows.map((document) => (
                 <IncomingCard
                   key={document.id}
+                  quickActions={quickActions}
                   document={document}
                   branchName={branchName(document)}
                   onOpen={openDocument}
@@ -416,6 +420,7 @@ export function IncomingPage(): JSX.Element {
           ) : showSplitWorkspace ? (
             <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
               <IncomingTable
+                quickActions={quickActions}
                 items={rows}
                 selectedId={selectedDocument?.id ?? null}
                 branchName={branchName}
@@ -439,6 +444,7 @@ export function IncomingPage(): JSX.Element {
             </div>
           ) : (
             <IncomingTable
+              quickActions={quickActions}
               items={rows}
               selectedId={null}
               branchName={branchName}
@@ -532,12 +538,14 @@ function SummaryMetric({
 }
 
 function IncomingTable({
+  quickActions,
   items,
   selectedId,
   branchName,
   onOpen,
   disabled = false,
 }: {
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
   items: IncomingDocument[];
   selectedId: string | null;
   branchName: (document: IncomingDocument) => string;
@@ -562,6 +570,8 @@ function IncomingTable({
         {items.map((document) => (
           <TR
             key={document.id}
+            data-context-actions
+            tabIndex={0}
             onClick={(event) => {
               if (!disabled && shouldOpenRecord(event)) onOpen(document);
             }}
@@ -597,16 +607,24 @@ function IncomingTable({
               {formatMoney(document.total_amount, document.currency)}
             </TD>
             <TD className="text-right">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-[var(--control-height-sm)] px-0"
-                aria-label={`Открыть приход: ${document.document_number || "без номера"}`}
-                disabled={disabled}
-                onClick={() => onOpen(document)}
-              >
-                <ChevronRightIcon />
-              </Button>
+              <div className="flex justify-end gap-1">
+                <IncomingActionMenu
+                  document={document}
+                  onOpen={onOpen}
+                  disabled={disabled}
+                  quickActions={quickActions}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-[var(--control-height-sm)] px-0"
+                  aria-label={`Открыть приход: ${document.document_number || "без номера"}`}
+                  disabled={disabled}
+                  onClick={() => onOpen(document)}
+                >
+                  <ChevronRightIcon />
+                </Button>
+              </div>
             </TD>
           </TR>
         ))}
@@ -616,11 +634,13 @@ function IncomingTable({
 }
 
 function IncomingCard({
+  quickActions,
   document,
   branchName,
   onOpen,
   disabled = false,
 }: {
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
   document: IncomingDocument;
   branchName: string;
   onOpen: (document: IncomingDocument) => void;
@@ -628,6 +648,8 @@ function IncomingCard({
 }): JSX.Element {
   return (
     <article
+      data-context-actions
+      tabIndex={0}
       className={cn(
         "min-w-0 rounded-lg border border-border bg-surface p-4",
         !disabled && "cursor-pointer transition-colors hover:bg-foreground/[0.025]",
@@ -645,7 +667,15 @@ function IncomingCard({
           </h2>
           <p className="mt-1 text-sm text-foreground-muted">{formatDate(document.document_date)}</p>
         </div>
-        <Badge tone={statusTone[document.status]}>{statusLabel[document.status]}</Badge>
+        <div className="flex items-center gap-1">
+          <Badge tone={statusTone[document.status]}>{statusLabel[document.status]}</Badge>
+          <IncomingActionMenu
+            document={document}
+            onOpen={onOpen}
+            disabled={disabled}
+            quickActions={quickActions}
+          />
+        </div>
       </div>
       <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
         <CardField
@@ -665,6 +695,45 @@ function IncomingCard({
         <ArrowRightIcon />
       </Button>
     </article>
+  );
+}
+
+function IncomingActionMenu({
+  document,
+  onOpen,
+  disabled,
+  quickActions,
+}: {
+  document: IncomingDocument;
+  onOpen: (document: IncomingDocument) => void;
+  disabled: boolean;
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+}): JSX.Element {
+  return (
+    <RecordActionMenu
+      section="incoming"
+      recordKey={`${document.id}:${document.updated_at}:${document.status}`}
+      title={
+        document.document_number ? `Приёмка № ${document.document_number}` : "Приёмка без номера"
+      }
+      detail={statusLabel[document.status]}
+      label={`Действия для приёмки ${document.document_number || "без номера"}`}
+      config={quickActions.config}
+      scope={quickActions.scope}
+      disabled={disabled}
+      items={[
+        { id: "open", label: "Открыть документ", onSelect: () => onOpen(document) },
+        ...(document.document_number
+          ? [
+              {
+                id: "copy_number",
+                label: "Скопировать номер документа",
+                copyValue: document.document_number,
+              },
+            ]
+          : []),
+      ]}
+    />
   );
 }
 

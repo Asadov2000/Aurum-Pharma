@@ -20,7 +20,7 @@ export interface UserPreferences {
   reduce_motion: boolean;
   accent: AccentPreference;
   workspace: WorkspacePreferences;
-  quick_actions?: QuickActionPreferences;
+  quick_actions?: Partial<QuickActionPreferences>;
   version: number;
   updated_at: string;
 }

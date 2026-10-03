@@ -29,6 +29,7 @@ import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { describeApiError } from "@/features/foundation/errors";
 import { useBranchesQuery } from "@/features/foundation/queries";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { createOperationId } from "@/lib/operationId";
 import { cn } from "@/lib/utils";
 
@@ -112,6 +113,7 @@ class UserPanelLoadBoundary extends Component<
 
 export function UsersPage(): JSX.Element {
   const { user } = useAuth();
+  const quickActions = useQuickActionPreferences("employees");
   const filterPreferenceKey = useFilterPreferenceKey("users");
   const tenantId = activeTenantId(user);
   const hasTenant = Boolean(tenantId);
@@ -720,6 +722,8 @@ export function UsersPage(): JSX.Element {
               </InlineNotice>
             ) : null}
             <EmployeeDirectory
+              quickActionConfig={quickActions.config}
+              quickActionScope={quickActions.scope}
               rows={rows}
               branches={visibleBranches}
               actionsDisabled={!directoryReady}

@@ -9,6 +9,9 @@ import {
   defaultQuickActionPreferences,
   parseQuickActionMenuPreferences,
   QUICK_ACTION_DEFAULTS,
+  QUICK_ACTION_DANGER_IDS,
+  QUICK_ACTION_SECTIONS,
+  QUICK_ACTION_SECTION_LABELS,
   quickActionMenuSchema,
   type QuickActionMenuPreferences,
   type QuickActionSection,
@@ -24,10 +27,22 @@ const LABELS: Record<string, string> = {
   archive: "Архивировать",
   restore: "Восстановить из архива",
   copy_number: "Скопировать номер партии",
+  profile: "Изменить профиль",
+  assign_access: "Настроить доступ",
+  reissue_invitation: "Обновить приглашение",
+  activate: "Возобновить",
+  revoke_sessions: "Завершить сеансы",
+  suspend: "Приостановить",
+  offboard: "Уволить / отозвать приглашение",
+  transfer_ownership: "Передать владение",
 };
 
-export function QuickActionsSettingsPanel(): JSX.Element {
-  const [section, setSection] = useState<QuickActionSection>("catalog");
+export function QuickActionsSettingsPanel({
+  initialSection = "catalog",
+}: {
+  initialSection?: QuickActionSection;
+}): JSX.Element {
+  const [section, setSection] = useState<QuickActionSection>(initialSection);
   const preferences = useQuickActionPreferences(section);
   return (
     <div className="space-y-5">
@@ -35,8 +50,8 @@ export function QuickActionsSettingsPanel(): JSX.Element {
         title="Быстрые действия"
         description="Выберите нужные команды и расположите частые выше. Это личные настройки вашего аккаунта."
       />
-      <nav aria-label="Раздел быстрых действий" className="flex gap-2">
-        {(["catalog", "batches"] as const).map((id) => (
+      <nav aria-label="Раздел быстрых действий" className="flex flex-wrap gap-2">
+        {QUICK_ACTION_SECTIONS.map((id) => (
           <Button
             key={id}
             type="button"
@@ -44,7 +59,7 @@ export function QuickActionsSettingsPanel(): JSX.Element {
             aria-pressed={section === id}
             onClick={() => setSection(id)}
           >
-            {id === "catalog" ? "Каталог" : "Партии"}
+            {QUICK_ACTION_SECTION_LABELS[id]}
           </Button>
         ))}
       </nav>
@@ -77,8 +92,13 @@ function QuickActionsForm({
   }, [isDirty, reset, saved]);
   const allItems = QUICK_ACTION_DEFAULTS[section].order.map((id) => ({
     id,
-    label: LABELS[id] ?? id,
-    tone: id === "archive" ? ("danger" as const) : ("default" as const),
+    label:
+      id === "copy_number" && section === "incoming"
+        ? "Скопировать номер документа"
+        : id === "open" && section === "incoming"
+          ? "Открыть документ"
+          : (LABELS[id] ?? id),
+    tone: QUICK_ACTION_DANGER_IDS.has(id) ? ("danger" as const) : ("default" as const),
   }));
   const ordered = applyQuickActions(allItems, { ...draft, hidden: [] });
   const preview = applyQuickActions(allItems, draft);
@@ -212,8 +232,8 @@ function QuickActionsForm({
             ) : null}
           </ul>
           <p className="mt-3 text-xs leading-5 text-foreground-muted">
-            Команды применяются только там, где они доступны вашему аккаунту. Архивирование и
-            восстановление появляются в зависимости от состояния товара.
+            В меню появятся только команды, доступные вашему аккаунту и подходящие для текущего
+            состояния записи. Настройки не расширяют ваши права.
           </p>
         </aside>
       </div>

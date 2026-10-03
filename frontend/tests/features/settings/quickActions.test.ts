@@ -5,6 +5,7 @@ import {
   defaultQuickActionPreferences,
   parseQuickActionMenuPreferences,
   parseQuickActionPreferences,
+  QUICK_ACTION_SECTIONS,
 } from "@/features/settings/quickActions";
 
 describe("quick action preferences", () => {
@@ -36,7 +37,7 @@ describe("quick action preferences", () => {
   });
 
   it("rejects configurations that hide every supported command", () => {
-    for (const section of ["catalog", "batches"] as const) {
+    for (const section of QUICK_ACTION_SECTIONS) {
       const defaults = defaultQuickActionPreferences(section);
       expect(
         parseQuickActionMenuPreferences({ ...defaults, hidden: defaults.order }, section),
@@ -48,6 +49,27 @@ describe("quick action preferences", () => {
         ),
       ).toBeNull();
     }
+  });
+
+  it("keeps extended sections independent and dangerous employee commands at the end", () => {
+    const incoming = defaultQuickActionPreferences("incoming");
+    const employees = defaultQuickActionPreferences("employees");
+    const saved = parseQuickActionPreferences({
+      incoming: { ...incoming, hidden: ["copy_number"] },
+      employees,
+    });
+    expect(saved?.incoming?.hidden).toEqual(["copy_number"]);
+    expect(saved?.employees?.hidden).toEqual([]);
+    expect(
+      parseQuickActionMenuPreferences(
+        { ...employees, order: ["offboard", "transfer_ownership", "open"] },
+        "employees",
+      )?.order.slice(-4),
+    ).toEqual(["offboard", "transfer_ownership", "revoke_sessions", "suspend"]);
+    // A cached custom menu must never turn a document command into a staff permission.
+    expect(
+      parseQuickActionMenuPreferences({ ...incoming, order: ["offboard"] }, "incoming")?.order,
+    ).toEqual(["open", "copy_number"]);
   });
 
   it("orders only the currently allowed commands, appends new ones, and keeps danger last", () => {

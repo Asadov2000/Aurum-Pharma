@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.auth.models import UserPreferences
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.foundation.service import FoundationService
 from app.domains.roles.models import TenantMembership
@@ -17,6 +18,28 @@ DEFAULT_CATALOG = {
     "hidden": [],
 }
 DEFAULT_BATCHES = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
+DEFAULT_INCOMING = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
+DEFAULT_EMPLOYEES = {
+    "enabled": True,
+    "order": [
+        "open",
+        "profile",
+        "assign_access",
+        "reissue_invitation",
+        "activate",
+        "revoke_sessions",
+        "suspend",
+        "offboard",
+        "transfer_ownership",
+    ],
+    "hidden": [],
+}
+DEFAULT_QUICK_ACTIONS = {
+    "catalog": DEFAULT_CATALOG,
+    "batches": DEFAULT_BATCHES,
+    "incoming": DEFAULT_INCOMING,
+    "employees": DEFAULT_EMPLOYEES,
+}
 
 
 async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
@@ -37,7 +60,7 @@ async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
         },
     )
     assert saved.status_code == 200, saved.text
-    assert saved.json()["quick_actions"] == {"catalog": catalog, "batches": DEFAULT_BATCHES}
+    assert saved.json()["quick_actions"] == {**DEFAULT_QUICK_ACTIONS, "catalog": catalog}
     assert saved.json()["version"] == 2
     sidebar = saved.json()["workspace"]
 
@@ -49,7 +72,11 @@ async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
     )
     assert changed_batches.status_code == 200, changed_batches.text
     assert changed_batches.json()["workspace"] == sidebar
-    assert changed_batches.json()["quick_actions"] == {"catalog": catalog, "batches": batches}
+    assert changed_batches.json()["quick_actions"] == {
+        **DEFAULT_QUICK_ACTIONS,
+        "catalog": catalog,
+        "batches": batches,
+    }
 
     old_client = await auth_client.patch(
         "/api/v1/auth/preferences",
@@ -58,7 +85,11 @@ async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
     )
     assert old_client.status_code == 200, old_client.text
     assert old_client.json()["workspace"]["start_route"] == "/batches"
-    assert old_client.json()["quick_actions"] == {"catalog": catalog, "batches": batches}
+    assert old_client.json()["quick_actions"] == {
+        **DEFAULT_QUICK_ACTIONS,
+        "catalog": catalog,
+        "batches": batches,
+    }
     assert old_client.json()["version"] == 4
 
     stale = await auth_client.patch(
@@ -70,8 +101,97 @@ async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
     assert stale.json()["error"]["details"] == {"current_version": 4}
     reread = await auth_client.get("/api/v1/auth/preferences", headers=headers)
     assert reread.status_code == 200, reread.text
-    assert reread.json()["quick_actions"] == {"catalog": catalog, "batches": batches}
+    assert reread.json()["quick_actions"] == {
+        **DEFAULT_QUICK_ACTIONS,
+        "catalog": catalog,
+        "batches": batches,
+    }
     assert reread.json()["version"] == 4
+
+
+async def test_legacy_storage_defaults_and_new_old_section_updates_preserve_each_other(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+) -> None:
+    user = await make_user()
+    catalog = {"enabled": False, "order": ["open", "copy_name"], "hidden": ["copy_name"]}
+    batches = {"enabled": True, "order": ["copy_number", "open"], "hidden": []}
+    db_session.add(
+        UserPreferences(
+            user_id=user.id,
+            workspace_preferences={
+                "global": {
+                    "favorite_routes": ["/catalog"],
+                    "start_route": "/catalog",
+                    "quick_actions": {"catalog": catalog, "batches": batches},
+                }
+            },
+        )
+    )
+    await db_session.flush()
+    headers = await _headers(db_session, user.id)
+    legacy = await auth_client.get("/api/v1/auth/preferences", headers=headers)
+    assert legacy.status_code == 200, legacy.text
+    expected = {**DEFAULT_QUICK_ACTIONS, "catalog": catalog, "batches": batches}
+    assert legacy.json()["quick_actions"] == expected
+    assert legacy.json()["version"] == 1
+    sidebar = legacy.json()["workspace"]
+
+    incoming = {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
+    incoming_saved = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 1, "quick_actions": {"incoming": incoming}},
+    )
+    assert incoming_saved.status_code == 200, incoming_saved.text
+    expected = {**expected, "incoming": incoming}
+    assert incoming_saved.json()["quick_actions"] == expected
+    assert incoming_saved.json()["workspace"] == sidebar
+
+    employees = {
+        "enabled": True,
+        "order": list(reversed(DEFAULT_EMPLOYEES["order"])),
+        "hidden": ["suspend", "offboard", "transfer_ownership"],
+    }
+    employees_saved = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 2, "quick_actions": {"employees": employees}},
+    )
+    assert employees_saved.status_code == 200, employees_saved.text
+    expected = {**expected, "employees": employees}
+    assert employees_saved.json()["quick_actions"] == expected
+    assert employees_saved.json()["workspace"] == sidebar
+
+    catalog_saved = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 3, "quick_actions": {"catalog": DEFAULT_CATALOG}},
+    )
+    assert catalog_saved.status_code == 200, catalog_saved.text
+    expected = {**expected, "catalog": DEFAULT_CATALOG}
+    assert catalog_saved.json()["quick_actions"] == expected
+    assert catalog_saved.json()["workspace"] == sidebar
+
+    old_sidebar_saved = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 4, "workspace": {"start_route": "/incoming"}},
+    )
+    assert old_sidebar_saved.status_code == 200, old_sidebar_saved.text
+    assert old_sidebar_saved.json()["quick_actions"] == expected
+    assert old_sidebar_saved.json()["workspace"]["start_route"] == "/incoming"
+    assert old_sidebar_saved.json()["version"] == 5
+    stale = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 4, "quick_actions": {"employees": DEFAULT_EMPLOYEES}},
+    )
+    assert stale.status_code == 409, stale.text
+    reread = await auth_client.get("/api/v1/auth/preferences", headers=headers)
+    assert reread.json()["quick_actions"] == expected
+    assert reread.json()["version"] == 5
 
 
 @pytest.mark.parametrize(
@@ -92,6 +212,21 @@ async def test_quick_actions_merge_preserves_sidebar_sections_and_version(
         {"batches": {"order": ["edit"]}},
         {"batches": {"hidden": ["copy_barcode"]}},
         {"batches": {"order": ["open", "copy_number"], "hidden": ["open", "copy_number"]}},
+        {"incoming": {"enabled": "true"}},
+        {"incoming": {"unknown": True}},
+        {"incoming": {"order": ["archive"]}},
+        {"incoming": {"order": ["open", "open"]}},
+        {"incoming": {"hidden": ["copy_number", "copy_number"]}},
+        {"incoming": {"order": ["open"], "hidden": ["copy_number"]}},
+        {"incoming": {"hidden": ["open", "copy_number"]}},
+        {"employees": {"enabled": 0}},
+        {"employees": {"unknown": True}},
+        {"employees": {"order": ["copy_number"]}},
+        {"employees": {"order": []}},
+        {"employees": {"order": ["profile", "profile"]}},
+        {"employees": {"hidden": ["suspend", "suspend"]}},
+        {"employees": {"order": ["profile"], "hidden": ["activate"]}},
+        {"employees": {"order": ["offboard"], "hidden": ["offboard"]}},
     ],
 )
 async def test_quick_actions_reject_invalid_config_without_updating(
@@ -111,10 +246,7 @@ async def test_quick_actions_reject_invalid_config_without_updating(
     reread = await auth_client.get("/api/v1/auth/preferences", headers=headers)
     assert reread.status_code == 200, reread.text
     assert reread.json()["version"] == 1
-    assert reread.json()["quick_actions"] == {
-        "catalog": DEFAULT_CATALOG,
-        "batches": DEFAULT_BATCHES,
-    }
+    assert reread.json()["quick_actions"] == DEFAULT_QUICK_ACTIONS
 
 
 async def test_quick_actions_are_isolated_between_users_and_tenants(
@@ -163,7 +295,7 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
     )
     assert saved_b.status_code == 200, saved_b.text
     reread_a = await auth_client.get("/api/v1/auth/preferences", headers=headers_a)
-    assert reread_a.json()["quick_actions"] == {"catalog": catalog_a, "batches": DEFAULT_BATCHES}
+    assert reread_a.json()["quick_actions"] == {**DEFAULT_QUICK_ACTIONS, "catalog": catalog_a}
 
     for user in (user_a, user_b):
         global_preferences = await auth_client.get(
@@ -171,13 +303,10 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
             headers=await _headers(db_session, user.id),
         )
         assert global_preferences.status_code == 200, global_preferences.text
-        assert global_preferences.json()["quick_actions"] == {
-            "catalog": DEFAULT_CATALOG,
-            "batches": DEFAULT_BATCHES,
-        }
+        assert global_preferences.json()["quick_actions"] == DEFAULT_QUICK_ACTIONS
         assert global_preferences.json()["version"] == 2
     reread_b = await auth_client.get("/api/v1/auth/preferences", headers=headers_b)
-    assert reread_b.json()["quick_actions"] == {"catalog": DEFAULT_CATALOG, "batches": batches_b}
+    assert reread_b.json()["quick_actions"] == {**DEFAULT_QUICK_ACTIONS, "batches": batches_b}
     for user, other_tenant in ((user_a, tenant_b), (user_b, tenant_a)):
         denied = await auth_client.get(
             "/api/v1/auth/preferences",

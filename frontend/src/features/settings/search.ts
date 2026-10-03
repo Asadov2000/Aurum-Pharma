@@ -1,3 +1,5 @@
+import { QUICK_ACTION_SECTIONS, type QuickActionSection } from "./quickActions";
+
 export const settingsCategories = [
   {
     id: "account",
@@ -36,7 +38,7 @@ export const settingsCategories = [
     group: "personal",
     title: "Быстрые действия",
     description: "Правый клик, команды и порядок",
-    keywords: "пкм контекстное меню каталог партии скрыть команда",
+    keywords: "пкм контекстное меню каталог партии приёмка сотрудники скрыть команда",
     source: "user_preferences",
   },
   {
@@ -111,9 +113,16 @@ export const SETTINGS_SECTION_IDS: readonly SettingsSectionId[] = settingsCatego
 
 export function parseSettingsSearch(raw: Record<string, unknown>): {
   section?: SettingsSectionId;
+  actions?: QuickActionSection;
 } {
   const section = raw.section;
-  return typeof section === "string" && SETTINGS_SECTION_IDS.includes(section as SettingsSectionId)
-    ? { section: section as SettingsSectionId }
-    : {};
+  if (typeof section !== "string" || !SETTINGS_SECTION_IDS.includes(section as SettingsSectionId))
+    return {};
+  return {
+    section: section as SettingsSectionId,
+    ...(section === "quick-actions" &&
+    QUICK_ACTION_SECTIONS.includes(raw.actions as QuickActionSection)
+      ? { actions: raw.actions as QuickActionSection }
+      : {}),
+  };
 }

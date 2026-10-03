@@ -42,7 +42,7 @@ describe("RecordActionMenu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Настроить это меню" }));
     expect(navigate).toHaveBeenCalledWith({
       to: "/settings",
-      search: { section: "quick-actions" },
+      search: { section: "quick-actions", actions: "catalog" },
     });
   });
 

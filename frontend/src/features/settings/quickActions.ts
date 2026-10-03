@@ -1,6 +1,20 @@
 import { z } from "zod";
 
-export type QuickActionSection = "catalog" | "batches";
+export const QUICK_ACTION_SECTIONS = ["catalog", "batches", "incoming", "employees"] as const;
+export type QuickActionSection = (typeof QUICK_ACTION_SECTIONS)[number];
+export const QUICK_ACTION_SECTION_LABELS: Record<QuickActionSection, string> = {
+  catalog: "Каталог",
+  batches: "Партии",
+  incoming: "Приёмка товаров",
+  employees: "Сотрудники",
+};
+export const QUICK_ACTION_DANGER_IDS = new Set([
+  "archive",
+  "revoke_sessions",
+  "suspend",
+  "offboard",
+  "transfer_ownership",
+]);
 export interface QuickActionMenuPreferences {
   enabled: boolean;
   order: string[];
@@ -15,6 +29,22 @@ export const QUICK_ACTION_DEFAULTS: QuickActionPreferences = {
     hidden: [],
   },
   batches: { enabled: true, order: ["open", "copy_number"], hidden: [] },
+  incoming: { enabled: true, order: ["open", "copy_number"], hidden: [] },
+  employees: {
+    enabled: true,
+    order: [
+      "open",
+      "profile",
+      "assign_access",
+      "reissue_invitation",
+      "activate",
+      "revoke_sessions",
+      "suspend",
+      "offboard",
+      "transfer_ownership",
+    ],
+    hidden: [],
+  },
 };
 
 export const quickActionMenuSchema = z
@@ -45,7 +75,10 @@ export function parseQuickActionMenuPreferences(
   if (order.every((id) => hidden.includes(id))) return null;
   return {
     enabled: parsed.data.enabled,
-    order: [...order.filter((id) => id !== "archive"), ...order.filter((id) => id === "archive")],
+    order: [
+      ...order.filter((id) => !QUICK_ACTION_DANGER_IDS.has(id)),
+      ...order.filter((id) => QUICK_ACTION_DANGER_IDS.has(id)),
+    ],
     hidden,
   };
 }
@@ -56,9 +89,10 @@ export function parseQuickActionPreferences(
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).length === 0) return null;
-  if (Object.keys(record).some((key) => key !== "catalog" && key !== "batches")) return null;
+  if (Object.keys(record).some((key) => !QUICK_ACTION_SECTIONS.includes(key as QuickActionSection)))
+    return null;
   const result: Partial<QuickActionPreferences> = {};
-  for (const section of ["catalog", "batches"] as const) {
+  for (const section of QUICK_ACTION_SECTIONS) {
     if (!(section in record)) continue;
     const config = parseQuickActionMenuPreferences(record[section], section);
     if (!config) return null;
