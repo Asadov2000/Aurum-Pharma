@@ -69,6 +69,7 @@ vi.mock("@/features/settings/queries", () => ({
 }));
 
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 import { Modal } from "@/components/ui/Modal";
 import { ConnectivityContext } from "@/lib/connectivityContext";
 
@@ -100,6 +101,110 @@ describe("AppLayout shell", () => {
   afterEach(() => {
     setOnlineStatus(true);
     window.localStorage.clear();
+  });
+
+  it("highlights the cashier action without completing a sale", async () => {
+    const complete = vi.fn();
+    render(
+      <AppLayout>
+        <ContextHelpPortal pathname="/pos" />
+        <button type="button" onClick={complete}>
+          Завершить продажу
+        </button>
+      </AppLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument();
+      expect(screen.getByTestId("tenant-access-banner")).toBeInTheDocument();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+    expect(
+      await within(help).findByText("Проверьте оплату и завершите продажу"),
+    ).toBeInTheDocument();
+    fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+
+    const action = screen.getByRole("button", { name: "Завершить продажу" });
+    expect(complete).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Помощь по разделу" })).toHaveFocus();
+    expect(action).toHaveClass("aurum-help-target");
+    fireEvent.pointerDown(action);
+    expect(action).not.toHaveClass("aurum-help-target");
+  });
+
+  it("does not spotlight a disabled incoming acceptance action", async () => {
+    layoutState.pathname = "/incoming/document-1";
+    render(
+      <AppLayout>
+        <ContextHelpPortal pathname="/incoming/detail" />
+        <button type="button" disabled>
+          Принять на склад
+        </button>
+      </AppLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument();
+      expect(screen.getByTestId("tenant-access-banner")).toBeInTheDocument();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+    await within(help).findByText("Просмотрите документ");
+    expect(within(help).queryByRole("button", { name: "Показать на экране" })).toBeNull();
+    expect(within(help).getByText(/Принятый документ нельзя изменить/)).toBeInTheDocument();
+  });
+
+  it("ignores hidden actions and clears the spotlight when the route changes", async () => {
+    layoutState.pathname = "/incoming/document-1";
+    const view = render(
+      <AppLayout>
+        <ContextHelpPortal pathname="/incoming/detail" />
+        <div style={{ display: "none" }}>
+          <button type="button">Продолжить</button>
+        </div>
+        <button type="button">Добавить позицию</button>
+      </AppLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument();
+      expect(screen.getByTestId("tenant-access-banner")).toBeInTheDocument();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+    expect(await within(help).findByText("Проверьте позиции поставки")).toBeInTheDocument();
+    fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+    const action = screen.getByRole("button", { name: "Добавить позицию" });
+    expect(action).toHaveClass("aurum-help-target");
+
+    layoutState.pathname = "/staff-pay";
+    view.rerender(<AppLayout>Другой раздел</AppLayout>);
+    await waitFor(() => expect(action).not.toHaveClass("aurum-help-target"));
+  });
+
+  it("keeps cash payout guidance independent from actual employee records", async () => {
+    layoutState.pathname = "/staff-pay";
+    render(
+      <AppLayout>
+        <ContextHelpPortal pathname="/staff-pay" />
+        <label htmlFor="pay-employee">Найти сотрудника</label>
+        <input id="pay-employee" />
+      </AppLayout>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("appearance-menu-ready")).toBeInTheDocument();
+      expect(screen.getByTestId("tenant-access-banner")).toBeInTheDocument();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+    await within(help).findByText("Найдите сотрудника");
+    fireEvent.click(within(help).getByRole("button", { name: "Инструкция по шагам" }));
+    expect(within(help).getByText(/После фактической выдачи наличных/)).toBeInTheDocument();
+    expect(within(help).getByText(/Запись выплаты не выдаёт деньги/)).toBeInTheDocument();
+    fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+    expect(screen.getByRole("textbox", { name: "Найти сотрудника" })).toHaveFocus();
   });
 
   it.each([

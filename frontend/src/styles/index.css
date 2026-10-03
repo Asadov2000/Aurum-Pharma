@@ -480,6 +480,12 @@
     @apply fixed z-popover w-[min(19rem,calc(100vw-1rem))] overflow-y-auto rounded-lg border border-border bg-surface-raised shadow-lg;
   }
 
+  .aurum-help-target {
+    outline: 3px solid hsl(var(--primary));
+    outline-offset: 3px;
+    box-shadow: 0 0 0 8px hsl(var(--primary) / 0.12);
+  }
+
   .app-header-popover-heading {
     @apply flex items-center justify-between border-b border-border py-1 pl-4 pr-1;
   }

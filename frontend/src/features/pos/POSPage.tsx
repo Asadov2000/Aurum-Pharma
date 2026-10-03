@@ -1,5 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
+
 import {
   Button,
   Input,
@@ -184,6 +186,7 @@ export function POSPage(): JSX.Element {
         mode === "touch" ? "pos--touch" : "pos--keyboard",
       )}
     >
+      <ContextHelpPortal pathname="/pos" />
       {!registerId ? (
         <PageHeader title="Касса" compact actions={workstationControls} />
       ) : (

@@ -1,4 +1,12 @@
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 
@@ -152,6 +160,7 @@ export function AppHeader(props: AppHeaderProps): JSX.Element {
               <AppearanceMenu />
             </Suspense>
           </div>
+          <span id="app-context-help-slot" className="shrink-0" />
           <button
             type="button"
             aria-label="Настроить быстрые переходы"
@@ -205,7 +214,7 @@ function ConnectionMenu(): JSX.Element {
   );
 }
 
-function HeaderPopover({
+export function HeaderPopover({
   title,
   trigger,
   triggerClassName,

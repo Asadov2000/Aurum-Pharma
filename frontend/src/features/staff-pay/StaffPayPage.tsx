@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
+
 import {
   Badge,
   Button,
@@ -48,6 +50,7 @@ function Management(): JSX.Element {
   });
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5" data-testid="staff-pay-management">
+      <ContextHelpPortal pathname="/staff-pay" />
       <PageHeader
         title="Выплаты сотрудникам"
         showTitleOnDesktop
