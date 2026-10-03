@@ -1,4 +1,5 @@
 import { lazy, Suspense, type ReactNode, useEffect, useMemo, useState } from "react";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
 import {
   Badge,
@@ -61,6 +62,7 @@ export function SuppliersPage(): JSX.Element {
   const plane = useMemo(() => resolveDataPlane(), []);
   return plane.mode === "edge-readonly" ? (
     <Suspense fallback={<SkeletonRows rows={6} />}>
+      <ContextHelpPortal pathname="/suppliers" readOnly />
       <EdgeSuppliersPage plane={plane} />
     </Suspense>
   ) : (
@@ -156,6 +158,7 @@ function CloudSuppliersPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
+      <ContextHelpPortal pathname="/suppliers" />
       <PageHeader
         title="Поставщики"
         description="Контакты, реквизиты и возвраты по каждой компании-партнёру."

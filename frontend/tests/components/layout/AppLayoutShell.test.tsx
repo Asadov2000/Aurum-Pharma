@@ -74,6 +74,94 @@ import { Modal } from "@/components/ui/Modal";
 import { ConnectivityContext } from "@/lib/connectivityContext";
 
 describe("AppLayout shell", () => {
+  it.each(["/suppliers", "/batches"])(
+    "explains %s as read-only in local mode",
+    async (pathname) => {
+      layoutState.pathname = pathname;
+      const change = vi.fn();
+      render(
+        <AppLayout>
+          <ContextHelpPortal pathname={pathname} readOnly />
+          <input id="edge_supplier_search" aria-label="Поиск" onChange={change} />
+          <input type="checkbox" aria-label="Показывать партии без остатка" onChange={change} />
+        </AppLayout>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+      fireEvent.click(screen.getByRole("button", { name: "Инструкция по шагам" }));
+      expect(screen.getByText(/доступен только просмотр/)).toBeInTheDocument();
+      expect(screen.getByText(/могут отличаться от данных сервера/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Показать на экране" }));
+      expect(change).not.toHaveBeenCalled();
+      expect(screen.getByRole("checkbox")).not.toBeChecked();
+    },
+  );
+
+  it.each([
+    {
+      pathname: "/suppliers",
+      field: "supplier_search",
+      inventorySection: undefined,
+      title: "Найдите поставщика",
+      warning: /Не создавайте второго поставщика/,
+    },
+    {
+      pathname: "/batches",
+      field: "batch_number_filter",
+      inventorySection: "saleable" as const,
+      title: "Найдите партию",
+      warning: /отсутствие блокировки партии/,
+    },
+    {
+      pathname: "/batches",
+      field: "customer_return_search",
+      inventorySection: "customer_returns" as const,
+      title: "Найдите возвращённый товар",
+      warning: /Сохранённое решение нельзя изменить/,
+    },
+  ])(
+    "shows $title offline without changing stock or supplier data",
+    async ({ pathname, field, inventorySection, title, warning }) => {
+      layoutState.pathname = pathname;
+      setOnlineStatus(false);
+      const change = vi.fn();
+      const act = vi.fn();
+      render(
+        <AppLayout>
+          <ContextHelpPortal pathname={pathname} inventorySection={inventorySection} />
+          <input id={field} aria-label="Поиск" onChange={change} />
+          <button onClick={act}>Принять решение</button>
+        </AppLayout>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+      const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+      expect(within(help).getByText(title)).toBeInTheDocument();
+      expect(within(help).getByText(warning)).toBeInTheDocument();
+      fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+      expect(screen.getByRole("textbox", { name: "Поиск" })).toHaveClass("aurum-help-target");
+      expect(change).not.toHaveBeenCalled();
+      expect(act).not.toHaveBeenCalled();
+    },
+  );
+
+  it("skips hidden and disabled inventory fields when offering a spotlight", async () => {
+    layoutState.pathname = "/batches";
+    render(
+      <AppLayout>
+        <ContextHelpPortal pathname="/batches" />
+        <input id="batch_number_filter" hidden />
+        <input id="batch_catalog_filter" aria-label="Товар" />
+      </AppLayout>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    fireEvent.click(screen.getByRole("button", { name: "Показать на экране" }));
+    const product = screen.getByRole("textbox", { name: "Товар" });
+    expect(product).toHaveClass("aurum-help-target");
+    fireEvent.pointerDown(product);
+    product.setAttribute("disabled", "");
+    fireEvent.click(screen.getByRole("button", { name: "Помощь по разделу" }));
+    expect(screen.queryByRole("button", { name: "Показать на экране" })).toBeNull();
+  });
+
   it.each(["payments", "refunds"] as const)(
     "explains %s reconciliation offline without executing an operation",
     async (operationKind) => {
