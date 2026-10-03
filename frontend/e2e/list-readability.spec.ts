@@ -3,6 +3,7 @@ import { request, test, type Locator, type Page } from "@playwright/test";
 import {
   apiContext,
   apiLogin,
+  catalogSearchKey,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -102,7 +103,9 @@ test("keeps supplier status and catalog price readable beside details at desktop
       await page.setViewportSize({ width, height: 1000 });
       for (const compact of [false, true]) {
         await openWorkspace(page, "/catalog", compact);
-        await page.getByPlaceholder("Название, МНН или штрихкод").fill(catalogName);
+        await page
+          .getByPlaceholder("Название, МНН или штрихкод")
+          .fill(catalogSearchKey(catalogName));
         const catalog = page.getByRole("region", { name: "Товары каталога" });
         const row = catalog.locator("article").filter({ hasText: catalogName });
         await expect(catalog.locator("article")).toHaveCount(1);
