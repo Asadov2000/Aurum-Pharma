@@ -1,10 +1,15 @@
 import { ContextHelp, type HelpLocation } from "./ContextHelp";
 import { HeaderPopover } from "./AppHeader";
 
-export function ContextHelpTrigger({ pathname, operationKind }: HelpLocation): JSX.Element {
+export function ContextHelpTrigger({
+  pathname,
+  operationKind,
+  inventorySection,
+  readOnly,
+}: HelpLocation): JSX.Element {
   return (
     <HeaderPopover
-      key={`help:${pathname}:${operationKind ?? ""}`}
+      key={`help:${pathname}:${operationKind ?? ""}:${inventorySection ?? ""}:${readOnly ?? false}`}
       title="Помощь по разделу"
       triggerClassName="app-header-settings flex w-auto items-center gap-2 px-2"
       trigger={
@@ -19,7 +24,15 @@ export function ContextHelpTrigger({ pathname, operationKind }: HelpLocation): J
         </>
       }
     >
-      {(close) => <ContextHelp pathname={pathname} operationKind={operationKind} close={close} />}
+      {(close) => (
+        <ContextHelp
+          pathname={pathname}
+          operationKind={operationKind}
+          inventorySection={inventorySection}
+          readOnly={readOnly}
+          close={close}
+        />
+      )}
     </HeaderPopover>
   );
 }

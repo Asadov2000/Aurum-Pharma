@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
 import {
   Badge,
@@ -69,6 +70,7 @@ export function BatchesPage(): JSX.Element {
   const plane = useMemo(() => resolveDataPlane(), []);
   return plane.mode === "edge-readonly" ? (
     <Suspense fallback={<SkeletonRows rows={6} />}>
+      <ContextHelpPortal pathname="/batches" readOnly />
       <EdgeInventoryPage plane={plane} />
     </Suspense>
   ) : (
@@ -162,6 +164,12 @@ function CloudBatchesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
+      <ContextHelpPortal
+        pathname="/batches"
+        inventorySection={
+          section === "customer_returns" && canViewCustomerReturns ? "customer_returns" : "saleable"
+        }
+      />
       <PageHeader
         title="Партии"
         description="Остатки, сроки годности и движения товара по аптечным точкам."

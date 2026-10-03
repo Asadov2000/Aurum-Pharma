@@ -5,6 +5,8 @@ import { showHelpSpotlight } from "./contextHelpSpotlight";
 export type HelpLocation = {
   pathname: string;
   operationKind?: "payments" | "refunds";
+  inventorySection?: "saleable" | "customer_returns";
+  readOnly?: boolean;
 };
 
 type HelpStep = {
@@ -43,8 +45,93 @@ function availableButton(root: HTMLElement, label: string): HTMLButtonElement | 
   );
 }
 
-function helpFor({ pathname, operationKind }: HelpLocation): HelpTopic {
+function availableField(root: HTMLElement | null, selector: string): HTMLElement | null {
+  return Array.from(root?.querySelectorAll<HTMLElement>(selector) ?? []).find(isVisible) ?? null;
+}
+
+function helpFor({ pathname, operationKind, inventorySection, readOnly }: HelpLocation): HelpTopic {
   const root = document.querySelector<HTMLElement>("#main-content");
+  if (readOnly && (pathname === "/suppliers" || pathname === "/batches")) {
+    const suppliers = pathname === "/suppliers";
+    return {
+      section: suppliers ? "Поставщики · Локальные данные" : "Партии · Локальные данные",
+      step: {
+        title: suppliers
+          ? "Найдите поставщика в локальных данных"
+          : "Проверьте остатки в локальных данных",
+        detail: suppliers
+          ? "Ищите по названию, контакту или ИНН. Здесь доступны сведения из локального снимка."
+          : "Проверьте остаток, срок годности и блокировку партии. Здесь доступны сведения из локального снимка.",
+        target: availableField(
+          root,
+          suppliers
+            ? "#edge_supplier_search:not(:disabled)"
+            : 'input[type="checkbox"]:not(:disabled)',
+        ),
+      },
+      instructions: suppliers
+        ? [
+            "Найдите компанию через поиск.",
+            "Посмотрите контакты и реквизиты в её карточке.",
+            "В этом режиме доступен только просмотр; добавление и изменение поставщиков недоступны.",
+          ]
+        : [
+            "Просмотрите остатки и сроки годности партий.",
+            "При необходимости включите «Показывать партии без остатка».",
+            "В этом режиме доступен только просмотр; складские операции недоступны.",
+          ],
+      warning: "Сведения относятся к локальному снимку и могут отличаться от данных сервера.",
+    };
+  }
+  if (pathname === "/suppliers") {
+    return {
+      section: "Поставщики",
+      step: {
+        title: "Найдите поставщика",
+        detail: "Ищите по названию, контакту, телефону или ИНН, затем откройте карточку компании.",
+        target: availableField(root, "#supplier_search:not(:disabled)"),
+      },
+      instructions: [
+        "Найдите компанию через поиск. Чтобы увидеть отключённых поставщиков, измените фильтр «Статус».",
+        "Откройте карточку и проверьте контакты и реквизиты перед работой с поставкой.",
+        "Если компании нет и доступна кнопка «Добавить поставщика», создайте карточку с её реквизитами.",
+      ],
+      warning:
+        "Перед добавлением проверьте существующие карточки, включая отключённые. Не создавайте второго поставщика для той же компании.",
+    };
+  }
+  if (pathname === "/batches") {
+    const returns = inventorySection === "customer_returns";
+    return {
+      section: returns ? "Возвраты покупателей" : "Партии",
+      step: {
+        title: returns ? "Найдите возвращённый товар" : "Найдите партию",
+        detail: returns
+          ? "Найдите товар, партию или номер чека. По умолчанию показаны возвраты, которые ожидают решения."
+          : "Укажите номер партии или выберите товар, затем проверьте остаток и срок годности.",
+        target: availableField(
+          root,
+          returns
+            ? "#customer_return_search:not(:disabled)"
+            : "#batch_number_filter:not(:disabled), #batch_catalog_filter:not(:disabled)",
+        ),
+      },
+      instructions: returns
+        ? [
+            "Найдите возврат по товару, партии или номеру чека.",
+            "Чтобы увидеть завершённые возвраты, измените фильтр «Статус».",
+            "Если доступна кнопка «Принять решение», укажите выполненное действие и причину. Проверьте данные перед сохранением.",
+          ]
+        : [
+            "Найдите партию по номеру или товару.",
+            "Уточните точку, срок годности и доступность с помощью фильтров.",
+            "Откройте карточку партии и проверьте остаток и движения. Новые партии появляются после принятия поставки.",
+          ],
+      warning: returns
+        ? "Возвращённый товар не становится доступным для продажи. Сохранённое решение нельзя изменить."
+        : "Остаток меняется через складские операции. Перед продажей проверьте срок годности и отсутствие блокировки партии.",
+    };
+  }
   if (pathname === "/payment-reconciliation") {
     const refunds = operationKind === "refunds";
     return {
@@ -179,12 +266,14 @@ function helpFor({ pathname, operationKind }: HelpLocation): HelpTopic {
 export function ContextHelp({
   pathname,
   operationKind,
+  inventorySection,
+  readOnly,
   close,
 }: HelpLocation & {
   close: () => void;
 }): JSX.Element {
   const [showInstructions, setShowInstructions] = useState(false);
-  const topic = helpFor({ pathname, operationKind });
+  const topic = helpFor({ pathname, operationKind, inventorySection, readOnly });
   return (
     <div className="space-y-4 p-4 text-sm text-foreground">
       <div>
@@ -200,7 +289,8 @@ export function ContextHelp({
             type="button"
             className="min-h-10 rounded-md bg-primary/10 px-3 font-medium text-primary hover:bg-primary/15"
             onClick={() => {
-              const target = helpFor({ pathname, operationKind }).step.target;
+              const target = helpFor({ pathname, operationKind, inventorySection, readOnly }).step
+                .target;
               if (!target) return;
               close();
               showHelpSpotlight(target);
