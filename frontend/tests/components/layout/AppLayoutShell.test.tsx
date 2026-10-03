@@ -74,6 +74,62 @@ import { Modal } from "@/components/ui/Modal";
 import { ConnectivityContext } from "@/lib/connectivityContext";
 
 describe("AppLayout shell", () => {
+  it.each(["payments", "refunds"] as const)(
+    "explains %s reconciliation offline without executing an operation",
+    async (operationKind) => {
+      layoutState.pathname = "/payment-reconciliation";
+      setOnlineStatus(false);
+      const refresh = vi.fn();
+      const resolve = vi.fn();
+      render(
+        <AppLayout>
+          <ContextHelpPortal pathname="/payment-reconciliation" operationKind={operationKind} />
+          <button onClick={refresh}>Обновить</button>
+          <button onClick={resolve}>Принять решение</button>
+        </AppLayout>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+      const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+      expect(
+        within(help).getByText(
+          operationKind === "refunds"
+            ? "Проверьте результат возврата"
+            : "Проверьте результат оплаты",
+        ),
+      ).toBeInTheDocument();
+      fireEvent.click(within(help).getByRole("button", { name: "Инструкция по шагам" }));
+      expect(
+        within(help).getByText(
+          operationKind === "refunds" ? /Статус «Ждут чека»/ : /ещё может ждать завершения чека/,
+        ),
+      ).toBeInTheDocument();
+      fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+      expect(screen.getByRole("button", { name: "Обновить" })).toHaveClass("aurum-help-target");
+      expect(refresh).not.toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+    },
+  );
+
+  it("resets reconciliation help when the operation kind changes", async () => {
+    layoutState.pathname = "/payment-reconciliation";
+    const view = (operationKind: "payments" | "refunds") => (
+      <AppLayout>
+        <ContextHelpPortal pathname="/payment-reconciliation" operationKind={operationKind} />
+        <button disabled>Обновить</button>
+      </AppLayout>
+    );
+    const { rerender } = render(view("payments"));
+    fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+    fireEvent.click(screen.getByRole("button", { name: "Инструкция по шагам" }));
+    rerender(view("refunds"));
+    expect(screen.queryByRole("dialog", { name: "Помощь по разделу" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Помощь по разделу" }));
+    const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+    expect(within(help).getByText("Проверьте результат возврата")).toBeInTheDocument();
+    expect(within(help).queryByRole("button", { name: "Показать на экране" })).toBeNull();
+    expect(within(help).queryByRole("list")).toBeNull();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
