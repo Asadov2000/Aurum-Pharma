@@ -2,13 +2,11 @@ import { forwardRef, type InputHTMLAttributes, useId } from "react";
 
 import { cn } from "@/lib/utils";
 
-import "./Switch.css";
-
 interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   label?: string;
 }
 
-export const Switch = forwardRef<HTMLInputElement, SwitchProps>(function Switch(
+export const Switch = /* @__PURE__ */ forwardRef<HTMLInputElement, SwitchProps>(function Switch(
   { label, className, id, ...rest },
   ref,
 ): JSX.Element {

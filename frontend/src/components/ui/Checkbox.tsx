@@ -2,7 +2,7 @@ import { forwardRef, type InputHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 
-export const Checkbox = forwardRef<
+export const Checkbox = /* @__PURE__ */ forwardRef<
   HTMLInputElement,
   Omit<InputHTMLAttributes<HTMLInputElement>, "type">
 >(function Checkbox({ className, ...rest }, ref) {

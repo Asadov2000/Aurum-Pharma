@@ -35,8 +35,26 @@ function packageNameFromModuleId(id: string): string | undefined {
 }
 
 function splitRuntimeDependencies(id: string): string | undefined {
+  const normalizedId = id.replaceAll("\\", "/");
+  // Shared controls travel with lazy pages, rather than being evaluated by
+  // the UI barrel at startup. Group them to avoid extra network requests.
+  if (/\/src\/components\/ui\/(Input|Label|FormError)\.tsx$/.test(normalizedId)) {
+    return "ui-fields";
+  }
+  if (/\/src\/components\/ui\/(Select|Switch|Textarea|Checkbox|ActionMenu)\.tsx$/.test(normalizedId)) {
+    return "ui-controls";
+  }
+  if (/\/src\/components\/ui\/(Modal|ConfirmDialog)\.tsx$/.test(normalizedId)) {
+    return "ui-dialogs";
+  }
   const packageName = packageNameFromModuleId(id);
   if (!packageName) return undefined;
+  if (
+    packageName === "@tanstack/react-query" &&
+    normalizedId.endsWith("/build/modern/useMutationState.js")
+  ) {
+    return "query-mutation-state";
+  }
   // Navigation blocking is used only by lazy editors. Keep that
   // optional router module out of the runtime loaded by Dashboard and POS.
   if (
@@ -99,6 +117,8 @@ export default defineConfig(({ mode }) => ({
     manifest: true,
     rollupOptions: {
       output: {
+        // A control's shared dependencies must not pull it back into the entry.
+        onlyExplicitManualChunks: true,
         manualChunks: splitRuntimeDependencies,
       },
     },

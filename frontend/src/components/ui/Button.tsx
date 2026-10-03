@@ -31,7 +31,7 @@ const sizeClasses: Record<Size, string> = {
   xl: "h-[var(--control-height-xl)] px-[var(--control-padding-xl)] text-base",
 };
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+export const Button = /* @__PURE__ */ forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   {
     variant = "primary",
     size = "md",
