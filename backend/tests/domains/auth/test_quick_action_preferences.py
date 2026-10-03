@@ -19,6 +19,7 @@ DEFAULT_CATALOG = {
 }
 DEFAULT_BATCHES = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
 DEFAULT_INCOMING = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
+DEFAULT_RECEIPTS = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
 DEFAULT_EMPLOYEES = {
     "enabled": True,
     "order": [
@@ -39,6 +40,7 @@ DEFAULT_QUICK_ACTIONS = {
     "batches": DEFAULT_BATCHES,
     "incoming": DEFAULT_INCOMING,
     "employees": DEFAULT_EMPLOYEES,
+    "receipts": DEFAULT_RECEIPTS,
 }
 
 
@@ -194,6 +196,95 @@ async def test_legacy_storage_defaults_and_new_old_section_updates_preserve_each
     assert reread.json()["version"] == 5
 
 
+@pytest.mark.parametrize("legacy_section_count", [2, 4])
+async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
+    auth_client: AsyncClient,
+    db_session: AsyncSession,
+    make_user,
+    legacy_section_count: int,
+) -> None:
+    user = await make_user()
+    legacy_actions = {
+        "catalog": {"enabled": False, "order": ["copy_name", "open"], "hidden": ["open"]},
+        "batches": {"enabled": True, "order": ["copy_number", "open"], "hidden": []},
+    }
+    if legacy_section_count == 4:
+        legacy_actions.update(
+            {
+                "incoming": {
+                    "enabled": False,
+                    "order": ["copy_number", "open"],
+                    "hidden": ["open"],
+                },
+                "employees": {"enabled": True, "order": ["profile", "open"], "hidden": []},
+            }
+        )
+    db_session.add(
+        UserPreferences(
+            user_id=user.id,
+            workspace_preferences={
+                "global": {
+                    "favorite_routes": ["/catalog"],
+                    "start_route": "/catalog",
+                    "quick_actions": legacy_actions,
+                }
+            },
+        )
+    )
+    await db_session.flush()
+    headers = await _headers(db_session, user.id)
+    initial = await auth_client.get("/api/v1/auth/preferences", headers=headers)
+    assert initial.status_code == 200, initial.text
+    expected = {**DEFAULT_QUICK_ACTIONS, **legacy_actions}
+    assert initial.json()["quick_actions"] == expected
+    assert initial.json()["version"] == 1
+    sidebar = initial.json()["workspace"]
+
+    receipts = {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
+    saved = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 1, "quick_actions": {"receipts": receipts}},
+    )
+    assert saved.status_code == 200, saved.text
+    expected = {**expected, "receipts": receipts}
+    assert saved.json()["quick_actions"] == expected
+    assert saved.json()["workspace"] == sidebar
+    assert saved.json()["version"] == 2
+
+    old_section = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 2, "quick_actions": {"catalog": DEFAULT_CATALOG}},
+    )
+    assert old_section.status_code == 200, old_section.text
+    expected = {**expected, "catalog": DEFAULT_CATALOG}
+    assert old_section.json()["quick_actions"] == expected
+    assert old_section.json()["workspace"] == sidebar
+
+    old_sidebar = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 3, "workspace": {"start_route": "/sales"}},
+    )
+    assert old_sidebar.status_code == 200, old_sidebar.text
+    assert old_sidebar.json()["quick_actions"] == expected
+    assert old_sidebar.json()["version"] == 4
+
+    stale = await auth_client.patch(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"expected_version": 3, "quick_actions": {"receipts": DEFAULT_RECEIPTS}},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["details"] == {"current_version": 4}
+    reread = await auth_client.get("/api/v1/auth/preferences", headers=headers)
+    assert reread.status_code == 200, reread.text
+    assert reread.json()["quick_actions"] == expected
+    assert reread.json()["workspace"] == old_sidebar.json()["workspace"]
+    assert reread.json()["version"] == 4
+
+
 @pytest.mark.parametrize(
     "quick_actions",
     [
@@ -227,6 +318,24 @@ async def test_legacy_storage_defaults_and_new_old_section_updates_preserve_each
         {"employees": {"hidden": ["suspend", "suspend"]}},
         {"employees": {"order": ["profile"], "hidden": ["activate"]}},
         {"employees": {"order": ["offboard"], "hidden": ["offboard"]}},
+        {"receipts": None},
+        {"catalog": DEFAULT_CATALOG, "receipts": None},
+        {"receipts": {"unknown": True}},
+        {"receipts": {"enabled": "false"}},
+        {"receipts": {"enabled": 1}},
+        {"receipts": {"enabled": None}},
+        {"receipts": {"order": None}},
+        {"receipts": {"hidden": None}},
+        {"receipts": {"order": []}},
+        {"receipts": {"order": ["print"]}},
+        {"receipts": {"order": ["refund"]}},
+        {"receipts": {"order": ["cancel"]}},
+        {"receipts": {"hidden": ["edit"]}},
+        {"receipts": {"order": ["open", "open"]}},
+        {"receipts": {"hidden": ["copy_number", "copy_number"]}},
+        {"receipts": {"order": ["open"], "hidden": ["copy_number"]}},
+        {"receipts": {"hidden": ["open", "copy_number"]}},
+        {"receipts": {"enabled": False, "hidden": ["open", "copy_number"]}},
     ],
 )
 async def test_quick_actions_reject_invalid_config_without_updating(
@@ -277,25 +386,38 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
     headers_a = await _headers(db_session, user_a.id, tenant_a.id)
     headers_b = await _headers(db_session, user_b.id, tenant_b.id)
     catalog_a = {"enabled": False, "order": ["open", "edit"], "hidden": ["edit"]}
+    receipts_a = {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
     saved_a = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers_a,
-        json={"expected_version": 1, "quick_actions": {"catalog": catalog_a}},
+        json={
+            "expected_version": 1,
+            "quick_actions": {"catalog": catalog_a, "receipts": receipts_a},
+        },
     )
     assert saved_a.status_code == 200, saved_a.text
 
     read_b = await auth_client.get("/api/v1/auth/preferences", headers=headers_b)
     assert read_b.status_code == 200, read_b.text
     assert read_b.json()["quick_actions"]["catalog"] == DEFAULT_CATALOG
+    assert read_b.json()["quick_actions"]["receipts"] == DEFAULT_RECEIPTS
     batches_b = {"enabled": False, "order": ["copy_number", "open"], "hidden": []}
+    receipts_b = {"enabled": True, "order": ["open", "copy_number"], "hidden": ["copy_number"]}
     saved_b = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers_b,
-        json={"expected_version": 1, "quick_actions": {"batches": batches_b}},
+        json={
+            "expected_version": 1,
+            "quick_actions": {"batches": batches_b, "receipts": receipts_b},
+        },
     )
     assert saved_b.status_code == 200, saved_b.text
     reread_a = await auth_client.get("/api/v1/auth/preferences", headers=headers_a)
-    assert reread_a.json()["quick_actions"] == {**DEFAULT_QUICK_ACTIONS, "catalog": catalog_a}
+    assert reread_a.json()["quick_actions"] == {
+        **DEFAULT_QUICK_ACTIONS,
+        "catalog": catalog_a,
+        "receipts": receipts_a,
+    }
 
     for user in (user_a, user_b):
         global_preferences = await auth_client.get(
@@ -306,7 +428,11 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
         assert global_preferences.json()["quick_actions"] == DEFAULT_QUICK_ACTIONS
         assert global_preferences.json()["version"] == 2
     reread_b = await auth_client.get("/api/v1/auth/preferences", headers=headers_b)
-    assert reread_b.json()["quick_actions"] == {**DEFAULT_QUICK_ACTIONS, "batches": batches_b}
+    assert reread_b.json()["quick_actions"] == {
+        **DEFAULT_QUICK_ACTIONS,
+        "batches": batches_b,
+        "receipts": receipts_b,
+    }
     for user, other_tenant in ((user_a, tenant_b), (user_b, tenant_a)):
         denied = await auth_client.get(
             "/api/v1/auth/preferences",

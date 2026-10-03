@@ -265,6 +265,7 @@ QuickActionId = TypeVar("QuickActionId", bound=str)
 CatalogQuickActionId = Literal["open", "edit", "copy_name", "copy_barcode", "archive", "restore"]
 BatchQuickActionId = Literal["open", "copy_number"]
 IncomingQuickActionId = Literal["open", "copy_number"]
+ReceiptQuickActionId = Literal["open", "copy_number"]
 EmployeeQuickActionId = Literal[
     "open",
     "profile",
@@ -287,6 +288,10 @@ def _batch_quick_action_order() -> list[BatchQuickActionId]:
 
 
 def _incoming_quick_action_order() -> list[IncomingQuickActionId]:
+    return ["open", "copy_number"]
+
+
+def _receipt_quick_action_order() -> list[ReceiptQuickActionId]:
     return ["open", "copy_number"]
 
 
@@ -351,6 +356,13 @@ class EmployeeQuickActionsConfig(QuickActionsConfig[EmployeeQuickActionId]):
     )
 
 
+class ReceiptQuickActionsConfig(QuickActionsConfig[ReceiptQuickActionId]):
+    order: list[ReceiptQuickActionId] = Field(
+        default_factory=_receipt_quick_action_order, min_length=1, max_length=2
+    )
+    hidden: list[ReceiptQuickActionId] = Field(default_factory=list, max_length=2)
+
+
 class QuickActionsPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -358,6 +370,7 @@ class QuickActionsPreferences(BaseModel):
     batches: BatchQuickActionsConfig = Field(default_factory=BatchQuickActionsConfig)
     incoming: IncomingQuickActionsConfig = Field(default_factory=IncomingQuickActionsConfig)
     employees: EmployeeQuickActionsConfig = Field(default_factory=EmployeeQuickActionsConfig)
+    receipts: ReceiptQuickActionsConfig = Field(default_factory=ReceiptQuickActionsConfig)
 
 
 class QuickActionsPreferencesUpdate(BaseModel):
@@ -367,9 +380,12 @@ class QuickActionsPreferencesUpdate(BaseModel):
     batches: BatchQuickActionsConfig | None = None
     incoming: IncomingQuickActionsConfig | None = None
     employees: EmployeeQuickActionsConfig | None = None
+    receipts: ReceiptQuickActionsConfig | None = None
 
     @model_validator(mode="after")
     def _require_section(self) -> Self:
+        if "receipts" in self.model_fields_set and self.receipts is None:
+            raise ValueError("receipts quick actions cannot be null")
         if not self.model_dump(exclude_none=True):
             raise ValueError("at least one quick action section must be provided")
         return self
