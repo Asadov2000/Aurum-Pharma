@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { NavIcon } from "@/components/layout/icons";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 import {
   Badge,
   Button,
@@ -24,6 +25,7 @@ export function MyWorkPage(): JSX.Element {
   const shifts = usePersonalShiftsQuery(page);
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5">
+      <ContextHelpPortal pathname="/my-work" />
       <PageHeader
         title="Моя работа"
         showTitleOnDesktop
