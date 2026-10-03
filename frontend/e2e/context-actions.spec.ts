@@ -65,11 +65,19 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   await addPosItemToCart(page, { brandName: item.brand_name, qty: "3", expectedCartItems: 2 });
   const first = page.getByTestId("cart-item").filter({ hasText: batchA });
   const second = page.getByTestId("cart-item").filter({ hasText: batchB });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Вид интерфейса", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Вид интерфейса", exact: true })
+    .getByRole("button", { name: "Сенсор", exact: true })
+    .click();
+  await page.keyboard.press("Escape");
   for (const mode of ["Сенсор", "Клавиши"]) {
     await page
       .getByRole("group", { name: "Режим кассы", exact: true })
       .getByRole("button", { name: mode, exact: true })
       .click();
+    await expect(second.getByText(batchB, { exact: false })).toBeVisible();
     await expect
       .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
       .toBe(true);
@@ -133,6 +141,17 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   await expect(first).toHaveCount(0);
   await expect(second).toBeVisible();
   await expect(page.getByTestId("cart-item")).toHaveCount(1);
+  for (const mode of ["Сенсор", "Клавиши"]) {
+    await page
+      .getByRole("group", { name: "Режим кассы", exact: true })
+      .getByRole("button", { name: mode, exact: true })
+      .click();
+    await expect(second.getByText(item.brand_name, { exact: true })).toBeVisible();
+    await expect(second.getByText(batchB, { exact: false })).toBeVisible();
+    await expect
+      .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
+      .toBe(true);
+  }
   await payPosSaleCash(page, "20.00");
   await second.click({ button: "right" });
   await expect(menu.getByRole("menuitem", { name: /Увеличить|Уменьшить|Удалить/ })).toHaveCount(0);

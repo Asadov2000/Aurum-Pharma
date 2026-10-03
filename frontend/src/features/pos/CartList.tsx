@@ -231,14 +231,21 @@ export function CartList({
     }
   }
 
-  // The qty stepper / line total / delete cluster — identical for a standalone
-  // row and a grouped batch sub-row.
-  const lineControls = (it: SaleItem, name: string, batchFallback?: string): ReactNode => (
+  // Shared qty stepper / line total / delete cluster for each sale item.
+  const lineControls = (
+    it: SaleItem,
+    name: string,
+    batchFallback?: string,
+    stacked = false,
+  ): ReactNode => (
     <div
-      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:justify-end sm:gap-1"
+      className={cn(
+        "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
+        !stacked && "sm:flex sm:w-auto sm:justify-end sm:gap-1",
+      )}
       data-testid="cart-line-controls"
     >
-      <div className="col-span-2 flex min-w-0 justify-start sm:contents">
+      <div className={cn("col-span-2 flex min-w-0 justify-start", !stacked && "sm:contents")}>
         {editable ? (
           <QtyStepper
             value={Number(it.qty)}
@@ -316,8 +323,10 @@ export function CartList({
         const first = g.items[0];
         if (!first) return null;
 
-        // Single line — name + controls on one compact hero row.
+        // Touch controls need the full receipt width once a row has both delete
+        // and a menu. Keep its name above the existing mobile controls grid.
         if (g.items.length === 1) {
+          const stacked = Boolean(touch && quickActions);
           return (
             <li
               key={g.catalogId}
@@ -325,7 +334,8 @@ export function CartList({
               data-context-actions={quickActions ? true : undefined}
               tabIndex={quickActions ? 0 : undefined}
               className={cn(
-                "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
+                "flex flex-col gap-3 px-4",
+                !stacked && "sm:flex-row sm:items-center",
                 touch ? "py-5" : "py-4",
                 windowed && "pos-cv",
               )}
@@ -339,7 +349,7 @@ export function CartList({
                 </p>
                 <BatchExpiry item={first} />
               </div>
-              {lineControls(first, g.name)}
+              {lineControls(first, g.name, undefined, stacked)}
             </li>
           );
         }
