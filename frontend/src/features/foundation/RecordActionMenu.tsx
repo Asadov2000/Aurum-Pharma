@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -26,6 +26,7 @@ export function RecordActionMenu({
   scope,
   disabled = false,
   isLoading = false,
+  triggerRef,
 }: {
   section: QuickActionSection;
   recordKey: string;
@@ -37,6 +38,7 @@ export function RecordActionMenu({
   scope: string;
   disabled?: boolean;
   isLoading?: boolean;
+  triggerRef?: Ref<HTMLButtonElement>;
 }): JSX.Element {
   const navigate = useNavigate();
   const [feedback, setFeedback] = useState<{ scope: string; message: string } | null>(null);
@@ -72,6 +74,7 @@ export function RecordActionMenu({
   return (
     <>
       <ActionMenu
+        ref={triggerRef}
         label={label}
         items={visible}
         disabled={disabled}
@@ -81,7 +84,9 @@ export function RecordActionMenu({
         contextTitle={title}
         contextDetail={detail}
         resetKey={`${scope}:${section}:${recordKey}`}
-        onConfigure={() => void navigate({ to: "/settings", search: { section: "quick-actions" } })}
+        onConfigure={() =>
+          void navigate({ to: "/settings", search: { section: "quick-actions", actions: section } })
+        }
       />
       {feedback?.scope === scope
         ? createPortal(

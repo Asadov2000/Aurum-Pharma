@@ -184,7 +184,14 @@ export function SettingsPage(): JSX.Element {
           {active === "account" ? <AccountSettingsPanel /> : null}
           {active === "interface" ? <InterfaceSettingsPanel /> : null}
           {active === "menu" ? <MenuSettingsPanel /> : null}
-          {active === "quick-actions" ? <QuickActionsSettingsPanel /> : null}
+          {active === "quick-actions" ? (
+            <QuickActionsSettingsPanel
+              initialSection={
+                parseSettingsSearch(Object.fromEntries(new URLSearchParams(window.location.search)))
+                  .actions
+              }
+            />
+          ) : null}
           {active === "notifications" ? (
             <div className="space-y-4">
               <SettingsSectionHeader

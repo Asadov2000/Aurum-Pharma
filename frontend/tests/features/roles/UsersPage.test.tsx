@@ -62,6 +62,33 @@ vi.mock("@/features/foundation/api", () => ({
 }));
 
 let mockUser: Record<string, unknown> = {};
+const quickActionsState = vi.hoisted(() => ({
+  config: {
+    enabled: true,
+    order: [
+      "open",
+      "profile",
+      "assign_access",
+      "reissue_invitation",
+      "activate",
+      "revoke_sessions",
+      "suspend",
+      "offboard",
+      "transfer_ownership",
+    ],
+    hidden: [] as string[],
+  },
+}));
+vi.mock("@/features/settings/useQuickActionPreferences", () => ({
+  useQuickActionPreferences: () => ({
+    config: quickActionsState.config,
+    scope: `${String(mockUser.id)}:${String(mockUser.active_tenant_id ?? mockUser.home_tenant_id ?? "global")}`,
+  }),
+}));
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => vi.fn(),
+}));
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({ user: mockUser }),
 }));
@@ -192,6 +219,7 @@ function employeeInviteConflict(): AxiosError {
 describe("UsersPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    quickActionsState.config = { ...quickActionsState.config, enabled: true, hidden: [] };
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
@@ -493,12 +521,14 @@ describe("UsersPage", () => {
     renderPage();
 
     expect(await screen.findByText("Иван Сотрудник")).toBeInTheDocument();
+    await openUserActions();
+    expect(screen.getByRole("menuitem", { name: "Открыть карточку" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Профиль" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Настроить доступ" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Приостановить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Уволить" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Завершить сеансы" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Действия для/ })).toBeInTheDocument();
   });
 
   it("opens employee details with view-only access and restores focus after closing", async () => {
@@ -523,7 +553,6 @@ describe("UsersPage", () => {
     expect(
       within(details).queryByRole("button", { name: "Изменить профиль" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Действия для/ })).not.toBeInTheDocument();
 
     fireEvent.click(within(details).getByText("Закрыть"));
 
@@ -555,6 +584,112 @@ describe("UsersPage", () => {
     expect(updateUser).not.toHaveBeenCalled();
     expect(suspendUser).not.toHaveBeenCalled();
     expect(offboardUser).not.toHaveBeenCalled();
+  });
+
+  it("opens the right-clicked employee instead of the previously viewed employee and restores menu trigger focus", async () => {
+    mockUser = {
+      id: "viewer",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["users.view"],
+    };
+    const second = {
+      ...USER_ACTIVE,
+      id: "member-2",
+      membership_id: "membership-2",
+      full_name: "Второй Сотрудник",
+      assignments: [],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE, second]));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть профиль: Иван Сотрудник" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Сотрудник: Иван Сотрудник" })).getByText(
+        "Закрыть",
+      ),
+    );
+    const trigger = screen.getByRole("button", { name: "Действия для Второй Сотрудник" });
+    const card = trigger.closest("[data-context-actions]");
+    if (!card) throw new Error("Employee action trigger must belong to a card");
+    fireEvent.contextMenu(card);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Открыть карточку" }));
+    const details = await screen.findByRole("dialog", { name: "Сотрудник: Второй Сотрудник" });
+    expect(
+      screen.queryByRole("dialog", { name: "Сотрудник: Иван Сотрудник" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(details).queryByRole("button", { name: "Изменить профиль" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(details).getByText("Закрыть"));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(suspendUser).not.toHaveBeenCalled();
+  });
+
+  it("applies personal visibility and closes the previous scope employee menu", async () => {
+    quickActionsState.config.hidden = ["profile"];
+    mockUser = {
+      id: "owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "users.update"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const page = renderPage(client);
+    await openUserActions();
+    expect(screen.getByRole("menuitem", { name: "Открыть карточку" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Профиль" })).not.toBeInTheDocument();
+    mockUser = { ...mockUser, id: "other-owner", active_tenant_id: "tenant-2" };
+    page.rerender(
+      <QueryClientProvider client={client}>
+        <UsersPage />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes even a view-only employee menu when membership state changes", async () => {
+    mockUser = {
+      id: "viewer",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: false,
+      permissions: ["users.view"],
+    };
+    listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(client);
+    await openUserActions();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    act(() =>
+      client.setQueriesData(
+        { queryKey: rolesKeys.users },
+        usersResponse([{ ...USER_ACTIVE, status: "suspended" }]),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  });
+
+  it("blocks right-click actions while filtered employee rows are placeholders", async () => {
+    let finish!: (value: ReturnType<typeof usersResponse>) => void;
+    listUsers.mockResolvedValueOnce(usersResponse([USER_ACTIVE])).mockImplementationOnce(
+      () =>
+        new Promise<ReturnType<typeof usersResponse>>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderPage();
+    const trigger = await openUserActions();
+    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "suspended" } });
+    await waitFor(() => expect(listUsers).toHaveBeenCalledTimes(2));
+    expect(trigger).toBeDisabled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const card = trigger.closest("[data-context-actions]");
+    if (!card) throw new Error("Employee action trigger must belong to a card");
+    fireEvent.contextMenu(card);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    act(() => finish(usersResponse([{ ...USER_ACTIVE, status: "suspended" }])));
+    await waitFor(() => expect(trigger).toBeEnabled());
   });
 
   it("shows actual branch names in the employee card and access details", async () => {
@@ -1168,8 +1303,12 @@ describe("UsersPage", () => {
     listUsers.mockResolvedValue(usersResponse([USER_ACTIVE]));
     renderPage();
 
-    await openUserActions();
+    const employee = await screen.findByRole("button", { name: "Действия для Иван Сотрудник" });
+    const card = employee.closest("[data-context-actions]");
+    if (!card) throw new Error("Employee action trigger must belong to a card");
+    fireEvent.contextMenu(card);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Завершить сеансы" }));
+    expect(revokeUserSessions).not.toHaveBeenCalled();
     expect(screen.getByText(/будет немедленно выведен из системы/i)).toBeInTheDocument();
     const confirmButtons = screen.getAllByRole("button", { name: "Завершить сеансы" });
     fireEvent.click(confirmButtons[confirmButtons.length - 1]!);
@@ -1300,6 +1439,8 @@ describe("UsersPage", () => {
       name: "Действия для Иван Сотрудник",
     });
     expect(actionTrigger).toBeEnabled();
+    fireEvent.click(actionTrigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
 
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: rolesKeys.users });
@@ -1310,6 +1451,7 @@ describe("UsersPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Иван Сотрудник")).toBeInTheDocument();
     expect(actionTrigger).toBeDisabled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     const assignmentTrigger = screen.getByRole("button", { name: "Настроить доступ" });
     expect(assignmentTrigger).toBeDisabled();
     fireEvent.click(actionTrigger);

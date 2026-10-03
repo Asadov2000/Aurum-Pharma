@@ -264,6 +264,18 @@ class WorkspacePreferences(BaseModel):
 QuickActionId = TypeVar("QuickActionId", bound=str)
 CatalogQuickActionId = Literal["open", "edit", "copy_name", "copy_barcode", "archive", "restore"]
 BatchQuickActionId = Literal["open", "copy_number"]
+IncomingQuickActionId = Literal["open", "copy_number"]
+EmployeeQuickActionId = Literal[
+    "open",
+    "profile",
+    "assign_access",
+    "reissue_invitation",
+    "activate",
+    "revoke_sessions",
+    "suspend",
+    "offboard",
+    "transfer_ownership",
+]
 
 
 def _catalog_quick_action_order() -> list[CatalogQuickActionId]:
@@ -274,12 +286,30 @@ def _batch_quick_action_order() -> list[BatchQuickActionId]:
     return ["open", "copy_number"]
 
 
+def _incoming_quick_action_order() -> list[IncomingQuickActionId]:
+    return ["open", "copy_number"]
+
+
+def _employee_quick_action_order() -> list[EmployeeQuickActionId]:
+    return [
+        "open",
+        "profile",
+        "assign_access",
+        "reissue_invitation",
+        "activate",
+        "revoke_sessions",
+        "suspend",
+        "offboard",
+        "transfer_ownership",
+    ]
+
+
 class QuickActionsConfig(BaseModel, Generic[QuickActionId]):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(default=True, strict=True)
-    order: list[QuickActionId] = Field(min_length=1, max_length=6)
-    hidden: list[QuickActionId] = Field(default_factory=list, max_length=6)
+    order: list[QuickActionId] = Field(min_length=1, max_length=9)
+    hidden: list[QuickActionId] = Field(default_factory=list, max_length=9)
 
     @model_validator(mode="after")
     def _validate_actions(self) -> Self:
@@ -298,11 +328,26 @@ class CatalogQuickActionsConfig(QuickActionsConfig[CatalogQuickActionId]):
         min_length=1,
         max_length=6,
     )
+    hidden: list[CatalogQuickActionId] = Field(default_factory=list, max_length=6)
 
 
 class BatchQuickActionsConfig(QuickActionsConfig[BatchQuickActionId]):
     order: list[BatchQuickActionId] = Field(
         default_factory=_batch_quick_action_order, min_length=1, max_length=2
+    )
+    hidden: list[BatchQuickActionId] = Field(default_factory=list, max_length=2)
+
+
+class IncomingQuickActionsConfig(QuickActionsConfig[IncomingQuickActionId]):
+    order: list[IncomingQuickActionId] = Field(
+        default_factory=_incoming_quick_action_order, min_length=1, max_length=2
+    )
+    hidden: list[IncomingQuickActionId] = Field(default_factory=list, max_length=2)
+
+
+class EmployeeQuickActionsConfig(QuickActionsConfig[EmployeeQuickActionId]):
+    order: list[EmployeeQuickActionId] = Field(
+        default_factory=_employee_quick_action_order, min_length=1, max_length=9
     )
 
 
@@ -311,6 +356,8 @@ class QuickActionsPreferences(BaseModel):
 
     catalog: CatalogQuickActionsConfig = Field(default_factory=CatalogQuickActionsConfig)
     batches: BatchQuickActionsConfig = Field(default_factory=BatchQuickActionsConfig)
+    incoming: IncomingQuickActionsConfig = Field(default_factory=IncomingQuickActionsConfig)
+    employees: EmployeeQuickActionsConfig = Field(default_factory=EmployeeQuickActionsConfig)
 
 
 class QuickActionsPreferencesUpdate(BaseModel):
@@ -318,10 +365,12 @@ class QuickActionsPreferencesUpdate(BaseModel):
 
     catalog: CatalogQuickActionsConfig | None = None
     batches: BatchQuickActionsConfig | None = None
+    incoming: IncomingQuickActionsConfig | None = None
+    employees: EmployeeQuickActionsConfig | None = None
 
     @model_validator(mode="after")
     def _require_section(self) -> Self:
-        if self.catalog is None and self.batches is None:
+        if not self.model_dump(exclude_none=True):
             raise ValueError("at least one quick action section must be provided")
         return self
 

@@ -1,13 +1,19 @@
-import { ActionMenu, type ActionMenuItem, Badge, Button } from "@/components/ui";
+import { useRef } from "react";
+
+import { Badge, Button } from "@/components/ui";
+import { RecordActionMenu, type RecordAction } from "@/features/foundation/RecordActionMenu";
 import { type Branch } from "@/features/foundation/types";
+import { type QuickActionMenuPreferences } from "@/features/settings/quickActions";
 
 import { EmployeeAssignmentScope, EmployeeStatus } from "./EmployeeDetails";
 import { type UserWithAssignments } from "./types";
-import { employeeInitials, formatLastLogin } from "./userPresentation";
+import { employeeInitials, formatLastLogin, userStatusLabel } from "./userPresentation";
 
 type Row = UserWithAssignments;
 
 interface EmployeeDirectoryProps {
+  quickActionConfig: QuickActionMenuPreferences;
+  quickActionScope: string;
   rows: Row[];
   branches?: Branch[];
   currentUserId: string | undefined;
@@ -35,6 +41,8 @@ interface EmployeeDirectoryProps {
 }
 
 export function EmployeeDirectory({
+  quickActionConfig,
+  quickActionScope,
   rows,
   branches = [],
   currentUserId,
@@ -67,6 +75,8 @@ export function EmployeeDirectory({
     >
       {rows.map((member) => (
         <EmployeeDirectoryRow
+          quickActionConfig={quickActionConfig}
+          quickActionScope={quickActionScope}
           key={member.id}
           member={member}
           branches={branches}
@@ -99,6 +109,8 @@ export function EmployeeDirectory({
 }
 
 function EmployeeDirectoryRow({
+  quickActionConfig,
+  quickActionScope,
   member,
   branches,
   currentUserId,
@@ -124,6 +136,8 @@ function EmployeeDirectoryRow({
   onSuspend,
   onOffboard,
 }: {
+  quickActionConfig: QuickActionMenuPreferences;
+  quickActionScope: string;
   member: Row;
   branches: Branch[];
   currentUserId: string | undefined;
@@ -149,6 +163,7 @@ function EmployeeDirectoryRow({
   onSuspend: () => void;
   onOffboard: () => void;
 }): JSX.Element {
+  const menuTrigger = useRef<HTMLButtonElement | null>(null);
   const activeAssignments = member.assignments.filter((assignment) => assignment.is_active);
   const shownAssignments = activeAssignments.slice(0, 2);
   const hiddenAssignmentCount = Math.max(0, activeAssignments.length - shownAssignments.length);
@@ -172,30 +187,60 @@ function EmployeeDirectoryRow({
   const canOffboardMember = canOffboard && !protectsLifecycle && member.status !== "offboarded";
   const canTransferToMember =
     canTransferOwnership && member.status === "active" && !protectsLifecycle;
-  const actions: ActionMenuItem[] = [];
+  const actions: RecordAction[] = [
+    {
+      id: "open",
+      label: "Открыть карточку",
+      onSelect: () => {
+        if (menuTrigger.current) onDetails(menuTrigger.current);
+      },
+    },
+  ];
 
-  if (canEditMember) actions.push({ label: "Профиль", onSelect: onProfile });
-  if (canActivateMember) {
+  if (showActions && canEditMember)
+    actions.push({ id: "profile", label: "Профиль", onSelect: onProfile });
+  if (showActions && canActivateMember) {
     actions.push({
+      id: "activate",
       label: "Возобновить",
       onSelect: onActivate,
     });
   }
-  if (canReissueInvitation) {
-    actions.push({ label: "Обновить приглашение", onSelect: onReissueInvitation });
-  }
-  if (canAssignMember) {
-    actions.push({ label: "Настроить доступ", onSelect: () => onAssignments() });
-  }
-  if (canRevokeMemberSessions) {
-    actions.push({ label: "Завершить сеансы", onSelect: onRevokeSessions });
-  }
-  if (canTransferToMember) {
-    actions.push({ label: "Передать владение", tone: "danger", onSelect: onTransferOwnership });
-  }
-  if (canSuspendMember) actions.push({ label: "Приостановить", onSelect: onSuspend });
-  if (canOffboardMember) {
+  if (showActions && canReissueInvitation) {
     actions.push({
+      id: "reissue_invitation",
+      label: "Обновить приглашение",
+      onSelect: onReissueInvitation,
+    });
+  }
+  if (showActions && canAssignMember) {
+    actions.push({
+      id: "assign_access",
+      label: "Настроить доступ",
+      onSelect: () => onAssignments(),
+    });
+  }
+  if (showActions && canRevokeMemberSessions) {
+    actions.push({
+      id: "revoke_sessions",
+      label: "Завершить сеансы",
+      tone: "danger",
+      onSelect: onRevokeSessions,
+    });
+  }
+  if (showActions && canTransferToMember) {
+    actions.push({
+      id: "transfer_ownership",
+      label: "Передать владение",
+      tone: "danger",
+      onSelect: onTransferOwnership,
+    });
+  }
+  if (showActions && canSuspendMember)
+    actions.push({ id: "suspend", label: "Приостановить", tone: "danger", onSelect: onSuspend });
+  if (showActions && canOffboardMember) {
+    actions.push({
+      id: "offboard",
       label: member.status === "pending" ? "Отозвать приглашение" : "Уволить",
       tone: "danger",
       onSelect: onOffboard,
@@ -203,7 +248,11 @@ function EmployeeDirectoryRow({
   }
 
   return (
-    <li className="relative flex min-w-0 flex-col gap-5 rounded-xl border border-border bg-surface p-5 shadow-sm">
+    <li
+      data-context-actions
+      tabIndex={0}
+      className="relative flex min-w-0 flex-col gap-5 rounded-xl border border-border bg-surface p-5 shadow-sm"
+    >
       <div className="flex min-w-0 items-start gap-3 pr-8">
         <span
           aria-hidden="true"
@@ -294,17 +343,36 @@ function EmployeeDirectoryRow({
         ) : null}
       </div>
 
-      {showActions && actions.length > 0 ? (
-        <div className="absolute right-3 top-3">
-          <ActionMenu
-            ref={actionRef}
-            label={`Действия для ${member.full_name}`}
-            items={actions}
-            isLoading={activating}
-            disabled={actionsDisabled}
-          />
-        </div>
-      ) : null}
+      <div className="absolute right-3 top-3">
+        <RecordActionMenu
+          triggerRef={(element) => {
+            menuTrigger.current = element;
+            actionRef(element);
+          }}
+          section="employees"
+          recordKey={JSON.stringify([
+            member.id,
+            member.membership_id,
+            member.status,
+            member.invitation_status,
+            member.invitation_expires_at,
+            member.is_tenant_owner,
+            member.assignments.map((assignment) => [
+              assignment.id,
+              assignment.role_version_id,
+              assignment.is_active,
+            ]),
+          ])}
+          title={member.full_name}
+          detail={userStatusLabel[member.status]}
+          label={`Действия для ${member.full_name}`}
+          items={actions}
+          config={quickActionConfig}
+          scope={quickActionScope}
+          isLoading={activating}
+          disabled={actionsDisabled}
+        />
+      </div>
     </li>
   );
 }
