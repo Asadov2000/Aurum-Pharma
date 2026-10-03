@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
 
 import { ActionMenu } from "@/components/ui/ActionMenu";
+import { getRecordActionPresentation, getRecordContextIcon } from "./recordActionPresentation";
 import {
   applyQuickActions,
   type QuickActionMenuPreferences,
@@ -66,6 +67,7 @@ export function RecordActionMenu({
     id: item.id,
     label: item.label,
     tone: item.tone,
+    ...getRecordActionPresentation(item.id),
     onSelect: () => {
       if (item.copyValue !== undefined) void copy(item.copyValue);
       else item.onSelect();
@@ -83,6 +85,7 @@ export function RecordActionMenu({
         contextEnabled={config.enabled}
         contextTitle={title}
         contextDetail={detail}
+        contextIcon={getRecordContextIcon(section)}
         resetKey={`${scope}:${section}:${recordKey}`}
         onConfigure={() =>
           void navigate({ to: "/settings", search: { section: "quick-actions", actions: section } })

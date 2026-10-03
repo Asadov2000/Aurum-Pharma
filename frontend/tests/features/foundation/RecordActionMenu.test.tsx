@@ -39,11 +39,51 @@ describe("RecordActionMenu", () => {
     expect(screen.queryByRole("menuitem", { name: "Открыть" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Изменить" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("menuitem")).toHaveLength(2);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить это меню" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить меню" }));
     expect(navigate).toHaveBeenCalledWith({
       to: "/settings",
       search: { section: "quick-actions", actions: "catalog" },
     });
+  });
+
+  it("preserves custom ordering across visual groups and keeps dangerous actions last", () => {
+    const onSelect = vi.fn();
+    render(
+      <RecordActionMenu
+        {...props}
+        config={{
+          enabled: true,
+          order: ["archive", "copy_name", "edit", "copy_barcode", "open"],
+          hidden: [],
+        }}
+        items={[
+          { id: "open", label: "Открыть", onSelect },
+          { id: "edit", label: "Изменить", onSelect },
+          { id: "copy_barcode", label: "Скопировать штрихкод", copyValue: "12345678" },
+          ...props.items,
+          { id: "archive", label: "В архив", tone: "danger", onSelect },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: props.label }));
+    const labels = [
+      "Скопировать название",
+      "Изменить",
+      "Скопировать штрихкод",
+      "Открыть",
+      "В архив",
+      "Настроить меню",
+    ];
+    const commands = screen.getAllByRole("menuitem");
+    expect(commands).toHaveLength(labels.length);
+    labels.forEach((label, index) => expect(commands[index]).toHaveAccessibleName(label));
+    expect(screen.getAllByText("Копирование")).toHaveLength(2);
+    expect(screen.getAllByText("Действия")).toHaveLength(2);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(commands[1]);
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("copies only on explicit command and shows safe failure feedback", async () => {

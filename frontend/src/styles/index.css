@@ -323,7 +323,87 @@
   }
 }
 
+@keyframes record-menu-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @layer components {
+  .record-action-menu {
+    @apply rounded-[14px] border border-border bg-surface-raised p-[7px] text-foreground shadow-xl;
+    animation: record-menu-appear 120ms ease-out;
+  }
+
+  .record-action-header {
+    @apply mb-1 flex items-center gap-3 border-b border-border px-2 py-3;
+  }
+
+  .record-action-icon-badge {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary;
+  }
+
+  .record-action-icon {
+    @apply h-[18px] w-[18px] shrink-0;
+  }
+
+  .record-action-title {
+    @apply truncate text-sm font-semibold;
+  }
+
+  .record-action-detail {
+    @apply mt-1 truncate text-xs text-foreground-muted;
+  }
+
+  .record-action-group {
+    @apply px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-muted;
+  }
+
+  .record-action-menu .record-action-row {
+    @apply flex h-auto min-h-10 w-full items-center justify-start gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium leading-5;
+    min-height: max(2.5rem, var(--control-height-sm));
+  }
+
+  .record-action-row > span {
+    @apply min-w-0;
+  }
+
+  button.record-action-row > span {
+    @apply w-full gap-3;
+  }
+
+  .record-action-row span {
+    overflow-wrap: anywhere;
+  }
+
+  .record-action-menu .record-action-primary {
+    @apply bg-primary/5 text-primary;
+  }
+
+  .record-action-menu .record-action-danger {
+    @apply text-danger;
+  }
+
+  .record-action-divider {
+    @apply my-1 border-t border-border;
+  }
+
+  .record-action-footer {
+    @apply mt-1 flex flex-wrap items-center justify-between gap-1 border-t border-border pt-1 text-[11px] text-foreground-muted;
+  }
+
+  .record-action-footer button {
+    @apply h-auto min-h-10 w-auto px-2 text-xs;
+    min-height: max(2.5rem, var(--control-height-sm));
+  }
+
+  .record-action-escape {
+    @apply pr-2 text-[10px];
+  }
+
   .app-shell-skip-link {
     @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-toast focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground;
   }

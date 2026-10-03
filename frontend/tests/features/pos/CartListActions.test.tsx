@@ -189,9 +189,9 @@ describe("CartList — row actions", () => {
       "Скопировать номер партии",
       "Увеличить количество",
       "Удалить из чека",
-      "Настроить это меню",
+      "Настроить меню",
     ]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить это меню" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить меню" }));
     expect(navigate).toHaveBeenCalledWith({
       to: "/settings",
       search: { section: "quick-actions", actions: "pos_cart" },

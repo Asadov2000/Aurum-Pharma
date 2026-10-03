@@ -76,6 +76,65 @@ describe("ActionMenu", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
+  it("keeps grouped commands in order and skips decorative content during keyboard navigation", async () => {
+    const onSelect = vi.fn();
+    const onConfigure = vi.fn();
+    const icon = (
+      <svg>
+        <title>Декоративная иконка</title>
+        <path d="M0 0h1" />
+      </svg>
+    );
+    render(
+      <ActionMenu
+        label="Действия товара"
+        contextTitle="Товар"
+        contextDetail="Упаковка"
+        contextIcon={icon}
+        items={[
+          { id: "copy_name", label: "Скопировать название", group: "Копирование", icon, onSelect },
+          { id: "open", label: "Открыть", group: "Действия", icon, onSelect },
+          {
+            id: "copy_barcode",
+            label: "Скопировать штрихкод",
+            group: "Копирование",
+            icon,
+            onSelect,
+          },
+        ]}
+        onConfigure={onConfigure}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Действия товара" }));
+    const commands = screen.getAllByRole("menuitem");
+    expect(commands).toEqual([
+      screen.getByRole("menuitem", { name: "Скопировать название" }),
+      screen.getByRole("menuitem", { name: "Открыть" }),
+      screen.getByRole("menuitem", { name: "Скопировать штрихкод" }),
+      screen.getByRole("menuitem", { name: "Настроить меню" }),
+    ]);
+    expect(screen.getAllByText("Копирование")).toHaveLength(2);
+    expect(screen.getByText("Действия")).not.toHaveAttribute("tabindex");
+    expect(commands[0]).toHaveAccessibleName("Скопировать название");
+    expect(commands[1]).toHaveAccessibleName("Открыть");
+    expect(commands[2]).toHaveAccessibleName("Скопировать штрихкод");
+    await waitFor(() => expect(commands[0]).toHaveFocus());
+    for (const command of commands.slice(1)) {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      expect(command).toHaveFocus();
+    }
+    fireEvent.keyDown(document.activeElement!, { key: "Home" });
+    expect(commands[0]).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    expect(commands.at(-1)).toHaveFocus();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onConfigure).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Действия товара" })).toHaveFocus(),
+    );
+  });
+
   it("does not bubble portal commands to the record click handler and opens only one menu", () => {
     const onRecord = vi.fn();
     const onSelect = vi.fn();

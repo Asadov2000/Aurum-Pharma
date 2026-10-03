@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui";
+import {
+  getRecordActionPresentation,
+  getRecordSectionLabel,
+  getRecordContextIcon,
+} from "@/features/foundation/recordActionPresentation";
 import { cn } from "@/lib/utils";
 
 import {
@@ -219,25 +224,51 @@ function QuickActionsForm({
             Вернуть стандартные настройки
           </Button>
         </section>
-        <aside className="rounded-md bg-background p-4" aria-label="Предпросмотр быстрых действий">
+        <aside className="rounded-xl bg-background p-4" aria-label="Предпросмотр быстрых действий">
           <p className="mb-3 text-xs font-semibold uppercase text-foreground-muted">Предпросмотр</p>
           <p className="mb-3 text-sm">Так будет выглядеть меню</p>
-          <ul className="rounded-md border border-border bg-surface p-1 shadow-sm">
-            {preview.map((item) => (
-              <li
-                key={item.id}
-                className={cn(
-                  "px-3 py-2 text-sm",
-                  item.tone === "danger" && "border-t border-border text-danger-foreground",
-                )}
-              >
-                {item.label}
-              </li>
-            ))}
-            {preview.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-foreground-muted">Все команды скрыты</li>
-            ) : null}
-          </ul>
+          <div className="record-action-menu mx-auto max-w-80">
+            <div className="record-action-header">
+              <span className="record-action-icon-badge">{getRecordContextIcon(section)}</span>
+              <div className="min-w-0">
+                <p className="record-action-title">{getRecordSectionLabel(section)}</p>
+                <p className="record-action-detail">Пример меню выбранного раздела</p>
+              </div>
+            </div>
+            <ul>
+              {preview.map((item, index) => {
+                const presentation = getRecordActionPresentation(item.id);
+                const previous = preview[index - 1];
+                const previousGroup = previous
+                  ? getRecordActionPresentation(previous.id).group
+                  : undefined;
+                return (
+                  <li key={item.id}>
+                    {item.tone === "danger" && previous?.tone !== "danger" ? (
+                      <div className="record-action-divider" aria-hidden="true" />
+                    ) : null}
+                    {presentation.group && presentation.group !== previousGroup ? (
+                      <p className="record-action-group">{presentation.group}</p>
+                    ) : null}
+                    <div
+                      className={cn(
+                        "record-action-row",
+                        item.tone === "danger" && "record-action-danger",
+                        item.id === "open" && "record-action-primary",
+                      )}
+                    >
+                      {presentation.icon}
+                      <span>{item.label}</span>
+                    </div>
+                  </li>
+                );
+              })}
+              {preview.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-foreground-muted">Все команды скрыты</li>
+              ) : null}
+            </ul>
+            <p className="record-action-footer">Предпросмотр — команды не выполняются</p>
+          </div>
           <p className="mt-3 text-xs leading-5 text-foreground-muted">
             В меню появятся только команды, доступные вашему аккаунту и подходящие для текущего
             состояния записи. Настройки не расширяют ваши права.
