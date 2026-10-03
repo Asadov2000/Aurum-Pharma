@@ -77,6 +77,9 @@ class TenantCatalog(Base):
     storage_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'normal'"))
     category: Mapped[str | None] = mapped_column(Text)
     base_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    unit_sale_preparation: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     image_version: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     image_width: Mapped[int | None] = mapped_column(Integer)

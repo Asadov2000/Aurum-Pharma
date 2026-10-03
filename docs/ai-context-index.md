@@ -54,6 +54,7 @@
 | События питания и сырые TPM-наблюдения | [windows-tpm-power-continuity.md](windows-tpm-power-continuity.md), `Security/WindowsTpmClockObservationSession.cs`, `WindowsPowerContinuityRegistration.cs` | fake lifecycle/cleanup/race tests и явный native probe; Windows-служба и trusted UTC ещё не подключены |
 | Явная проверка TPM в Windows preflight | [windows-tpm-readiness.md](windows-tpm-readiness.md), `scripts/windows-host-readiness.ps1 -CheckTpm`, `scripts/lib/windows-tpm-readiness.ps1` | `scripts/test-windows-tpm-readiness.ps1`; без build/restore и без допуска автономного входа |
 | Backend core/middleware | `backend/app/core/`, `backend/app/middleware/` | `backend/tests/core/`, `backend/tests/middleware/` |
+| Продажа поштучно: подготовка, ещё без кассового режима | [unit-sales.md](unit-sales.md), [ADR-0050](adr/0050-explicit-unit-sale-accounting.md), `backend/app/domains/catalog/unit_sales.py` | catalog preparation/math pytest, миграция 0161; склад, POS и Edge ещё требуют реализации |
 | Фоновые задачи | `backend/app/tasks/` | тесты соответствующего домена |
 | Frontend-фича | `frontend/src/features/<domain>/` | `frontend/tests/features/<domain>/` |
 | Личный профиль и свои назначения | [personal-profile.md](personal-profile.md), `backend/app/domains/auth/profile_*`, `frontend/src/features/profile/` | auth profile/RLS pytest, profile Vitest, `frontend/e2e/profile.spec.ts` |
