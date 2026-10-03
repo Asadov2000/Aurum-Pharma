@@ -234,7 +234,7 @@ describe("SalesPage", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Открыть чек", "Скопировать номер чека", "Настроить это меню"]);
+    ).toEqual(["Открыть чек", "Скопировать номер чека", "Настроить меню"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Открыть чек" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     await waitFor(() => expect(getSaleDetails).toHaveBeenCalledWith("s-2"));
@@ -283,7 +283,7 @@ describe("SalesPage", () => {
     const trigger = within(row).getByRole("button", { name: "Действия для чека № 000142" });
     expect(button.contains(trigger)).toBe(false);
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить это меню" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Настроить меню" }));
     expect(navigate).toHaveBeenCalledWith({
       to: "/settings",
       search: { section: "quick-actions", actions: "receipts" },

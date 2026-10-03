@@ -104,7 +104,7 @@ describe("Edge read-only pages", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((control) => control.textContent),
-    ).toEqual(["Открыть", "Скопировать название", "Настроить это меню"]);
+    ).toEqual(["Открыть", "Скопировать название", "Настроить меню"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать название" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("Ибупрофен"));
     fireEvent.contextMenu(row!);
@@ -214,7 +214,7 @@ describe("Edge read-only pages", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((control) => control.textContent),
-    ).toEqual(["Скопировать номер партии", "Настроить это меню"]);
+    ).toEqual(["Скопировать номер партии", "Настроить меню"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать номер партии" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("EDGE-007"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

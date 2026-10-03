@@ -8,6 +8,7 @@ import {
   useState,
   type ForwardedRef,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 
 import { cn } from "@/lib/utils";
@@ -19,6 +20,8 @@ export interface ActionMenuItem {
   label: string;
   onSelect: () => void;
   tone?: "default" | "danger";
+  icon?: ReactNode;
+  group?: string;
 }
 
 interface ActionMenuProps {
@@ -30,12 +33,13 @@ interface ActionMenuProps {
   contextEnabled?: boolean;
   contextTitle?: string;
   contextDetail?: string;
+  contextIcon?: ReactNode;
   resetKey?: string;
   onConfigure?: () => void;
 }
 
 const MENU_WIDTH = 224;
-const RECORD_MENU_WIDTH = 288;
+const RECORD_MENU_WIDTH = 302;
 // Conservative across compact, comfortable and touch density modes.
 const MENU_ITEM_HEIGHT = 48;
 const VIEWPORT_GUTTER = 8;
@@ -51,6 +55,7 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
       contextEnabled = false,
       contextTitle,
       contextDetail,
+      contextIcon,
       resetKey,
       onConfigure,
     },
@@ -67,7 +72,7 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
       resetKey,
       label,
       contextEnabled,
-      items.map((item) => [item.id, item.label, item.tone]),
+      items.map((item) => [item.id, item.label, item.tone, item.group]),
     ]);
     useEffect(() => {
       setOpen(false);
@@ -102,7 +107,12 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
           window.innerHeight - VIEWPORT_GUTTER * 2,
           items.length * MENU_ITEM_HEIGHT +
             VIEWPORT_GUTTER +
-            (contextTitle ? 64 : 0) +
+            (contextTitle
+              ? 64 +
+                items.filter((item, index) => item.group && item.group !== items[index - 1]?.group)
+                  .length *
+                  28
+              : 0) +
             (onConfigure ? 48 : 0),
         );
         const opensUpward = rect.bottom + estimatedHeight > window.innerHeight - VIEWPORT_GUTTER;
@@ -126,7 +136,7 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
         document.dispatchEvent(new CustomEvent("aurum:action-menu-open", { detail: menuId }));
         setOpen(true);
       },
-      [unavailable, items.length, contextTitle, onConfigure, menuId],
+      [unavailable, items, contextTitle, onConfigure, menuId],
     );
 
     useEffect(() => {
@@ -269,7 +279,7 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
           disabled={unavailable}
           onClick={() => (open ? closeMenu() : openMenu())}
         >
-          <span aria-hidden="true">⋮</span>
+          <span aria-hidden="true">{contextTitle ? "⋯" : "⋮"}</span>
         </Button>
 
         {open &&
@@ -281,27 +291,49 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
               role="menu"
               aria-label={label}
               aria-orientation="vertical"
-              className="fixed z-popover max-h-[calc(100dvh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-border bg-surface-raised p-1 shadow-lg"
+              className={cn(
+                "fixed z-popover max-h-[calc(100dvh-1rem)] w-56 max-w-[calc(100vw-1rem)] overflow-y-auto border border-border bg-surface-raised",
+                contextTitle ? "record-action-menu" : "rounded-lg p-1 shadow-lg",
+              )}
               style={{ ...position, width: contextTitle ? RECORD_MENU_WIDTH : MENU_WIDTH }}
               onKeyDown={moveMenuFocus}
               onClick={(event) => event.stopPropagation()}
               onContextMenu={(event) => event.stopPropagation()}
             >
               {contextTitle ? (
-                <div className="mb-1 border-b border-border px-3 py-2">
-                  <p className="truncate text-sm font-semibold">{contextTitle}</p>
-                  {contextDetail ? (
-                    <p className="mt-1 truncate text-xs text-foreground-muted">{contextDetail}</p>
+                <div className="record-action-header">
+                  {contextIcon ? (
+                    <span className="record-action-icon-badge" aria-hidden="true">
+                      {contextIcon}
+                    </span>
                   ) : null}
+                  <div className="min-w-0">
+                    <p className="record-action-title" title={contextTitle}>
+                      {contextTitle}
+                    </p>
+                    {contextDetail ? (
+                      <p className="record-action-detail" title={contextDetail}>
+                        {contextDetail}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               {items.map((item, index) => (
                 <div
                   key={item.id ?? item.label}
                   className={cn(
-                    item.tone === "danger" && index > 0 && "mt-1 border-t border-border pt-1",
+                    item.tone === "danger" &&
+                      index > 0 &&
+                      (!contextTitle || items[index - 1]?.tone !== "danger") &&
+                      "mt-1 border-t border-border pt-1",
                   )}
                 >
+                  {contextTitle && item.group && item.group !== items[index - 1]?.group ? (
+                    <p role="presentation" className="record-action-group">
+                      {item.group}
+                    </p>
+                  ) : null}
                   <Button
                     role="menuitem"
                     tabIndex={-1}
@@ -309,6 +341,9 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
                     size="sm"
                     className={cn(
                       "w-full justify-start px-3 font-medium",
+                      contextTitle && "record-action-row",
+                      contextTitle && item.id === "open" && "record-action-primary",
+                      contextTitle && item.tone === "danger" && "record-action-danger",
                       item.tone === "danger" && "text-danger hover:bg-danger/10",
                     )}
                     onClick={() => {
@@ -317,12 +352,22 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
                       item.onSelect();
                     }}
                   >
-                    {item.label}
+                    {item.icon ? (
+                      <span aria-hidden="true" className="shrink-0">
+                        {item.icon}
+                      </span>
+                    ) : null}
+                    <span>{item.label}</span>
                   </Button>
                 </div>
               ))}
               {onConfigure ? (
-                <div className="mt-1 border-t border-border pt-1">
+                <div
+                  className={cn(
+                    "mt-1 border-t border-border pt-1",
+                    contextTitle && "record-action-footer",
+                  )}
+                >
                   <Button
                     role="menuitem"
                     tabIndex={-1}
@@ -334,8 +379,29 @@ export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMe
                       onConfigure();
                     }}
                   >
-                    Настроить это меню
+                    {contextTitle ? (
+                      <svg
+                        aria-hidden="true"
+                        focusable="false"
+                        viewBox="0 0 24 24"
+                        className="record-action-icon"
+                      >
+                        <path
+                          d="M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M8 15v6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    ) : null}
+                    Настроить меню
                   </Button>
+                  {contextTitle ? (
+                    <span className="record-action-escape" aria-hidden="true">
+                      Esc — закрыть
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </div>,

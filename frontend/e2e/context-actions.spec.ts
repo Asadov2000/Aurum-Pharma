@@ -162,7 +162,7 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   await completePosSale(page);
   await second.getByRole("button", { name: /^Действия / }).click();
   await expect(menu.getByRole("menuitem", { name: /Увеличить|Уменьшить|Удалить/ })).toHaveCount(0);
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await expect(
     page.getByRole("button", { name: "Касса — товары чека", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -255,7 +255,7 @@ test("receipt menus preserve completed sales and persist independent preferences
 
   await row.focus();
   await page.keyboard.press("Shift+F10");
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await expect(page.getByRole("button", { name: "Чеки и возвраты", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -290,7 +290,7 @@ test("receipt menus preserve completed sales and persist independent preferences
   await expect(menu.getByRole("menuitem", { name: "Открыть чек", exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Скопировать номер чека" })).toHaveCount(0);
   expect(saleWrites).toEqual([]);
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await page.getByRole("button", { name: "Вернуть стандартные настройки" }).click();
   const restored = page.waitForResponse(
     (response) =>
@@ -304,7 +304,7 @@ test("receipt menus preserve completed sales and persist independent preferences
 
 test("catalog right-click and keyboard actions respect personal settings after reload", async ({
   page,
-}) => {
+}, testInfo) => {
   clearLoginRateLimit(OWNER.email);
   const anonymous = await request.newContext();
   const tokens = await apiLogin(anonymous, OWNER);
@@ -341,11 +341,58 @@ test("catalog right-click and keyboard actions respect personal settings after r
   const menu = page.getByRole("menu");
   await expect(menu.getByText(name, { exact: true })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Изменить" })).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const scheme of ["light", "dark"] as const) {
+    await page.evaluate(
+      (theme) => document.documentElement.setAttribute("data-theme", theme),
+      scheme,
+    );
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await row.getByRole("button", { name: /^Действия/ }).click();
+      await expect(menu).toBeVisible();
+      await expect
+        .poll(() =>
+          menu.evaluate((element) => {
+            const channels =
+              getComputedStyle(element).backgroundColor.match(/\d+/g)?.slice(0, 3).map(Number) ??
+              [];
+            return (
+              channels.length === 3 && channels.reduce((sum, value) => sum + value, 0) / 3 < 128
+            );
+          }),
+        )
+        .toBe(scheme === "dark");
+      await expect
+        .poll(async () => {
+          const bounds = await menu.boundingBox();
+          return (
+            bounds !== null &&
+            bounds.x >= 7 &&
+            bounds.y >= 7 &&
+            bounds.x + bounds.width <= width - 7 &&
+            bounds.y + bounds.height <= 837
+          );
+        })
+        .toBe(true);
+      const commands = menu.getByRole("menuitem");
+      for (const command of await commands.all()) {
+        expect((await command.boundingBox())!.height).toBeGreaterThanOrEqual(39);
+      }
+      await expect
+        .poll(() => menu.evaluate((element) => element.scrollWidth <= element.clientWidth))
+        .toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`record-menu-${scheme}-${width}.png`) });
+      await page.keyboard.press("Escape");
+    }
+  }
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+  await row.click({ button: "right" });
   await page.keyboard.press("Escape");
   await expect(row).toBeFocused();
   await page.keyboard.press("Shift+F10");
   await expect(menu).toBeVisible();
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await expect(page.getByRole("heading", { name: "Быстрые действия" })).toBeVisible();
   const checkbox = page.getByRole("checkbox", { name: "Меню по правой кнопке" });
   await checkbox.uncheck();
@@ -369,7 +416,7 @@ test("catalog right-click and keyboard actions respect personal settings after r
   await expect(page.getByRole("menu")).toHaveCount(0);
   await row.getByRole("button", { name: `Действия для ${name}` }).click();
   await expect(menu).toBeVisible();
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await checkbox.check();
   const restored = page.waitForResponse(
     (response) =>
@@ -423,7 +470,7 @@ test("receiving and employee menus open their own settings and preserve read-onl
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem", { name: "Скопировать номер документа" })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Принять" })).toHaveCount(0);
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await expect(page.getByRole("button", { name: "Приёмка товаров", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -465,7 +512,7 @@ test("receiving and employee menus open their own settings and preserve read-onl
     .first();
   await expect(employee).toBeVisible();
   await employee.click({ button: "right" });
-  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await menu.getByRole("menuitem", { name: "Настроить меню" }).click();
   await expect(page.getByRole("button", { name: "Сотрудники", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
