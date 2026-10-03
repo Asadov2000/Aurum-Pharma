@@ -44,6 +44,10 @@ vi.mock("@/features/settings/InterfaceSettingsPanel", () => ({
   InterfaceSettingsPanel: () => <div>Панель интерфейса</div>,
 }));
 
+vi.mock("@/features/settings/QuickActionsSettingsPanel", () => ({
+  QuickActionsSettingsPanel: () => <div>Панель быстрых действий</div>,
+}));
+
 vi.mock("@/features/settings/OwnerSettingsPanel", () => ({
   OwnerSettingsPanel: ({ section }: { section: string }) => <div>Панель владельца: {section}</div>,
 }));
@@ -106,6 +110,17 @@ describe("SettingsPage access boundaries", () => {
     renderPage();
 
     expect(screen.getByText("Панель владельца: sales")).toBeInTheDocument();
+  });
+
+  it("opens personal quick actions by deep link and finds the category by right click", () => {
+    window.history.replaceState({}, "", "/settings?section=quick-actions");
+    renderPage();
+    expect(screen.getByText("Панель быстрых действий")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Найти настройку" }), {
+      target: { value: "пкм" },
+    });
+    expect(screen.getByRole("button", { name: /Быстрые действия/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Мой аккаунт/ })).not.toBeInTheDocument();
   });
 
   it("hides owner categories from platform identities even if ownership is present", () => {

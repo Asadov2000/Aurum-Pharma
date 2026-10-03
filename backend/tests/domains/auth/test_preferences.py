@@ -50,6 +50,14 @@ async def test_preferences_default_update_and_stale_version(
             "route_order": [],
             "start_route": "/",
         },
+        "quick_actions": {
+            "catalog": {
+                "enabled": True,
+                "order": ["open", "edit", "copy_name", "copy_barcode", "archive", "restore"],
+                "hidden": [],
+            },
+            "batches": {"enabled": True, "order": ["open", "copy_number"], "hidden": []},
+        },
         "version": 1,
         "updated_at": initial.json()["updated_at"],
     }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Generic, Literal, Self, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -261,6 +261,71 @@ class WorkspacePreferences(BaseModel):
         return self
 
 
+QuickActionId = TypeVar("QuickActionId", bound=str)
+CatalogQuickActionId = Literal["open", "edit", "copy_name", "copy_barcode", "archive", "restore"]
+BatchQuickActionId = Literal["open", "copy_number"]
+
+
+def _catalog_quick_action_order() -> list[CatalogQuickActionId]:
+    return ["open", "edit", "copy_name", "copy_barcode", "archive", "restore"]
+
+
+def _batch_quick_action_order() -> list[BatchQuickActionId]:
+    return ["open", "copy_number"]
+
+
+class QuickActionsConfig(BaseModel, Generic[QuickActionId]):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)
+    order: list[QuickActionId] = Field(min_length=1, max_length=6)
+    hidden: list[QuickActionId] = Field(default_factory=list, max_length=6)
+
+    @model_validator(mode="after")
+    def _validate_actions(self) -> Self:
+        if len(self.order) != len(set(self.order)) or len(self.hidden) != len(set(self.hidden)):
+            raise ValueError("quick actions must be unique")
+        if not set(self.hidden).issubset(self.order):
+            raise ValueError("hidden quick actions must be included in order")
+        if not set(self.order).difference(self.hidden):
+            raise ValueError("at least one quick action must be visible")
+        return self
+
+
+class CatalogQuickActionsConfig(QuickActionsConfig[CatalogQuickActionId]):
+    order: list[CatalogQuickActionId] = Field(
+        default_factory=_catalog_quick_action_order,
+        min_length=1,
+        max_length=6,
+    )
+
+
+class BatchQuickActionsConfig(QuickActionsConfig[BatchQuickActionId]):
+    order: list[BatchQuickActionId] = Field(
+        default_factory=_batch_quick_action_order, min_length=1, max_length=2
+    )
+
+
+class QuickActionsPreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    catalog: CatalogQuickActionsConfig = Field(default_factory=CatalogQuickActionsConfig)
+    batches: BatchQuickActionsConfig = Field(default_factory=BatchQuickActionsConfig)
+
+
+class QuickActionsPreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    catalog: CatalogQuickActionsConfig | None = None
+    batches: BatchQuickActionsConfig | None = None
+
+    @model_validator(mode="after")
+    def _require_section(self) -> Self:
+        if self.catalog is None and self.batches is None:
+            raise ValueError("at least one quick action section must be provided")
+        return self
+
+
 class UserPreferencesRead(BaseModel):
     theme: Literal["system", "light", "dark"]
     density: Literal["auto", "compact", "comfortable", "touch"]
@@ -268,6 +333,7 @@ class UserPreferencesRead(BaseModel):
     reduce_motion: bool
     accent: Literal["teal", "blue", "violet", "green", "amber", "rose"]
     workspace: WorkspacePreferences
+    quick_actions: QuickActionsPreferences
     version: int = Field(ge=1)
     updated_at: datetime
 
@@ -282,6 +348,7 @@ class UserPreferencesUpdate(BaseModel):
     reduce_motion: bool | None = None
     accent: Literal["teal", "blue", "violet", "green", "amber", "rose"] | None = None
     workspace: WorkspacePreferences | None = None
+    quick_actions: QuickActionsPreferencesUpdate | None = None
 
     @model_validator(mode="after")
     def _require_change(self) -> UserPreferencesUpdate:

@@ -1,3 +1,5 @@
+import { type QuickActionPreferences } from "./quickActions";
+
 export type ThemePreference = "system" | "light" | "dark";
 export type DensityPreference = "auto" | "compact" | "comfortable" | "touch";
 export type ContrastPreference = "standard" | "high";
@@ -18,6 +20,7 @@ export interface UserPreferences {
   reduce_motion: boolean;
   accent: AccentPreference;
   workspace: WorkspacePreferences;
+  quick_actions?: QuickActionPreferences;
   version: number;
   updated_at: string;
 }
@@ -30,4 +33,5 @@ export interface UserPreferencesUpdate {
   reduce_motion?: boolean;
   accent?: AccentPreference;
   workspace?: WorkspacePreferences;
+  quick_actions?: Partial<QuickActionPreferences>;
 }

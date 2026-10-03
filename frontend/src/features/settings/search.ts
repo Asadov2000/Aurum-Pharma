@@ -32,6 +32,14 @@ export const settingsCategories = [
     source: "notification_subscriptions",
   },
   {
+    id: "quick-actions",
+    group: "personal",
+    title: "Быстрые действия",
+    description: "Правый клик, команды и порядок",
+    keywords: "пкм контекстное меню каталог партии скрыть команда",
+    source: "user_preferences",
+  },
+  {
     id: "security",
     group: "personal",
     title: "Безопасность аккаунта",

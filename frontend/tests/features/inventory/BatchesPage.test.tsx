@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listBatches = vi.fn();
@@ -7,6 +7,17 @@ const getBatch = vi.fn();
 const authResult = {
   user: { is_developer: false, permissions: [] as string[] },
 };
+
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("@/features/settings/useQuickActionPreferences", async () => {
+  const { defaultQuickActionPreferences } = await import("@/features/settings/quickActions");
+  return {
+    useQuickActionPreferences: (section: "catalog" | "batches") => ({
+      config: defaultQuickActionPreferences(section),
+      scope: "user-1:t-1",
+    }),
+  };
+});
 
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => authResult,
@@ -262,6 +273,10 @@ describe("BatchesPage", () => {
       });
       listBatches.mockImplementation(() => new Promise(() => undefined));
       renderPage();
+      await screen.findByRole("button", { name: /Открыть партию LOT-2026-001/ });
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+      });
       fireEvent.click(await screen.findByRole("button", { name: /Вперёд/ }));
       await waitFor(() => expect(listBatches).toHaveBeenCalledTimes(2));
       const open = screen.getByRole("button", { name: /Открыть партию LOT-2026-001/ });
@@ -273,8 +288,56 @@ describe("BatchesPage", () => {
       fireEvent.click(open);
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(getBatch).toHaveBeenCalledTimes(previousReads);
+      const actions = within(record!).getByRole("button", {
+        name: "Действия для партии LOT-2026-001",
+      });
+      expect(actions).toBeDisabled();
+      fireEvent.contextMenu(record!);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     },
   );
+
+  it.each([false, true])("opens and copies the right-clicked batch (mobile=%s)", async (mobile) => {
+    setDesktop(!mobile);
+    const second = { ...BATCH, id: "batch-2", batch_number: "LOT-002" };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    listBatches.mockResolvedValue({
+      items: [BATCH, second],
+      total: 2,
+      page: 1,
+      page_size: 25,
+      summary: SUMMARY,
+    });
+    getBatch.mockImplementation(async (id: string) => ({
+      ...(id === second.id ? second : BATCH),
+      report_timezone: "Asia/Dushanbe",
+      recent_movements: [],
+    }));
+    renderPage();
+    const button = await screen.findByRole("button", { name: /Открыть партию LOT-002/ });
+    const record = button.closest(mobile ? "article" : "tr");
+    expect(record).not.toBeNull();
+    fireEvent.contextMenu(record!, { clientX: 35, clientY: 45 });
+    const menu = await screen.findByRole("menu", { name: "Действия для партии LOT-002" });
+    expect(
+      within(menu).queryByRole("menuitem", { name: /Списать|Изменить|Заблокировать/ }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать номер партии" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("LOT-002"));
+    fireEvent.contextMenu(record!);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Открыть" }),
+    );
+    await waitFor(() =>
+      expect(getBatch).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal)),
+    );
+    if (mobile) expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    else
+      expect(
+        await screen.findByRole("region", { name: "Карточка партии LOT-002" }),
+      ).toBeInTheDocument();
+  });
 
   it("debounces the batch-number filter before requesting data", async () => {
     listBatches.mockResolvedValue({

@@ -1,11 +1,22 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listEdgeCatalog = vi.fn();
 const getEdgeCatalogItem = vi.fn();
 const listEdgeSuppliers = vi.fn();
 const listEdgeInventory = vi.fn();
+
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("@/features/settings/useQuickActionPreferences", async () => {
+  const { defaultQuickActionPreferences } = await import("@/features/settings/quickActions");
+  return {
+    useQuickActionPreferences: (section: "catalog" | "batches") => ({
+      config: defaultQuickActionPreferences(section),
+      scope: "user-1:t-1",
+    }),
+  };
+});
 
 vi.mock("@/features/edgeReadModel/api", () => ({
   listEdgeCatalog: (...args: unknown[]) => listEdgeCatalog(...args),
@@ -67,8 +78,8 @@ describe("Edge read-only pages", () => {
     };
     listEdgeCatalog.mockResolvedValue({
       metadata,
-      items: [item],
-      total: 1,
+      items: [item, { ...item, id: "item-2", brand_name: "Ибупрофен" }],
+      total: 2,
       page: 1,
       page_size: 50,
     });
@@ -84,6 +95,29 @@ describe("Edge read-only pages", () => {
     expect(
       screen.queryByRole("button", { name: /добавить|изменить|удалить/i }),
     ).not.toBeInTheDocument();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const row = screen.getByText("Ибупрофен").closest("article");
+    fireEvent.contextMenu(row!);
+    const menu = await screen.findByRole("menu", { name: "Действия для Ибупрофен" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((control) => control.textContent),
+    ).toEqual(["Открыть", "Скопировать название", "Настроить это меню"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать название" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("Ибупрофен"));
+    fireEvent.contextMenu(row!);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Открыть" }),
+    );
+    await waitFor(() =>
+      expect(getEdgeCatalogItem).toHaveBeenCalledWith(
+        "item-2",
+        plane.branchId,
+        expect.any(AbortSignal),
+      ),
+    );
   });
 
   it("shows suppliers without return or edit actions", async () => {
@@ -142,6 +176,104 @@ describe("Edge read-only pages", () => {
     expect(screen.queryByText(/закуп/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /списать/i })).not.toBeInTheDocument();
   });
+
+  it("copies local batch numbers without offering stock mutations or unavailable cloud details", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    listEdgeInventory.mockResolvedValue({
+      metadata,
+      items: [
+        {
+          id: "batch-1",
+          catalog_name: "Парацетамол",
+          batch_number: "EDGE-007",
+          branch_name: "Рудаки",
+          expires_at: "2027-01-01",
+          qty_remaining: "12",
+          expiry_status: "normal",
+          is_blocked: false,
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 50,
+      summary: {
+        total_qty: "12",
+        purchase_value: null,
+        sale_value: "60",
+        attention_count: 0,
+        expired_count: 0,
+        blocked_count: 0,
+      },
+    });
+    renderEdge(<EdgeInventoryPage plane={plane} />);
+    const row = (await screen.findByText("Партия EDGE-007")).closest("article");
+    fireEvent.contextMenu(row!);
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((control) => control.textContent),
+    ).toEqual(["Скопировать номер партии", "Настроить это меню"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать номер партии" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("EDGE-007"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it.each(["catalog", "inventory"])(
+    "blocks previous local %s context actions while another page is loading",
+    async (section) => {
+      const catalogItem = {
+        id: "item-1",
+        brand_name: "Парацетамол",
+        inn: null,
+        manufacturer: null,
+        base_price: null,
+        currency: "TJS",
+        updated_at: "2026-09-20T09:00:00Z",
+      };
+      const batch = {
+        id: "batch-1",
+        catalog_name: "Парацетамол",
+        batch_number: "EDGE-007",
+        branch_name: "Рудаки",
+        expires_at: "2027-01-01",
+        qty_remaining: "12",
+        expiry_status: "normal",
+        is_blocked: false,
+      };
+      const list = section === "catalog" ? listEdgeCatalog : listEdgeInventory;
+      list.mockResolvedValueOnce({
+        metadata,
+        items: [section === "catalog" ? catalogItem : batch],
+        total: 51,
+        page: 1,
+        page_size: 50,
+        summary: { total_qty: "12", attention_count: 0, expired_count: 0, blocked_count: 0 },
+      });
+      list.mockImplementation(() => new Promise(() => undefined));
+      getEdgeCatalogItem.mockResolvedValue({ metadata, item: catalogItem });
+      renderEdge(
+        section === "catalog" ? (
+          <EdgeCatalogPage plane={plane} />
+        ) : (
+          <EdgeInventoryPage plane={plane} />
+        ),
+      );
+      const actions = await screen.findByRole("button", {
+        name: section === "catalog" ? "Действия для Парацетамол" : "Действия для партии EDGE-007",
+      });
+      const row = actions.closest("article");
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
+      await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(actions).toBeDisabled());
+      fireEvent.contextMenu(row!);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    },
+  );
 });
 
 function renderEdge(node: React.ReactNode): void {
