@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import {
-  ActionMenu,
   Badge,
   Button,
   ConfigurableFilterBar,
@@ -19,10 +18,13 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
+import { RecordActionMenu, type RecordAction } from "@/features/foundation/RecordActionMenu";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { resolveDataPlane } from "@/features/edgeReadModel/dataPlane";
 import { cn } from "@/lib/utils";
 
 import { BarcodesPanel } from "./BarcodesPanel";
+import { CatalogBarcodeCopyModal } from "./CatalogBarcodeCopyModal";
 import { CatalogImage } from "./CatalogImage";
 import { CatalogImageManager } from "./CatalogImageManager";
 import { CatalogItemDetails } from "./CatalogItemDetails";
@@ -166,6 +168,7 @@ export function CatalogPage(): JSX.Element {
 
 function CloudCatalogPage(): JSX.Element {
   const { user } = useAuth();
+  const quickActions = useQuickActionPreferences("catalog");
   const filterPreferenceKey = useFilterPreferenceKey("catalog");
   const canCreate = hasPermission(user, "catalog.create");
   const canUpdate = hasPermission(user, "catalog.update");
@@ -193,6 +196,9 @@ function CloudCatalogPage(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<CatalogItem | null>(null);
+  const [copyingBarcode, setCopyingBarcode] = useState<{ itemId: string; scope: string } | null>(
+    null,
+  );
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [importing, setImporting] = useState(false);
   const [confirmItem, setConfirmItem] = useState<CatalogItem | null>(null);
@@ -348,14 +354,15 @@ function CloudCatalogPage(): JSX.Element {
     }
   };
 
-  const rowActions = (item: CatalogItem) => [
-    { label: "Открыть", onSelect: () => setViewing(item) },
+  const rowActions = (item: CatalogItem): RecordAction[] => [
+    { id: "open", label: "Открыть", onSelect: () => setViewing(item) },
     ...(!item.deleted_at && canUpdate
-      ? [{ label: "Изменить", onSelect: () => setEditing(item) }]
+      ? [{ id: "edit", label: "Изменить", onSelect: () => setEditing(item) }]
       : []),
     ...(!item.deleted_at && canDelete
       ? [
           {
+            id: "archive",
             label: "Архивировать",
             onSelect: () => setConfirmItem(item),
             tone: "danger" as const,
@@ -363,8 +370,14 @@ function CloudCatalogPage(): JSX.Element {
         ]
       : []),
     ...(item.deleted_at && canDelete
-      ? [{ label: "Восстановить", onSelect: () => void doRestore(item) }]
+      ? [{ id: "restore", label: "Восстановить", onSelect: () => void doRestore(item) }]
       : []),
+    { id: "copy_name", label: "Скопировать название", copyValue: item.brand_name },
+    {
+      id: "copy_barcode",
+      label: "Скопировать штрихкод",
+      onSelect: () => setCopyingBarcode({ itemId: item.id, scope: quickActions.scope }),
+    },
   ];
 
   const importStorageKey = `aurum:catalog-import:v1:${user?.active_tenant_id ?? "none"}:${user?.id ?? "unknown"}`;
@@ -823,6 +836,8 @@ function CloudCatalogPage(): JSX.Element {
                       return (
                         <article
                           key={item.id}
+                          data-context-actions
+                          tabIndex={0}
                           className={cn(
                             "relative flex min-w-0 items-stretch transition-colors duration-fast",
                             selected ? "bg-primary/5" : "hover:bg-foreground/[0.02]",
@@ -883,7 +898,15 @@ function CloudCatalogPage(): JSX.Element {
                             </span>
                           </button>
                           <div className="grid w-11 shrink-0 place-items-center pr-1">
-                            <ActionMenu
+                            <RecordActionMenu
+                              section="catalog"
+                              title={item.brand_name}
+                              detail={[item.form, item.dosage, item.pack_size]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              recordKey={`${item.id}:${item.updated_at}`}
+                              config={quickActions.config}
+                              scope={quickActions.scope}
                               label={`Действия для ${item.brand_name}`}
                               items={rowActions(item)}
                               isLoading={isShowingPreviousResults}
@@ -902,6 +925,8 @@ function CloudCatalogPage(): JSX.Element {
                     return (
                       <article
                         key={item.id}
+                        data-context-actions
+                        tabIndex={0}
                         className={cn(
                           "relative overflow-hidden rounded-lg border bg-surface",
                           selected ? "border-primary ring-1 ring-primary/20" : "border-border",
@@ -931,7 +956,15 @@ function CloudCatalogPage(): JSX.Element {
                           </span>
                         </button>
                         <div className="absolute right-2 top-2 rounded-md bg-surface/90">
-                          <ActionMenu
+                          <RecordActionMenu
+                            section="catalog"
+                            title={item.brand_name}
+                            detail={[item.form, item.dosage, item.pack_size]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            recordKey={`${item.id}:${item.updated_at}`}
+                            config={quickActions.config}
+                            scope={quickActions.scope}
                             label={`Действия для ${item.brand_name}`}
                             items={rowActions(item)}
                             isLoading={isShowingPreviousResults}
@@ -984,6 +1017,13 @@ function CloudCatalogPage(): JSX.Element {
       )}
 
       <CatalogCreateDialog open={creating} onClose={() => setCreating(false)} />
+      {copyingBarcode?.scope === quickActions.scope ? (
+        <CatalogBarcodeCopyModal
+          key={`${quickActions.scope}:${copyingBarcode.itemId}`}
+          itemId={copyingBarcode.itemId}
+          onClose={() => setCopyingBarcode(null)}
+        />
+      ) : null}
       <Modal
         open={viewing !== null}
         onClose={() => setViewing(null)}

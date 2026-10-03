@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Input, Label, PageHeader, Pagination, SkeletonRows } from "@/components/ui";
 import { type CatalogItem } from "@/features/catalog/types";
 import { describeApiError } from "@/features/foundation/errors";
+import { RecordActionMenu } from "@/features/foundation/RecordActionMenu";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { type BatchWithExpiry } from "@/features/inventory/types";
 import { type Supplier } from "@/features/suppliers/types";
 
@@ -18,6 +20,7 @@ import { EdgeSnapshotBanner } from "./EdgeSnapshotBanner";
 const PAGE_SIZE = 50;
 
 export function EdgeCatalogPage({ plane }: { readonly plane: EdgePlane }): JSX.Element {
+  const quickActions = useQuickActionPreferences("catalog");
   const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -67,6 +70,8 @@ export function EdgeCatalogPage({ plane }: { readonly plane: EdgePlane }): JSX.E
             {rows.length ? (
               rows.map((item) => (
                 <CatalogRow
+                  quickActions={quickActions}
+                  isLoading={list.isPlaceholderData}
                   key={item.id}
                   item={item}
                   selected={item.id === selectedId}
@@ -140,6 +145,7 @@ export function EdgeSuppliersPage({ plane }: { readonly plane: EdgePlane }): JSX
 }
 
 export function EdgeInventoryPage({ plane }: { readonly plane: EdgePlane }): JSX.Element {
+  const quickActions = useQuickActionPreferences("batches");
   const [page, setPage] = useState(1);
   const [showEmpty, setShowEmpty] = useState(false);
   const params = useMemo(
@@ -177,7 +183,14 @@ export function EdgeInventoryPage({ plane }: { readonly plane: EdgePlane }): JSX
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
             {result.data.items.length ? (
-              result.data.items.map((batch) => <InventoryRow key={batch.id} batch={batch} />)
+              result.data.items.map((batch) => (
+                <InventoryRow
+                  key={batch.id}
+                  batch={batch}
+                  quickActions={quickActions}
+                  isLoading={result.isPlaceholderData}
+                />
+              ))
             ) : (
               <EmptyState text="Партии не найдены." />
             )}
@@ -273,31 +286,55 @@ function EdgeQueryState({
 }
 
 function CatalogRow({
+  quickActions,
+  isLoading,
   item,
   selected,
   onSelect,
 }: {
+  readonly quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+  readonly isLoading: boolean;
   readonly item: CatalogItem;
   readonly selected: boolean;
   readonly onSelect: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      className={`grid w-full gap-1 border-b border-border px-4 py-3 text-left last:border-b-0 hover:bg-foreground/[0.025] ${selected ? "bg-primary/5" : ""}`}
-      onClick={onSelect}
+    <article
+      data-context-actions
+      tabIndex={0}
+      className="flex items-center border-b border-border pr-2 last:border-b-0"
     >
-      <span className="font-semibold text-foreground">{item.brand_name}</span>
-      <span className="text-sm text-foreground-secondary">
-        {[item.inn, item.manufacturer].filter(Boolean).join(" · ") || "Сведения не указаны"}
-      </span>
-      <span className="text-sm font-medium text-foreground">
-        {item.base_price
-          ? `${Number(item.base_price).toFixed(2)} ${item.currency}`
-          : "Цена не задана"}
-      </span>
-    </button>
+      <button
+        type="button"
+        aria-pressed={selected}
+        className={`grid min-w-0 flex-1 gap-1 px-4 py-3 text-left hover:bg-foreground/[0.025] ${selected ? "bg-primary/5" : ""}`}
+        onClick={onSelect}
+      >
+        <span className="font-semibold text-foreground">{item.brand_name}</span>
+        <span className="text-sm text-foreground-secondary">
+          {[item.inn, item.manufacturer].filter(Boolean).join(" · ") || "Сведения не указаны"}
+        </span>
+        <span className="text-sm font-medium text-foreground">
+          {item.base_price
+            ? `${Number(item.base_price).toFixed(2)} ${item.currency}`
+            : "Цена не задана"}
+        </span>
+      </button>
+      <RecordActionMenu
+        section="catalog"
+        recordKey={`${item.id}:${item.updated_at}`}
+        title={item.brand_name}
+        detail="Локальные данные · Только просмотр"
+        label={`Действия для ${item.brand_name}`}
+        config={quickActions.config}
+        scope={quickActions.scope}
+        isLoading={isLoading}
+        items={[
+          { id: "open", label: "Открыть", onSelect },
+          { id: "copy_name", label: "Скопировать название", copyValue: item.brand_name },
+        ]}
+      />
+    </article>
   );
 }
 
@@ -342,9 +379,21 @@ function SupplierCard({ supplier }: { readonly supplier: Supplier }): JSX.Elemen
   );
 }
 
-function InventoryRow({ batch }: { readonly batch: BatchWithExpiry }): JSX.Element {
+function InventoryRow({
+  batch,
+  quickActions,
+  isLoading,
+}: {
+  readonly batch: BatchWithExpiry;
+  readonly isLoading: boolean;
+  readonly quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+}): JSX.Element {
   return (
-    <article className="grid gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] sm:items-center">
+    <article
+      data-context-actions
+      tabIndex={0}
+      className="grid gap-2 border-b border-border px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto_auto] sm:items-center"
+    >
       <div className="min-w-0">
         <h2 className="truncate font-semibold text-foreground">{batch.catalog_name}</h2>
         <p className="truncate text-sm text-foreground-secondary">
@@ -363,6 +412,27 @@ function InventoryRow({ batch }: { readonly batch: BatchWithExpiry }): JSX.Eleme
           {batch.is_blocked ? "Заблокирована" : expiryLabel(batch.expiry_status)}
         </Badge>
       </div>
+      <RecordActionMenu
+        section="batches"
+        isLoading={isLoading}
+        recordKey={`${batch.id}:${batch.updated_at}`}
+        title={batch.catalog_name}
+        detail="Локальные данные · Только просмотр"
+        label={`Действия для партии ${batch.batch_number ?? "без номера"}`}
+        config={quickActions.config}
+        scope={quickActions.scope}
+        items={
+          batch.batch_number
+            ? [
+                {
+                  id: "copy_number",
+                  label: "Скопировать номер партии",
+                  copyValue: batch.batch_number,
+                },
+              ]
+            : []
+        }
+      />
     </article>
   );
 }

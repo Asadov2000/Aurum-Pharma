@@ -58,6 +58,7 @@ from app.domains.auth.schemas import (
     MfaStepUpRequest,
     PasswordConfirmationRequest,
     PasswordSetupRequest,
+    QuickActionsPreferences,
     RefreshRequest,
     SessionListResponse,
     SessionRevokeResponse,
@@ -142,7 +143,10 @@ def _preferences_response(
     user: CurrentUser,
 ) -> UserPreferencesRead:
     raw_workspace = preferences.workspace_preferences.get(_workspace_scope(user), {})
-    workspace = WorkspacePreferences.model_validate(raw_workspace)
+    workspace = WorkspacePreferences.model_validate(
+        {key: value for key, value in raw_workspace.items() if key != "quick_actions"}
+    )
+    quick_actions = QuickActionsPreferences.model_validate(raw_workspace.get("quick_actions", {}))
     return UserPreferencesRead.model_validate(
         {
             "theme": preferences.theme,
@@ -151,6 +155,7 @@ def _preferences_response(
             "reduce_motion": preferences.reduce_motion,
             "accent": preferences.accent,
             "workspace": workspace,
+            "quick_actions": quick_actions,
             "version": preferences.version,
             "updated_at": preferences.updated_at,
         }
@@ -928,11 +933,14 @@ async def update_preferences(
     expected_version = int(raw.pop("expected_version"))
     workspace_value = raw.pop("workspace", None)
     workspace = dict(workspace_value) if isinstance(workspace_value, dict) else None
+    quick_actions_value = raw.pop("quick_actions", None)
+    quick_actions = dict(quick_actions_value) if isinstance(quick_actions_value, dict) else None
     preferences = await service.update_user_preferences(
         user_id=user.user_id,
         workspace_scope=_workspace_scope(user),
         expected_version=expected_version,
         fields=raw,
         workspace=workspace,
+        quick_actions=quick_actions,
     )
     return _preferences_response(preferences, user)

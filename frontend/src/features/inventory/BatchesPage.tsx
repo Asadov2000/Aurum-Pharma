@@ -28,6 +28,8 @@ import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { describeApiError } from "@/features/foundation/errors";
+import { RecordActionMenu } from "@/features/foundation/RecordActionMenu";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { useBranchesQuery } from "@/features/foundation/queries";
 import { shouldOpenRecord } from "@/lib/record";
 import { cn } from "@/lib/utils";
@@ -80,6 +82,7 @@ export function BatchesPage(): JSX.Element {
 
 function CloudBatchesPage(): JSX.Element {
   const { user } = useAuth();
+  const quickActions = useQuickActionPreferences("batches");
   const canViewCustomerReturns = hasPermission(user, "customer_returns.view");
   const [section, setSection] = useState<InventorySection>("saleable");
   const filterPreferenceKey = useFilterPreferenceKey("batches");
@@ -448,6 +451,7 @@ function CloudBatchesPage(): JSX.Element {
             <>
               {view === "cards" || !isDesktopLayout ? (
                 <BatchCards
+                  quickActions={quickActions}
                   items={data.items}
                   onOpen={openBatch}
                   disabled={isShowingPreviousResults}
@@ -455,6 +459,7 @@ function CloudBatchesPage(): JSX.Element {
               ) : showSplitWorkspace ? (
                 <div className="grid min-w-0 grid-cols-[minmax(0,1.65fr)_minmax(23rem,1fr)] items-start gap-4">
                   <BatchTable
+                    quickActions={quickActions}
                     items={data.items}
                     selectedId={selectedBatch?.id ?? null}
                     onOpen={openBatch}
@@ -476,6 +481,7 @@ function CloudBatchesPage(): JSX.Element {
                 </div>
               ) : (
                 <BatchTable
+                  quickActions={quickActions}
                   items={data.items}
                   selectedId={null}
                   onOpen={openBatch}
@@ -580,11 +586,13 @@ function SummaryMetric({
 }
 
 function BatchTable({
+  quickActions,
   items,
   selectedId,
   onOpen,
   disabled = false,
 }: {
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
   items: BatchWithExpiry[];
   selectedId: string | null;
   onOpen: (batch: BatchWithExpiry) => void;
@@ -608,6 +616,8 @@ function BatchTable({
         {items.map((batch) => (
           <TR
             key={batch.id}
+            data-context-actions
+            tabIndex={0}
             onClick={(event) => {
               if (!disabled && shouldOpenRecord(event)) onOpen(batch);
             }}
@@ -663,16 +673,24 @@ function BatchTable({
               </p>
             </TD>
             <TD className="text-right">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-[var(--control-height-sm)] px-0"
-                aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
-                disabled={disabled}
-                onClick={() => onOpen(batch)}
-              >
-                <ChevronRightIcon />
-              </Button>
+              <div className="inline-flex items-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-[var(--control-height-sm)] px-0"
+                  aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
+                  disabled={disabled}
+                  onClick={() => onOpen(batch)}
+                >
+                  <ChevronRightIcon />
+                </Button>
+                <BatchActionMenu
+                  batch={batch}
+                  onOpen={onOpen}
+                  disabled={disabled}
+                  quickActions={quickActions}
+                />
+              </div>
             </TD>
           </TR>
         ))}
@@ -682,10 +700,12 @@ function BatchTable({
 }
 
 function BatchCards({
+  quickActions,
   items,
   onOpen,
   disabled = false,
 }: {
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
   items: BatchWithExpiry[];
   onOpen: (batch: BatchWithExpiry) => void;
   disabled?: boolean;
@@ -695,6 +715,8 @@ function BatchCards({
       {items.map((batch) => (
         <article
           key={batch.id}
+          data-context-actions
+          tabIndex={0}
           aria-label={`${batch.catalog_name}, партия ${batch.batch_number ?? "без номера"}`}
           className={cn(
             "rounded-lg border border-border bg-surface px-3 py-3",
@@ -747,19 +769,64 @@ function BatchCards({
                 {formatInventoryMoney(batch.sale_price, batch.currency)}
               </p>
             </div>
-            <Button
-              className="min-h-11 shrink-0"
-              variant="secondary"
-              disabled={disabled}
-              aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
-              onClick={() => onOpen(batch)}
-            >
-              Открыть
-            </Button>
+            <div className="flex items-center gap-1">
+              <BatchActionMenu
+                batch={batch}
+                onOpen={onOpen}
+                disabled={disabled}
+                quickActions={quickActions}
+              />
+              <Button
+                className="min-h-11 shrink-0"
+                variant="secondary"
+                disabled={disabled}
+                aria-label={`Открыть партию ${batch.batch_number ?? "без номера"} товара ${batch.catalog_name}`}
+                onClick={() => onOpen(batch)}
+              >
+                Открыть
+              </Button>
+            </div>
           </div>
         </article>
       ))}
     </div>
+  );
+}
+
+function BatchActionMenu({
+  batch,
+  onOpen,
+  disabled,
+  quickActions,
+}: {
+  batch: BatchWithExpiry;
+  onOpen: (batch: BatchWithExpiry) => void;
+  disabled: boolean;
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+}): JSX.Element {
+  return (
+    <RecordActionMenu
+      section="batches"
+      title={batch.catalog_name}
+      detail={`Партия ${batch.batch_number ?? "без номера"}`}
+      label={`Действия для партии ${batch.batch_number ?? "без номера"}`}
+      recordKey={`${batch.id}:${batch.updated_at}`}
+      config={quickActions.config}
+      scope={quickActions.scope}
+      disabled={disabled}
+      items={[
+        { id: "open", label: "Открыть", onSelect: () => onOpen(batch) },
+        ...(batch.batch_number
+          ? [
+              {
+                id: "copy_number",
+                label: "Скопировать номер партии",
+                copyValue: batch.batch_number,
+              },
+            ]
+          : []),
+      ]}
+    />
   );
 }
 

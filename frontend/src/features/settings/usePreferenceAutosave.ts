@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/features/auth/hooks";
 
 import { useUpdateUserPreferences, useUserPreferencesQuery } from "./queries";
+import { parseQuickActionPreferences } from "./quickActions";
 import {
   type AccentPreference,
   type ContrastPreference,
@@ -15,6 +16,7 @@ import {
 type PreferencePatch = Omit<UserPreferencesUpdate, "expected_version">;
 
 const STORAGE_PREFIX = "aurum:preferences-pending:v1";
+export const PREFERENCE_QUEUE_CHANGED_EVENT = "aurum:preferences-pending-changed";
 const PATCH_KEYS = new Set([
   "theme",
   "density",
@@ -22,6 +24,7 @@ const PATCH_KEYS = new Set([
   "reduce_motion",
   "accent",
   "workspace",
+  "quick_actions",
 ]);
 const THEMES = new Set<ThemePreference>(["system", "light", "dark"]);
 const DENSITIES = new Set<DensityPreference>(["auto", "compact", "comfortable", "touch"]);
@@ -89,7 +92,7 @@ export function usePreferenceAutosave(channel: string) {
     generationRef.current += 1;
     runningRef.current = false;
     versionRef.current = null;
-    const restored = readPatch(scope, channel);
+    const restored = readPendingPreferencePatch(scope, channel);
     queueRef.current = restored;
     inFlightRef.current = {};
     setHasPending(!isEmpty(queueRef.current));
@@ -136,7 +139,7 @@ function storageKey(scope: string, channel: string): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(channel)}`;
 }
 
-function readPatch(scope: string, channel: string): PreferencePatch {
+export function readPendingPreferencePatch(scope: string, channel: string): PreferencePatch {
   try {
     const raw = window.localStorage.getItem(storageKey(scope, channel));
     if (raw === null) return {};
@@ -174,6 +177,11 @@ function parsePendingPatch(value: unknown): PreferencePatch | null {
     const workspace = parseWorkspace(value.workspace);
     if (workspace === null) return null;
     patch.workspace = workspace;
+  }
+  if ("quick_actions" in value) {
+    const quickActions = parseQuickActionPreferences(value.quick_actions);
+    if (quickActions === null) return null;
+    patch.quick_actions = quickActions;
   }
   return patch;
 }
@@ -224,6 +232,9 @@ function persistPatch(scope: string, channel: string, patch: PreferencePatch): v
   } catch {
     // The in-memory queue remains authoritative until this page is closed.
   }
+  window.dispatchEvent(
+    new CustomEvent(PREFERENCE_QUEUE_CHANGED_EVENT, { detail: { scope, channel } }),
+  );
 }
 
 function isEmpty(patch: PreferencePatch): boolean {

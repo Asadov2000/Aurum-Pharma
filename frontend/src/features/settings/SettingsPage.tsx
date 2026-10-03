@@ -11,6 +11,7 @@ import { AccountSettingsPanel, MenuSettingsPanel } from "./AccountAndMenuPanels"
 import { DeviceSettingsPanel } from "./DeviceSettingsPanel";
 import { InterfaceSettingsPanel } from "./InterfaceSettingsPanel";
 import { OwnerSettingsPanel, type OwnerSettingsSection } from "./OwnerSettingsPanel";
+import { QuickActionsSettingsPanel } from "./QuickActionsSettingsPanel";
 import {
   parseSettingsSearch,
   settingsCategories,
@@ -183,6 +184,7 @@ export function SettingsPage(): JSX.Element {
           {active === "account" ? <AccountSettingsPanel /> : null}
           {active === "interface" ? <InterfaceSettingsPanel /> : null}
           {active === "menu" ? <MenuSettingsPanel /> : null}
+          {active === "quick-actions" ? <QuickActionsSettingsPanel /> : null}
           {active === "notifications" ? (
             <div className="space-y-4">
               <SettingsSectionHeader
@@ -248,6 +250,12 @@ function CategoryIcon({ category }: { category: CategoryId }): JSX.Element {
       <>
         <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
         <path d="M10 21h4" />
+      </>
+    ),
+    "quick-actions": (
+      <>
+        <path d="m6 3 12 10-7 1-3 7-2-18Z" />
+        <path d="m12 14 4 6" />
       </>
     ),
     security: <path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z" />,

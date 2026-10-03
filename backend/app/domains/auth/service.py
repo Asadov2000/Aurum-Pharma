@@ -1209,6 +1209,7 @@ class AuthService:
         expected_version: int,
         fields: dict[str, object],
         workspace: dict[str, object] | None,
+        quick_actions: dict[str, object] | None = None,
     ) -> UserPreferences:
         current = await self.repo.get_or_create_user_preferences(user_id)
         if current.version != expected_version:
@@ -1217,11 +1218,19 @@ class AuthService:
                 details={"current_version": current.version},
             )
 
-        if workspace is not None:
+        if workspace is not None or quick_actions is not None:
             workspaces = dict(current.workspace_preferences)
             if workspace_scope not in workspaces and len(workspaces) >= 64:
                 raise BusinessRuleError("Too many saved workspace preferences")
-            workspaces[workspace_scope] = workspace
+            scoped_workspace = dict(workspaces.get(workspace_scope, {}))
+            if workspace is not None:
+                scoped_workspace.update(workspace)
+            if quick_actions is not None:
+                saved_actions = scoped_workspace.get("quick_actions", {})
+                actions = dict(saved_actions) if isinstance(saved_actions, dict) else {}
+                actions.update(quick_actions)
+                scoped_workspace["quick_actions"] = actions
+            workspaces[workspace_scope] = scoped_workspace
             if len(json.dumps(workspaces, separators=(",", ":")).encode("utf-8")) > 65_536:
                 raise BusinessRuleError("Saved workspace preferences are too large")
             fields = {**fields, "workspace_preferences": workspaces}

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/features/catalog/fieldTemplates", () => ({
@@ -16,7 +16,20 @@ const authState = vi.hoisted(() => ({
   permissions: ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"],
 }));
 
-vi.mock("@tanstack/react-router", () => ({ useBlocker: () => ({ status: "idle" }) }));
+vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" }),
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("@/features/settings/useQuickActionPreferences", async () => {
+  const { defaultQuickActionPreferences } = await import("@/features/settings/quickActions");
+  return {
+    useQuickActionPreferences: (section: "catalog" | "batches") => ({
+      config: defaultQuickActionPreferences(section),
+      scope: "user-1:t-1",
+    }),
+  };
+});
 
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({
@@ -88,6 +101,7 @@ const ITEM = {
 
 describe("CatalogPage", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     authState.permissions = ["catalog.view", "catalog.create", "catalog.update", "catalog.delete"];
     listCatalog.mockReset();
     createCatalogItem.mockReset();
@@ -256,6 +270,117 @@ describe("CatalogPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть карточку Парацетамол" }));
 
     expect(await screen.findByRole("dialog", { name: "Карточка товара" })).toBeInTheDocument();
+  });
+
+  it("uses the right-clicked product for copying and opening, without selecting the first row", async () => {
+    const second = { ...ITEM, id: "item-2", brand_name: "Ибупрофен" };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    listCatalog.mockResolvedValue({ items: [ITEM, second], total: 2, page: 1, page_size: 25 });
+    getCatalogItem.mockImplementation(async (id: string) => ({
+      ...(id === second.id ? second : ITEM),
+      barcodes: [],
+    }));
+    renderPage();
+    const row = (await screen.findByRole("button", { name: "Открыть карточку Ибупрофен" })).closest(
+      "article",
+    );
+    expect(row).not.toBeNull();
+    fireEvent.contextMenu(row!, { clientX: 30, clientY: 40 });
+    const menu = await screen.findByRole("menu", { name: "Действия для Ибупрофен" });
+    expect(within(menu).getByText("Ибупрофен")).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Скопировать название" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith(second.brand_name));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.contextMenu(row!);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Открыть" }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Карточка товара" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getCatalogItem).toHaveBeenLastCalledWith(second.id, expect.any(AbortSignal)),
+    );
+  });
+
+  it("keeps only permitted actions in a read-only user's context menu", async () => {
+    authState.permissions = ["catalog.view"];
+    listCatalog.mockResolvedValue({ items: [ITEM], total: 1, page: 1, page_size: 25 });
+    renderPage();
+    const row = (
+      await screen.findByRole("button", { name: "Открыть карточку Парацетамол" })
+    ).closest("article");
+    fireEvent.contextMenu(row!);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Открыть" })).toBeInTheDocument();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Скопировать штрихкод" }),
+    ).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /Изменить|Архивировать|Восстановить/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens the barcode picker for the right-clicked product", async () => {
+    const second = { ...ITEM, id: "item-2", brand_name: "Ибупрофен" };
+    listCatalog.mockResolvedValue({ items: [ITEM, second], total: 2, page: 1, page_size: 25 });
+    getCatalogItem.mockResolvedValue({
+      ...second,
+      barcodes: [{ id: "barcode-2", code: "SECOND-PACK", code_type: "other" }],
+    });
+    renderPage();
+    const row = (await screen.findByRole("button", { name: "Открыть карточку Ибупрофен" })).closest(
+      "article",
+    );
+    fireEvent.contextMenu(row!);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", {
+        name: "Скопировать штрихкод",
+      }),
+    );
+    const picker = await screen.findByRole("dialog", { name: "Скопировать штрихкод" });
+    expect(await within(picker).findByText("SECOND-PACK")).toBeInTheDocument();
+    expect(getCatalogItem).toHaveBeenCalledWith(second.id, expect.any(AbortSignal));
+  });
+
+  it("offers restore only for an archived product, according to its delete permission", async () => {
+    listCatalog.mockResolvedValue({
+      items: [{ ...ITEM, deleted_at: "2026-10-01T00:00:00Z" }],
+      total: 1,
+      page: 1,
+      page_size: 25,
+    });
+    renderPage();
+    fireEvent.contextMenu(
+      (await screen.findByRole("button", { name: "Открыть карточку Парацетамол" })).closest(
+        "article",
+      )!,
+    );
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Восстановить" })).toBeInTheDocument();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /Архивировать|Изменить/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("blocks context actions on previous catalog results while changing pages", async () => {
+    listCatalog.mockResolvedValueOnce({ items: [ITEM], total: 26, page: 1, page_size: 25 });
+    listCatalog.mockImplementation(() => new Promise(() => undefined));
+    renderPage();
+    const row = (
+      await screen.findByRole("button", { name: "Открыть карточку Парацетамол" })
+    ).closest("article");
+    // The initial filter debounce resets page to 1; settle it before navigating.
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Вперёд/ }));
+    await waitFor(() => expect(listCatalog).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(within(row!).getByRole("button", { name: "Действия для Парацетамол" })).toBeDisabled(),
+    );
+    fireEvent.contextMenu(row!);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps an imported uncommon dosage form when editing a product", async () => {
