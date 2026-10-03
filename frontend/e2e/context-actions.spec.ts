@@ -1,13 +1,16 @@
 import { request, test } from "@playwright/test";
 
 import {
+  addPosItemToCart,
   apiContext,
   apiLogin,
   catalogSearchKey,
   clearLoginRateLimit,
+  completePosSale,
   expect,
   loginInBrowser,
   OWNER,
+  payPosSaleCash,
   seedAcceptedBatch,
   seedBranch,
   seedCatalogItem,
@@ -15,6 +18,155 @@ import {
   seedSupplier,
   uniqueName,
 } from "./helpers";
+
+test("cart menus target a single FEFO line and become read-only after payment", async ({
+  page,
+}) => {
+  clearLoginRateLimit(OWNER.email);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  const branch = await seedBranch(api, uniqueName("Cart context"));
+  const register = await seedRegister(api, branch.id, uniqueName("Cart register"));
+  const supplier = await seedSupplier(api, uniqueName("Cart supplier"));
+  const item = await seedCatalogItem(api, uniqueName("Cart product"), "10.00");
+  const batchA = uniqueName("Cart A");
+  const batchB = uniqueName("Cart B");
+  await seedAcceptedBatch(api, {
+    branchId: branch.id,
+    supplierId: supplier.id,
+    catalogId: item.id,
+    qty: "1",
+    purchasePrice: "5.00",
+    salePrice: "10.00",
+    expiresAt: "2028-01-03",
+    batchNumber: batchA,
+  });
+  const secondBatch = await seedAcceptedBatch(api, {
+    branchId: branch.id,
+    supplierId: supplier.id,
+    catalogId: item.id,
+    qty: "4",
+    purchasePrice: "5.00",
+    salePrice: "10.00",
+    expiresAt: "2028-10-03",
+    batchNumber: batchB,
+  });
+  await api.dispose();
+  await anonymous.dispose();
+  await loginInBrowser(page, OWNER);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/pos");
+  await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+  await page.getByLabel("Наличные в кассе на начало смены").fill("0");
+  await page.getByRole("button", { name: "Открыть смену" }).click();
+  await expect(page.getByText("Смена открыта")).toBeVisible();
+  await addPosItemToCart(page, { brandName: item.brand_name, qty: "3", expectedCartItems: 2 });
+  const first = page.getByTestId("cart-item").filter({ hasText: batchA });
+  const second = page.getByTestId("cart-item").filter({ hasText: batchB });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Вид интерфейса", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Вид интерфейса", exact: true })
+    .getByRole("button", { name: "Сенсор", exact: true })
+    .click();
+  await page.keyboard.press("Escape");
+  for (const mode of ["Сенсор", "Клавиши"]) {
+    await page
+      .getByRole("group", { name: "Режим кассы", exact: true })
+      .getByRole("button", { name: mode, exact: true })
+      .click();
+    await expect(second.getByText(batchB, { exact: false })).toBeVisible();
+    await expect
+      .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
+      .toBe(true);
+    const rowBox = await second.boundingBox();
+    const buttonBox = await second.getByRole("button", { name: /^Действия / }).boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
+  }
+  const paymentWrites: string[] = [];
+  page.on("request", (req) => {
+    if (
+      req.method() === "POST" &&
+      /\/api\/v1\/sales\/(checkout|[^/]+\/(payments|complete))$/.test(new URL(req.url()).pathname)
+    )
+      paymentWrites.push(req.method());
+  });
+  await second.click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu.getByText(`Партия ${batchB}`, { exact: false })).toBeVisible();
+  for (const key of ["F2", "F3", "F4"]) await page.keyboard.press(key);
+  await expect(menu).toBeVisible();
+  expect(paymentWrites).toEqual([]);
+  await menu.getByRole("menuitem", { name: "Скопировать номер партии" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(batchB);
+  await second.click({ button: "right" });
+  const increased = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      /\/api\/v1\/sales\/[^/]+\/items\/[^/]+$/.test(new URL(response.url()).pathname) &&
+      response.ok(),
+  );
+  await menu.getByRole("menuitem", { name: "Увеличить количество", exact: true }).click();
+  const changed = (await (await increased).json()) as { id: string; batch_id: string; qty: string };
+  expect(changed.batch_id).toBe(secondBatch.id);
+  expect(Number(changed.qty)).toBe(3);
+  await expect(second.getByRole("button", { name: "Количество", exact: true })).toHaveText("3");
+  await expect(first.getByRole("button", { name: "Количество", exact: true })).toHaveText("1");
+  await second.click({ button: "right" });
+  const decreased = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.endsWith(`/items/${changed.id}`) &&
+      response.ok(),
+  );
+  await menu.getByRole("menuitem", { name: "Уменьшить количество", exact: true }).click();
+  expect(Number(((await (await decreased).json()) as { qty: string }).qty)).toBe(2);
+  await expect(second.getByRole("button", { name: "Количество", exact: true })).toHaveText("2");
+  await first.click({ button: "right" });
+  await expect(
+    menu.getByRole("menuitem", { name: "Уменьшить количество", exact: true }),
+  ).toHaveCount(0);
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      /\/api\/v1\/sales\/[^/]+\/items\/[^/]+$/.test(new URL(response.url()).pathname) &&
+      response.ok(),
+  );
+  await menu.getByRole("menuitem", { name: "Удалить из чека", exact: true }).click();
+  await deleted;
+  await expect(first).toHaveCount(0);
+  await expect(second).toBeVisible();
+  await expect(page.getByTestId("cart-item")).toHaveCount(1);
+  for (const mode of ["Сенсор", "Клавиши"]) {
+    await page
+      .getByRole("group", { name: "Режим кассы", exact: true })
+      .getByRole("button", { name: mode, exact: true })
+      .click();
+    await expect(second.getByText(item.brand_name, { exact: true })).toBeVisible();
+    await expect(second.getByText(batchB, { exact: false })).toBeVisible();
+    await expect
+      .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
+      .toBe(true);
+  }
+  await payPosSaleCash(page, "20.00");
+  await second.click({ button: "right" });
+  await expect(menu.getByRole("menuitem", { name: /Увеличить|Уменьшить|Удалить/ })).toHaveCount(0);
+  await expect(
+    menu.getByRole("menuitem", { name: "Скопировать название", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await completePosSale(page);
+  await second.getByRole("button", { name: /^Действия / }).click();
+  await expect(menu.getByRole("menuitem", { name: /Увеличить|Уменьшить|Удалить/ })).toHaveCount(0);
+  await menu.getByRole("menuitem", { name: "Настроить это меню" }).click();
+  await expect(
+    page.getByRole("button", { name: "Касса — товары чека", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
 
 test("receipt menus preserve completed sales and persist independent preferences", async ({
   page,

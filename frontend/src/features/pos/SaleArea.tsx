@@ -14,6 +14,7 @@ import {
 import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
 import { describeApiError } from "@/lib/errorMessages";
 import { useConnectivity } from "@/lib/connectivityContext";
@@ -382,6 +383,7 @@ function ActiveWorkspace({
   const touch = mode === "touch";
   const keyboard = mode === "keyboard";
   const queryClient = useQueryClient();
+  const quickActions = useQuickActionPreferences("pos_cart");
   const { saveDraft, clearDraft: clearDraftStorage } = useMemo(
     () => scopedDraftStorage(storageScope),
     [storageScope],
@@ -950,7 +952,8 @@ function ActiveWorkspace({
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
-    if (!saleId || saleEditingBlocked) return;
+    if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
+      return;
     setTopError(null);
     try {
       const outcome = await posCommand.begin({
@@ -967,7 +970,8 @@ function ActiveWorkspace({
   };
 
   const onDelete = async (itemId: string) => {
-    if (!saleId || saleEditingBlocked) return;
+    if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
+      return;
     try {
       const outcome = await posCommand.begin({
         commandType: "item.delete",
@@ -1834,7 +1838,7 @@ function ActiveWorkspace({
 
   // Physical keyboard shortcuts stay available on touch-capable laptops.
   // Ref holds the latest handlers so we bind the listener once. F-keys are
-  // ignored while any modal/keypad (role="dialog") is open.
+  // ignored while a modal, keypad or action menu is open.
   const actionsRef = useRef({
     onNewSale,
     onComplete,
@@ -1851,7 +1855,7 @@ function ActiveWorkspace({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const dialogOpen = document.querySelector('[role="dialog"]') !== null;
+      const overlayOpen = document.querySelector('[role="dialog"], [role="menu"]') !== null;
       const el = document.activeElement as HTMLElement | null;
       const typing =
         !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
@@ -1868,32 +1872,32 @@ function ActiveWorkspace({
         ) !== null;
       switch (e.key) {
         case "F2":
-          if (dialogOpen) return;
+          if (overlayOpen) return;
           e.preventDefault();
           if (actionsRef.current.onNewSale()) searchRef.current?.focus();
           break;
         case "F3":
-          if (dialogOpen) return;
+          if (overlayOpen) return;
           e.preventDefault();
           document.querySelector<HTMLElement>(".pos-tile")?.focus();
           break;
         case "F4":
-          if (dialogOpen) return;
+          if (overlayOpen) return;
           e.preventDefault();
           void actionsRef.current.onComplete();
           break;
         case "/":
-          if (dialogOpen || typing) return;
+          if (overlayOpen || typing) return;
           e.preventDefault();
           searchRef.current?.focus();
           break;
         case "Enter":
-          if (dialogOpen || fieldHasContent || interactive) return;
+          if (overlayOpen || fieldHasContent || interactive) return;
           e.preventDefault();
           actionsRef.current.onEnterPayDefault();
           break;
         case "Escape":
-          if (!dialogOpen && actionsRef.current.canDismissError) setTopError(null);
+          if (!overlayOpen && actionsRef.current.canDismissError) setTopError(null);
           break;
       }
     };
@@ -2063,6 +2067,8 @@ function ActiveWorkspace({
               touch={touch}
               busy={posCommand.blocked}
               embedded
+              quickActions={quickActions}
+              actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
             />
 
             {topError ? (

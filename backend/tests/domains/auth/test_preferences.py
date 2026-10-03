@@ -59,6 +59,11 @@ async def test_preferences_default_update_and_stale_version(
             "batches": {"enabled": True, "order": ["open", "copy_number"], "hidden": []},
             "incoming": {"enabled": True, "order": ["open", "copy_number"], "hidden": []},
             "receipts": {"enabled": True, "order": ["open", "copy_number"], "hidden": []},
+            "pos_cart": {
+                "enabled": True,
+                "order": ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"],
+                "hidden": [],
+            },
             "employees": {
                 "enabled": True,
                 "order": [

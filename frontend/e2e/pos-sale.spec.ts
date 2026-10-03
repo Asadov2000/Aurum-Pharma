@@ -178,6 +178,20 @@ test.describe("POS sale (owner)", () => {
     await barcodeLookup;
     await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByTestId("cart-item").getByText(item.brand_name)).toBeVisible();
+    await expect
+      .poll(() =>
+        page.getByTestId("cart-item").evaluate((row) => {
+          const bounds = row.getBoundingClientRect();
+          return (
+            row.scrollWidth <= row.clientWidth + 1 &&
+            Array.from(row.querySelectorAll("button")).every((button) => {
+              const control = button.getBoundingClientRect();
+              return control.left >= bounds.left && control.right <= bounds.right + 1;
+            })
+          );
+        }),
+      )
+      .toBe(true);
     await expect(page.getByText("18.00", { exact: false }).first()).toBeVisible();
 
     const physicalBarcodeLookup = page.waitForResponse(

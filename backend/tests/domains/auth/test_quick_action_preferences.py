@@ -20,6 +20,11 @@ DEFAULT_CATALOG = {
 DEFAULT_BATCHES = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
 DEFAULT_INCOMING = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
 DEFAULT_RECEIPTS = {"enabled": True, "order": ["open", "copy_number"], "hidden": []}
+DEFAULT_POS_CART = {
+    "enabled": True,
+    "order": ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"],
+    "hidden": [],
+}
 DEFAULT_EMPLOYEES = {
     "enabled": True,
     "order": [
@@ -41,6 +46,7 @@ DEFAULT_QUICK_ACTIONS = {
     "incoming": DEFAULT_INCOMING,
     "employees": DEFAULT_EMPLOYEES,
     "receipts": DEFAULT_RECEIPTS,
+    "pos_cart": DEFAULT_POS_CART,
 }
 
 
@@ -196,19 +202,21 @@ async def test_legacy_storage_defaults_and_new_old_section_updates_preserve_each
     assert reread.json()["version"] == 5
 
 
-@pytest.mark.parametrize("legacy_section_count", [2, 4])
-async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
+@pytest.mark.parametrize("section", ["receipts", "pos_cart"])
+@pytest.mark.parametrize("legacy_section_count", [2, 4, 5])
+async def test_new_preferences_preserve_legacy_sections_sidebar_and_version(
     auth_client: AsyncClient,
     db_session: AsyncSession,
     make_user,
     legacy_section_count: int,
+    section: str,
 ) -> None:
     user = await make_user()
     legacy_actions = {
         "catalog": {"enabled": False, "order": ["copy_name", "open"], "hidden": ["open"]},
         "batches": {"enabled": True, "order": ["copy_number", "open"], "hidden": []},
     }
-    if legacy_section_count == 4:
+    if legacy_section_count >= 4:
         legacy_actions.update(
             {
                 "incoming": {
@@ -219,6 +227,12 @@ async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
                 "employees": {"enabled": True, "order": ["profile", "open"], "hidden": []},
             }
         )
+    if legacy_section_count == 5:
+        legacy_actions["receipts"] = {
+            "enabled": True,
+            "order": ["copy_number", "open"],
+            "hidden": ["open"],
+        }
     db_session.add(
         UserPreferences(
             user_id=user.id,
@@ -240,14 +254,22 @@ async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
     assert initial.json()["version"] == 1
     sidebar = initial.json()["workspace"]
 
-    receipts = {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
+    config = (
+        {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
+        if section == "receipts"
+        else {
+            "enabled": False,
+            "order": ["remove", "decrease_qty", "increase_qty", "copy_number", "copy_name"],
+            "hidden": ["remove", "copy_number"],
+        }
+    )
     saved = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers,
-        json={"expected_version": 1, "quick_actions": {"receipts": receipts}},
+        json={"expected_version": 1, "quick_actions": {section: config}},
     )
     assert saved.status_code == 200, saved.text
-    expected = {**expected, "receipts": receipts}
+    expected = {**expected, section: config}
     assert saved.json()["quick_actions"] == expected
     assert saved.json()["workspace"] == sidebar
     assert saved.json()["version"] == 2
@@ -274,7 +296,7 @@ async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
     stale = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers,
-        json={"expected_version": 3, "quick_actions": {"receipts": DEFAULT_RECEIPTS}},
+        json={"expected_version": 3, "quick_actions": {section: DEFAULT_QUICK_ACTIONS[section]}},
     )
     assert stale.status_code == 409, stale.text
     assert stale.json()["error"]["details"] == {"current_version": 4}
@@ -336,6 +358,27 @@ async def test_receipt_preferences_preserve_legacy_sections_sidebar_and_version(
         {"receipts": {"order": ["open"], "hidden": ["copy_number"]}},
         {"receipts": {"hidden": ["open", "copy_number"]}},
         {"receipts": {"enabled": False, "hidden": ["open", "copy_number"]}},
+        {"pos_cart": None},
+        {"catalog": DEFAULT_CATALOG, "pos_cart": None},
+        {"pos_cart": {"unknown": True}},
+        {"pos_cart": {"enabled": "false"}},
+        {"pos_cart": {"enabled": 1}},
+        {"pos_cart": {"enabled": None}},
+        {"pos_cart": {"order": None}},
+        {"pos_cart": {"hidden": None}},
+        {"pos_cart": {"order": []}},
+        {"pos_cart": {"order": ["payment"]}},
+        {"pos_cart": {"order": ["refund"]}},
+        {"pos_cart": {"order": ["complete"]}},
+        {"pos_cart": {"order": ["print"]}},
+        {"pos_cart": {"order": ["open"]}},
+        {"pos_cart": {"hidden": ["refund"]}},
+        {"pos_cart": {"order": ["copy_name", "copy_name"]}},
+        {"pos_cart": {"hidden": ["remove", "remove"]}},
+        {"pos_cart": {"order": ["copy_name"], "hidden": ["remove"]}},
+        {"pos_cart": {"hidden": DEFAULT_POS_CART["order"]}},
+        {"pos_cart": {"enabled": False, "hidden": DEFAULT_POS_CART["order"]}},
+        {"pos_cart": {"order": [*DEFAULT_POS_CART["order"], "copy_name"]}},
     ],
 )
 async def test_quick_actions_reject_invalid_config_without_updating(
@@ -387,12 +430,17 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
     headers_b = await _headers(db_session, user_b.id, tenant_b.id)
     catalog_a = {"enabled": False, "order": ["open", "edit"], "hidden": ["edit"]}
     receipts_a = {"enabled": False, "order": ["copy_number", "open"], "hidden": ["open"]}
+    pos_cart_a = {
+        "enabled": False,
+        "order": ["remove", "copy_name", "increase_qty"],
+        "hidden": ["remove"],
+    }
     saved_a = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers_a,
         json={
             "expected_version": 1,
-            "quick_actions": {"catalog": catalog_a, "receipts": receipts_a},
+            "quick_actions": {"catalog": catalog_a, "receipts": receipts_a, "pos_cart": pos_cart_a},
         },
     )
     assert saved_a.status_code == 200, saved_a.text
@@ -401,14 +449,20 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
     assert read_b.status_code == 200, read_b.text
     assert read_b.json()["quick_actions"]["catalog"] == DEFAULT_CATALOG
     assert read_b.json()["quick_actions"]["receipts"] == DEFAULT_RECEIPTS
+    assert read_b.json()["quick_actions"]["pos_cart"] == DEFAULT_POS_CART
     batches_b = {"enabled": False, "order": ["copy_number", "open"], "hidden": []}
     receipts_b = {"enabled": True, "order": ["open", "copy_number"], "hidden": ["copy_number"]}
+    pos_cart_b = {
+        "enabled": True,
+        "order": ["copy_number", "copy_name", "decrease_qty"],
+        "hidden": ["decrease_qty"],
+    }
     saved_b = await auth_client.patch(
         "/api/v1/auth/preferences",
         headers=headers_b,
         json={
             "expected_version": 1,
-            "quick_actions": {"batches": batches_b, "receipts": receipts_b},
+            "quick_actions": {"batches": batches_b, "receipts": receipts_b, "pos_cart": pos_cart_b},
         },
     )
     assert saved_b.status_code == 200, saved_b.text
@@ -417,6 +471,7 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
         **DEFAULT_QUICK_ACTIONS,
         "catalog": catalog_a,
         "receipts": receipts_a,
+        "pos_cart": pos_cart_a,
     }
 
     for user in (user_a, user_b):
@@ -432,6 +487,7 @@ async def test_quick_actions_are_isolated_between_users_and_tenants(
         **DEFAULT_QUICK_ACTIONS,
         "batches": batches_b,
         "receipts": receipts_b,
+        "pos_cart": pos_cart_b,
     }
     for user, other_tenant in ((user_a, tenant_b), (user_b, tenant_a)):
         denied = await auth_client.get(

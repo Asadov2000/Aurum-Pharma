@@ -1,11 +1,10 @@
-import { z } from "zod";
-
 export const QUICK_ACTION_SECTIONS = [
   "catalog",
   "batches",
   "incoming",
   "employees",
   "receipts",
+  "pos_cart",
 ] as const;
 export type QuickActionSection = (typeof QUICK_ACTION_SECTIONS)[number];
 export const QUICK_ACTION_SECTION_LABELS: Record<QuickActionSection, string> = {
@@ -14,6 +13,7 @@ export const QUICK_ACTION_SECTION_LABELS: Record<QuickActionSection, string> = {
   incoming: "Приёмка товаров",
   employees: "Сотрудники",
   receipts: "Чеки и возвраты",
+  pos_cart: "Касса — товары чека",
 };
 export const QUICK_ACTION_DANGER_IDS = new Set([
   "archive",
@@ -21,6 +21,7 @@ export const QUICK_ACTION_DANGER_IDS = new Set([
   "suspend",
   "offboard",
   "transfer_ownership",
+  "remove",
 ]);
 export interface QuickActionMenuPreferences {
   enabled: boolean;
@@ -38,6 +39,11 @@ export const QUICK_ACTION_DEFAULTS: QuickActionPreferences = {
   batches: { enabled: true, order: ["open", "copy_number"], hidden: [] },
   incoming: { enabled: true, order: ["open", "copy_number"], hidden: [] },
   receipts: { enabled: true, order: ["open", "copy_number"], hidden: [] },
+  pos_cart: {
+    enabled: true,
+    order: ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"],
+    hidden: [],
+  },
   employees: {
     enabled: true,
     order: [
@@ -55,14 +61,6 @@ export const QUICK_ACTION_DEFAULTS: QuickActionPreferences = {
   },
 };
 
-export const quickActionMenuSchema = z
-  .object({
-    enabled: z.boolean(),
-    order: z.array(z.string().max(64)).max(32),
-    hidden: z.array(z.string().max(64)).max(32),
-  })
-  .strict();
-
 export function defaultQuickActionPreferences(
   section: QuickActionSection,
 ): QuickActionMenuPreferences {
@@ -74,21 +72,43 @@ export function parseQuickActionMenuPreferences(
   value: unknown,
   section: QuickActionSection,
 ): QuickActionMenuPreferences | null {
-  const parsed = quickActionMenuSchema.safeParse(value);
-  if (!parsed.success) return null;
+  if (!isQuickActionMenuPreferences(value)) return null;
   const allowed = new Set(QUICK_ACTION_DEFAULTS[section].order);
   const clean = (ids: string[]) => [...new Set(ids.filter((id) => allowed.has(id)))];
-  const order = clean([...parsed.data.order, ...QUICK_ACTION_DEFAULTS[section].order]);
-  const hidden = clean(parsed.data.hidden);
+  const order = clean([...value.order, ...QUICK_ACTION_DEFAULTS[section].order]);
+  const hidden = clean(value.hidden);
   if (order.every((id) => hidden.includes(id))) return null;
   return {
-    enabled: parsed.data.enabled,
+    enabled: value.enabled,
     order: [
       ...order.filter((id) => !QUICK_ACTION_DANGER_IDS.has(id)),
       ...order.filter((id) => QUICK_ACTION_DANGER_IDS.has(id)),
     ],
     hidden,
   };
+}
+
+// Row menus and their persisted preferences load on POS startup. Keep their
+// bounded runtime validation independent of the settings form's Zod dependency.
+function isQuickActionMenuPreferences(value: unknown): value is QuickActionMenuPreferences {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  for (const key in record) {
+    if (key !== "enabled" && key !== "order" && key !== "hidden") return false;
+  }
+  return (
+    typeof record.enabled === "boolean" &&
+    isCommandList(record.order) &&
+    isCommandList(record.hidden)
+  );
+}
+
+function isCommandList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    Array.from(value).every((id: unknown) => typeof id === "string" && id.length <= 64)
+  );
 }
 
 export function parseQuickActionPreferences(

@@ -41,7 +41,19 @@ function splitRuntimeDependencies(id: string): string | undefined {
   if (/\/src\/components\/ui\/(Input|Label|FormError)\.tsx$/.test(normalizedId)) {
     return "ui-fields";
   }
-  if (/\/src\/components\/ui\/(Select|Switch|Textarea|Checkbox|ActionMenu)\.tsx$/.test(normalizedId)) {
+  if (
+    /\/src\/components\/ui\/(Select|Switch|Textarea|Checkbox|ActionMenu)\.tsx$/.test(normalizedId)
+  ) {
+    return "ui-controls";
+  }
+  // Record menus share ActionMenu and preference persistence. Keep their small
+  // runtime helpers in its existing lazy chunk rather than adding three POS
+  // startup requests; the settings form's Zod schema remains separate.
+  if (
+    /\/src\/features\/(foundation\/RecordActionMenu\.tsx|settings\/(useQuickActionPreferences|usePreferenceAutosave|quickActions|quickActionStorage)\.ts)$/.test(
+      normalizedId,
+    )
+  ) {
     return "ui-controls";
   }
   if (/\/src\/components\/ui\/(Modal|ConfirmDialog)\.tsx$/.test(normalizedId)) {

@@ -1,8 +1,10 @@
-import { type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { Button, TableEmpty } from "@/components/ui";
+import { RecordActionMenu, type RecordAction } from "@/features/foundation/RecordActionMenu";
 import { expiryStatusFromDays } from "@/features/inventory/labels";
 import { type ExpiryStatus } from "@/features/inventory/types";
+import { type QuickActionMenuPreferences } from "@/features/settings/quickActions";
 import { cn } from "@/lib/utils";
 
 import { QtyStepper } from "./QtyStepper";
@@ -53,6 +55,111 @@ interface CartGroup {
   items: SaleItem[];
 }
 
+interface CartQuickActions {
+  config: QuickActionMenuPreferences;
+  scope: string;
+}
+
+function CartItemActionMenu({
+  item,
+  name,
+  knownName,
+  batchFallback,
+  quickActions,
+  editable,
+  busy,
+  actionsDisabled,
+  onQtyChange,
+  onDelete,
+}: {
+  item: SaleItem;
+  name: string;
+  knownName?: string;
+  batchFallback?: string;
+  quickActions: CartQuickActions;
+  editable: boolean;
+  busy?: boolean;
+  actionsDisabled?: boolean;
+  onQtyChange: (itemId: string, qty: number) => void;
+  onDelete: (itemId: string) => void;
+}): JSX.Element {
+  const current = useRef({ item, editable, busy, actionsDisabled, onQtyChange, onDelete });
+  current.current = { item, editable, busy, actionsDisabled, onQtyChange, onDelete };
+  const changeQty = (direction: 1 | -1) => {
+    const latest = current.current;
+    if (!latest.editable || latest.busy || latest.actionsDisabled) return;
+    const qty = Number(latest.item.qty);
+    if (direction === -1 && qty <= 1) return;
+    latest.onQtyChange(latest.item.id, direction === 1 ? qty + 1 : Math.max(1, qty - 1));
+  };
+  const actions: RecordAction[] = [];
+  if (knownName?.trim())
+    actions.push({ id: "copy_name", label: "Скопировать название", copyValue: knownName });
+  if (item.batch_number?.trim())
+    actions.push({
+      id: "copy_number",
+      label: "Скопировать номер партии",
+      copyValue: item.batch_number,
+    });
+  if (editable && !busy && !actionsDisabled) {
+    actions.push({
+      id: "increase_qty",
+      label: "Увеличить количество",
+      onSelect: () => changeQty(1),
+    });
+    if (Number(item.qty) > 1)
+      actions.push({
+        id: "decrease_qty",
+        label: "Уменьшить количество",
+        onSelect: () => changeQty(-1),
+      });
+    actions.push({
+      id: "remove",
+      label: "Удалить из чека",
+      tone: "danger",
+      onSelect: () => {
+        const latest = current.current;
+        if (latest.editable && !latest.busy && !latest.actionsDisabled)
+          latest.onDelete(latest.item.id);
+      },
+    });
+  }
+  const batch = item.batch_number?.trim()
+    ? `Партия ${item.batch_number}`
+    : (batchFallback ?? "Партия без номера");
+  const detail = item.expires_at
+    ? `${batch} · до ${new Date(item.expires_at).toLocaleDateString("ru-RU")}`
+    : batch;
+  return (
+    <RecordActionMenu
+      section="pos_cart"
+      recordKey={JSON.stringify([
+        item.sale_id,
+        item.id,
+        item.catalog_id,
+        item.batch_id,
+        item.qty,
+        item.unit_price,
+        item.total_price,
+        editable,
+        busy,
+        actionsDisabled,
+        knownName,
+        item.batch_number,
+        item.expires_at,
+        item.days_to_expiry,
+      ])}
+      title={name}
+      detail={detail}
+      label={`Действия ${name}, ${detail}`}
+      items={actions}
+      config={quickActions.config}
+      scope={quickActions.scope}
+      disabled={busy || actionsDisabled}
+    />
+  );
+}
+
 export function CartList({
   items,
   nameById,
@@ -64,6 +171,8 @@ export function CartList({
   touch,
   busy,
   embedded = false,
+  quickActions,
+  actionsDisabled,
 }: {
   items: SaleItem[];
   nameById: Record<string, string>;
@@ -75,6 +184,8 @@ export function CartList({
   touch?: boolean;
   busy?: boolean;
   embedded?: boolean;
+  quickActions?: CartQuickActions;
+  actionsDisabled?: boolean;
 }): JSX.Element {
   if (items.length === 0) {
     if (embedded) {
@@ -120,14 +231,21 @@ export function CartList({
     }
   }
 
-  // The qty stepper / line total / delete cluster — identical for a standalone
-  // row and a grouped batch sub-row.
-  const lineControls = (it: SaleItem, name: string): ReactNode => (
+  // Shared qty stepper / line total / delete cluster for each sale item.
+  const lineControls = (
+    it: SaleItem,
+    name: string,
+    batchFallback?: string,
+    stacked = false,
+  ): ReactNode => (
     <div
-      className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:justify-end sm:gap-1"
+      className={cn(
+        "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
+        !stacked && "sm:flex sm:w-auto sm:justify-end sm:gap-1",
+      )}
       data-testid="cart-line-controls"
     >
-      <div className="col-span-2 flex min-w-0 justify-start sm:contents">
+      <div className={cn("col-span-2 flex min-w-0 justify-start", !stacked && "sm:contents")}>
         {editable ? (
           <QtyStepper
             value={Number(it.qty)}
@@ -150,19 +268,44 @@ export function CartList({
         {Number(it.total_price).toFixed(2)}
       </div>
 
-      {editable && (
-        <Button
-          variant="ghost"
-          onClick={() => onDelete(it.id)}
-          disabled={busy}
-          aria-label={`Удалить ${name}`}
+      {(editable || quickActions) && (
+        <div
           className={cn(
-            "rounded-md p-0 text-foreground-muted hover:text-danger",
-            touch ? "h-14 w-14" : "h-10 w-10",
+            quickActions ? "flex items-center justify-end gap-1" : "contents",
+            quickActions &&
+              touch &&
+              "[&>button[aria-haspopup=menu]]:h-14 [&>button[aria-haspopup=menu]]:w-14",
           )}
         >
-          <TrashIcon />
-        </Button>
+          {editable && (
+            <Button
+              variant="ghost"
+              onClick={() => onDelete(it.id)}
+              disabled={busy}
+              aria-label={`Удалить ${name}`}
+              className={cn(
+                "rounded-md p-0 text-foreground-muted hover:text-danger",
+                touch ? "h-14 w-14" : "h-10 w-10",
+              )}
+            >
+              <TrashIcon />
+            </Button>
+          )}
+          {quickActions && (
+            <CartItemActionMenu
+              item={it}
+              name={name}
+              knownName={nameById[it.catalog_id]}
+              batchFallback={batchFallback}
+              quickActions={quickActions}
+              editable={editable}
+              busy={busy}
+              actionsDisabled={actionsDisabled}
+              onQtyChange={onQtyChange}
+              onDelete={onDelete}
+            />
+          )}
+        </div>
       )}
     </div>
   );
@@ -180,14 +323,19 @@ export function CartList({
         const first = g.items[0];
         if (!first) return null;
 
-        // Single line — name + controls on one compact hero row.
+        // Touch controls need the full receipt width once a row has both delete
+        // and a menu. Keep its name above the existing mobile controls grid.
         if (g.items.length === 1) {
+          const stacked = Boolean(touch && quickActions);
           return (
             <li
               key={g.catalogId}
               data-testid="cart-item"
+              data-context-actions={quickActions ? true : undefined}
+              tabIndex={quickActions ? 0 : undefined}
               className={cn(
-                "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
+                "flex flex-col gap-3 px-4",
+                !stacked && "sm:flex-row sm:items-center",
                 touch ? "py-5" : "py-4",
                 windowed && "pos-cv",
               )}
@@ -201,7 +349,7 @@ export function CartList({
                 </p>
                 <BatchExpiry item={first} />
               </div>
-              {lineControls(first, g.name)}
+              {lineControls(first, g.name, undefined, stacked)}
             </li>
           );
         }
@@ -227,6 +375,8 @@ export function CartList({
                 <div
                   key={it.id}
                   data-testid="cart-item"
+                  data-context-actions={quickActions ? true : undefined}
+                  tabIndex={quickActions ? 0 : undefined}
                   className={cn(
                     "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
                     touch ? "py-3" : "py-2.5",
@@ -238,7 +388,7 @@ export function CartList({
                       {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
-                  {lineControls(it, g.name)}
+                  {lineControls(it, g.name, `Партия ${idx + 1}`)}
                 </div>
               ))}
             </div>
