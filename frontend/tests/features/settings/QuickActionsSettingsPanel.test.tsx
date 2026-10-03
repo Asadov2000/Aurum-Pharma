@@ -42,6 +42,29 @@ describe("QuickActionsSettingsPanel", () => {
     state.save.mockReset();
   });
 
+  it("saves receipt choices separately without exposing refund or print commands", async () => {
+    render(<QuickActionsSettingsPanel initialSection="receipts" />);
+    expect(screen.getByRole("button", { name: "Чеки и возвраты" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("checkbox", { name: "Показывать в меню: Открыть чек" })).toBeChecked();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Показывать в меню: Скопировать номер чека" }),
+    );
+    const preview = screen.getByRole("complementary", { name: "Предпросмотр быстрых действий" });
+    expect(within(preview).queryByText("Скопировать номер чека")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Оформить возврат|Печать чека/)).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить настройки" }));
+    });
+    expect(state.save).toHaveBeenCalledWith({
+      enabled: true,
+      order: ["open", "copy_number"],
+      hidden: ["copy_number"],
+    });
+  });
+
   it("previews drafts and cancels without saving or applying them", () => {
     render(<QuickActionsSettingsPanel />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Показывать в меню: Изменить товар" }));

@@ -96,4 +96,18 @@ describe("quick action preferences", () => {
       "new_command",
     ]);
   });
+
+  it("restores safe receipt defaults without adding sale mutations from cached settings", () => {
+    expect(
+      parseQuickActionMenuPreferences(
+        { enabled: false, order: ["refund", "delete", "copy_number"], hidden: ["refund"] },
+        "receipts",
+      ),
+    ).toEqual({ enabled: false, order: ["copy_number", "open"], hidden: [] });
+    const legacy = { batches: defaultQuickActionPreferences("batches") };
+    expect(parseQuickActionPreferences(legacy)).toEqual(legacy);
+    expect(
+      parseQuickActionPreferences({ receipts: defaultQuickActionPreferences("receipts") }),
+    ).toEqual({ receipts: { enabled: true, order: ["open", "copy_number"], hidden: [] } });
+  });
 });

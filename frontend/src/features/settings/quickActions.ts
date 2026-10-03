@@ -1,12 +1,19 @@
 import { z } from "zod";
 
-export const QUICK_ACTION_SECTIONS = ["catalog", "batches", "incoming", "employees"] as const;
+export const QUICK_ACTION_SECTIONS = [
+  "catalog",
+  "batches",
+  "incoming",
+  "employees",
+  "receipts",
+] as const;
 export type QuickActionSection = (typeof QUICK_ACTION_SECTIONS)[number];
 export const QUICK_ACTION_SECTION_LABELS: Record<QuickActionSection, string> = {
   catalog: "Каталог",
   batches: "Партии",
   incoming: "Приёмка товаров",
   employees: "Сотрудники",
+  receipts: "Чеки и возвраты",
 };
 export const QUICK_ACTION_DANGER_IDS = new Set([
   "archive",
@@ -30,6 +37,7 @@ export const QUICK_ACTION_DEFAULTS: QuickActionPreferences = {
   },
   batches: { enabled: true, order: ["open", "copy_number"], hidden: [] },
   incoming: { enabled: true, order: ["open", "copy_number"], hidden: [] },
+  receipts: { enabled: true, order: ["open", "copy_number"], hidden: [] },
   employees: {
     enabled: true,
     order: [

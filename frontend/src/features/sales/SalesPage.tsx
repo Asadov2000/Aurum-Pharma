@@ -17,8 +17,10 @@ import { useFilterPreferenceKey } from "@/features/auth/filterPreferences";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
 import { useBranchesQuery, useRegistersQuery } from "@/features/foundation/queries";
+import { RecordActionMenu } from "@/features/foundation/RecordActionMenu";
 import { paymentMethodLabel } from "@/features/pos/labels";
 import { type PaymentMethodRead } from "@/features/pos/types";
+import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { describeApiError } from "@/lib/errorMessages";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +49,7 @@ const timeFormatter = new Intl.DateTimeFormat("ru-RU", {
 export function SalesPage(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("sales");
+  const quickActions = useQuickActionPreferences("receipts");
   const canFilterByLocation =
     hasPermission(user, "branches.view") && hasPermission(user, "registers.view");
   const canOpenPos = hasPermission(user, "pos.sell");
@@ -364,6 +367,8 @@ export function SalesPage(): JSX.Element {
           total={total}
           onPage={setPage}
           onOpen={setOpenRow}
+          quickActions={quickActions}
+          disabled={sales.isPlaceholderData || sales.isError}
         />
       )}
 
@@ -455,12 +460,16 @@ function ReceiptList({
   total,
   onPage,
   onOpen,
+  quickActions,
+  disabled,
 }: {
   items: SaleListItem[];
   page: number;
   total: number;
   onPage: (page: number) => void;
   onOpen: (sale: SaleListItem) => void;
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+  disabled: boolean;
 }): JSX.Element {
   return (
     <section
@@ -487,7 +496,15 @@ function ReceiptList({
 
       <div className="divide-y divide-border">
         {items.map((sale) => (
-          <ReceiptRow key={sale.id} sale={sale} onOpen={() => onOpen(sale)} />
+          <ReceiptRow
+            key={sale.id}
+            sale={sale}
+            onOpen={() => {
+              if (!disabled) onOpen(sale);
+            }}
+            quickActions={quickActions}
+            disabled={disabled}
+          />
         ))}
       </div>
 
@@ -498,7 +515,17 @@ function ReceiptList({
   );
 }
 
-function ReceiptRow({ sale, onOpen }: { sale: SaleListItem; onOpen: () => void }): JSX.Element {
+function ReceiptRow({
+  sale,
+  onOpen,
+  quickActions,
+  disabled,
+}: {
+  sale: SaleListItem;
+  onOpen: () => void;
+  quickActions: Pick<ReturnType<typeof useQuickActionPreferences>, "config" | "scope">;
+  disabled: boolean;
+}): JSX.Element {
   const receiptNumber = sale.receipt_number ?? "—";
   const amount = formatSaleAmount(sale);
   const payment = formatPayments(sale.payment_methods);
@@ -506,61 +533,90 @@ function ReceiptRow({ sale, onOpen }: { sale: SaleListItem; onOpen: () => void }
   const location = [sale.branch_name, sale.register_name].filter(Boolean).join(" · ") || "—";
 
   return (
-    <button
-      type="button"
-      aria-label={`Открыть чек № ${receiptNumber}`}
-      className="block w-full text-left transition-colors duration-fast hover:bg-foreground/[0.025] focus-visible:bg-foreground/[0.025]"
-      onClick={onOpen}
-    >
-      <div className="space-y-2 px-4 py-3 lg:hidden">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-mono text-sm font-semibold text-foreground">№ {receiptNumber}</p>
-            <p className="mt-0.5 truncate text-xs text-foreground-muted">
-              {date} · {sale.cashier_name ?? "Кассир не указан"}
+    <article data-context-actions tabIndex={0} className="relative">
+      <button
+        type="button"
+        aria-label={`Открыть чек № ${receiptNumber}`}
+        className="block w-full text-left transition-colors duration-fast hover:bg-foreground/[0.025] focus-visible:bg-foreground/[0.025]"
+        onClick={onOpen}
+        disabled={disabled}
+      >
+        <div className="space-y-2 py-3 pl-4 pr-14 lg:hidden">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-sm font-semibold text-foreground">№ {receiptNumber}</p>
+              <p className="mt-0.5 truncate text-xs text-foreground-muted">
+                {date} · {sale.cashier_name ?? "Кассир не указан"}
+              </p>
+            </div>
+            <p
+              className={cn(
+                "shrink-0 font-mono text-sm font-semibold tabular-nums",
+                sale.is_refund ? "text-danger" : "text-foreground",
+              )}
+            >
+              {amount}
             </p>
           </div>
-          <p
+          <p className="truncate text-xs text-foreground-secondary">{location}</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <ReceiptStatus sale={sale} />
+            <span className="text-xs text-foreground-secondary">{payment}</span>
+          </div>
+        </div>
+
+        <div className={cn(desktopReceiptGrid, "hidden min-h-16 items-center gap-3 px-4 lg:grid")}>
+          <span className="font-mono text-sm font-semibold text-foreground">{receiptNumber}</span>
+          <span className="text-sm text-foreground-secondary">{date}</span>
+          <span className="truncate text-sm text-foreground">{sale.cashier_name ?? "—"}</span>
+          <span className="hidden truncate text-sm text-foreground-secondary 2xl:block">
+            {location}
+          </span>
+          <span className="truncate text-sm text-foreground-secondary">
+            {sale.items_summary || "—"}
+          </span>
+          <span className="truncate text-sm text-foreground-secondary">{payment}</span>
+          <span
             className={cn(
-              "shrink-0 font-mono text-sm font-semibold tabular-nums",
+              "text-right font-mono text-sm font-semibold tabular-nums",
               sale.is_refund ? "text-danger" : "text-foreground",
             )}
           >
             {amount}
-          </p>
-        </div>
-        <p className="truncate text-xs text-foreground-secondary">{location}</p>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+          </span>
           <ReceiptStatus sale={sale} />
-          <span className="text-xs text-foreground-secondary">{payment}</span>
+          <span aria-hidden="true" />
         </div>
+      </button>
+      <div className="absolute right-3 top-3 lg:right-4 lg:top-1/2 lg:-translate-y-1/2">
+        <RecordActionMenu
+          section="receipts"
+          recordKey={`${sale.id}:${sale.status}:${sale.is_refund}:${sale.has_refund}:${sale.receipt_number ?? ""}:${sale.parent_sale_id ?? ""}:${sale.parent_receipt_number ?? ""}:${sale.refund_receipt_number ?? ""}`}
+          title={
+            sale.receipt_number?.trim()
+              ? `${sale.is_refund ? "Чек возврата" : "Чек"} № ${sale.receipt_number}`
+              : `${sale.is_refund ? "Чек возврата" : "Чек"} без номера`
+          }
+          detail={`${location} · ${date}`}
+          label={`Действия для чека ${sale.receipt_number?.trim() ? `№ ${sale.receipt_number}` : "без номера"}`}
+          config={quickActions.config}
+          scope={quickActions.scope}
+          disabled={disabled}
+          items={[
+            { id: "open", label: "Открыть чек", onSelect: onOpen },
+            ...(sale.receipt_number?.trim()
+              ? [
+                  {
+                    id: "copy_number",
+                    label: "Скопировать номер чека",
+                    copyValue: sale.receipt_number,
+                  },
+                ]
+              : []),
+          ]}
+        />
       </div>
-
-      <div className={cn(desktopReceiptGrid, "hidden min-h-16 items-center gap-3 px-4 lg:grid")}>
-        <span className="font-mono text-sm font-semibold text-foreground">{receiptNumber}</span>
-        <span className="text-sm text-foreground-secondary">{date}</span>
-        <span className="truncate text-sm text-foreground">{sale.cashier_name ?? "—"}</span>
-        <span className="hidden truncate text-sm text-foreground-secondary 2xl:block">
-          {location}
-        </span>
-        <span className="truncate text-sm text-foreground-secondary">
-          {sale.items_summary || "—"}
-        </span>
-        <span className="truncate text-sm text-foreground-secondary">{payment}</span>
-        <span
-          className={cn(
-            "text-right font-mono text-sm font-semibold tabular-nums",
-            sale.is_refund ? "text-danger" : "text-foreground",
-          )}
-        >
-          {amount}
-        </span>
-        <ReceiptStatus sale={sale} />
-        <span className="text-foreground-muted" aria-hidden="true">
-          <ChevronIcon />
-        </span>
-      </div>
-    </button>
+    </article>
   );
 }
 
@@ -684,24 +740,6 @@ function ReceiptIcon(): JSX.Element {
     >
       <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
       <path d="M9 8h6M9 12h6M9 16h3" />
-    </svg>
-  );
-}
-
-function ChevronIcon(): JSX.Element {
-  return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m9 18 6-6-6-6" />
     </svg>
   );
 }

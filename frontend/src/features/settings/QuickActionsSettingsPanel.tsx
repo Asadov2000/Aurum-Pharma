@@ -93,11 +93,15 @@ function QuickActionsForm({
   const allItems = QUICK_ACTION_DEFAULTS[section].order.map((id) => ({
     id,
     label:
-      id === "copy_number" && section === "incoming"
-        ? "Скопировать номер документа"
-        : id === "open" && section === "incoming"
-          ? "Открыть документ"
-          : (LABELS[id] ?? id),
+      id === "copy_number" && section === "receipts"
+        ? "Скопировать номер чека"
+        : id === "open" && section === "receipts"
+          ? "Открыть чек"
+          : id === "copy_number" && section === "incoming"
+            ? "Скопировать номер документа"
+            : id === "open" && section === "incoming"
+              ? "Открыть документ"
+              : (LABELS[id] ?? id),
     tone: QUICK_ACTION_DANGER_IDS.has(id) ? ("danger" as const) : ("default" as const),
   }));
   const ordered = applyQuickActions(allItems, { ...draft, hidden: [] });

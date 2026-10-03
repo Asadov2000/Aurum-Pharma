@@ -61,6 +61,7 @@ vi.mock("@/features/notifications/SubscriptionsForm", () => ({
 }));
 
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { parseSettingsSearch } from "@/features/settings/search";
 
 function renderPage(): void {
   const queryClient = new QueryClient({
@@ -74,6 +75,18 @@ function renderPage(): void {
 }
 
 describe("SettingsPage access boundaries", () => {
+  it("accepts receipt menu links only within personal quick actions", () => {
+    expect(parseSettingsSearch({ section: "quick-actions", actions: "receipts" })).toEqual({
+      section: "quick-actions",
+      actions: "receipts",
+    });
+    expect(parseSettingsSearch({ section: "quick-actions", actions: "refund" })).toEqual({
+      section: "quick-actions",
+    });
+    expect(parseSettingsSearch({ section: "sales", actions: "receipts" })).toEqual({
+      section: "sales",
+    });
+  });
   beforeEach(() => {
     window.history.replaceState({}, "", "/settings");
     state.isOwner = false;
