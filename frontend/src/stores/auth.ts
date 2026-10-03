@@ -4,6 +4,8 @@ import { clearTokens, loadTokens, saveTokens } from "@/features/auth/storage";
 import { getAuthEpoch, isSessionRestorationBlocked } from "@/features/auth/logoutState";
 import { tokenMatchesEpoch } from "@/features/auth/tokenEpoch";
 import { type MeResponse, type TokenPair } from "@/features/auth/types";
+import { authorizationSnapshotKey } from "@/features/auth/authorizationSnapshot";
+import { queryClient } from "@/lib/query";
 
 interface AuthState {
   accessToken: string | null;
@@ -36,16 +38,27 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 }));
 
-// Token rotation retains the session; identity changes and logout invalidate work
-// started under its previous authority, including a new login by the same user.
+// A new authority invalidates work started under the old one. Token rotation,
+// profile edits and network outages do not revoke the current authority.
 let sessionGeneration = 0;
 useAuthStore.subscribe((state, previous) => {
-  if (
-    state.user?.id !== previous.user?.id ||
-    state.user?.active_tenant_id !== previous.user?.active_tenant_id ||
-    (previous.accessToken !== null && state.accessToken === null)
-  ) {
+  const authorityChanged =
+    state.user !== previous.user &&
+    authorizationSnapshotKey(state.user) !== authorizationSnapshotKey(previous.user);
+  if (authorityChanged || (previous.accessToken !== null && state.accessToken === null)) {
     sessionGeneration += 1;
+  }
+  if (previous.user && authorityChanged) {
+    // Keep the identity query that delivered the new authority; drop all data
+    // and pending reads from the old scope before protected pages mount again.
+    const filters = {
+      predicate: (query: { queryKey: readonly unknown[] }) =>
+        !(query.queryKey[0] === "auth" && query.queryKey[1] === "me"),
+    };
+    void queryClient.cancelQueries(filters);
+    queryClient.removeQueries(filters);
+    queryClient.getMutationCache().clear();
+    window.dispatchEvent(new Event("aurum:client-session-cleared"));
   }
 });
 
