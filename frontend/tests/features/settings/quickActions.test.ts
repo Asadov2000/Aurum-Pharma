@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { quickActionMenuSchema } from "@/features/settings/quickActionSchema";
 import {
   applyQuickActions,
   defaultQuickActionPreferences,
@@ -9,6 +10,43 @@ import {
 } from "@/features/settings/quickActions";
 
 describe("quick action preferences", () => {
+  it.each([
+    null,
+    [],
+    { enabled: true, order: [], hidden: [], unexpected: true },
+    { enabled: "true", order: [], hidden: [] },
+    { enabled: true, order: [], hidden: null },
+    { enabled: true, order: [1], hidden: [] },
+    { enabled: true, order: [], hidden: [false] },
+    { enabled: true, order: Array(1), hidden: [] },
+    { enabled: true, order: Array.from({ length: 33 }, () => "open"), hidden: [] },
+    { enabled: true, order: [], hidden: Array.from({ length: 33 }, () => "edit") },
+    { enabled: true, order: ["x".repeat(65)], hidden: [] },
+    { enabled: true, order: [], hidden: ["x".repeat(65)] },
+    { enabled: true, order: Array.from({ length: 32 }, () => "open"), hidden: [] },
+    { enabled: false, order: ["x".repeat(64)], hidden: Array.from({ length: 32 }, () => "edit") },
+  ])("keeps runtime shape validation equivalent to the settings form for %j", (value) => {
+    const valid = quickActionMenuSchema.safeParse(value).success;
+    expect(parseQuickActionMenuPreferences(value, "catalog") !== null).toBe(valid);
+  });
+
+  it("normalizes cart choices without turning cached IDs into payment commands", () => {
+    const config = parseQuickActionMenuPreferences(
+      { enabled: true, order: ["remove", "pay", "copy_name"], hidden: ["complete", "copy_number"] },
+      "pos_cart",
+    );
+    expect(config?.order).toEqual([
+      "copy_name",
+      "copy_number",
+      "increase_qty",
+      "decrease_qty",
+      "remove",
+    ]);
+    expect(config?.hidden).toEqual(["copy_number"]);
+    expect(
+      applyQuickActions([{ id: "copy_name" }, { id: "remove", tone: "danger" as const }], config!),
+    ).toEqual([{ id: "copy_name" }, { id: "remove", tone: "danger" }]);
+  });
   it("validates the stored shape and removes unknown or repeated command IDs", () => {
     expect(
       parseQuickActionMenuPreferences(

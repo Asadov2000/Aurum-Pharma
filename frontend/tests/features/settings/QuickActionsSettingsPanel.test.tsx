@@ -20,6 +20,30 @@ vi.mock("@/features/settings/useQuickActionPreferences", () => ({
 import { QuickActionsSettingsPanel } from "@/features/settings/QuickActionsSettingsPanel";
 
 describe("QuickActionsSettingsPanel", () => {
+  it("offers cart commands while pinning removal below ordinary choices", async () => {
+    render(<QuickActionsSettingsPanel initialSection="pos_cart" />);
+    expect(screen.getByRole("button", { name: "Касса — товары чека" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Показывать в меню: Увеличить количество на 1" }),
+    ).toBeChecked();
+    expect(
+      screen.queryByRole("button", { name: "Выше: Удалить строку из чека" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Показывать в меню: Удалить строку из чека" }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить настройки" }));
+    });
+    expect(state.save).toHaveBeenCalledWith({
+      enabled: true,
+      order: ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"],
+      hidden: ["remove"],
+    });
+  });
   it("opens the originating section and labels document commands correctly", () => {
     render(<QuickActionsSettingsPanel initialSection="incoming" />);
     expect(screen.getByRole("button", { name: "Приёмка товаров" })).toHaveAttribute(

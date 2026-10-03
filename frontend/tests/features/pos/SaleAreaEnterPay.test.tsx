@@ -3,6 +3,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("@/features/settings/useQuickActionPreferences", () => ({
+  useQuickActionPreferences: () => ({
+    config: {
+      enabled: true,
+      order: ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"],
+      hidden: [],
+    },
+    scope: "pos-test:tenant-test",
+  }),
+}));
+
 const getCurrentShift = vi.fn();
 const getSale = vi.fn();
 const addPayment = vi.fn();
@@ -292,6 +308,27 @@ function fillExternalPaymentEvidence(
 }
 
 describe("SaleArea atomic checkout", () => {
+  it("keeps POS hotkeys from starting payment or a new receipt while a menu owns focus", async () => {
+    getSale.mockResolvedValue(SALE);
+    window.localStorage.setItem(
+      draftKey(REG, POS_SCOPE),
+      JSON.stringify({ saleId: SALE.id, nameById: { "c-1": "Парацетамол" }, savedAt: Date.now() }),
+    );
+    renderArea();
+    const row = await screen.findByTestId("cart-item");
+    fireEvent.contextMenu(row);
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeInTheDocument();
+    for (const key of ["F2", "F3", "F4", "/"]) fireEvent.keyDown(window, { key });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByTestId("cart-item")).toBeInTheDocument();
+    expect(checkoutSale).not.toHaveBeenCalled();
+    expect(completeSale).not.toHaveBeenCalled();
+    expect(addPayment).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(menu, { key: "Escape" });
+  });
   beforeEach(() => {
     authenticatePos();
     window.localStorage.clear();

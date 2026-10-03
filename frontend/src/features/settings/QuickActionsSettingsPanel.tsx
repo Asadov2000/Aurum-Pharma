@@ -12,10 +12,10 @@ import {
   QUICK_ACTION_DANGER_IDS,
   QUICK_ACTION_SECTIONS,
   QUICK_ACTION_SECTION_LABELS,
-  quickActionMenuSchema,
   type QuickActionMenuPreferences,
   type QuickActionSection,
 } from "./quickActions";
+import { quickActionMenuSchema } from "./quickActionSchema";
 import { SettingsNotice, SettingsSectionHeader } from "./SettingsPrimitives";
 import { useQuickActionPreferences } from "./useQuickActionPreferences";
 
@@ -35,6 +35,9 @@ const LABELS: Record<string, string> = {
   suspend: "Приостановить",
   offboard: "Уволить / отозвать приглашение",
   transfer_ownership: "Передать владение",
+  increase_qty: "Увеличить количество на 1",
+  decrease_qty: "Уменьшить количество на 1",
+  remove: "Удалить строку из чека",
 };
 
 export function QuickActionsSettingsPanel({

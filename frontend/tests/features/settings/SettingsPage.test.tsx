@@ -76,6 +76,10 @@ function renderPage(): void {
 
 describe("SettingsPage access boundaries", () => {
   it("accepts receipt menu links only within personal quick actions", () => {
+    expect(parseSettingsSearch({ section: "quick-actions", actions: "pos_cart" })).toEqual({
+      section: "quick-actions",
+      actions: "pos_cart",
+    });
     expect(parseSettingsSearch({ section: "quick-actions", actions: "receipts" })).toEqual({
       section: "quick-actions",
       actions: "receipts",

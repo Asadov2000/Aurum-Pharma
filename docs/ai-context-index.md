@@ -71,7 +71,7 @@
 | Автономность точки до 30 дней | [ADR-0043](adr/0043-thirty-day-branch-edge-continuity.md), [контракт автономной работы](offline-operations-contract.md), `backend/app/domains/sync/` | fault matrix, Edge integration, Windows и recovery-тесты; текущий runtime остаётся fail-closed |
 | Зашифрованная репетиция read-only Edge recovery | [edge-encrypted-recovery-drill.md](edge-encrypted-recovery-drill.md), `scripts/smoke-edge-cold-read.ps1 -VerifyRestore`, `scripts/edge-read-recovery-drill.sh` | Restic, точный snapshot ID, неверный ключ и повреждённый ciphertext; синтетика на одном хосте, не production backup или TPM-перенос |
 | Общий UI | `frontend/src/components/` | `frontend/tests/components/` |
-| Правой кнопкой и личные быстрые действия | [context-actions.md](context-actions.md), `ActionMenu.tsx`, `RecordActionMenu.tsx`, `frontend/src/features/settings/quickActions.ts` | auth/preferences, Vitest меню и настроек, `frontend/e2e/context-actions.spec.ts`; каталог, партии, приёмка, сотрудники и чеки |
+| Правой кнопкой и личные быстрые действия | [context-actions.md](context-actions.md), `ActionMenu.tsx`, `RecordActionMenu.tsx`, `frontend/src/features/settings/quickActions.ts` | auth/preferences, Vitest меню и настроек, `frontend/e2e/context-actions.spec.ts`; каталог, партии, приёмка, сотрудники, чеки и строки чека кассы |
 | Общие frontend-механизмы | `frontend/src/lib/`, `frontend/src/stores/` | `frontend/tests/lib/`, тесты фичи |
 | Browser flow | `frontend/e2e/*.spec.ts` | изолированный `scripts/e2e-isolated.ps1` |
 | Тестовая инфраструктура и быстрый цикл | `docs/testing.md`, `docs/e2e.md` | fixtures backend, Vitest environments, E2E guards |

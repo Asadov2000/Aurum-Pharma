@@ -266,6 +266,7 @@ CatalogQuickActionId = Literal["open", "edit", "copy_name", "copy_barcode", "arc
 BatchQuickActionId = Literal["open", "copy_number"]
 IncomingQuickActionId = Literal["open", "copy_number"]
 ReceiptQuickActionId = Literal["open", "copy_number"]
+PosCartQuickActionId = Literal["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"]
 EmployeeQuickActionId = Literal[
     "open",
     "profile",
@@ -293,6 +294,10 @@ def _incoming_quick_action_order() -> list[IncomingQuickActionId]:
 
 def _receipt_quick_action_order() -> list[ReceiptQuickActionId]:
     return ["open", "copy_number"]
+
+
+def _pos_cart_quick_action_order() -> list[PosCartQuickActionId]:
+    return ["copy_name", "copy_number", "increase_qty", "decrease_qty", "remove"]
 
 
 def _employee_quick_action_order() -> list[EmployeeQuickActionId]:
@@ -363,6 +368,13 @@ class ReceiptQuickActionsConfig(QuickActionsConfig[ReceiptQuickActionId]):
     hidden: list[ReceiptQuickActionId] = Field(default_factory=list, max_length=2)
 
 
+class PosCartQuickActionsConfig(QuickActionsConfig[PosCartQuickActionId]):
+    order: list[PosCartQuickActionId] = Field(
+        default_factory=_pos_cart_quick_action_order, min_length=1, max_length=5
+    )
+    hidden: list[PosCartQuickActionId] = Field(default_factory=list, max_length=5)
+
+
 class QuickActionsPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -371,6 +383,7 @@ class QuickActionsPreferences(BaseModel):
     incoming: IncomingQuickActionsConfig = Field(default_factory=IncomingQuickActionsConfig)
     employees: EmployeeQuickActionsConfig = Field(default_factory=EmployeeQuickActionsConfig)
     receipts: ReceiptQuickActionsConfig = Field(default_factory=ReceiptQuickActionsConfig)
+    pos_cart: PosCartQuickActionsConfig = Field(default_factory=PosCartQuickActionsConfig)
 
 
 class QuickActionsPreferencesUpdate(BaseModel):
@@ -381,11 +394,14 @@ class QuickActionsPreferencesUpdate(BaseModel):
     incoming: IncomingQuickActionsConfig | None = None
     employees: EmployeeQuickActionsConfig | None = None
     receipts: ReceiptQuickActionsConfig | None = None
+    pos_cart: PosCartQuickActionsConfig | None = None
 
     @model_validator(mode="after")
     def _require_section(self) -> Self:
         if "receipts" in self.model_fields_set and self.receipts is None:
             raise ValueError("receipts quick actions cannot be null")
+        if "pos_cart" in self.model_fields_set and self.pos_cart is None:
+            raise ValueError("pos_cart quick actions cannot be null")
         if not self.model_dump(exclude_none=True):
             raise ValueError("at least one quick action section must be provided")
         return self
