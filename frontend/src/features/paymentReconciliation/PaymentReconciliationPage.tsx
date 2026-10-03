@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
 import {
   Badge,
@@ -66,6 +67,7 @@ export default function PaymentReconciliationPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
+      <ContextHelpPortal pathname="/payment-reconciliation" operationKind={kind} />
       <PageHeader
         title="Сверка операций"
         description="Безопасное завершение оплат и возвратов, результат которых требует проверки."

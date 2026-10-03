@@ -1,10 +1,10 @@
-import { ContextHelp } from "./ContextHelp";
+import { ContextHelp, type HelpLocation } from "./ContextHelp";
 import { HeaderPopover } from "./AppHeader";
 
-export function ContextHelpTrigger({ pathname }: { pathname: string }): JSX.Element {
+export function ContextHelpTrigger({ pathname, operationKind }: HelpLocation): JSX.Element {
   return (
     <HeaderPopover
-      key={`help:${pathname}`}
+      key={`help:${pathname}:${operationKind ?? ""}`}
       title="Помощь по разделу"
       triggerClassName="app-header-settings flex w-auto items-center gap-2 px-2"
       trigger={
@@ -19,7 +19,7 @@ export function ContextHelpTrigger({ pathname }: { pathname: string }): JSX.Elem
         </>
       }
     >
-      {(close) => <ContextHelp pathname={pathname} close={close} />}
+      {(close) => <ContextHelp pathname={pathname} operationKind={operationKind} close={close} />}
     </HeaderPopover>
   );
 }

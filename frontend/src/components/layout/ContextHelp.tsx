@@ -2,6 +2,11 @@ import { useState } from "react";
 
 import { showHelpSpotlight } from "./contextHelpSpotlight";
 
+export type HelpLocation = {
+  pathname: string;
+  operationKind?: "payments" | "refunds";
+};
+
 type HelpStep = {
   title: string;
   detail: string;
@@ -38,8 +43,34 @@ function availableButton(root: HTMLElement, label: string): HTMLButtonElement | 
   );
 }
 
-function helpFor(pathname: string): HelpTopic {
+function helpFor({ pathname, operationKind }: HelpLocation): HelpTopic {
   const root = document.querySelector<HTMLElement>("#main-content");
+  if (pathname === "/payment-reconciliation") {
+    const refunds = operationKind === "refunds";
+    return {
+      section: refunds ? "Сверка возвратов" : "Сверка оплат",
+      step: {
+        title: refunds ? "Проверьте результат возврата" : "Проверьте результат оплаты",
+        detail:
+          "Обновите список, затем сверьте сумму и номер операции с документом банка или терминала.",
+        target: root && availableButton(root, "Обновить"),
+      },
+      instructions: refunds
+        ? [
+            "Обновите список и откройте чек нужного возврата. В чеке продолжите существующую заявку через «Оформить возврат».",
+            "Сверьте результат с документом банка или терминала; укажите подтверждение в чеке.",
+            "Если деньги возвращены, завершите оформление возвратного чека. Статус «Ждут чека» означает, что оформление ещё не закончено.",
+          ]
+        : [
+            "Обновите список и выберите оплату, результат которой нужно проверить.",
+            "Сверьте документ банка или терминала. Выберите «Оплата прошла» либо «Оплаты нет», укажите реквизиты подтверждения и сохраните решение.",
+            "Подтверждённая оплата ещё может ждать завершения чека. Откройте чек и проверьте, завершена ли продажа.",
+          ],
+      warning: refunds
+        ? "Если результат неизвестен, не повторяйте возврат денег. Сначала получите подтверждение банка или терминала."
+        : "Если результат неизвестен, не принимайте оплату повторно. Сначала получите подтверждение банка или терминала.",
+    };
+  }
   if (pathname === "/pos") {
     const complete = root && availableButton(root, "Завершить продажу");
     const searchCandidate = root?.querySelector<HTMLInputElement>(
@@ -147,13 +178,13 @@ function helpFor(pathname: string): HelpTopic {
 
 export function ContextHelp({
   pathname,
+  operationKind,
   close,
-}: {
-  pathname: string;
+}: HelpLocation & {
   close: () => void;
 }): JSX.Element {
   const [showInstructions, setShowInstructions] = useState(false);
-  const topic = helpFor(pathname);
+  const topic = helpFor({ pathname, operationKind });
   return (
     <div className="space-y-4 p-4 text-sm text-foreground">
       <div>
@@ -169,7 +200,7 @@ export function ContextHelp({
             type="button"
             className="min-h-10 rounded-md bg-primary/10 px-3 font-medium text-primary hover:bg-primary/15"
             onClick={() => {
-              const target = helpFor(pathname).step.target;
+              const target = helpFor({ pathname, operationKind }).step.target;
               if (!target) return;
               close();
               showHelpSpotlight(target);
