@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 
 import { NavIcon } from "@/components/layout/icons";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 import { canAccessPath, getRouteAccessContext } from "@/components/layout/routeAccess";
 import {
   Badge,
@@ -34,6 +35,7 @@ export function ProfilePage(): JSX.Element {
   const visibleProfile = !profile.isPending && !profile.isError ? profile.data : undefined;
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5">
+      <ContextHelpPortal pathname="/profile" />
       <PageHeader
         title="Мой профиль"
         showTitleOnDesktop

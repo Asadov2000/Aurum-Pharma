@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { NavIcon } from "@/components/layout/icons";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 import {
   Badge,
   Button,
@@ -63,6 +64,7 @@ export function SecurityPage({ embedded = false }: { embedded?: boolean } = {}):
       className={embedded ? "w-full space-y-5" : "mx-auto w-full max-w-6xl space-y-5"}
       data-testid="security-page"
     >
+      {!embedded && <ContextHelpPortal pathname="/security" />}
       {embedded ? (
         <div>
           <h2 className="font-display text-xl font-semibold text-foreground">Безопасность</h2>

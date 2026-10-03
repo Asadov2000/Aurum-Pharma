@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
 import { Card, CardContent, PageHeader } from "@/components/ui";
 
@@ -8,6 +9,7 @@ import { SubscriptionsForm } from "./SubscriptionsForm";
 export function NotificationsPage(): JSX.Element {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-5">
+      <ContextHelpPortal pathname="/notifications" />
       <PageHeader
         title="Уведомления"
         description="Сообщения для вас и настройки их получения."

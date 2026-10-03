@@ -74,6 +74,59 @@ import { Modal } from "@/components/ui/Modal";
 import { ConnectivityContext } from "@/lib/connectivityContext";
 
 describe("AppLayout shell", () => {
+  it.each([
+    {
+      pathname: "/profile",
+      target: "profile-security-heading",
+      title: "Проверьте данные и способы входа",
+      warning: /ФИО и рабочие права здесь не редактируются/,
+    },
+    {
+      pathname: "/my-work",
+      target: "work-pay-help",
+      title: "Проверьте свои смены и выплаты",
+      warning: /Зарплата не начисляется автоматически/,
+    },
+    {
+      pathname: "/security",
+      target: "security-overview-heading",
+      title: "Проверьте защиту аккаунта",
+      warning: /требуется связь с сервером/,
+    },
+    {
+      pathname: "/notifications",
+      target: "notifications-overview-heading",
+      title: "Проверьте входящие сообщения",
+      warning: /затрагивает и сообщения за фильтрами/,
+    },
+  ])(
+    "explains $pathname offline without executing personal actions",
+    async ({ pathname, target, title, warning }) => {
+      layoutState.pathname = pathname;
+      setOnlineStatus(false);
+      const act = vi.fn();
+      render(
+        <AppLayout>
+          <ContextHelpPortal pathname={pathname} />
+          <h2 id={target}>Сведения</h2>
+          <button onClick={act}>Показать сведения</button>
+          <button onClick={act}>Завершить сеанс</button>
+          <button onClick={act}>Сохранить настройки</button>
+        </AppLayout>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Помощь по разделу" }));
+      const help = screen.getByRole("dialog", { name: "Помощь по разделу" });
+      expect(within(help).getByText(title)).toBeInTheDocument();
+      expect(within(help).getByText(warning)).toBeInTheDocument();
+      expect(within(help).queryByRole("list")).toBeNull();
+      fireEvent.click(within(help).getByRole("button", { name: "Инструкция по шагам" }));
+      expect(within(help).getAllByRole("listitem")).toHaveLength(3);
+      fireEvent.click(within(help).getByRole("button", { name: "Показать на экране" }));
+      expect(screen.getByRole("heading", { name: "Сведения" })).toHaveClass("aurum-help-target");
+      expect(act).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["/suppliers", "/batches"])(
     "explains %s as read-only in local mode",
     async (pathname) => {
