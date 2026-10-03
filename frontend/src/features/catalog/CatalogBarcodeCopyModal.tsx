@@ -46,12 +46,19 @@ export function CatalogBarcodeCopyModal({
                 className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
               >
                 <span>
-                  <span className="block font-mono text-sm">{barcode.code}</span>
+                  <span id={`barcode-copy-${barcode.id}`} className="block font-mono text-sm">
+                    {barcode.code}
+                  </span>
                   <span className="text-xs text-foreground-muted">
                     {barcodeLabel[barcode.code_type]}
                   </span>
                 </span>
-                <Button variant="secondary" size="sm" onClick={() => void copy(barcode.code)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-describedby={`barcode-copy-${barcode.id}`}
+                  onClick={() => void copy(barcode.code)}
+                >
                   Скопировать
                 </Button>
               </li>

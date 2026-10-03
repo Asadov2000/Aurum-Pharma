@@ -36,6 +36,12 @@ describe("CatalogBarcodeCopyModal", () => {
     });
     renderModal();
     const code = await screen.findByText("A-20");
+    expect(screen.getAllByRole("button", { name: "Скопировать" })[0]).toHaveAccessibleDescription(
+      "0012345678905",
+    );
+    expect(
+      within(code.closest("li")!).getByRole("button", { name: "Скопировать" }),
+    ).toHaveAccessibleDescription("A-20");
     expect(writeText).not.toHaveBeenCalled();
     expect(getCatalogItem).toHaveBeenCalledExactlyOnceWith("chosen-item", expect.any(AbortSignal));
     fireEvent.click(within(code.closest("li")!).getByRole("button", { name: "Скопировать" }));
