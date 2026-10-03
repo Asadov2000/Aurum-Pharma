@@ -6,7 +6,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
+export const Input = /* @__PURE__ */ forwardRef<HTMLInputElement, InputProps>(function Input(
   { invalid, className, ...rest },
   ref,
 ) {

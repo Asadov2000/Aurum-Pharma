@@ -32,7 +32,7 @@ const MENU_WIDTH = 224;
 const MENU_ITEM_HEIGHT = 48;
 const VIEWPORT_GUTTER = 8;
 
-export const ActionMenu = forwardRef<HTMLButtonElement, ActionMenuProps>(function ActionMenu(
+export const ActionMenu = /* @__PURE__ */ forwardRef<HTMLButtonElement, ActionMenuProps>(function ActionMenu(
   { label, items, isLoading = false, disabled = false },
   forwardedRef,
 ): JSX.Element {

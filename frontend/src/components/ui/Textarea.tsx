@@ -6,7 +6,7 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
   invalid?: boolean;
 }
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+export const Textarea = /* @__PURE__ */ forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
   { invalid, className, ...rest },
   ref,
 ) {

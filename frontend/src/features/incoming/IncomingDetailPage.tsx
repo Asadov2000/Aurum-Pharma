@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useBlocker, useParams } from "@tanstack/react-router";
 
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
+
 import {
   ActionMenu,
   Badge,
@@ -190,6 +192,7 @@ export function IncomingDetailPage(): JSX.Element {
 
   return (
     <div className="space-y-5">
+      <ContextHelpPortal pathname="/incoming/detail" />
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <BackToIncoming />
         <Badge tone={statusTone[doc.status]}>{statusLabel[doc.status]}</Badge>

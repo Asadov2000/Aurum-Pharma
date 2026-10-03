@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
+
 import {
   Badge,
   Button,
@@ -172,6 +174,7 @@ export function IncomingPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
+      <ContextHelpPortal pathname="/incoming" />
       <PageHeader
         title="Приёмка товаров"
         description="Проверяйте поставки и принимайте товары на склад без изменения завершённых документов."

@@ -13,6 +13,7 @@ import { applyRuntimeSurfaceAttribute } from "@/lib/runtime";
 import { applyTheme, getThemePreference, watchSystemTheme } from "@/lib/theme";
 import { router } from "@/router";
 import "@/styles/index.css";
+import "@/components/ui/Switch.css";
 
 bootstrapAuth();
 

@@ -6,7 +6,7 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   invalid?: boolean;
 }
 
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
+export const Select = /* @__PURE__ */ forwardRef<HTMLSelectElement, SelectProps>(function Select(
   { invalid, className, children, ...rest },
   ref,
 ) {
