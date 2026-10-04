@@ -212,6 +212,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "unit_lot_is_received_for_report",
     "unit_lot_has_received_source",
     "trg_unit_received_stock_complete",
     "unit_incoming_uuid5",
@@ -557,6 +558,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "unit_lot_is_received_for_report",
     "unit_lot_has_received_source",
     "command_staff_pay",
     "staff_pay_can_read",
@@ -1086,15 +1088,21 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     received_functions = {
         row["proname"]: row
         for row in rows
-        if row["proname"] in {"unit_lot_has_received_source", "trg_unit_received_stock_complete"}
+        if row["proname"]
+        in {
+            "unit_lot_has_received_source",
+            "unit_lot_is_received_for_report",
+            "trg_unit_received_stock_complete",
+        }
     }
     assert set(received_functions) == {
         "unit_lot_has_received_source",
+        "unit_lot_is_received_for_report",
         "trg_unit_received_stock_complete",
     }
     for name, row in received_functions.items():
         assert row["is_security_definer"] is True
-        assert row["app_can_execute"] is (name == "unit_lot_has_received_source")
+        assert row["app_can_execute"] is (name != "trg_unit_received_stock_complete")
         assert row["support_can_execute"] is False
         assert row["public_can_execute"] is False
     incoming_names = {
