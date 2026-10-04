@@ -37,6 +37,11 @@ class UnitSaleLineRepository:
                     sale_format=command.sale_format,
                     quantity=command.quantity,
                     discount_amount=command.discount_amount,
+                    stock_source_kind=(
+                        "prepared"
+                        if command.stock_source_kind is None
+                        else command.stock_source_kind
+                    ),
                 )
                 .on_conflict_do_nothing()
                 .returning(UnitSaleCommand)

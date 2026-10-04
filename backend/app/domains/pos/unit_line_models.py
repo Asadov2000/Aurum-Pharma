@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import BigInteger, Integer, Numeric, Text, UniqueConstraint
@@ -26,6 +27,9 @@ class UnitSaleCommand(StockIdentity, Base):
     sale_format: Mapped[SaleFormat] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    stock_source_kind: Mapped[Literal["prepared", "received"]] = mapped_column(
+        Text, nullable=False, server_default="prepared", default="prepared"
+    )
 
 
 class UnitSaleLine(StockIdentity, Base):

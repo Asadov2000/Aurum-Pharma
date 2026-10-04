@@ -103,7 +103,10 @@ def _fingerprint(
     quantity: int,
     expires_at: date | None = None,
     purchase_cost_per_pack: Decimal | None = None,
+    stock_source_kind: Literal["prepared", "received"] = "prepared",
 ) -> str:
+    if stock_source_kind not in ("prepared", "received"):
+        raise ValueError("unsupported stock source policy")
     # Protocol v1 is explicit. Server-derived `today` is intentionally absent:
     # tomorrow's retry must return yesterday's immutable result, not dispense again.
     payload = {
@@ -124,6 +127,11 @@ def _fingerprint(
         payload["version"] = 2
         payload["purchase_cost_per_pack"] = format(canonical, ".2f")
         payload["cost_version"] = 1
+    if stock_source_kind == "received":
+        if kind != "dispense" or purchase_cost_per_pack is not None:
+            raise ValueError("received source policy is only valid for dispensing")
+        payload["version"] = 2
+        payload["stock_source_kind"] = "received"
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -269,6 +277,7 @@ class PreparedUnitLedgerService:
         quantity: int,
         expires_at: date | None = None,
         purchase_cost_per_pack: Decimal | None = None,
+        stock_source_kind: Literal["prepared", "received"] = "prepared",
     ) -> tuple[UnitStockOperation, bool]:
         request_hash = _fingerprint(
             tenant_id=tenant_id,
@@ -280,6 +289,7 @@ class PreparedUnitLedgerService:
             quantity=quantity,
             expires_at=expires_at,
             purchase_cost_per_pack=purchase_cost_per_pack,
+            stock_source_kind=stock_source_kind,
         )
         operation, created = await self.repo.claim_operation(
             UnitStockOperation(
@@ -295,9 +305,13 @@ class PreparedUnitLedgerService:
                 units_per_pack=packaging.units_per_pack,
                 dispense_step=packaging.dispense_step,
                 request_hash=request_hash,
+                stock_source_kind=stock_source_kind,
             )
         )
-        if operation.request_hash != request_hash:
+        if (
+            operation.request_hash != request_hash
+            or operation.stock_source_kind != stock_source_kind
+        ):
             raise ConflictError("Operation was already used for a different request")
         return operation, created
 
@@ -402,7 +416,71 @@ class PreparedUnitLedgerService:
         require_new_operation: bool = False,
     ) -> CommittedUnitStockResult:
         """Record only prepared stock; live POS/Edge must not call this core yet."""
+        return await self._dispense(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_id=catalog_id,
+            operation_id=operation_id,
+            packaging=packaging,
+            sale_format=sale_format,
+            quantity=quantity,
+            today=today,
+            allowed_branch_ids=allowed_branch_ids,
+            require_new_operation=require_new_operation,
+        )
+
+    async def dispense_received(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_id: UUID,
+        operation_id: UUID,
+        actor_id: UUID,
+        packaging: UnitPackaging,
+        sale_format: SaleFormat,
+        quantity: int,
+        today: date,
+        allowed_branch_ids: set[UUID],
+        require_new_operation: bool = False,
+    ) -> CommittedUnitStockResult:
+        """Dispense only source-bound received lots; still no sale or payment."""
+        return await self._dispense(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_id=catalog_id,
+            operation_id=operation_id,
+            packaging=packaging,
+            sale_format=sale_format,
+            quantity=quantity,
+            today=today,
+            allowed_branch_ids=allowed_branch_ids,
+            require_new_operation=require_new_operation,
+            stock_source_kind="received",
+            actor_id=actor_id,
+        )
+
+    async def _dispense(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_id: UUID,
+        operation_id: UUID,
+        packaging: UnitPackaging,
+        sale_format: SaleFormat,
+        quantity: int,
+        today: date,
+        allowed_branch_ids: set[UUID],
+        require_new_operation: bool = False,
+        stock_source_kind: Literal["prepared", "received"] = "prepared",
+        actor_id: UUID | None = None,
+    ) -> CommittedUnitStockResult:
         _assert_branch(branch_id, allowed_branch_ids)
+        if stock_source_kind == "received":
+            if actor_id is None:
+                raise PermissionDeniedError("An authenticated actor is required")
+            await self.repo.assert_received_actor(tenant_id, branch_id, actor_id)
         async with self.repo.session.begin_nested():
             operation, created = await self._claim(
                 tenant_id=tenant_id,
@@ -413,11 +491,18 @@ class PreparedUnitLedgerService:
                 kind="dispense",
                 sale_format=sale_format,
                 quantity=quantity,
+                stock_source_kind=stock_source_kind,
             )
             if require_new_operation and not created:
                 raise ConflictError("Stock operation was already recorded")
             if created:
-                await self._record_dispense(operation, packaging, today)
+                await self._record_dispense(
+                    operation, packaging, today, received_only=stock_source_kind == "received"
+                )
+            if stock_source_kind == "received" and not await self.repo.received_entries_are_valid(
+                tenant_id, operation_id
+            ):
+                raise BusinessRuleError("Received operation contains an invalid incoming source")
             return await self._result(operation)
 
     async def _record_dispense(
@@ -425,6 +510,8 @@ class PreparedUnitLedgerService:
         operation: UnitStockOperation,
         packaging: UnitPackaging,
         today: date,
+        *,
+        received_only: bool = False,
     ) -> None:
         if await self.repo.lock_catalog(operation.tenant_id, operation.catalog_id) is None:
             raise NotFoundError("Catalog item not found")
@@ -432,6 +519,7 @@ class PreparedUnitLedgerService:
             operation.tenant_id,
             operation.branch_id,
             operation.catalog_id,
+            received_only=received_only,
         )
         packs = await self.repo.lock_packs(operation.tenant_id, [lot.id for lot in lots])
         opened_by_lot: dict[UUID, list[OpenedPack]] = {}

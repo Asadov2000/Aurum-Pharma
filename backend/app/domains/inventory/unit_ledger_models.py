@@ -60,6 +60,9 @@ class UnitStockOperation(StockIdentity, PackagingSnapshot, Base):
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     base_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    stock_source_kind: Mapped[Literal["prepared", "received"]] = mapped_column(
+        Text, nullable=False, server_default="prepared", default="prepared"
+    )
 
 
 class UnitStockLot(StockIdentity, PackagingSnapshot, Base):

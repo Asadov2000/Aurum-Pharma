@@ -51,6 +51,7 @@ class UnitSaleLineSnapshot:
     original_cost_amount: Decimal
     money_version: Literal[1]
     currency: Literal["TJS"]
+    stock_source_kind: Literal["prepared", "received"] = "prepared"
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,11 @@ def _fingerprint(
     sale_format: SaleFormat,
     quantity: int,
     discount: Decimal,
+    *,
+    stock_source_kind: Literal["prepared", "received"] = "prepared",
 ) -> str:
+    if stock_source_kind not in ("prepared", "received"):
+        raise ValueError("unsupported stock source policy")
     payload = {
         "version": 1,
         "tenant_id": str(tenant_id),
@@ -79,6 +84,9 @@ def _fingerprint(
         "quantity": quantity,
         "discount_amount": format(discount, ".2f"),
     }
+    if stock_source_kind == "received":
+        payload["version"] = 2
+        payload["stock_source_kind"] = "received"
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -101,8 +109,68 @@ class PreparedUnitSaleLineService:
         allowed_branch_ids: set[UUID],
         discount_amount: Decimal = Decimal("0.00"),
     ) -> PreparedUnitSaleLineResult:
+        return await self._post_line(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_id=catalog_id,
+            operation_id=operation_id,
+            sale_format=sale_format,
+            quantity=quantity,
+            today=today,
+            allowed_branch_ids=allowed_branch_ids,
+            discount_amount=discount_amount,
+        )
+
+    async def post_received_line(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_id: UUID,
+        operation_id: UUID,
+        actor_id: UUID,
+        sale_format: SaleFormat,
+        quantity: int,
+        today: date,
+        allowed_branch_ids: set[UUID],
+        discount_amount: Decimal = Decimal("0.00"),
+    ) -> PreparedUnitSaleLineResult:
+        """Post against accepted incoming sources, without creating a live sale."""
+        return await self._post_line(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_id=catalog_id,
+            operation_id=operation_id,
+            sale_format=sale_format,
+            quantity=quantity,
+            today=today,
+            allowed_branch_ids=allowed_branch_ids,
+            discount_amount=discount_amount,
+            stock_source_kind="received",
+            actor_id=actor_id,
+        )
+
+    async def _post_line(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_id: UUID,
+        operation_id: UUID,
+        sale_format: SaleFormat,
+        quantity: int,
+        today: date,
+        allowed_branch_ids: set[UUID],
+        discount_amount: Decimal,
+        stock_source_kind: Literal["prepared", "received"] = "prepared",
+        actor_id: UUID | None = None,
+    ) -> PreparedUnitSaleLineResult:
         if not isinstance(allowed_branch_ids, set) or branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
+        if stock_source_kind == "received":
+            if actor_id is None:
+                raise PermissionDeniedError("An authenticated actor is required")
+            await self.stock_repo.assert_received_actor(tenant_id, branch_id, actor_id)
         if type(quantity) is not int or not 1 <= quantity <= MAX_BASE_UNITS:
             raise ValueError("quantity must be a positive whole integer within the stock limit")
         if sale_format not in ("pack", "unit"):
@@ -114,7 +182,13 @@ class PreparedUnitSaleLineService:
             quantity=1,
         ).total_amount
         request_hash = _fingerprint(
-            tenant_id, branch_id, catalog_id, sale_format, quantity, discount
+            tenant_id,
+            branch_id,
+            catalog_id,
+            sale_format,
+            quantity,
+            discount,
+            stock_source_kind=stock_source_kind,
         )
         try:
             async with self.repo.session.begin_nested():
@@ -128,12 +202,22 @@ class PreparedUnitSaleLineService:
                         sale_format=sale_format,
                         quantity=quantity,
                         discount_amount=discount,
+                        stock_source_kind=stock_source_kind,
                     )
                 )
-                if command.request_hash != request_hash:
+                if (
+                    command.request_hash != request_hash
+                    or command.stock_source_kind != stock_source_kind
+                ):
                     raise ConflictError("Operation was already used for a different request")
                 if created:
-                    await self._post(command, today, allowed_branch_ids)
+                    await self._post(command, today, allowed_branch_ids, actor_id=actor_id)
+                if stock_source_kind == "received":
+                    line = await self.repo.get_line(tenant_id, command.id)
+                    if line is None or not await self.stock_repo.received_entries_are_valid(
+                        tenant_id, line.stock_operation_id
+                    ):
+                        raise BusinessRuleError("Received line has an invalid incoming source")
                 return await self._result(command)
         except IntegrityError as error:
             # Translate only the explicit identity conflict after the savepoint
@@ -147,6 +231,8 @@ class PreparedUnitSaleLineService:
         command: UnitSaleCommand,
         today: date,
         allowed_branch_ids: set[UUID],
+        *,
+        actor_id: UUID | None = None,
     ) -> None:
         catalog = await self.repo.get_catalog(command.tenant_id, command.catalog_id)
         if catalog is None:
@@ -169,7 +255,7 @@ class PreparedUnitSaleLineService:
             NAMESPACE_URL,
             f"aurum-unit-line-stock:{command.tenant_id}:{command.id}",
         )
-        stock = await self.stock_service.dispense(
+        stock = await self.stock_service._dispense(
             tenant_id=command.tenant_id,
             branch_id=command.branch_id,
             catalog_id=command.catalog_id,
@@ -180,6 +266,8 @@ class PreparedUnitSaleLineService:
             today=today,
             allowed_branch_ids=allowed_branch_ids,
             require_new_operation=True,
+            stock_source_kind=command.stock_source_kind,
+            actor_id=actor_id,
         )
         catalog = await self.stock_repo.lock_catalog(command.tenant_id, command.catalog_id)
         if catalog is None:
@@ -324,6 +412,7 @@ class PreparedUnitSaleLineService:
                 line.original_cost_amount,
                 1,
                 "TJS",
+                command.stock_source_kind,
             ),
             tuple(slices),
         )

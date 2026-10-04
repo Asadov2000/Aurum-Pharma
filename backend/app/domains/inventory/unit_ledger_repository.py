@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,45 @@ from app.domains.inventory.unit_ledger_models import (
 class UnitLedgerRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def assert_received_actor(self, tenant_id: UUID, branch_id: UUID, actor_id: UUID) -> None:
+        """Apply actual app actor and scoped POS authorization before any retry."""
+        if not isinstance(actor_id, UUID):
+            raise PermissionDeniedError("An authenticated actor is required")
+        authorized = await self.session.scalar(
+            text(
+                "SELECT current_user='aurum_app' AND NOT public.is_support_session() "
+                "AND public.current_app_user_id()=:actor "
+                "AND public.current_tenant_id()=:tenant AND "
+                "public.tenant_actor_has_scoped_permission(:tenant,'pos.sell',:branch)"
+            ),
+            {"tenant": tenant_id, "branch": branch_id, "actor": actor_id},
+        )
+        if authorized is not True:
+            raise PermissionDeniedError("Received stock posting permission denied")
+
+    async def received_entries_are_valid(self, tenant_id: UUID, operation_id: UUID) -> bool:
+        count, all_valid = (
+            await self.session.execute(
+                select(
+                    func.count(),
+                    func.bool_and(
+                        func.public.unit_lot_has_received_source(
+                            UnitStockEntry.tenant_id,
+                            UnitStockEntry.branch_id,
+                            UnitStockEntry.catalog_id,
+                            UnitStockEntry.lot_id,
+                        )
+                    ),
+                )
+                .select_from(UnitStockEntry)
+                .where(
+                    UnitStockEntry.tenant_id == tenant_id,
+                    UnitStockEntry.operation_id == operation_id,
+                )
+            )
+        ).one()
+        return bool(count) and all_valid is True
 
     async def incoming_source(
         self, item_id: UUID, actor_id: UUID
@@ -100,6 +139,11 @@ class UnitLedgerRepository:
                 units_per_pack=operation.units_per_pack,
                 dispense_step=operation.dispense_step,
                 request_hash=operation.request_hash,
+                stock_source_kind=(
+                    "prepared"
+                    if operation.stock_source_kind is None
+                    else operation.stock_source_kind
+                ),
                 created_by=operation.created_by,
                 updated_by=operation.updated_by,
             )
@@ -154,9 +198,14 @@ class UnitLedgerRepository:
         ).one_or_none()
 
     async def lock_lots(
-        self, tenant_id: UUID, branch_id: UUID, catalog_id: UUID
+        self,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_id: UUID,
+        *,
+        received_only: bool = False,
     ) -> list[UnitStockLot]:
-        rows = await self.session.scalars(
+        statement = (
             select(UnitStockLot)
             .where(
                 UnitStockLot.tenant_id == tenant_id,
@@ -167,6 +216,16 @@ class UnitLedgerRepository:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+        if received_only:
+            statement = statement.where(
+                func.public.unit_lot_has_received_source(
+                    UnitStockLot.tenant_id,
+                    UnitStockLot.branch_id,
+                    UnitStockLot.catalog_id,
+                    UnitStockLot.id,
+                )
+            )
+        rows = await self.session.scalars(statement)
         return list(rows)
 
     async def lock_packs(self, tenant_id: UUID, lot_ids: list[UUID]) -> list[UnitStockOpenedPack]:
