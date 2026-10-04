@@ -76,6 +76,10 @@ APPEND_ONLY_TABLES = {
     "sync_read_inventory_projection",
     "sync_read_inventory_rollup",
     "sync_read_supplier_projection",
+    "unit_stock_entry",
+    "unit_stock_lot",
+    "unit_stock_opened_pack",
+    "unit_stock_operation",
     "write_off",
 }
 
@@ -511,6 +515,9 @@ CUSTOM_FUNCTIONS = {
     "trg_set_created_meta",
     "trg_set_updated_meta",
     "trg_update_batch_qty",
+    "trg_unit_stock_complete",
+    "trg_unit_stock_entry_apply",
+    "trg_unit_stock_guard",
     "trg_validate_edge_cash_node_identity",
     "trg_validate_customer_return_disposition_insert",
     "trg_validate_customer_return_quarantine_insert",
@@ -761,6 +768,9 @@ SELECT
     'aurum_app', routines.oid, 'EXECUTE'
   ) AS app_can_execute,
   pg_catalog.has_function_privilege(
+    'aurum_support', routines.oid, 'EXECUTE'
+  ) AS support_can_execute,
+  pg_catalog.has_function_privilege(
     'aurum_app', routines.oid, 'EXECUTE WITH GRANT OPTION'
   ) AS is_grantable,
   EXISTS (
@@ -950,6 +960,37 @@ ORDER BY attributes.attname
 """
 
 
+UNIT_STOCK_COLUMN_PRIVILEGES_SQL = """
+SELECT
+  roles.role_name,
+  relations.relname,
+  attributes.attname,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'SELECT'
+  ) AS can_select,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'INSERT'
+  ) AS can_insert,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'UPDATE'
+  ) AS can_update,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'UPDATE WITH GRANT OPTION'
+  ) AS update_is_grantable
+FROM pg_catalog.pg_attribute AS attributes
+JOIN pg_catalog.pg_class AS relations ON relations.oid = attributes.attrelid
+JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+CROSS JOIN (VALUES ('aurum_app'), ('aurum_support')) AS roles(role_name)
+WHERE schemas.nspname = 'public'
+  AND relations.relname IN (
+    'unit_stock_operation', 'unit_stock_entry', 'unit_stock_lot', 'unit_stock_opened_pack'
+  )
+  AND attributes.attnum > 0
+  AND NOT attributes.attisdropped
+ORDER BY roles.role_name, relations.relname, attributes.attname
+"""
+
+
 def _assert_tenant_account_support_privileges(
     rows: list[RowMapping],
 ) -> None:
@@ -965,6 +1006,46 @@ def _assert_tenant_account_support_privileges(
         "tenant_membership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
         "tenant_ownership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
         "tenant_invitation": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    }
+
+
+def _assert_unit_stock_column_privileges(rows: list[RowMapping]) -> None:
+    assert {row["relname"] for row in rows} == {
+        "unit_stock_operation",
+        "unit_stock_entry",
+        "unit_stock_lot",
+        "unit_stock_opened_pack",
+    }
+    assert all(row["can_select"] and row["can_insert"] for row in rows)
+    assert all(not row["update_is_grantable"] for row in rows)
+    assert {
+        (row["role_name"], row["relname"], row["attname"]) for row in rows if row["can_update"]
+    } == {
+        (role, table, column)
+        for role in ("aurum_app", "aurum_support")
+        for table, column in (
+            ("unit_stock_lot", "closed_packs"),
+            ("unit_stock_opened_pack", "remaining_units"),
+        )
+    }
+
+
+def _assert_unit_stock_function_privileges(rows: list[RowMapping]) -> None:
+    unit_stock_functions = {
+        row["proname"]: row
+        for row in rows
+        if row["proname"]
+        in {"trg_unit_stock_complete", "trg_unit_stock_entry_apply", "trg_unit_stock_guard"}
+    }
+    assert set(unit_stock_functions) == {
+        "trg_unit_stock_complete",
+        "trg_unit_stock_entry_apply",
+        "trg_unit_stock_guard",
+    }
+    assert all(not row["support_can_execute"] for row in unit_stock_functions.values())
+    assert {name for name, row in unit_stock_functions.items() if row["is_security_definer"]} == {
+        "trg_unit_stock_complete",
+        "trg_unit_stock_entry_apply",
     }
 
 
@@ -1010,6 +1091,9 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         app_user_column_privileges = list(app_user_column_result.mappings())
         sync_outbox_column_result = await conn.execute(text(SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL))
         sync_outbox_column_privileges = list(sync_outbox_column_result.mappings())
+        _assert_unit_stock_column_privileges(
+            list((await conn.execute(text(UNIT_STOCK_COLUMN_PRIVILEGES_SQL))).mappings())
+        )
         tenant_account_result = await conn.execute(text(TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL))
         tenant_account_privileges = list(tenant_account_result.mappings())
 
@@ -1048,6 +1132,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
+    _assert_unit_stock_function_privileges(function_privileges)
     assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {
         (row["extname"], row["signature"]) for row in extension_privileges if row["app_can_execute"]
