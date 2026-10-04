@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_unit_cash_intent",
     "pos_unit_return_command",
     "pos_unit_return_slice",
     "offline_policy_inbox",
@@ -215,6 +216,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_unit_cash_intent_guard",
     "trg_unit_cart_guard",
     "trg_unit_cart_payment_boundary",
     "trg_unit_return_guard",
