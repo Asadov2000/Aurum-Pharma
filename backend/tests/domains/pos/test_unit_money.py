@@ -113,7 +113,8 @@ def test_result_is_frozen_and_money_is_canonical(total: Decimal) -> None:
         result.amount = Decimal("2.00")
 
 
-def test_allocation_ignores_ambient_decimal_precision_and_traps() -> None:
+@pytest.mark.parametrize("dirty_flags", [False, True])
+def test_allocation_ignores_ambient_decimal_precision_and_traps(dirty_flags: bool) -> None:
     total = Decimal("999999999999.9900")
     expected_total = Decimal("999999999999.99")
     expected_amount = Decimal("333333333333.33")
@@ -123,6 +124,11 @@ def test_allocation_ignores_ambient_decimal_precision_and_traps() -> None:
         context.traps[Inexact] = True
         context.traps[Rounded] = True
         context.traps[InvalidOperation] = True
+        context.clear_flags()
+        if dirty_flags:
+            context.flags[InvalidOperation] = True
+            context.flags[Rounded] = True
+        original_flags = dict(context.flags)
         result = allocate_unit_amount(total, total_units=3, offset=2, quantity=1)
         assert result.total_amount == expected_total
         assert result.amount == expected_amount
@@ -130,7 +136,7 @@ def test_allocation_ignores_ambient_decimal_precision_and_traps() -> None:
         assert result.amount.as_tuple().exponent == -2
         with pytest.raises(ValueError):
             allocate_unit_amount(tiny, total_units=3, offset=0, quantity=1)
-        assert not any(context.flags.values())
+        assert dict(context.flags) == original_flags
 
 
 @pytest.mark.parametrize(
