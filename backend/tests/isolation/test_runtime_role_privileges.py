@@ -23,6 +23,7 @@ from app.core.security import (
 )
 
 CRUD_TABLES = {
+    "pos_unit_cart_item",
     "barcode",
     "batch",
     "branch",
@@ -214,6 +215,8 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_unit_cart_guard",
+    "trg_unit_cart_payment_boundary",
     "trg_unit_return_guard",
     "trg_unit_return_complete",
     "unit_lot_is_received_for_report",

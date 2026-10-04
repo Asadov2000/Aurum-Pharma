@@ -47,16 +47,17 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "pos_unit_sale_line",
             "pos_unit_return_command",
             "pos_unit_return_slice",
+            "pos_unit_cart_item",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169. Preserve history and every immutable/audit guard.
+        # 0160/0162/0165/0169/0170. Preserve history and every immutable/audit guard.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
               public.staff_pay_revision, public.unit_stock_operation,
               public.unit_stock_lot, public.unit_stock_opened_pack,
               public.unit_stock_entry, public.pos_unit_sale_command,
               public.pos_unit_sale_line, public.pos_unit_return_command,
-              public.pos_unit_return_slice IN ACCESS EXCLUSIVE MODE
+              public.pos_unit_return_slice, public.pos_unit_cart_item IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
             SELECT c.relname, t.tgname, t.tgenabled::text AS tgenabled,
@@ -68,7 +69,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
-              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass)
+              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
+              'public.pos_unit_cart_item'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -79,7 +81,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
-              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass)
+              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
+              'public.pos_unit_cart_item'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -90,7 +93,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
-              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass)
+              'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
+              'public.pos_unit_cart_item'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()
