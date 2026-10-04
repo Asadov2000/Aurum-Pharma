@@ -30,6 +30,7 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.catalog.models import TenantCatalog
+from app.domains.catalog.unit_sales import UnitSalePreparation
 from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.incoming.models import IncomingDocument, IncomingItem
@@ -39,7 +40,9 @@ from app.domains.incoming.repository import (
     IncomingListSummaryData,
     IncomingRepository,
 )
+from app.domains.incoming.unit_preparation import validate_prepared_pack_quantity
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.inventory.unit_stock import UnitPackaging
 from app.domains.suppliers.models import Supplier
 
 logger = structlog.get_logger("incoming.service")
@@ -253,6 +256,13 @@ class IncomingService:
             "tenant_id": doc.tenant_id,
             "operation_id": operation_id,
         }
+        prepare = payload.pop("prepare_unit_sale", False)
+        if prepare is True:
+            payload["unit_packaging_preparation"] = await self._prepare_packaging(
+                tenant_id=doc.tenant_id, catalog_id=fields["catalog_id"], qty=fields["qty"]
+            )
+        elif prepare is not False:
+            raise BusinessRuleError("prepare_unit_sale must be a boolean")
         item = await self.repo.create_item(**payload)
         await self._recompute_total(doc)
         return item
@@ -279,7 +289,24 @@ class IncomingService:
             manufactured_at=fields.get("manufactured_at", item.manufactured_at),
             expires_at=fields.get("expires_at", item.expires_at),
         )
-        updated = await self.repo.update_item(item, **fields)
+        payload = dict(fields)
+        prepare = payload.pop("prepare_unit_sale", None)
+        if "prepare_unit_sale" in fields and type(prepare) is not bool:
+            raise BusinessRuleError("prepare_unit_sale must be a boolean")
+        if prepare is True:
+            payload["unit_packaging_preparation"] = await self._prepare_packaging(
+                tenant_id=doc.tenant_id,
+                catalog_id=fields.get("catalog_id", item.catalog_id),
+                qty=fields.get("qty", item.qty),
+            )
+        elif prepare is False or fields.get("catalog_id", item.catalog_id) != item.catalog_id:
+            payload["unit_packaging_preparation"] = None
+        elif item.unit_packaging_preparation is not None:
+            validate_prepared_pack_quantity(
+                UnitPackaging.model_validate(item.unit_packaging_preparation),
+                fields.get("qty", item.qty),
+            )
+        updated = await self.repo.update_item(item, **payload)
         await self._recompute_total(doc)
         return updated
 
@@ -349,6 +376,10 @@ class IncomingService:
 
         inv_repo = InventoryRepository(self.repo.session)
         for item in items:
+            if item.unit_packaging_preparation is not None:
+                validate_prepared_pack_quantity(
+                    UnitPackaging.model_validate(item.unit_packaging_preparation), item.qty
+                )
             batch = await inv_repo.create_batch(
                 tenant_id=doc.tenant_id,
                 branch_id=doc.branch_id,
@@ -359,6 +390,7 @@ class IncomingService:
                 purchase_price=item.purchase_price,
                 sale_price=item.sale_price,
                 qty_initial=item.qty,
+                unit_packaging_preparation=item.unit_packaging_preparation,
                 qty_remaining=Decimal("0"),  # raised by the trigger via insert_movement
                 created_by=actor_id,
             )
@@ -458,8 +490,34 @@ class IncomingService:
             "sale_price": fields.get("sale_price"),
         }
         actual = {name: getattr(existing, name) for name in expected}
-        if existing.document_id != document_id or actual != expected:
+        if (
+            existing.document_id != document_id
+            or actual != expected
+            or fields.get("prepare_unit_sale", False)
+            is not (existing.unit_packaging_preparation is not None)
+        ):
             raise ConflictError("Operation ID was already used for another incoming item")
+
+    async def _prepare_packaging(
+        self, *, tenant_id: UUID, catalog_id: UUID, qty: Decimal
+    ) -> dict[str, object]:
+        catalog = await self.repo.get_catalog_for_preparation(
+            tenant_id=tenant_id, catalog_id=catalog_id
+        )
+        if catalog is None:
+            raise NotFoundError("Catalog item not found")
+        if not catalog.is_active or catalog.deleted_at is not None:
+            raise ConflictError("Catalog item is unavailable for incoming documents")
+        if catalog.unit_sale_preparation is None:
+            raise BusinessRuleError("Catalog item has no unit sale preparation")
+        preparation = UnitSalePreparation.model_validate(catalog.unit_sale_preparation)
+        packaging = UnitPackaging(
+            unit=preparation.unit,
+            units_per_pack=preparation.units_per_pack,
+            dispense_step=preparation.dispense_step,
+        )
+        validate_prepared_pack_quantity(packaging, qty)
+        return packaging.model_dump(mode="json")
 
     @staticmethod
     def _assert_branch_allowed(

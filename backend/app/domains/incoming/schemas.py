@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
+from app.domains.inventory.unit_stock import UnitPackaging
+
 IncomingQuantity = Annotated[
     Decimal,
     Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False),
@@ -59,6 +61,8 @@ class IncomingItemBase(BaseModel):
     qty: IncomingQuantity
     purchase_price: IncomingMoney
     sale_price: IncomingMoney
+    # Preparation metadata only; this does not enable unit stock or unit sales.
+    prepare_unit_sale: bool = Field(default=False, strict=True)
 
 
 class IncomingItemUpdate(BaseModel):
@@ -71,8 +75,11 @@ class IncomingItemUpdate(BaseModel):
     qty: IncomingQuantity | None = None
     purchase_price: IncomingMoney | None = None
     sale_price: IncomingMoney | None = None
+    prepare_unit_sale: bool | None = Field(default=None, strict=True)
 
-    @field_validator("catalog_id", "expires_at", "qty", "purchase_price", "sale_price")
+    @field_validator(
+        "catalog_id", "expires_at", "qty", "purchase_price", "sale_price", "prepare_unit_sale"
+    )
     @classmethod
     def required_fields_cannot_be_cleared(cls, value: object) -> object:
         if value is None:
@@ -94,6 +101,7 @@ class IncomingItemRead(BaseModel):
     sale_price: Decimal
     currency: str
     created_batch_id: UUID | None
+    unit_packaging_preparation: UnitPackaging | None = None
     catalog_name: str | None = None
     catalog_form: str | None = None
     catalog_dosage: str | None = None

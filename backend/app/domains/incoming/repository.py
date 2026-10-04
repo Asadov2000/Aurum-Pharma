@@ -46,6 +46,17 @@ class IncomingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def get_catalog_for_preparation(
+        self, *, tenant_id: UUID, catalog_id: UUID
+    ) -> TenantCatalog | None:
+        stmt = (
+            select(TenantCatalog)
+            .where(TenantCatalog.tenant_id == tenant_id, TenantCatalog.id == catalog_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_draft_row(self, tenant_id: UUID, row_id: UUID) -> IncomingDraftRow | None:
         result = await self.session.execute(
             select(IncomingDraftRow)
