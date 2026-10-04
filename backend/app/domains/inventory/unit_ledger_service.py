@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from hashlib import sha256
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -32,6 +33,7 @@ from app.domains.inventory.unit_stock import (
     UnitStockPick,
     plan_unit_stock,
 )
+from app.domains.pos.unit_money import allocate_unit_amount
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,22 @@ class PreparedLotResult:
     operation_id: UUID
     lot_id: UUID
     base_units: int
+
+
+@dataclass(frozen=True)
+class UnitStockCostSlice:
+    """Immutable cost of a contiguous physical pack range, in TJS."""
+
+    entry_id: UUID
+    lot_id: UUID
+    pack_ordinal_start: int
+    pack_count: int
+    unit_offset: int
+    base_units: int
+    original_pack_cost: Decimal
+    amount: Decimal
+    version: Literal[1] = 1
+    currency: Literal["TJS"] = "TJS"
 
 
 @dataclass(frozen=True)
@@ -50,6 +68,7 @@ class CommittedUnitStockResult:
     quantity: int
     base_units: int
     picks: tuple[UnitStockPick, ...]
+    cost_slices: tuple[UnitStockCostSlice, ...] = ()
 
 
 def _base_units(packaging: UnitPackaging, quantity: int, sale_format: SaleFormat) -> int:
@@ -81,6 +100,7 @@ def _fingerprint(
     sale_format: SaleFormat,
     quantity: int,
     expires_at: date | None = None,
+    purchase_cost_per_pack: Decimal | None = None,
 ) -> str:
     # Protocol v1 is explicit. Server-derived `today` is intentionally absent:
     # tomorrow's retry must return yesterday's immutable result, not dispense again.
@@ -95,6 +115,13 @@ def _fingerprint(
         "quantity": quantity,
         "expires_at": expires_at.isoformat() if expires_at is not None else None,
     }
+    if purchase_cost_per_pack is not None:
+        canonical = allocate_unit_amount(
+            purchase_cost_per_pack, total_units=1, offset=0, quantity=1
+        ).total_amount
+        payload["version"] = 2
+        payload["purchase_cost_per_pack"] = format(canonical, ".2f")
+        payload["cost_version"] = 1
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -116,6 +143,7 @@ class PreparedUnitLedgerService:
         sale_format: SaleFormat,
         quantity: int,
         expires_at: date | None = None,
+        purchase_cost_per_pack: Decimal | None = None,
     ) -> tuple[UnitStockOperation, bool]:
         request_hash = _fingerprint(
             tenant_id=tenant_id,
@@ -126,6 +154,7 @@ class PreparedUnitLedgerService:
             sale_format=sale_format,
             quantity=quantity,
             expires_at=expires_at,
+            purchase_cost_per_pack=purchase_cost_per_pack,
         )
         operation, created = await self.repo.claim_operation(
             UnitStockOperation(
@@ -158,6 +187,7 @@ class PreparedUnitLedgerService:
         closed_packs: int,
         expires_at: date,
         allowed_branch_ids: set[UUID],
+        purchase_cost_per_pack: Decimal | None = None,
     ) -> PreparedLotResult:
         """Create a new prepared lot; never copy or convert a legacy batch."""
         _assert_branch(branch_id, allowed_branch_ids)
@@ -172,6 +202,7 @@ class PreparedUnitLedgerService:
                 sale_format="pack",
                 quantity=closed_packs,
                 expires_at=expires_at,
+                purchase_cost_per_pack=purchase_cost_per_pack,
             )
             if not created:
                 entries = await self.repo.get_entries(tenant_id, operation_id)
@@ -205,6 +236,11 @@ class PreparedUnitLedgerService:
                     expires_at=expires_at,
                     is_blocked=False,
                     closed_packs=0,
+                    initial_closed_packs=(
+                        closed_packs if purchase_cost_per_pack is not None else None
+                    ),
+                    purchase_cost_per_pack=purchase_cost_per_pack,
+                    cost_version=1 if purchase_cost_per_pack is not None else None,
                 )
             )
             await self.repo.insert_entry(
@@ -309,8 +345,11 @@ class PreparedUnitLedgerService:
             quantity=operation.quantity,
             packaging=packaging,
         )
+        lots_by_id = {lot.id: lot for lot in lots}
         order = 0
         for pick in plan.picks:
+            lot = lots_by_id[pick.batch_id]
+            initial_closed_packs = lot.initial_closed_packs
             for take in pick.opened_packs:
                 await self._entry(
                     operation,
@@ -348,6 +387,14 @@ class PreparedUnitLedgerService:
                             branch_id=operation.branch_id,
                             catalog_id=operation.catalog_id,
                             lot_id=pick.batch_id,
+                            pack_ordinal=(
+                                initial_closed_packs
+                                - lot.closed_packs
+                                + pick.closed_packs_taken
+                                + pick.new_packs_opened
+                                if initial_closed_packs is not None
+                                else None
+                            ),
                             opened_at=utc_now(),
                             remaining_units=0,
                         )
@@ -402,9 +449,33 @@ class PreparedUnitLedgerService:
 
     async def _result(self, operation: UnitStockOperation) -> CommittedUnitStockResult:
         entries = await self.repo.get_entries(operation.tenant_id, operation.id)
+        cost_slices: list[UnitStockCostSlice] = []
         grouped: dict[UUID, list[UnitStockEntry]] = {}
         for entry in entries:
             grouped.setdefault(entry.lot_id, []).append(entry)
+            if entry.cost_version is not None:
+                if (
+                    entry.cost_version != 1
+                    or entry.cost_pack_ordinal_start is None
+                    or entry.cost_pack_count is None
+                    or entry.cost_unit_offset is None
+                    or entry.cost_base_units is None
+                    or entry.cost_original_pack_cost is None
+                    or entry.cost_amount is None
+                ):
+                    raise BusinessRuleError("Prepared operation has an invalid cost snapshot")
+                cost_slices.append(
+                    UnitStockCostSlice(
+                        entry.id,
+                        entry.lot_id,
+                        entry.cost_pack_ordinal_start,
+                        entry.cost_pack_count,
+                        entry.cost_unit_offset,
+                        entry.cost_base_units,
+                        entry.cost_original_pack_cost,
+                        entry.cost_amount,
+                    )
+                )
         picks: list[UnitStockPick] = []
         for lot_id, movements in grouped.items():
             opened: list[OpenedPackTake] = []
@@ -431,4 +502,5 @@ class PreparedUnitLedgerService:
             operation.quantity,
             operation.base_units,
             tuple(picks),
+            tuple(cost_slices),
         )
