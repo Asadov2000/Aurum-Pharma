@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Context, Decimal, InvalidOperation, localcontext
-from typing import Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -20,8 +20,10 @@ from pydantic import (
 
 from app.domains.catalog.unit_sales import MAX_BASE_UNITS, SaleFormat
 from app.domains.inventory.unit_stock import UnitPackaging
-from app.domains.pos.unit_line_service import UnitSaleLineSnapshot
 from app.domains.pos.unit_money import allocate_unit_amount
+
+if TYPE_CHECKING:
+    from app.domains.pos.unit_line_service import UnitSaleLineSnapshot
 
 EXACT_CONTEXT = Context(prec=40, rounding=ROUND_HALF_EVEN)
 MAX_LEGACY_QUANTITY = Decimal("99999999999.999")
