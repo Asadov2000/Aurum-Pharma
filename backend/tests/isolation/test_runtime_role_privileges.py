@@ -62,6 +62,8 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_unit_return_command",
+    "pos_unit_return_slice",
     "offline_policy_inbox",
     "batch_movement",
     "customer_return_disposition",
@@ -212,6 +214,8 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_unit_return_guard",
+    "trg_unit_return_complete",
     "unit_lot_is_received_for_report",
     "unit_lot_has_received_source",
     "trg_unit_received_stock_complete",
