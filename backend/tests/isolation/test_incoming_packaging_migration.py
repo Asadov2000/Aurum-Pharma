@@ -18,8 +18,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.service import IncomingService
-from app.domains.suppliers.repository import SupplierRepository
-from app.domains.suppliers.service import SupplierService
+from app.domains.suppliers.repository import SuppliersRepository
+from app.domains.suppliers.service import SuppliersService
 from tests.domains.inventory.test_unit_ledger import PACKAGING, seed_ledger_context
 
 
@@ -91,7 +91,7 @@ async def test_nonempty_packaging_downgrade_preserves_incoming_and_batch(
             assert str(await session.scalar(text("SELECT current_database()"))).endswith("_test")
             await session.execute(text("SELECT set_config('app.support_session', 'true', true)"))
             context = await seed_ledger_context(session)
-            supplier = await SupplierService(SupplierRepository(session)).create_supplier(
+            supplier = await SuppliersService(SuppliersRepository(session)).create_supplier(
                 tenant_id=context.tenant_id, fields={"name": "Packaging migration supplier"}
             )
             service = IncomingService(IncomingRepository(session))
