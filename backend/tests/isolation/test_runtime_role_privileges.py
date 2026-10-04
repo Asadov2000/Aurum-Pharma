@@ -216,6 +216,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_unit_prescription_guard",
     "trg_unit_cash_intent_guard",
     "trg_unit_cart_guard",
     "trg_unit_cart_payment_boundary",

@@ -792,6 +792,7 @@ class PrescriptionLog(Base):
         nullable=False,
     )
     sale_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    unit_cart_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     prescription_number: Mapped[str | None] = mapped_column(Text)
     doctor_name: Mapped[str | None] = mapped_column(Text)
     doctor_license: Mapped[str | None] = mapped_column(Text)

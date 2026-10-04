@@ -6,6 +6,7 @@ from decimal import Decimal, localcontext
 from uuid import UUID
 
 from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.catalog.models import TenantCatalog
@@ -204,14 +205,21 @@ class UnitCartService:
     ) -> None:
         if not isinstance(item_id, UUID):
             raise BusinessRuleError("Unit cart item identifier must be a UUID")
-        async with self.repository.session.begin_nested():
-            await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
-            item = await self.repository.get_item(tenant_id, item_id)
-            if item is None:
-                raise NotFoundError("Unit cart item not found")
-            if item.sale_id != sale_id:
-                raise ConflictError("Unit cart item belongs to another draft")
-            await self.repository.delete_item(item)
+        try:
+            async with self.repository.session.begin_nested():
+                await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
+                item = await self.repository.get_item(tenant_id, item_id)
+                if item is None:
+                    raise NotFoundError("Unit cart item not found")
+                if item.sale_id != sale_id:
+                    raise ConflictError("Unit cart item belongs to another draft")
+                await self.repository.delete_item(item)
+        except IntegrityError as error:
+            if "fk_prescription_unit_cart_item" in str(error.orig):
+                raise BusinessRuleError(
+                    "Remove the linked prescription before removing this cart position"
+                ) from error
+            raise
 
     async def list_items(
         self,

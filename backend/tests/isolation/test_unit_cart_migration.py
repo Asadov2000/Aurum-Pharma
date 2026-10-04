@@ -17,24 +17,31 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from app.core.errors import BusinessRuleError, ConflictError
-from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
-from tests.domains.incoming.test_unit_acceptance import seed_receiving_actor, set_receiving_context
+from tests.domains.incoming.test_unit_acceptance import (
+    db_session as receiving_session_fixture,
+)
+from tests.domains.incoming.test_unit_acceptance import (
+    seed_receiving_actor,
+    set_receiving_context,
+)
 from tests.domains.pos.test_unit_cart import put_cart_item, seed_cart_draft
 from tests.domains.pos.test_unit_return import runtime
 
 db_session = receiving_session_fixture
 
 
-def migration() -> ModuleType:
-    source = Path(__file__).resolve().parents[2] / "alembic/versions/0170_unit_cart_intents.py"
-    spec = importlib.util.spec_from_file_location("unit_cart_migration", source)
+def migration(filename: str = "0170_unit_cart_intents.py") -> ModuleType:
+    source = Path(__file__).resolve().parents[2] / "alembic/versions" / filename
+    spec = importlib.util.spec_from_file_location(f"unit_cart_{source.stem}", source)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-async def test_unit_cart_empty_downgrade_roundtrip(maintenance_engine: AsyncEngine) -> None:
+async def test_unit_cart_empty_downgrade_roundtrip(
+    maintenance_engine: AsyncEngine,
+) -> None:
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         with Operations.context(MigrationContext.configure(connection)):
@@ -43,9 +50,13 @@ async def test_unit_cart_empty_downgrade_roundtrip(maintenance_engine: AsyncEngi
                     with connection.begin_nested():
                         migration().downgrade()
                 return
+            # Rehearse the actual dependency order: 0172 adds a scoped FK to
+            # unit cart rows even when both tables contain no unit intents.
+            migration("0172_unit_prescription_links.py").downgrade()
             migration().downgrade()
             assert connection.scalar(text("SELECT to_regclass('pos_unit_cart_item')")) is None
             migration().upgrade()
+            migration("0172_unit_prescription_links.py").upgrade()
             assert connection.scalar(text("""
                 SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
                 WHERE oid='pos_unit_cart_item'::regclass
@@ -123,7 +134,8 @@ async def test_draft_is_private_to_actual_cashier_and_tenant(
     await set_receiving_context(db_session, context.stock, other)
     assert (
         await db_session.scalar(
-            text("SELECT count(*) FROM pos_unit_cart_item WHERE id=:id"), {"id": item_id}
+            text("SELECT count(*) FROM pos_unit_cart_item WHERE id=:id"),
+            {"id": item_id},
         )
         == 0
     )
@@ -145,11 +157,13 @@ async def test_draft_is_private_to_actual_cashier_and_tenant(
             )
     await set_receiving_context(db_session, context.stock, context.actor_id)
     await db_session.execute(
-        text("SELECT set_config('app.tenant_id',:tenant,true)"), {"tenant": str(uuid4())}
+        text("SELECT set_config('app.tenant_id',:tenant,true)"),
+        {"tenant": str(uuid4())},
     )
     assert (
         await db_session.scalar(
-            text("SELECT count(*) FROM pos_unit_cart_item WHERE id=:id"), {"id": item_id}
+            text("SELECT count(*) FROM pos_unit_cart_item WHERE id=:id"),
+            {"id": item_id},
         )
         == 0
     )
@@ -183,7 +197,9 @@ async def test_payment_started_prevents_cart_creation(db_session: AsyncSession) 
             )
 
 
-async def test_removing_last_intent_restores_legacy_payment_path(db_session: AsyncSession) -> None:
+async def test_removing_last_intent_restores_legacy_payment_path(
+    db_session: AsyncSession,
+) -> None:
     sale = await seed_cart_draft(db_session)
     context = runtime(db_session)
     item_id = await put_cart_item(db_session, sale.id)
@@ -197,7 +213,8 @@ async def test_removing_last_intent_restores_legacy_payment_path(db_session: Asy
     )
     assert (
         await db_session.scalar(
-            text("SELECT count(*) FROM sale_payment WHERE sale_id=:sale"), {"sale": sale.id}
+            text("SELECT count(*) FROM sale_payment WHERE sale_id=:sale"),
+            {"sale": sale.id},
         )
         == 1
     )
