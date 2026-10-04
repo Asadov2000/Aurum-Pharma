@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import PermissionDeniedError
 from app.domains.catalog.models import TenantCatalog
-from app.domains.pos.models import POSPaymentAttempt, Sale, SalePayment, Shift
+from app.domains.pos.models import POSPaymentAttempt, Sale, SaleItem, SalePayment, Shift
 from app.domains.pos.unit_cart_models import UnitCartItem
 
 
@@ -106,6 +106,18 @@ class UnitCartRepository:
     async def save_item(self, item: UnitCartItem) -> None:
         self.session.add(item)
         await self.session.flush()
+
+    async def list_legacy_items(self, tenant_id: UUID, sale_id: UUID) -> tuple[SaleItem, ...]:
+        # The finalized-sale child guard locks Sale FOR SHARE for every write.
+        # The caller's Sale FOR UPDATE therefore protects both rows and inserts.
+        return tuple(
+            await self.session.scalars(
+                select(SaleItem)
+                .where(SaleItem.tenant_id == tenant_id, SaleItem.sale_id == sale_id)
+                .order_by(SaleItem.position, SaleItem.id)
+                .execution_options(populate_existing=True)
+            )
+        )
 
     async def delete_item(self, item: UnitCartItem) -> None:
         await self.session.delete(item)
