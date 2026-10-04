@@ -67,6 +67,8 @@ APPEND_ONLY_TABLES = {
     "customer_return_disposition",
     "customer_return_quarantine_item",
     "pos_command",
+    "pos_unit_sale_command",
+    "pos_unit_sale_line",
     "pos_refund_reference",
     "supplier_return",
     "sync_read_snapshot_chunk",
@@ -520,6 +522,8 @@ CUSTOM_FUNCTIONS = {
     "trg_unit_stock_cost_snapshot",
     "trg_unit_stock_entry_apply",
     "trg_unit_stock_guard",
+    "trg_pos_unit_line_guard",
+    "trg_pos_unit_line_complete",
     "trg_validate_edge_cash_node_identity",
     "trg_validate_customer_return_disposition_insert",
     "trg_validate_customer_return_quarantine_insert",
@@ -1072,6 +1076,15 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    names = {"trg_pos_unit_line_guard", "trg_pos_unit_line_complete"}
+    functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(functions) == names
+    assert all(not row["app_can_execute"] for row in functions.values())
+    assert all(not row["support_can_execute"] for row in functions.values())
+    assert {name for name, row in functions.items() if row["is_security_definer"]} == {
+        "trg_pos_unit_line_complete",
+        "trg_pos_unit_line_guard",
+    }
 
 
 @pytest_asyncio.fixture
