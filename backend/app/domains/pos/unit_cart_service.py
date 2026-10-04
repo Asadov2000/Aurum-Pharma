@@ -58,13 +58,14 @@ class UnitCartService:
     def __init__(self, repository: UnitCartRepository) -> None:
         self.repository = repository
 
-    async def _editable_sale(
+    async def lock_editable_sale(
         self,
         tenant_id: UUID,
         sale_id: UUID,
         actor_id: UUID,
         allowed_branch_ids: set[UUID],
     ) -> Sale:
+        """Lock the cashier's unpaid draft; the caller owns the transaction."""
         if not all(isinstance(value, UUID) for value in (tenant_id, sale_id, actor_id)):
             raise BusinessRuleError("Unit cart identifiers must be UUIDs")
         if not isinstance(allowed_branch_ids, set) or not all(
@@ -153,7 +154,7 @@ class UnitCartService:
                     "Unit cart discount must contain at most two decimal places"
                 )
         async with self.repository.session.begin_nested():
-            sale = await self._editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
+            sale = await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
             item = await self.repository.get_item(tenant_id, item_id)
             if item is not None and (
                 item.sale_id != sale_id
@@ -204,7 +205,7 @@ class UnitCartService:
         if not isinstance(item_id, UUID):
             raise BusinessRuleError("Unit cart item identifier must be a UUID")
         async with self.repository.session.begin_nested():
-            await self._editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
+            await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
             item = await self.repository.get_item(tenant_id, item_id)
             if item is None:
                 raise NotFoundError("Unit cart item not found")
@@ -221,7 +222,7 @@ class UnitCartService:
         allowed_branch_ids: set[UUID],
     ) -> tuple[UnitCartItemSnapshot, ...]:
         async with self.repository.session.begin_nested():
-            await self._editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
+            await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
             return tuple(
                 _snapshot(item) for item in await self.repository.list_items(tenant_id, sale_id)
             )
