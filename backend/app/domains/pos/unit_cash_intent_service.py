@@ -7,7 +7,13 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, ValidationError
 
-from app.core.errors import AurumError, BusinessRuleError, ConflictError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.domains.pos.unit_cart_quote import MixedCartQuoteV2
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cash_confirmation import (
@@ -37,6 +43,33 @@ class UnitCashIntentService:
     def __init__(self, repository: UnitCashIntentRepository) -> None:
         self.repository = repository
         self.cart_repository = UnitCartRepository(repository.session)
+
+    async def read_saved(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+        request: CashConfirmationRequestV2,
+    ) -> SavedCashIntentV2:
+        """Read existing evidence only; no creation or fresh-cart authorization."""
+        request = CashConfirmationRequestV2.model_validate(request)
+        if not all(isinstance(value, UUID) for value in (tenant_id, actor_id)):
+            raise BusinessRuleError("Cash confirmation scope must use UUIDs")
+        if not isinstance(allowed_branch_ids, set) or not all(
+            isinstance(branch, UUID) for branch in allowed_branch_ids
+        ):
+            raise BusinessRuleError("Allowed branches must be UUIDs")
+        await self.cart_repository.assert_actor(tenant_id, actor_id)
+        intent = await self.repository.get(tenant_id, request.operation_id)
+        if intent is None:
+            raise NotFoundError("Saved cash confirmation not found")
+        if intent.branch_id not in allowed_branch_ids or intent.cashier_user_id != actor_id:
+            raise PermissionDeniedError("Cash confirmation branch or cashier access denied")
+        await self.cart_repository.assert_actor(tenant_id, actor_id, intent.branch_id)
+        if intent.request_hash != cash_intent_request_hash(request):
+            raise ConflictError("Cash operation was already used for a different request")
+        return self._result(intent, request)
 
     async def save(
         self,
