@@ -173,13 +173,18 @@ async def test_concurrent_same_command_applies_once(
     committed_ledger: tuple[async_sessionmaker[AsyncSession], LedgerContext],
 ) -> None:
     factory, context = committed_ledger
-    operation_id = uuid4()
-    first, second = await asyncio.gather(
-        concurrent_dispense(factory, context, operation_id, 1),
-        concurrent_dispense(factory, context, operation_id, 1),
-    )
-    assert first == second
-    assert not isinstance(first, UnitStockShortage)
+    # Exercise both unique indexes across repeated concurrent command claims.
+    rounds = 8
+    for _ in range(rounds):
+        operation_id = uuid4()
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(concurrent_dispense(factory, context, operation_id, 1) for _ in range(8))
+            ),
+            timeout=15,
+        )
+        assert all(result == results[0] for result in results)
+        assert not isinstance(results[0], UnitStockShortage)
     async with factory.begin() as session:
         assert (
             await session.scalar(
@@ -189,7 +194,54 @@ async def test_concurrent_same_command_applies_once(
                 ),
                 {"tenant": context.tenant_id},
             )
-            == 29
+            == 30 - rounds
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM unit_stock_operation "
+                    "WHERE tenant_id = :tenant AND kind = 'dispense'"
+                ),
+                {"tenant": context.tenant_id},
+            )
+            == rounds
+        )
+
+
+async def test_concurrent_command_rejects_changed_quantity(
+    committed_ledger: tuple[async_sessionmaker[AsyncSession], LedgerContext],
+) -> None:
+    factory, context = committed_ledger
+    operation_id = uuid4()
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            *(
+                concurrent_dispense(factory, context, operation_id, quantity)
+                for quantity in (1, 2) * 4
+            ),
+            return_exceptions=True,
+        ),
+        timeout=15,
+    )
+    assert sum(isinstance(result, ConflictError) for result in results) == 4
+    successful = [result for result in results if not isinstance(result, Exception)]
+    assert len(successful) == 4
+    assert all(result == successful[0] for result in successful)
+    async with factory.begin() as session:
+        quantity = await session.scalar(
+            text("SELECT quantity FROM unit_stock_operation WHERE tenant_id=:tenant AND id=:id"),
+            {"tenant": context.tenant_id, "id": operation_id},
+        )
+        assert quantity in (1, 2)
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT sum(remaining_units) FROM unit_stock_opened_pack "
+                    "WHERE tenant_id=:tenant"
+                ),
+                {"tenant": context.tenant_id},
+            )
+            == 30 - quantity
         )
 
 

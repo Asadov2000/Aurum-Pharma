@@ -532,6 +532,8 @@ CUSTOM_FUNCTIONS = {
     "trg_reject_billing_pricing_event_mutation",
     "trg_reject_immutable_billing_financial_mutation",
     "trg_guard_batch_qty_ledger",
+    "trg_guard_batch_unit_packaging_preparation",
+    "trg_validate_incoming_unit_packaging_preparation",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -1049,6 +1051,27 @@ def _assert_unit_stock_function_privileges(rows: list[RowMapping]) -> None:
     }
 
 
+def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> None:
+    names = {
+        "trg_guard_batch_unit_packaging_preparation",
+        "trg_validate_incoming_unit_packaging_preparation",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(functions) == names
+    for row in functions.values():
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
+    assert {name for name, row in functions.items() if row["is_security_definer"]} == {
+        "trg_validate_incoming_unit_packaging_preparation"
+    }
+
+
+def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
+    _assert_unit_stock_function_privileges(rows)
+    _assert_incoming_packaging_function_privileges(rows)
+
+
 @pytest_asyncio.fixture
 async def support_engine_privileges() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(get_settings().DATABASE_URL_SUPPORT, poolclass=NullPool)
@@ -1132,7 +1155,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
-    _assert_unit_stock_function_privileges(function_privileges)
+    _assert_prepared_stock_function_privileges(function_privileges)
     assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {
         (row["extname"], row["signature"]) for row in extension_privileges if row["app_can_execute"]

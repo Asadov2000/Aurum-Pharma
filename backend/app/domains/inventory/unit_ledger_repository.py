@@ -51,7 +51,10 @@ class UnitLedgerRepository:
                 created_by=operation.created_by,
                 updated_by=operation.updated_by,
             )
-            .on_conflict_do_nothing(index_elements=["tenant_id", "id"])
+            # The scoped FK adds a second unique index containing the command
+            # identity. Arbitrate both indexes so simultaneous retries cannot
+            # raise a uniqueness error on the otherwise non-arbiter index.
+            .on_conflict_do_nothing()
             .returning(UnitStockOperation)
         )
         claimed = (await self.session.execute(statement)).scalar_one_or_none()

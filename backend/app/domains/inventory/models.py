@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -42,6 +43,9 @@ class Batch(Base):
     sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     qty_initial: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_packaging_preparation: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     qty_remaining: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     block_reason: Mapped[str | None] = mapped_column(Text)

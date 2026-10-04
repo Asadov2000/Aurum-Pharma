@@ -87,6 +87,9 @@ class IncomingItem(Base):
     manufactured_at: Mapped[date | None] = mapped_column(Date)
     expires_at: Mapped[date] = mapped_column(Date, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_packaging_preparation: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
