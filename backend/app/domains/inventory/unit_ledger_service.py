@@ -18,6 +18,8 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.time import utc_now
 from app.domains.catalog.unit_sales import MAX_BASE_UNITS, SaleFormat, UnitSalePreparation
+from app.domains.incoming.models import IncomingDocument, IncomingItem
+from app.domains.incoming.unit_preparation import validate_prepared_pack_quantity
 from app.domains.inventory.unit_ledger_models import (
     UnitStockEntry,
     UnitStockLot,
@@ -130,6 +132,129 @@ class PreparedUnitLedgerService:
 
     def __init__(self, repo: UnitLedgerRepository) -> None:
         self.repo = repo
+
+    async def _incoming_source(
+        self, item_id: UUID, actor_id: UUID, allowed_branch_ids: set[UUID]
+    ) -> tuple[IncomingItem, IncomingDocument, UnitPackaging]:
+        source = await self.repo.incoming_source(item_id, actor_id)
+        if source is None:
+            raise NotFoundError("Prepared incoming source not found")
+        item, document = source
+        _assert_branch(document.branch_id, allowed_branch_ids)
+        if (
+            document.status != "draft"
+            or item.tenant_id != document.tenant_id
+            or item.created_batch_id is not None
+            or item.created_unit_lot_id is not None
+            or item.unit_packaging_preparation is None
+            or item.currency != "TJS"
+            or document.currency != "TJS"
+        ):
+            raise BusinessRuleError("Unit initialization requires an unclaimed prepared draft item")
+        packaging = UnitPackaging.model_validate(item.unit_packaging_preparation)
+        validate_prepared_pack_quantity(packaging, item.qty)
+        allocate_unit_amount(item.purchase_price, total_units=1, offset=0, quantity=1)
+        return item, document, packaging
+
+    async def _claim_incoming_lot(
+        self, item_id: UUID, *, actor_id: UUID, allowed_branch_ids: set[UUID]
+    ) -> UUID:
+        """Claim a fresh source command before any catalog locks are acquired."""
+        item, document, packaging = await self._incoming_source(
+            item_id, actor_id, allowed_branch_ids
+        )
+        operation_id = uuid5(NAMESPACE_URL, f"aurum-unit-incoming:{item.tenant_id}:{item.id}")
+        _, created = await self._claim(
+            tenant_id=item.tenant_id,
+            branch_id=document.branch_id,
+            catalog_id=item.catalog_id,
+            operation_id=operation_id,
+            packaging=packaging,
+            kind="initialize",
+            sale_format="pack",
+            quantity=int(item.qty),
+            expires_at=item.expires_at,
+            purchase_cost_per_pack=item.purchase_price,
+        )
+        if not created:
+            raise ConflictError("Prepared incoming source command was already claimed")
+        return operation_id
+
+    async def _prepare_incoming_lot(
+        self, item_id: UUID, *, actor_id: UUID, allowed_branch_ids: set[UUID]
+    ) -> PreparedLotResult:
+        """Initialize from the locked saved source, never from current catalog shape.
+
+        The incoming service first claims every command and locks all catalog
+        references in UUID order. Database provenance guards require the source
+        document to be accepted before the caller commits its transaction.
+        """
+        item, document, packaging = await self._incoming_source(
+            item_id, actor_id, allowed_branch_ids
+        )
+        operation_id = uuid5(NAMESPACE_URL, f"aurum-unit-incoming:{item.tenant_id}:{item.id}")
+        operation = await self.repo.get_operation(item.tenant_id, operation_id)
+        expected_hash = _fingerprint(
+            tenant_id=item.tenant_id,
+            branch_id=document.branch_id,
+            catalog_id=item.catalog_id,
+            packaging=packaging,
+            kind="initialize",
+            sale_format="pack",
+            quantity=int(item.qty),
+            expires_at=item.expires_at,
+            purchase_cost_per_pack=item.purchase_price,
+        )
+        if (
+            operation is None
+            or operation.request_hash != expected_hash
+            or await self.repo.get_entries(item.tenant_id, operation_id)
+        ):
+            raise ConflictError("Prepared incoming requires a fresh matching source command")
+        lot_id = uuid5(NAMESPACE_URL, f"aurum-unit-lot:{item.tenant_id}:{operation_id}")
+        await self.repo.insert_lot(
+            UnitStockLot(
+                id=lot_id,
+                tenant_id=item.tenant_id,
+                branch_id=document.branch_id,
+                catalog_id=item.catalog_id,
+                state="prepared",
+                version=packaging.version,
+                unit=packaging.unit,
+                units_per_pack=packaging.units_per_pack,
+                dispense_step=packaging.dispense_step,
+                expires_at=item.expires_at,
+                is_blocked=False,
+                closed_packs=0,
+                initial_closed_packs=int(item.qty),
+                purchase_cost_per_pack=item.purchase_price,
+                cost_version=1,
+                created_by=actor_id,
+            )
+        )
+        # Bind while there is no initialization: an existing initialized lot
+        # can never be appropriated as the provenance of a new incoming item.
+        item.created_unit_lot_id = lot_id
+        await self.repo.session.flush()
+        await self.repo.insert_entry(
+            UnitStockEntry(
+                id=uuid4(),
+                tenant_id=item.tenant_id,
+                branch_id=document.branch_id,
+                catalog_id=item.catalog_id,
+                operation_id=operation_id,
+                lot_id=lot_id,
+                pack_id=None,
+                kind="initialize",
+                entry_order=0,
+                closed_delta=int(item.qty),
+                opened_delta=0,
+                units_delta=operation.base_units,
+                pack_remaining_after=0,
+                created_by=actor_id,
+            )
+        )
+        return PreparedLotResult(operation_id, lot_id, operation.base_units)
 
     async def _claim(
         self,

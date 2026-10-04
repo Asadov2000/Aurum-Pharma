@@ -94,6 +94,8 @@ class IncomingItem(Base):
     sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     created_batch_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Scoped cross-domain FK and uniqueness are enforced by migration 0166.
+    created_unit_lot_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -103,6 +105,10 @@ class IncomingItem(Base):
 
     __table_args__ = (
         CheckConstraint("qty > 0", name="ck_ii_qty"),
+        CheckConstraint(
+            "created_unit_lot_id IS NULL OR created_batch_id IS NULL",
+            name="ck_incoming_item_stock_source",
+        ),
         CheckConstraint("purchase_price >= 0", name="ck_ii_purchase_price"),
         CheckConstraint("sale_price >= 0", name="ck_ii_sale_price"),
         CheckConstraint(

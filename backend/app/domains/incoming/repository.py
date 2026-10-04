@@ -190,6 +190,7 @@ class IncomingRepository:
         branch_id: UUID,
         supplier_id: UUID,
         catalog_ids: set[UUID],
+        prepared_units: bool = False,
     ) -> tuple[Branch | None, Supplier | None, list[TenantCatalog]]:
         # Match branch lifecycle's tenant -> branch order before batch FK checks.
         await self.session.execute(
@@ -216,7 +217,7 @@ class IncomingRepository:
                 TenantCatalog.id.in_(sorted(catalog_ids, key=str)),
             )
             .order_by(TenantCatalog.id.asc())
-            .with_for_update(read=True)
+            .with_for_update(read=not prepared_units, key_share=prepared_units)
             .execution_options(populate_existing=True)
         )
         branch = (await self.session.execute(branch_stmt)).scalar_one_or_none()

@@ -212,6 +212,10 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "unit_incoming_uuid5",
+    "assert_unit_incoming_provenance",
+    "trg_unit_incoming_binding",
+    "trg_unit_incoming_complete",
     "command_staff_pay",
     "staff_pay_can_read",
     "staff_pay_employees",
@@ -1076,6 +1080,21 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    incoming_names = {
+        "unit_incoming_uuid5",
+        "assert_unit_incoming_provenance",
+        "trg_unit_incoming_binding",
+        "trg_unit_incoming_complete",
+        "trg_guard_incoming_document_lifecycle",
+        "trg_validate_incoming_acceptance_integrity",
+    }
+    incoming_functions = {row["proname"]: row for row in rows if row["proname"] in incoming_names}
+    assert set(incoming_functions) == incoming_names
+    for row in incoming_functions.values():
+        assert row["is_security_definer"] is True
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
     names = {"trg_pos_unit_line_guard", "trg_pos_unit_line_complete"}
     functions = {row["proname"]: row for row in rows if row["proname"] in names}
     assert set(functions) == names

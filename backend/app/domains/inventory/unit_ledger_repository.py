@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import PermissionDeniedError
 from app.domains.catalog.models import TenantCatalog
+from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.inventory.unit_ledger_models import (
     UnitStockEntry,
     UnitStockLot,
@@ -21,6 +22,57 @@ from app.domains.inventory.unit_ledger_models import (
 class UnitLedgerRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def incoming_source(
+        self, item_id: UUID, actor_id: UUID
+    ) -> tuple[IncomingItem, IncomingDocument] | None:
+        """Read a real source under tenant RLS, with an explicit current actor."""
+        if not isinstance(actor_id, UUID):
+            raise PermissionDeniedError("An authenticated actor is required")
+        actor_matches = await self.session.scalar(
+            text("SELECT current_user = 'aurum_app' AND public.current_app_user_id() = :actor"),
+            {"actor": actor_id},
+        )
+        if actor_matches is not True:
+            raise PermissionDeniedError("Prepared receiving requires the application actor context")
+        row = (
+            await self.session.execute(
+                select(IncomingItem, IncomingDocument)
+                .join(IncomingDocument, IncomingDocument.id == IncomingItem.document_id)
+                .where(IncomingItem.id == item_id)
+                .with_for_update(of=IncomingItem)
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        item, document = row
+        await self.assert_incoming_actor(document.tenant_id, document.branch_id, actor_id)
+        return item, document
+
+    async def assert_incoming_actor(self, tenant_id: UUID, branch_id: UUID, actor_id: UUID) -> None:
+        if not isinstance(actor_id, UUID):
+            raise PermissionDeniedError("An authenticated actor is required")
+        authorized = await self.session.scalar(
+            text(
+                "SELECT current_user = 'aurum_app' AND public.current_app_user_id() = :actor "
+                "AND public.current_tenant_id() = :tenant AND "
+                "public.tenant_actor_has_scoped_permission(:tenant, 'incoming.finalize', :branch)"
+            ),
+            {"tenant": tenant_id, "branch": branch_id, "actor": actor_id},
+        )
+        if authorized is not True:
+            raise PermissionDeniedError("Prepared receiving permission denied")
+
+    async def get_operation(self, tenant_id: UUID, operation_id: UUID) -> UnitStockOperation | None:
+        return (
+            await self.session.scalars(
+                select(UnitStockOperation).where(
+                    UnitStockOperation.tenant_id == tenant_id,
+                    UnitStockOperation.id == operation_id,
+                )
+            )
+        ).one_or_none()
 
     async def claim_operation(
         self, operation: UnitStockOperation
