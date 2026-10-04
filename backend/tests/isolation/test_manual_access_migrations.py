@@ -43,14 +43,17 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "unit_stock_lot",
             "unit_stock_opened_pack",
             "unit_stock_entry",
+            "pos_unit_sale_command",
+            "pos_unit_sale_line",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162. Preserve committed history and every immutable/audit guard.
+        # 0160/0162/0165. Preserve committed history and every immutable/audit guard.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
               public.staff_pay_revision, public.unit_stock_operation,
               public.unit_stock_lot, public.unit_stock_opened_pack,
-              public.unit_stock_entry IN ACCESS EXCLUSIVE MODE
+              public.unit_stock_entry, public.pos_unit_sale_command,
+              public.pos_unit_sale_line IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
             SELECT c.relname, t.tgname, t.tgenabled::text AS tgenabled,
@@ -60,7 +63,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             WHERE t.tgrelid IN ('public.staff_pay_period'::regclass,
               'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass,
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
-              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass)
+              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
+              'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -69,7 +73,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             FROM pg_class WHERE oid IN ('public.staff_pay_period'::regclass,
               'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass,
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
-              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass)
+              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
+              'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -78,7 +83,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             FROM pg_policy WHERE polrelid IN ('public.staff_pay_period'::regclass,
               'public.staff_pay_entry'::regclass, 'public.staff_pay_revision'::regclass,
               'public.unit_stock_operation'::regclass, 'public.unit_stock_lot'::regclass,
-              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass)
+              'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
+              'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()

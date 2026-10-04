@@ -274,6 +274,7 @@ class PreparedUnitLedgerService:
         quantity: int,
         today: date,
         allowed_branch_ids: set[UUID],
+        require_new_operation: bool = False,
     ) -> CommittedUnitStockResult:
         """Record only prepared stock; live POS/Edge must not call this core yet."""
         _assert_branch(branch_id, allowed_branch_ids)
@@ -288,6 +289,8 @@ class PreparedUnitLedgerService:
                 sale_format=sale_format,
                 quantity=quantity,
             )
+            if require_new_operation and not created:
+                raise ConflictError("Stock operation was already recorded")
             if created:
                 await self._record_dispense(operation, packaging, today)
             return await self._result(operation)

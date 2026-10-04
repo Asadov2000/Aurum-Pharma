@@ -850,7 +850,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 164 THEN
+        IF revision_number < 1 OR revision_number > 165 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -911,6 +911,10 @@ BEGIN
     IF pg_catalog.to_regprocedure('public.gen_random_uuid()') IS NOT NULL THEN
         GRANT EXECUTE ON FUNCTION public.gen_random_uuid()
             TO aurum_app, aurum_support, aurum_schema_owner;
+    END IF;
+    IF pg_catalog.to_regprocedure('public.digest(bytea,text)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.digest(BYTEA, TEXT)
+            TO aurum_schema_owner;
     END IF;
     IF pg_catalog.to_regprocedure('public.pgp_sym_encrypt(text,text)') IS NOT NULL THEN
         GRANT EXECUTE ON FUNCTION public.pgp_sym_encrypt(TEXT, TEXT)
