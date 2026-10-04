@@ -42,6 +42,8 @@ from app.domains.incoming.repository import (
 )
 from app.domains.incoming.unit_preparation import validate_prepared_pack_quantity
 from app.domains.inventory.repository import InventoryRepository
+from app.domains.inventory.unit_ledger_repository import UnitLedgerRepository
+from app.domains.inventory.unit_ledger_service import PreparedUnitLedgerService
 from app.domains.inventory.unit_stock import UnitPackaging
 from app.domains.suppliers.models import Supplier
 
@@ -341,6 +343,10 @@ class IncomingService:
             raise NotFoundError("Incoming document not found")
         self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
         if doc.status == "accepted":
+            if any(
+                item.created_unit_lot_id is not None for item in await self.repo.list_items(doc.id)
+            ):
+                raise ConflictError("Incoming document was accepted into prepared unit stock")
             return doc
         self._assert_draft(doc)
         if await self.repo.count_draft_rows(document_id):
@@ -415,6 +421,67 @@ class IncomingService:
         )
         logger.info("incoming_accepted", document_id=str(doc.id), items=len(items))
         return doc
+
+    async def accept_prepared(
+        self,
+        document_id: UUID,
+        *,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+    ) -> IncomingDocument:
+        """Internal all-unit receiving; no legacy batch or movement is created.
+
+        A savepoint makes the entire document atomic on failure. The caller owns
+        the outer commit, including deferred provenance checks. No HTTP caller
+        is connected until read-side and subsequent operations support units.
+        """
+        if not isinstance(actor_id, UUID) or not isinstance(allowed_branch_ids, set):
+            raise PermissionDeniedError("Prepared receiving requires actor and branch scope")
+        async with self.repo.session.begin_nested():
+            doc = await self.repo.get_document_for_update(document_id)
+            if doc is None:
+                raise NotFoundError("Incoming document not found")
+            self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
+            ledger_repo = UnitLedgerRepository(self.repo.session)
+            await ledger_repo.assert_incoming_actor(doc.tenant_id, doc.branch_id, actor_id)
+            items = await self.repo.list_items(doc.id)
+            if doc.status == "accepted":
+                if not items or any(item.created_unit_lot_id is None for item in items):
+                    raise ConflictError("Incoming document was accepted into legacy pack stock")
+                return doc
+            self._assert_draft(doc)
+            if await self.repo.count_draft_rows(doc.id):
+                raise BusinessRuleError("Resolve pending draft rows before prepared receiving")
+            if not items:
+                raise BusinessRuleError("Cannot accept a document with no items")
+            settings = await FoundationRepository(self.repo.session).get_settings(doc.tenant_id)
+            timezone_name = settings.report_timezone if settings is not None else "Asia/Dushanbe"
+            try:
+                today = utc_now().astimezone(ZoneInfo(timezone_name)).date()
+            except (ValueError, ZoneInfoNotFoundError) as exc:
+                raise AurumError("Tenant report timezone is invalid") from exc
+            ledger = PreparedUnitLedgerService(ledger_repo)
+            # All command identities precede catalog locks, including documents
+            # whose lines contain the same catalog item in different orders.
+            ordered_items = sorted(items, key=lambda item: str(item.id))
+            for item in ordered_items:
+                self._assert_item_dates(
+                    manufactured_at=item.manufactured_at, expires_at=item.expires_at
+                )
+                if item.expires_at <= today:
+                    raise BusinessRuleError("Prepared incoming item must expire in the future")
+                await ledger._claim_incoming_lot(
+                    item.id, actor_id=actor_id, allowed_branch_ids=allowed_branch_ids
+                )
+            await self._assert_acceptance_refs_available(doc=doc, items=items, prepared_units=True)
+            for item in ordered_items:
+                await ledger._prepare_incoming_lot(
+                    item.id, actor_id=actor_id, allowed_branch_ids=allowed_branch_ids
+                )
+            await self.repo.update_document(
+                doc, status="accepted", accepted_at=utc_now(), accepted_by=actor_id
+            )
+            return doc
 
     async def reject(
         self,
@@ -567,12 +634,14 @@ class IncomingService:
         *,
         doc: IncomingDocument,
         items: list[IncomingItem],
+        prepared_units: bool = False,
     ) -> None:
         branch, supplier, catalog_items = await self.repo.get_acceptance_references_for_update(
             tenant_id=doc.tenant_id,
             branch_id=doc.branch_id,
             supplier_id=doc.supplier_id,
             catalog_ids={item.catalog_id for item in items},
+            prepared_units=prepared_units,
         )
         if branch is None:
             raise NotFoundError("Branch not found")
