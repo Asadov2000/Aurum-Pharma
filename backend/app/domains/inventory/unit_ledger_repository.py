@@ -77,6 +77,8 @@ class UnitLedgerRepository:
         self.session.add(entry)
         await self.session.flush()
 
+        await self.session.refresh(entry)
+
     async def get_entries(self, tenant_id: UUID, operation_id: UUID) -> list[UnitStockEntry]:
         rows = await self.session.scalars(
             select(UnitStockEntry)

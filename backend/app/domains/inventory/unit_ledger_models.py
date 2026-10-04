@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -61,12 +72,17 @@ class UnitStockLot(StockIdentity, PackagingSnapshot, Base):
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     closed_packs: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
 
+    initial_closed_packs: Mapped[int | None] = mapped_column(BigInteger)
+    purchase_cost_per_pack: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    cost_version: Mapped[int | None] = mapped_column(Integer)
+
 
 class UnitStockOpenedPack(StockIdentity, Base):
     __tablename__ = "unit_stock_opened_pack"
     __table_args__ = (UniqueConstraint("tenant_id", "id", "lot_id"),)
 
     lot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    pack_ordinal: Mapped[int | None] = mapped_column(BigInteger)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -88,3 +104,11 @@ class UnitStockEntry(StockIdentity, Base):
     opened_delta: Mapped[int] = mapped_column(BigInteger, nullable=False)
     units_delta: Mapped[int] = mapped_column(BigInteger, nullable=False)
     pack_remaining_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    cost_pack_ordinal_start: Mapped[int | None] = mapped_column(BigInteger)
+    cost_pack_count: Mapped[int | None] = mapped_column(BigInteger)
+    cost_unit_offset: Mapped[int | None] = mapped_column(BigInteger)
+    cost_base_units: Mapped[int | None] = mapped_column(BigInteger)
+    cost_original_pack_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    cost_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    cost_version: Mapped[int | None] = mapped_column(Integer)
