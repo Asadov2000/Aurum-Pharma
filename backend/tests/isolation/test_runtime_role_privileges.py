@@ -212,6 +212,8 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "unit_lot_has_received_source",
+    "trg_unit_received_stock_complete",
     "unit_incoming_uuid5",
     "assert_unit_incoming_provenance",
     "trg_unit_incoming_binding",
@@ -555,6 +557,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "unit_lot_has_received_source",
     "command_staff_pay",
     "staff_pay_can_read",
     "staff_pay_employees",
@@ -1080,6 +1083,20 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    received_functions = {
+        row["proname"]: row
+        for row in rows
+        if row["proname"] in {"unit_lot_has_received_source", "trg_unit_received_stock_complete"}
+    }
+    assert set(received_functions) == {
+        "unit_lot_has_received_source",
+        "trg_unit_received_stock_complete",
+    }
+    for name, row in received_functions.items():
+        assert row["is_security_definer"] is True
+        assert row["app_can_execute"] is (name == "unit_lot_has_received_source")
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
     incoming_names = {
         "unit_incoming_uuid5",
         "assert_unit_incoming_provenance",
