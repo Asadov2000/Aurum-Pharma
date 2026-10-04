@@ -516,6 +516,8 @@ CUSTOM_FUNCTIONS = {
     "trg_set_updated_meta",
     "trg_update_batch_qty",
     "trg_unit_stock_complete",
+    "trg_unit_stock_cost_identity",
+    "trg_unit_stock_cost_snapshot",
     "trg_unit_stock_entry_apply",
     "trg_unit_stock_guard",
     "trg_validate_edge_cash_node_identity",
@@ -1033,20 +1035,20 @@ def _assert_unit_stock_column_privileges(rows: list[RowMapping]) -> None:
 
 
 def _assert_unit_stock_function_privileges(rows: list[RowMapping]) -> None:
-    unit_stock_functions = {
-        row["proname"]: row
-        for row in rows
-        if row["proname"]
-        in {"trg_unit_stock_complete", "trg_unit_stock_entry_apply", "trg_unit_stock_guard"}
-    }
-    assert set(unit_stock_functions) == {
+    names = {
         "trg_unit_stock_complete",
+        "trg_unit_stock_cost_identity",
+        "trg_unit_stock_cost_snapshot",
         "trg_unit_stock_entry_apply",
         "trg_unit_stock_guard",
     }
+    unit_stock_functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(unit_stock_functions) == names
+    assert all(not row["app_can_execute"] for row in unit_stock_functions.values())
     assert all(not row["support_can_execute"] for row in unit_stock_functions.values())
     assert {name for name, row in unit_stock_functions.items() if row["is_security_definer"]} == {
         "trg_unit_stock_complete",
+        "trg_unit_stock_cost_snapshot",
         "trg_unit_stock_entry_apply",
     }
 
