@@ -23,6 +23,7 @@ const integer = (minimum: number) =>
 
 const schema = z
   .object({
+    sale_mode: z.enum(["single", "portions", "packs"]),
     unit: z.enum(["tablet", "capsule", "ampoule", "sachet", "suppository"]),
     units_per_pack: integer(2),
     dispense_step: integer(1),
@@ -44,9 +45,28 @@ const schema = z
         message: "Упаковка должна делиться на это количество без остатка",
       });
     }
+    if (values.sale_mode === "portions" && step >= pack) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dispense_step"],
+        message: "Для продажи по несколько штук выберите количество меньше целой упаковки",
+      });
+    }
   });
 
 type Values = z.infer<typeof schema>;
+const quantityNames: Record<Values["unit"], readonly [string, string, string]> = {
+  tablet: ["таблетка", "таблетки", "таблеток"],
+  capsule: ["капсула", "капсулы", "капсул"],
+  ampoule: ["ампула", "ампулы", "ампул"],
+  sachet: ["саше", "саше", "саше"],
+  suppository: ["суппозиторий", "суппозитория", "суппозиториев"],
+};
+const quantityPlural = new Intl.PluralRules("ru");
+function describeQuantity(quantity: number, unit: Values["unit"]): string {
+  const plural = quantityPlural.select(quantity);
+  return `${quantity} ${quantityNames[unit][plural === "one" ? 0 : plural === "few" ? 1 : 2]}`;
+}
 interface Props {
   itemId: string;
   onClose: () => void;
@@ -106,6 +126,12 @@ function PreparationForm({
   const [error, setError] = useState<string | null>(null);
   const form = useForm<Values>({
     defaultValues: {
+      sale_mode:
+        saved && saved.dispense_step !== 1
+          ? saved.dispense_step === saved.units_per_pack
+            ? "packs"
+            : "portions"
+          : "single",
       unit: saved?.unit ?? "tablet",
       units_per_pack: saved ? String(saved.units_per_pack) : "",
       dispense_step: saved ? String(saved.dispense_step) : "1",
@@ -114,13 +140,14 @@ function PreparationForm({
   });
   const busy = update.isPending || form.formState.isSubmitting;
   const packValue = form.watch("units_per_pack").trim();
+  const saleMode = form.watch("sale_mode");
   const stepValue = form.watch("dispense_step");
   const pack = Number(packValue);
   const validPack = /^[1-9]\d{0,4}$/.test(packValue) && pack >= 2 && pack <= 10_000;
   const popularSteps = [2, 5, 10, 20, 30, 50, 100];
   const steps = validPack
     ? Array.from({ length: pack - 1 }, (_, index) => index + 2)
-        .filter((step) => pack % step === 0)
+        .filter((step) => step < pack && pack % step === 0)
         .sort((left, right) => {
           const leftRank = popularSteps.indexOf(left);
           const rightRank = popularSteps.indexOf(right);
@@ -130,8 +157,14 @@ function PreparationForm({
           return left - right;
         })
     : [];
-  const step = Number(stepValue);
-  const unavailableStep = stepValue !== "1" && !steps.includes(step);
+  const step = saleMode === "single" ? 1 : saleMode === "packs" ? pack : Number(stepValue);
+  const unavailableStep = saleMode === "portions" && stepValue !== "" && !steps.includes(step);
+  const unit = form.watch("unit");
+  const chooseMode = (mode: Values["sale_mode"]): void => {
+    form.setValue("sale_mode", mode, { shouldDirty: true });
+    form.setValue("dispense_step", mode === "single" ? "1" : "", { shouldDirty: true });
+    form.clearErrors("dispense_step");
+  };
 
   async function persist(preparation: UnitSalePreparation | null): Promise<void> {
     setError(null);
@@ -150,7 +183,15 @@ function PreparationForm({
 
   const submit = form.handleSubmit(async (values) => {
     form.clearErrors();
-    const parsed = schema.safeParse(values);
+    const parsed = schema.safeParse({
+      ...values,
+      dispense_step:
+        values.sale_mode === "single"
+          ? "1"
+          : values.sale_mode === "packs"
+            ? values.units_per_pack.trim()
+            : values.dispense_step,
+    });
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         form.setError(issue.path[0] as keyof Values, { message: issue.message });
@@ -205,7 +246,7 @@ function PreparationForm({
             <FormError>{form.formState.errors.unit?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="unit-preparation-pack">Единиц в упаковке</Label>
+            <Label htmlFor="unit-preparation-pack">Сколько штук в упаковке?</Label>
             <Input
               id="unit-preparation-pack"
               inputMode="numeric"
@@ -215,45 +256,102 @@ function PreparationForm({
             />
             <FormError>{form.formState.errors.units_per_pack?.message}</FormError>
           </div>
-          <div>
-            <Label htmlFor="unit-preparation-step">Продавать по, шт.</Label>
-            <Select
-              id="unit-preparation-step"
-              value={stepValue}
-              aria-describedby="unit-preparation-step-help"
-              aria-invalid={Boolean(form.formState.errors.dispense_step)}
-              {...form.register("dispense_step")}
-            >
-              <option value="1">Поштучно — любое количество</option>
-              {steps.map((quantity) => (
-                <option key={quantity} value={String(quantity)}>
-                  {quantity === pack ? `Целая упаковка — ${quantity} шт.` : `По ${quantity} шт.`}
-                </option>
-              ))}
-              {unavailableStep && (
-                <option value={stepValue}>По {stepValue} шт. — проверьте размер упаковки</option>
-              )}
-            </Select>
+          <fieldset className="space-y-3 sm:col-span-2">
+            <legend className="mb-2 text-sm font-medium">Как продавать лекарство</legend>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {(
+                [
+                  ["single", "Поштучно", "Любое целое количество: 1, 2, 3 штуки и больше."],
+                  [
+                    "portions",
+                    "По несколько штук",
+                    "Например, по 5 или 10 штук. Количество выбираете вы.",
+                  ],
+                  [
+                    "packs",
+                    "Только целыми упаковками",
+                    "Упаковка не делится: можно продать 1, 2, 3 упаковки.",
+                  ],
+                ] as const
+              ).map(([mode, title, description]) => {
+                const disabled =
+                  mode !== "single" && (!validPack || (mode === "portions" && steps.length === 0));
+                return (
+                  <label
+                    key={mode}
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 ${saleMode === mode ? "border-primary bg-primary/5" : "border-input bg-surface"} ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                  >
+                    <input
+                      type="radio"
+                      value={mode}
+                      checked={saleMode === mode}
+                      disabled={disabled}
+                      aria-label={title}
+                      className="mt-1 shrink-0 accent-primary"
+                      {...form.register("sale_mode")}
+                      onChange={() => chooseMode(mode)}
+                    />
+                    <span>
+                      <span className="block text-sm font-medium">{title}</span>
+                      <span className="mt-1 block text-xs text-foreground-muted">
+                        {description}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {saleMode === "portions" && (
+              <div>
+                <Label htmlFor="unit-preparation-step">Сколько штук в одной порции?</Label>
+                <Select
+                  id="unit-preparation-step"
+                  value={stepValue}
+                  aria-describedby="unit-preparation-step-help"
+                  aria-invalid={Boolean(form.formState.errors.dispense_step)}
+                  {...form.register("dispense_step")}
+                >
+                  <option value="">Выберите количество</option>
+                  {steps.map((quantity) => (
+                    <option key={quantity} value={String(quantity)}>
+                      По {quantity} шт.
+                    </option>
+                  ))}
+                  {unavailableStep && (
+                    <option value={stepValue}>
+                      По {stepValue} шт. — проверьте размер упаковки
+                    </option>
+                  )}
+                </Select>
+              </div>
+            )}
             <p id="unit-preparation-step-help" className="mt-1 text-xs text-foreground-muted">
               {!validPack
-                ? "Сначала укажите, сколько штук в упаковке — появятся подходящие варианты."
+                ? "Сначала укажите, сколько штук в упаковке — станут доступны остальные способы продажи."
                 : unavailableStep
                   ? "Выбранное количество не подходит для этой упаковки. Выберите другой вариант."
-                  : step === 1
-                    ? "Можно продать 1, 2, 3 штуки и больше."
-                    : `Можно продать только ${step}, ${step * 2}, ${step * 3} штук и так далее.`}
+                  : saleMode === "portions" && stepValue === ""
+                    ? "Выберите количество. Размер блистера нужно указать самостоятельно — система его не угадывает."
+                    : `В упаковке: ${describeQuantity(pack, unit)}. Можно продать: ${step}, ${step * 2}, ${step * 3} шт. и так далее.`}
+              {validPack &&
+                steps.length === 0 &&
+                " Эта упаковка не делится на равные части по несколько штук."}
             </p>
             <FormError>{form.formState.errors.dispense_step?.message}</FormError>
-          </div>
+          </fieldset>
           <div>
             <Label htmlFor="unit-preparation-price">Цена одной единицы, TJS</Label>
             <Input
               id="unit-preparation-price"
               inputMode="decimal"
               placeholder="Например, 1,50"
+              aria-describedby="unit-preparation-price-help"
               aria-invalid={Boolean(form.formState.errors.unit_price)}
               {...form.register("unit_price")}
             />
+            <p id="unit-preparation-price-help" className="mt-1 text-xs text-foreground-muted">
+              Цена за одну штуку, даже если продаёте по несколько штук или целыми упаковками.
+            </p>
             <FormError>{form.formState.errors.unit_price?.message}</FormError>
           </div>
         </fieldset>
