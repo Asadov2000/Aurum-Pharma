@@ -72,12 +72,12 @@ function setup(item: CatalogItem | null = ITEM) {
   return { onClose, onCreated };
 }
 
-const ENABLE_UNITS = "Настроить поштучную продажу";
+const ENABLE_UNITS = "Добавить настройку";
 const HAS_BLISTER = "В пачке есть блистеры (плажки)";
 const UNPREPARED: CatalogItem = { ...ITEM, unit_sale_preparation: null };
 
 function fillComposition(price = "0,35") {
-  fireEvent.click(screen.getByText(ENABLE_UNITS, { exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: ENABLE_UNITS, exact: true }));
   fireEvent.change(screen.getByLabelText("Количество в упаковке"), { target: { value: "20" } });
   fireEvent.change(screen.getByLabelText("Что в упаковке"), { target: { value: "tablet" } });
   fireEvent.change(screen.getByLabelText("Цена одной штуки, TJS"), { target: { value: price } });
@@ -85,6 +85,18 @@ function fillComposition(price = "0,35") {
 
 function save() {
   fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения", exact: true }));
+}
+
+function expectPackagingSections() {
+  expect(screen.getByRole("heading", { name: "Целая упаковка", exact: true })).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "Поштучно и блистерами", exact: true }),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Цена целой упаковки, TJS")).toBeEnabled();
+  expect(screen.getByLabelText("Цена целой упаковки, TJS")).toHaveValue("99.00");
+  expect(
+    screen.queryByRole("checkbox", { name: "Настроить поштучную продажу" }),
+  ).not.toBeInTheDocument();
 }
 
 describe("CatalogItemForm packaging", () => {
@@ -100,7 +112,8 @@ describe("CatalogItemForm packaging", () => {
 
   it("shows saved composition in the single form and omits untouched preparation from an ordinary save", async () => {
     const { onClose } = setup();
-    expect(screen.getByRole("checkbox", { name: ENABLE_UNITS })).toBeChecked();
+    expectPackagingSections();
+    expect(screen.getByRole("button", { name: "Убрать настройку", exact: true })).toBeEnabled();
     expect(
       screen.queryByRole("textbox", { name: "Размер упаковки", exact: true }),
     ).not.toBeInTheDocument();
@@ -126,8 +139,10 @@ describe("CatalogItemForm packaging", () => {
 
   it("does not parse the old free text or save composition before the common Save button", async () => {
     const { onClose } = setup(UNPREPARED);
+    expectPackagingSections();
     expect(screen.getByLabelText("Размер упаковки")).toHaveValue(ITEM.pack_size);
-    fireEvent.click(screen.getByText(ENABLE_UNITS, { exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: ENABLE_UNITS, exact: true }));
+    expectPackagingSections();
     expect(
       screen.queryByRole("textbox", { name: "Размер упаковки", exact: true }),
     ).not.toBeInTheDocument();
@@ -280,7 +295,10 @@ describe("CatalogItemForm packaging", () => {
 
   it("removes preparation with the common Save while retaining the prior pack description", async () => {
     setup();
-    fireEvent.click(screen.getByText(ENABLE_UNITS, { exact: true }));
+    expectPackagingSections();
+    fireEvent.click(screen.getByRole("button", { name: "Убрать настройку", exact: true }));
+    expectPackagingSections();
+    expect(screen.getByRole("button", { name: ENABLE_UNITS, exact: true })).toBeEnabled();
     expect(screen.getByLabelText("Размер упаковки")).toHaveValue(ITEM.pack_size);
     expect(screen.queryByLabelText("Количество в упаковке")).not.toBeInTheDocument();
     save();
@@ -323,8 +341,13 @@ describe("CatalogItemForm packaging", () => {
     if (kind === "missing") auth.permissions = [];
     else auth.scope = ["branch-1"];
     setup(UNPREPARED);
-    const enable = screen.queryByRole("checkbox", { name: ENABLE_UNITS });
-    if (enable) expect(enable).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: ENABLE_UNITS, exact: true }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Убрать настройку", exact: true }),
+    ).not.toBeInTheDocument();
+    expectPackagingSections();
     expect(screen.queryByLabelText("Количество в упаковке")).not.toBeInTheDocument();
   });
 
@@ -334,6 +357,10 @@ describe("CatalogItemForm packaging", () => {
       if (kind === "missing") auth.permissions = [];
       else auth.scope = ["branch-1"];
       setup();
+      expectPackagingSections();
+      expect(
+        screen.queryByRole("button", { name: "Убрать настройку", exact: true }),
+      ).not.toBeInTheDocument();
       expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("30");
       expect(screen.getByLabelText("Количество в упаковке")).toBeDisabled();
       expect(screen.getByLabelText("Что в упаковке")).toBeDisabled();
