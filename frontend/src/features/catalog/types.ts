@@ -71,6 +71,7 @@ export interface CatalogSummary {
 }
 
 export interface CatalogItemCreatePayload {
+  unit_sale_preparation?: UnitSalePreparation | null;
   operation_id?: string;
   confirm_distinct_item?: boolean;
   initial_barcode?: { code: string; code_type: BarcodeType };
