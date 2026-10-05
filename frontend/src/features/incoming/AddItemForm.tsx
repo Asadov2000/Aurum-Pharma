@@ -2,8 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, ConfirmDialog, FormError, Input, Label } from "@/components/ui";
-import { describeApiError } from "@/features/foundation/errors";
+import { Button, ConfirmDialog, FormError, Input, Label, Switch } from "@/components/ui";
 import { createOperationId } from "@/lib/operationId";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
@@ -11,6 +10,7 @@ import { hasPermission } from "@/features/auth/permissions";
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
 import { type CatalogItem } from "@/features/catalog/types";
 import { pharmacyCalendarDate } from "./calendar";
+import { describeIncomingItemError } from "./errors";
 import { useUpdateIncomingItem } from "./queries";
 import { type IncomingDraftFields, type IncomingDraftRow, type IncomingItem } from "./types";
 import { draftFields, useIncomingDraft } from "./useIncomingDraft";
@@ -49,6 +49,7 @@ const decimalString = (
 const schema = z
   .object({
     source_name: z.string().optional(),
+    prepare_unit_sale: z.boolean().default(false),
     catalog_id: z.string().min(1, "Выберите позицию"),
     batch_number: z.string().optional(),
     manufactured_at: z.string().optional(),
@@ -76,6 +77,13 @@ const schema = z
     ),
   })
   .superRefine((values, context) => {
+    if (values.prepare_unit_sale && !/^\d+(?:[.,]0{1,3})?$/.test(values.qty.trim())) {
+      context.addIssue({
+        code: "custom",
+        path: ["qty"],
+        message: "Для сохранения состава укажите целое количество упаковок",
+      });
+    }
     if (values.expires_at && values.expires_at <= pharmacyCalendarDate()) {
       context.addIssue({
         code: "custom",
@@ -156,9 +164,11 @@ export function AddItemForm({
           qty: item?.qty ?? "",
           purchase_price: item?.purchase_price ?? "",
           sale_price: item?.sale_price ?? "",
+          prepare_unit_sale: Boolean(item.unit_packaging_preparation),
         }
-      : draftFields(draftRow),
+      : { ...draftFields(draftRow), prepare_unit_sale: false },
   });
+  const selectedCatalogId = form.watch("catalog_id");
 
   useEffect(() => {
     onDirtyChange?.(
@@ -207,6 +217,9 @@ export function AddItemForm({
   };
 
   const selectCatalogFromDialog = (selected: CatalogItem) => {
+    if (selected.id !== form.getValues("catalog_id")) {
+      form.setValue("prepare_unit_sale", false, { shouldDirty: true });
+    }
     form.setValue("catalog_id", selected.id, { shouldDirty: true });
     // Do not depend on the form watch callback running before the immediate
     // save when a catalog dialog selects an existing card.
@@ -264,6 +277,10 @@ export function AddItemForm({
             qty: payload.qty,
             purchase_price: payload.purchase_price,
             sale_price: payload.sale_price,
+            ...(d.prepare_unit_sale !== Boolean(item.unit_packaging_preparation) ||
+            d.catalog_id !== item.catalog_id
+              ? { prepare_unit_sale: d.prepare_unit_sale }
+              : {}),
           },
         });
       } else {
@@ -274,7 +291,7 @@ export function AddItemForm({
       onClose();
     } catch (err) {
       setTopError(
-        describeApiError(
+        describeIncomingItemError(
           err,
           isEditing ? "Не удалось сохранить позицию" : "Не удалось добавить позицию",
         ),
@@ -349,6 +366,9 @@ export function AddItemForm({
                 }
                 onSearchChange={setCatalogSearch}
                 onChange={(id, name) => {
+                  if (id !== field.value) {
+                    form.setValue("prepare_unit_sale", false, { shouldDirty: true });
+                  }
                   setCatalogLabel(name);
                   field.onChange(id);
                 }}
@@ -439,6 +459,33 @@ export function AddItemForm({
           </div>
         </div>
       </fieldset>
+      {item && (
+        <fieldset
+          disabled={form.formState.isSubmitting}
+          className="space-y-2 rounded-lg border border-border bg-surface-subtle p-3 text-sm"
+        >
+          <Switch
+            label="Сохранить состав упаковки"
+            aria-describedby="incoming-packaging-help"
+            {...form.register("prepare_unit_sale")}
+          />
+          <p id="incoming-packaging-help" className="text-foreground-muted">
+            Состав берётся из настройки поштучного отпуска в каталоге. Количество и обе цены
+            остаются за упаковку. Приёмка остаётся упаковочной; продажа поштучно ещё недоступна.
+          </p>
+          {item.unit_packaging_preparation && selectedCatalogId === item.catalog_id && (
+            <p>
+              Сохранённый состав: {item.unit_packaging_preparation.units_per_pack} ед. в упаковке;
+              шаг отпуска — {item.unit_packaging_preparation.dispense_step}.
+            </p>
+          )}
+          {selectedCatalogId !== item.catalog_id && (
+            <p className="text-foreground-muted">
+              Товар изменён. Для нового товара включите сохранение состава заново.
+            </p>
+          )}
+        </fieldset>
+      )}
       {topError && (
         <p className="text-sm text-danger" role="alert">
           {topError}
