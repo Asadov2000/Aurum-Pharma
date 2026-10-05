@@ -55,6 +55,15 @@ def test_preparation_requires_an_explicit_supported_unit(unit: str) -> None:
         ("units_per_pack", "30"),
         ("units_per_pack", 30.0),
         ("units_per_pack", True),
+        ("units_per_blister", 0),
+        ("units_per_blister", 1),
+        ("units_per_blister", 10_001),
+        ("units_per_blister", "10"),
+        ("units_per_blister", 10.0),
+        ("units_per_blister", 2.5),
+        ("units_per_blister", True),
+        ("units_per_blister", 7),
+        ("units_per_blister", 60),
         ("dispense_step", 0),
         ("dispense_step", 10_001),
         ("dispense_step", "1"),
@@ -116,6 +125,29 @@ def test_equivalent_price_scales_have_one_json_representation() -> None:
     assert _preparation(unit_price=Decimal("3.3")).model_dump(mode="json") == _preparation(
         unit_price=Decimal("3.30")
     ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("blister", [None, 2, 10, 30])
+def test_blister_size_is_optional_and_does_not_change_sale_arithmetic(blister: int | None) -> None:
+    preparation = _preparation(units_per_blister=blister)
+    assert preparation.units_per_blister == blister
+    assert to_base_units(preparation, quantity=Decimal("2"), sale_format="pack") == 60
+    assert to_base_units(preparation, quantity=Decimal("3"), sale_format="unit") == 3
+    for serialized, legacy in (
+        (preparation.model_dump(), _preparation().model_dump()),
+        (preparation.model_dump(mode="json"), _preparation().model_dump(mode="json")),
+    ):
+        if blister is None:
+            assert "units_per_blister" not in serialized
+            assert serialized == legacy
+        else:
+            assert serialized["units_per_blister"] == blister
+    assert UnitSalePreparation.model_validate_json(preparation.model_dump_json()) == preparation
+
+
+def test_blister_size_accepts_maximum_pack_boundary() -> None:
+    preparation = _preparation(units_per_pack=10_000, units_per_blister=10_000)
+    assert preparation.model_dump(mode="json")["units_per_blister"] == 10_000
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { Button, FormError, Input, Label, Modal, Select } from "@/components/ui";
+import { Button, FormError, Input, Label, Modal, Select, Switch } from "@/components/ui";
 import { permissionBranchScope } from "@/features/auth/branchPermissions";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission } from "@/features/auth/permissions";
@@ -23,10 +23,10 @@ const integer = (minimum: number) =>
 
 const schema = z
   .object({
-    sale_mode: z.enum(["single", "portions", "packs"]),
     unit: z.enum(["tablet", "capsule", "ampoule", "sachet", "suppository"]),
     units_per_pack: integer(2),
-    dispense_step: integer(1),
+    has_blister: z.boolean(),
+    units_per_blister: z.string(),
     unit_price: z
       .string()
       .trim()
@@ -37,19 +37,23 @@ const schema = z
   })
   .superRefine((values, context) => {
     const pack = Number(values.units_per_pack);
-    const step = Number(values.dispense_step);
-    if (Number.isInteger(pack) && Number.isInteger(step) && step > 0 && pack % step !== 0) {
+    if (!values.has_blister) return;
+    const parsedBlister = integer(2).safeParse(values.units_per_blister);
+    if (!parsedBlister.success) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["dispense_step"],
-        message: "Упаковка должна делиться на это количество без остатка",
+        path: ["units_per_blister"],
+        message: "Укажите целое число от 2 до 10 000",
       });
+      return;
     }
-    if (values.sale_mode === "portions" && step >= pack) {
+    const blister = Number(parsedBlister.data);
+    if (blister > pack || pack % blister !== 0) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["dispense_step"],
-        message: "Для продажи по несколько штук выберите количество меньше целой упаковки",
+        path: ["units_per_blister"],
+        message:
+          "В пачке должно быть целое число блистеров. Проверьте количество штук в пачке и блистере.",
       });
     }
   });
@@ -126,45 +130,23 @@ function PreparationForm({
   const [error, setError] = useState<string | null>(null);
   const form = useForm<Values>({
     defaultValues: {
-      sale_mode:
-        saved && saved.dispense_step !== 1
-          ? saved.dispense_step === saved.units_per_pack
-            ? "packs"
-            : "portions"
-          : "single",
       unit: saved?.unit ?? "tablet",
       units_per_pack: saved ? String(saved.units_per_pack) : "",
-      dispense_step: saved ? String(saved.dispense_step) : "1",
+      has_blister: saved?.units_per_blister != null,
+      units_per_blister: saved?.units_per_blister != null ? String(saved.units_per_blister) : "",
       unit_price: saved?.unit_price ?? "",
     },
   });
   const busy = update.isPending || form.formState.isSubmitting;
   const packValue = form.watch("units_per_pack").trim();
-  const saleMode = form.watch("sale_mode");
-  const stepValue = form.watch("dispense_step");
+  const hasBlister = form.watch("has_blister");
+  const blisterValue = form.watch("units_per_blister").trim();
   const pack = Number(packValue);
   const validPack = /^[1-9]\d{0,4}$/.test(packValue) && pack >= 2 && pack <= 10_000;
-  const popularSteps = [2, 5, 10, 20, 30, 50, 100];
-  const steps = validPack
-    ? Array.from({ length: pack - 1 }, (_, index) => index + 2)
-        .filter((step) => step < pack && pack % step === 0)
-        .sort((left, right) => {
-          const leftRank = popularSteps.indexOf(left);
-          const rightRank = popularSteps.indexOf(right);
-          if (leftRank >= 0 && rightRank >= 0) return leftRank - rightRank;
-          if (leftRank >= 0) return -1;
-          if (rightRank >= 0) return 1;
-          return left - right;
-        })
-    : [];
-  const step = saleMode === "single" ? 1 : saleMode === "packs" ? pack : Number(stepValue);
-  const unavailableStep = saleMode === "portions" && stepValue !== "" && !steps.includes(step);
+  const blister = Number(blisterValue);
+  const validBlister =
+    /^[1-9]\d{0,4}$/.test(blisterValue) && blister >= 2 && blister <= pack && pack % blister === 0;
   const unit = form.watch("unit");
-  const chooseMode = (mode: Values["sale_mode"]): void => {
-    form.setValue("sale_mode", mode, { shouldDirty: true });
-    form.setValue("dispense_step", mode === "single" ? "1" : "", { shouldDirty: true });
-    form.clearErrors("dispense_step");
-  };
 
   async function persist(preparation: UnitSalePreparation | null): Promise<void> {
     setError(null);
@@ -183,15 +165,7 @@ function PreparationForm({
 
   const submit = form.handleSubmit(async (values) => {
     form.clearErrors();
-    const parsed = schema.safeParse({
-      ...values,
-      dispense_step:
-        values.sale_mode === "single"
-          ? "1"
-          : values.sale_mode === "packs"
-            ? values.units_per_pack.trim()
-            : values.dispense_step,
-    });
+    const parsed = schema.safeParse(values);
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         form.setError(issue.path[0] as keyof Values, { message: issue.message });
@@ -204,7 +178,8 @@ function PreparationForm({
       state: "prepared",
       unit: parsed.data.unit,
       units_per_pack: Number(parsed.data.units_per_pack),
-      dispense_step: Number(parsed.data.dispense_step),
+      dispense_step: 1,
+      units_per_blister: parsed.data.has_blister ? Number(parsed.data.units_per_blister) : null,
       unit_price: `${whole}.${fraction.padEnd(2, "0")}`,
     });
   });
@@ -256,89 +231,45 @@ function PreparationForm({
             />
             <FormError>{form.formState.errors.units_per_pack?.message}</FormError>
           </div>
-          <fieldset className="space-y-3 sm:col-span-2">
-            <legend className="mb-2 text-sm font-medium">Как продавать лекарство</legend>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {(
-                [
-                  ["single", "Поштучно", "Любое целое количество: 1, 2, 3 штуки и больше."],
-                  [
-                    "portions",
-                    "По несколько штук",
-                    "Например, по 5 или 10 штук. Количество выбираете вы.",
-                  ],
-                  [
-                    "packs",
-                    "Только целыми упаковками",
-                    "Упаковка не делится: можно продать 1, 2, 3 упаковки.",
-                  ],
-                ] as const
-              ).map(([mode, title, description]) => {
-                const disabled =
-                  mode !== "single" && (!validPack || (mode === "portions" && steps.length === 0));
-                return (
-                  <label
-                    key={mode}
-                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 ${saleMode === mode ? "border-primary bg-primary/5" : "border-input bg-surface"} ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
-                  >
-                    <input
-                      type="radio"
-                      value={mode}
-                      checked={saleMode === mode}
-                      disabled={disabled}
-                      aria-label={title}
-                      className="mt-1 shrink-0 accent-primary"
-                      {...form.register("sale_mode")}
-                      onChange={() => chooseMode(mode)}
-                    />
-                    <span>
-                      <span className="block text-sm font-medium">{title}</span>
-                      <span className="mt-1 block text-xs text-foreground-muted">
-                        {description}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            {saleMode === "portions" && (
+          <div className="space-y-3 sm:col-span-2">
+            <Switch label="В пачке есть блистеры (плажки)" {...form.register("has_blister")} />
+            {hasBlister && (
               <div>
-                <Label htmlFor="unit-preparation-step">Сколько штук в одной порции?</Label>
-                <Select
-                  id="unit-preparation-step"
-                  value={stepValue}
-                  aria-describedby="unit-preparation-step-help"
-                  aria-invalid={Boolean(form.formState.errors.dispense_step)}
-                  {...form.register("dispense_step")}
+                <Label htmlFor="unit-preparation-blister">Сколько штук в одном блистере?</Label>
+                <Input
+                  id="unit-preparation-blister"
+                  inputMode="numeric"
+                  placeholder="Например, 10"
+                  aria-describedby="unit-preparation-blister-help"
+                  aria-invalid={Boolean(form.formState.errors.units_per_blister)}
+                  {...form.register("units_per_blister")}
+                />
+                <p
+                  id="unit-preparation-blister-help"
+                  className="mt-1 text-xs text-foreground-muted"
                 >
-                  <option value="">Выберите количество</option>
-                  {steps.map((quantity) => (
-                    <option key={quantity} value={String(quantity)}>
-                      По {quantity} шт.
-                    </option>
-                  ))}
-                  {unavailableStep && (
-                    <option value={stepValue}>
-                      По {stepValue} шт. — проверьте размер упаковки
-                    </option>
-                  )}
-                </Select>
+                  Посмотрите на упаковку и укажите фактическое количество. Например: 20 таблеток в
+                  пачке, по 10 в блистере — всего 2 блистера.
+                </p>
+                <FormError>{form.formState.errors.units_per_blister?.message}</FormError>
               </div>
             )}
-            <p id="unit-preparation-step-help" className="mt-1 text-xs text-foreground-muted">
-              {!validPack
-                ? "Сначала укажите, сколько штук в упаковке — станут доступны остальные способы продажи."
-                : unavailableStep
-                  ? "Выбранное количество не подходит для этой упаковки. Выберите другой вариант."
-                  : saleMode === "portions" && stepValue === ""
-                    ? "Выберите количество. Размер блистера нужно указать самостоятельно — система его не угадывает."
-                    : `В упаковке: ${describeQuantity(pack, unit)}. Можно продать: ${step}, ${step * 2}, ${step * 3} шт. и так далее.`}
-              {validPack &&
-                steps.length === 0 &&
-                " Эта упаковка не делится на равные части по несколько штук."}
-            </p>
-            <FormError>{form.formState.errors.dispense_step?.message}</FormError>
-          </fieldset>
+            {validPack && (!hasBlister || validBlister) && (
+              <p className="rounded-lg border border-border bg-surface-raised p-3 text-sm">
+                Пачка: {describeQuantity(pack, unit)}.
+                {hasBlister &&
+                  ` Блистер: ${describeQuantity(blister, unit)}. Количество блистеров в пачке: ${pack / blister}.`}
+                {" Способ продажи выбирается в кассе, а не в каталоге."}
+              </p>
+            )}
+            {saved && saved.dispense_step > 1 && (
+              <p className="rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm">
+                Раньше была подготовлена продажа только по {saved.dispense_step} шт. После
+                сохранения состав будет подготовлен для выбора способа продажи в кассе, включая
+                поштучный отпуск. Старые поставки не изменятся.
+              </p>
+            )}
+          </div>
           <div>
             <Label htmlFor="unit-preparation-price">Цена одной единицы, TJS</Label>
             <Input

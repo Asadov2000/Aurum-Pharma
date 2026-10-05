@@ -107,10 +107,14 @@ def test_prepare_flag_defaults_and_server_owned_snapshot() -> None:
             schema.model_validate({**fields, "unit_packaging_preparation": _snapshot()})
 
 
+@pytest.mark.parametrize("blister", [None, 10])
 async def test_accept_copies_original_packaging_without_creating_unit_stock(
-    db_session: AsyncSession, scaffold: Scaffold
+    db_session: AsyncSession, scaffold: Scaffold, blister: int | None
 ) -> None:
     service, document, catalog = await _draft(db_session, scaffold)
+    if blister is not None:
+        catalog.unit_sale_preparation = {**_preparation(), "units_per_blister": blister}
+        await db_session.flush()
     row = await service.add_item(
         document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
     )

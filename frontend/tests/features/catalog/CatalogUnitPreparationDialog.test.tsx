@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn() }));
@@ -73,10 +73,6 @@ async function fillValid(price = "0,35") {
   await screen.findByLabelText("Единица отпуска");
   fireEvent.change(screen.getByLabelText("Единица отпуска"), { target: { value: "tablet" } });
   fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), { target: { value: "20" } });
-  fireEvent.click(screen.getByRole("radio", { name: "По несколько штук", exact: true }));
-  fireEvent.change(screen.getByLabelText("Сколько штук в одной порции?"), {
-    target: { value: "2" },
-  });
   fireEvent.change(screen.getByLabelText(/Цена одной единицы/), { target: { value: price } });
 }
 
@@ -113,7 +109,7 @@ describe("CatalogUnitPreparationDialog", () => {
     expect(calls.get).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
       signal: expect.any(AbortSignal),
     });
-    const updated = { ...PREPARATION, unit_price: "2.10" };
+    const updated = { ...PREPARATION, dispense_step: 1, unit_price: "2.10" };
     calls.get.mockResolvedValue({ data: { ...ITEM, unit_sale_preparation: updated } });
     fireEvent.change(screen.getByLabelText(/Цена одной единицы/), { target: { value: "2.10" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
@@ -150,7 +146,8 @@ describe("CatalogUnitPreparationDialog", () => {
           state: "prepared",
           unit: "tablet",
           units_per_pack: 20,
-          dispense_step: 2,
+          dispense_step: 1,
+          units_per_blister: null,
           unit_price: "0.35",
         },
       }),
@@ -165,7 +162,7 @@ describe("CatalogUnitPreparationDialog", () => {
       expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30"),
     );
     expect(screen.getByLabelText("Единица отпуска")).toHaveValue("capsule");
-    expect(screen.getByLabelText("Сколько штук в одной порции?")).toHaveValue("5");
+    expect(screen.queryByLabelText("Сколько штук в одном блистере?")).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
     fireEvent.click(screen.getByRole("button", { name: "Убрать подготовку" }));
     await waitFor(() =>
@@ -177,20 +174,18 @@ describe("CatalogUnitPreparationDialog", () => {
   });
 
   it.each([
-    ["2", "1", "0.01"],
+    ["2", "2", "0.01"],
     ["10000", "10000", "999999999999.99"],
-  ])("preserves valid boundary values %s/%s/%s exactly", async (pack, step, price) => {
+  ])("preserves valid boundary values %s/%s/%s exactly", async (pack, blister, price) => {
     const { onClose } = setup();
     await fillValid(price);
     fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
       target: { value: pack },
     });
-    fireEvent.click(
-      screen.getByRole("radio", {
-        name: step === "1" ? "Поштучно" : "Только целыми упаковками",
-        exact: true,
-      }),
-    );
+    fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+    fireEvent.change(screen.getByLabelText("Сколько штук в одном блистере?"), {
+      target: { value: blister },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
@@ -199,7 +194,8 @@ describe("CatalogUnitPreparationDialog", () => {
           state: "prepared",
           unit: "tablet",
           units_per_pack: Number(pack),
-          dispense_step: Number(step),
+          dispense_step: 1,
+          units_per_blister: Number(blister),
           unit_price: price,
         },
       }),
@@ -234,181 +230,117 @@ describe("CatalogUnitPreparationDialog", () => {
     expect(calls.patch).not.toHaveBeenCalled();
   });
 
-  it("defaults to single units and offers proper divisors only in portion mode", async () => {
+  it("shows only pack composition and requires an explicit blister size", async () => {
     setup();
-    await screen.findByRole("group", { name: "Как продавать лекарство" });
-    expect(screen.getByRole("radio", { name: "Поштучно", exact: true })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "По несколько штук", exact: true })).toBeDisabled();
+    await screen.findByLabelText("Сколько штук в упаковке?");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Сколько штук в одном блистере?")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("combobox", { name: "Сколько штук в одной порции?" }),
-    ).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-      target: { value: "20" },
-    });
-    fireEvent.click(screen.getByRole("radio", { name: "По несколько штук", exact: true }));
-    const step = screen.getByRole("combobox", { name: "Сколько штук в одной порции?" });
-    const values = () =>
-      within(step)
-        .getAllByRole("option")
-        .map((option) => option.getAttribute("value"));
-    expect(step).toHaveValue("");
-    expect(within(step).getByRole("option", { name: "Выберите количество" })).toHaveValue("");
-    expect(values()).toEqual(["", "2", "5", "10", "4"]);
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-      target: { value: "300" },
-    });
-    expect(values()).toEqual([
-      "",
-      "2",
-      "5",
-      "10",
-      "20",
-      "30",
-      "50",
-      "100",
-      "3",
-      "4",
-      "6",
-      "12",
-      "15",
-      "25",
-      "60",
-      "75",
-      "150",
-    ]);
+      screen.getByRole("checkbox", { name: "В пачке есть блистеры (плажки)" }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+    expect(screen.getByRole("checkbox", { name: "В пачке есть блистеры (плажки)" })).toBeChecked();
+    expect(screen.getByLabelText("Сколько штук в одном блистере?")).toHaveValue("");
+    expect(screen.getByLabelText("Сколько штук в одном блистере?")).toHaveAttribute(
+      "inputmode",
+      "numeric",
+    );
   });
 
-  it.each(["1", "2", "7", "20.5", "10001"])(
-    "disables portion mode without proper divisors for pack size %s",
-    async (pack) => {
-      setup();
-      await screen.findByLabelText("Сколько штук в упаковке?");
-      fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-        target: { value: pack },
-      });
-      expect(screen.getByRole("radio", { name: "По несколько штук", exact: true })).toBeDisabled();
-      expect(
-        screen.queryByRole("combobox", { name: "Сколько штук в одной порции?" }),
-      ).not.toBeInTheDocument();
-    },
-  );
-
-  it("keeps the chosen step when the new pack size is incompatible and rejects saving", async () => {
-    const { onClose } = setup();
-    await fillValid();
-    const step = screen.getByRole("combobox", { name: "Сколько штук в одной порции?" });
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-      target: { value: "21" },
-    });
-    fireEvent.change(step, { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-      target: { value: "20" },
-    });
-    expect(step).toHaveValue("3");
-    expect(
-      within(step)
-        .getAllByRole("option")
-        .find((option) => option.getAttribute("value") === "3"),
-    ).toHaveTextContent("проверьте размер упаковки");
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("без остатка");
-    expect(calls.patch).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("radio", { name: "Поштучно", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
-      unit_sale_preparation: expect.objectContaining({ units_per_pack: 20, dispense_step: 1 }),
-    });
-  });
-
-  it("requires an explicit quantity whenever switching back to portion mode", async () => {
-    const { onClose } = setup();
-    await fillValid();
-    fireEvent.click(screen.getByRole("radio", { name: "Только целыми упаковками", exact: true }));
-    expect(
-      screen.queryByRole("combobox", { name: "Сколько штук в одной порции?" }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: "По несколько штук", exact: true }));
-    expect(screen.getByRole("combobox", { name: "Сколько штук в одной порции?" })).toHaveValue("");
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(calls.patch).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [1, "Поштучно", 1],
-    [20, "Только целыми упаковками", 30],
-  ])(
-    "restores saved step %s as %s and saves the changed pack size correctly",
-    async (savedStep, mode, expectedStep) => {
-      calls.get.mockResolvedValue({
-        data: {
-          ...ITEM,
-          unit_sale_preparation: { ...PREPARATION, units_per_pack: 20, dispense_step: savedStep },
-        },
-      });
-      setup();
-      const radio = await screen.findByRole("radio", { name: mode, exact: true });
-      expect(radio).toBeChecked();
-      expect(
-        screen.queryByRole("combobox", { name: "Сколько штук в одной порции?" }),
-      ).not.toBeInTheDocument();
-      fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-        target: { value: "30" },
-      });
-      expect(radio).toBeChecked();
-      fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
-      await waitFor(() =>
-        expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
-          unit_sale_preparation: expect.objectContaining({
-            units_per_pack: 30,
-            dispense_step: expectedStep,
-          }),
-        }),
-      );
-    },
-  );
-
-  it("saves a nonstandard divisor and updates the quantity example", async () => {
+  it("saves the number of units per blister independently of dispensing mode", async () => {
     setup();
     await fillValid();
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-      target: { value: "21" },
+    fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+    fireEvent.change(screen.getByLabelText("Сколько штук в одном блистере?"), {
+      target: { value: "10" },
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Сколько штук в одной порции?" }), {
-      target: { value: "7" },
-    });
-    expect(screen.getByText(/7, 14, 21/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
-        unit_sale_preparation: expect.objectContaining({ units_per_pack: 21, dispense_step: 7 }),
+        unit_sale_preparation: {
+          version: 1,
+          state: "prepared",
+          unit: "tablet",
+          units_per_pack: 20,
+          dispense_step: 1,
+          units_per_blister: 10,
+          unit_price: "0.35",
+        },
       }),
     );
   });
 
-  it.each([2, 5])(
-    "preserves saved step %s when changing to an incompatible pack size",
-    async (savedStep) => {
-      calls.get.mockResolvedValue({
-        data: { ...ITEM, unit_sale_preparation: { ...PREPARATION, dispense_step: savedStep } },
+  it.each(["", "1", "3", "21", "2.5", "10001", "true"])(
+    "rejects invalid or missing blister size %s without a PATCH",
+    async (value) => {
+      const { onClose } = setup();
+      await fillValid();
+      fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+      fireEvent.change(screen.getByLabelText("Сколько штук в одном блистере?"), {
+        target: { value },
       });
-      setup();
-      const step = await screen.findByRole("combobox", { name: "Сколько штук в одной порции?" });
-      expect(screen.getByRole("radio", { name: "По несколько штук", exact: true })).toBeChecked();
-      expect(step).toHaveValue(String(savedStep));
-      fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
-        target: { value: "21" },
-      });
-      expect(step).toHaveValue(String(savedStep));
       fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("без остатка");
+      expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
       expect(calls.patch).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
     },
   );
 
+  it("restores saved blister composition and clears it explicitly when switched off", async () => {
+    const saved = { ...PREPARATION, dispense_step: 1, units_per_blister: 10 };
+    calls.get.mockResolvedValue({ data: { ...ITEM, unit_sale_preparation: saved } });
+    setup();
+    const blister = await screen.findByLabelText("Сколько штук в одном блистере?");
+    expect(blister).toHaveValue("10");
+    expect(screen.getByRole("checkbox", { name: "В пачке есть блистеры (плажки)" })).toBeChecked();
+    expect(calls.patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+    expect(screen.queryByLabelText("Сколько штук в одном блистере?")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
+    await waitFor(() =>
+      expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        unit_sale_preparation: { ...saved, units_per_blister: null },
+      }),
+    );
+  });
+
+  it("warns about a legacy dispensing step and resets it only on explicit save", async () => {
+    calls.get.mockResolvedValue({ data: { ...ITEM, unit_sale_preparation: PREPARATION } });
+    setup();
+    await screen.findByLabelText("Сколько штук в упаковке?");
+    expect(screen.getByText(/После сохранения/)).toBeInTheDocument();
+    expect(calls.patch).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Единица отпуска")).toHaveValue("capsule");
+    expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30");
+    expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
+    await waitFor(() =>
+      expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        unit_sale_preparation: { ...PREPARATION, dispense_step: 1, units_per_blister: null },
+      }),
+    );
+  });
+
+  it("keeps the blister size after changing pack size and rejects incompatible composition", async () => {
+    const { onClose } = setup();
+    await fillValid();
+    fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
+    fireEvent.change(screen.getByLabelText("Сколько штук в одном блистере?"), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
+      target: { value: "21" },
+    });
+    expect(screen.getByLabelText("Сколько штук в одном блистере?")).toHaveValue("10");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
+    expect(
+      (await screen.findAllByRole("alert")).some((alert) =>
+        alert.textContent?.includes("целое число блистеров"),
+      ),
+    ).toBe(true);
+    expect(calls.patch).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
   it("keeps entered values and the dialog open when PATCH fails", async () => {
     calls.patch.mockRejectedValue(new Error("request failed"));
     const { onClose } = setup();
