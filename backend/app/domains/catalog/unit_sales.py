@@ -10,6 +10,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     SerializerFunctionWrapHandler,
     TypeAdapter,
     field_serializer,
@@ -17,6 +18,8 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 SaleFormat = Literal["pack", "unit"]
 DispenseUnit = Literal["tablet", "capsule", "ampoule", "sachet", "suppository"]
@@ -63,6 +66,19 @@ class UnitSalePreparation(BaseModel):
         if self.units_per_blister is None:
             result.pop("units_per_blister", None)
         return result
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # The wrapper only omits unknown blister size; the response still has model fields.
+        if schema["type"] == "function-after":
+            schema = schema["schema"]
+        if schema["type"] == "model":
+            model_schema: dict[str, object] = dict(schema)
+            model_schema.pop("serialization", None)
+            return handler(model_schema)
+        return handler(schema)
 
     @field_serializer("unit_price", when_used="json")
     def serialize_unit_price(self, value: Decimal) -> str:
