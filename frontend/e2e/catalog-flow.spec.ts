@@ -103,6 +103,88 @@ test.describe("Catalog flow (owner)", () => {
     await expect(dialog.getByText(code)).toBeVisible({ timeout: 30_000 });
   });
 
+  test("prepares unit dispensing separately, reloads it and removes it without changing pack price", async ({
+    page,
+  }) => {
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    const name = uniqueName("E2E Unit Preparation");
+    try {
+      const created = await api.post("catalog", {
+        data: {
+          brand_name: name,
+          dispensing_type: "otc",
+          storage_type: "normal",
+          base_price: "30.00",
+        },
+      });
+      expect(created.ok()).toBeTruthy();
+      const item = (await created.json()) as { id: string };
+      await loginInBrowser(page, OWNER);
+      await page.goto("/catalog");
+      await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
+      await expect(catalogItem(page, name)).toBeVisible({ timeout: 15_000 });
+      await catalogItem(page, name)
+        .getByRole("button", { name: `Открыть карточку ${name}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Карточка товара" })
+        .getByRole("button", { name: "Изменить позицию" })
+        .click();
+      const editor = page.getByRole("dialog", { name: `Изменить товар: ${name}` });
+      const open = editor.getByRole("button", { name: "Подготовить поштучный отпуск" });
+      await editor.getByLabel("Название лекарства").fill(`${name} edited`);
+      await expect(open).toBeDisabled();
+      await editor.getByLabel("Название лекарства").fill(name);
+      await open.click();
+      const preparation = page.getByRole("dialog", { name: "Подготовка поштучного отпуска" });
+      await expect(preparation.getByRole("status")).toContainText(
+        "Продажа поштучно ещё недоступна",
+      );
+      await preparation.getByLabel("Единиц в упаковке").fill("20");
+      await preparation.getByLabel("Шаг отпуска").fill("3");
+      await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
+      await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
+      await expect(preparation.getByRole("alert")).toContainText("без остатка");
+      await preparation.getByLabel("Шаг отпуска").fill("1");
+      await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
+      await expect(preparation).toBeHidden();
+      await expect(editor).toBeVisible();
+      const savedResponse = await api.get(`catalog/${item.id}`);
+      expect(savedResponse.ok()).toBeTruthy();
+      const saved = (await savedResponse.json()) as {
+        base_price: string;
+        unit_sale_preparation: unknown;
+      };
+      expect(saved.base_price).toBe("30.00");
+      expect(saved.unit_sale_preparation).toEqual({
+        version: 1,
+        state: "prepared",
+        unit: "tablet",
+        units_per_pack: 20,
+        dispense_step: 1,
+        unit_price: "1.50",
+      });
+      await open.click();
+      await expect(preparation.getByLabel("Единиц в упаковке")).toHaveValue("20");
+      await expect(preparation.getByLabel(/Цена одной единицы/)).toHaveValue("1.50");
+      await preparation.getByRole("button", { name: "Убрать подготовку" }).click();
+      await expect(preparation).toBeHidden();
+      const clearedResponse = await api.get(`catalog/${item.id}`);
+      const cleared = (await clearedResponse.json()) as {
+        base_price: string;
+        unit_sale_preparation: unknown;
+      };
+      expect(clearedResponse.ok()).toBeTruthy();
+      expect(cleared.unit_sale_preparation).toBeNull();
+      expect(cleared.base_price).toBe("30.00");
+    } finally {
+      await apiAnon.dispose();
+      await api.dispose();
+    }
+  });
+
   test("trigram search filters the table after the debounce window", async ({ page }) => {
     // Seed a distinctive item via the API.
     const apiAnon = await request.newContext();
