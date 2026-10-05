@@ -31,9 +31,47 @@ test.describe("Catalog flow (owner)", () => {
     await dialog.getByLabel("Название лекарства").fill(name);
     await dialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
     await dialog.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
-    await dialog.getByLabel(/Цена по умолчанию/).fill("12.50");
+    await dialog.getByLabel("Цена целой упаковки, TJS").fill("12.50");
+    await dialog.getByText("Настроить поштучную продажу", { exact: true }).click();
+    await dialog.getByLabel("Количество в упаковке").fill("20");
+    await dialog.getByLabel("Что в упаковке").selectOption("capsule");
+    await dialog.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
+    await dialog.getByLabel("Штук в одном блистере").fill("10");
+    await dialog.getByLabel("Цена одной штуки, TJS").fill("0,40");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.getByLabel("Количество в упаковке").scrollIntoViewIfNeeded();
+    await expect(dialog.getByLabel("Что в упаковке")).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: /^Добавить товар$/ })).toBeInViewport();
+    const mobileCount = await dialog.getByLabel("Количество в упаковке").boundingBox();
+    const mobileUnit = await dialog.getByLabel("Что в упаковке").boundingBox();
+    if (!mobileCount || !mobileUnit)
+      throw new Error("Поля размера упаковки не видны на мобильном экране");
+    expect(mobileUnit.x).toBeGreaterThanOrEqual(mobileCount.x + mobileCount.width);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const createdResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/catalog") &&
+        response.ok(),
+    );
     await dialog.getByRole("button", { name: /^Добавить товар$/ }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
+    const created = (await (await createdResponse).json()) as {
+      pack_size: string;
+      base_price: string;
+      unit_sale_preparation: unknown;
+    };
+    expect(created.pack_size).toBe("20 капсул");
+    expect(created.base_price).toBe("12.50");
+    expect(created.unit_sale_preparation).toEqual({
+      version: 1,
+      state: "prepared",
+      unit: "capsule",
+      units_per_pack: 20,
+      units_per_blister: 10,
+      dispense_step: 1,
+      unit_price: "0.40",
+    });
 
     // Modal closes and the row appears. Catalog page uses a trigram search;
     // search by the unique name tail so accumulated same-prefix rows don't
@@ -103,7 +141,7 @@ test.describe("Catalog flow (owner)", () => {
     await expect(dialog.getByText(code)).toBeVisible({ timeout: 30_000 });
   });
 
-  test("prepares unit dispensing separately, reloads it and removes it without changing pack price", async ({
+  test("saves composition in the catalog editor and removes preparation without changing pack price", async ({
     page,
   }) => {
     const apiAnon = await request.newContext();
@@ -133,25 +171,20 @@ test.describe("Catalog flow (owner)", () => {
         .getByRole("button", { name: "Изменить позицию" })
         .click();
       const editor = page.getByRole("dialog", { name: `Изменить товар: ${name}` });
-      const open = editor.getByRole("button", { name: "Подготовить поштучный отпуск" });
-      await editor.getByLabel("Название лекарства").fill(`${name} edited`);
-      await expect(open).toBeDisabled();
-      await editor.getByLabel("Название лекарства").fill(name);
-      await open.click();
-      const preparation = page.getByRole("dialog", { name: "Подготовка поштучного отпуска" });
-      await expect(preparation.getByRole("status")).toContainText(
-        "Продажа поштучно ещё недоступна",
+      await editor.getByText("Настроить поштучную продажу", { exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Подготовка поштучного отпуска" })).toHaveCount(
+        0,
       );
-      await preparation.getByLabel("Количество в упаковке").fill("20");
-      await preparation.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
-      await preparation.getByLabel("Сколько штук в одном блистере?").fill("3");
-      await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
-      await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
-      await expect(preparation.getByRole("alert")).toContainText("целое число блистеров");
-      await preparation.getByLabel("Сколько штук в одном блистере?").fill("10");
-      await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
-      await expect(preparation).toBeHidden();
-      await expect(editor).toBeVisible();
+      await editor.getByLabel("Количество в упаковке").fill("20");
+      await editor.getByLabel("Что в упаковке").selectOption("tablet");
+      await editor.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
+      await editor.getByLabel("Штук в одном блистере").fill("3");
+      await editor.getByLabel("Цена одной штуки, TJS").fill("1,50");
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor.getByRole("alert")).toContainText("целое число блистеров");
+      await editor.getByLabel("Штук в одном блистере").fill("10");
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor).toBeHidden();
       const savedResponse = await api.get(`catalog/${item.id}`);
       expect(savedResponse.ok()).toBeTruthy();
       const saved = (await savedResponse.json()) as {
@@ -170,14 +203,24 @@ test.describe("Catalog flow (owner)", () => {
         units_per_blister: 10,
         unit_price: "1.50",
       });
+      await catalogItem(page, name)
+        .getByRole("button", { name: `Открыть карточку ${name}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Карточка товара" })
+        .getByRole("button", { name: "Изменить позицию" })
+        .click();
+      await expect(editor.getByLabel("Количество в упаковке")).toHaveValue("20");
+      await expect(editor.getByLabel("Что в упаковке")).toHaveValue("tablet");
+      await expect(editor.getByLabel("Штук в одном блистере")).toHaveValue("10");
+      await expect(editor.getByLabel("Цена одной штуки, TJS")).toHaveValue("1.50");
+      await expect(
+        editor.getByRole("textbox", { name: "Размер упаковки", exact: true }),
+      ).toHaveCount(0);
+      await editor.getByText("Настроить поштучную продажу", { exact: true }).click();
       await expect(editor.getByLabel("Размер упаковки")).toHaveValue("20 таблеток");
-      await expect(editor.getByLabel("Размер упаковки")).toHaveAttribute("readonly", "");
-      await editor.getByRole("button", { name: "Изменить состав упаковки" }).click();
-      await expect(preparation.getByLabel("Количество в упаковке")).toHaveValue("20");
-      await expect(preparation.getByLabel("Сколько штук в одном блистере?")).toHaveValue("10");
-      await expect(preparation.getByLabel(/Цена одной единицы/)).toHaveValue("1.50");
-      await preparation.getByRole("button", { name: "Убрать подготовку" }).click();
-      await expect(preparation).toBeHidden();
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor).toBeHidden();
       const clearedResponse = await api.get(`catalog/${item.id}`);
       const cleared = (await clearedResponse.json()) as {
         base_price: string;
