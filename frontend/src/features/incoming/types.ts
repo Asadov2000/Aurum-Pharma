@@ -22,6 +22,13 @@ export interface IncomingDocument {
   supplier_name?: string | null;
 }
 
+export interface IncomingUnitPackaging {
+  version: 1;
+  unit: "tablet" | "capsule" | "ampoule" | "sachet" | "suppository";
+  units_per_pack: number;
+  dispense_step: number;
+}
+
 export interface IncomingItem {
   id: string;
   document_id: string;
@@ -38,6 +45,7 @@ export interface IncomingItem {
   catalog_form?: string | null;
   catalog_dosage?: string | null;
   catalog_pack_size?: string | null;
+  unit_packaging_preparation?: IncomingUnitPackaging | null;
 }
 
 export interface IncomingDocumentWithItems extends IncomingDocument {
@@ -141,6 +149,7 @@ export interface IncomingItemCreatePayload {
 }
 
 export interface IncomingItemUpdatePayload {
+  prepare_unit_sale?: boolean;
   catalog_id?: string;
   batch_number?: string | null;
   manufactured_at?: string | null;
