@@ -113,6 +113,25 @@ function PreparationForm({
     },
   });
   const busy = update.isPending || form.formState.isSubmitting;
+  const packValue = form.watch("units_per_pack").trim();
+  const stepValue = form.watch("dispense_step");
+  const pack = Number(packValue);
+  const validPack = /^[1-9]\d{0,4}$/.test(packValue) && pack >= 2 && pack <= 10_000;
+  const popularSteps = [2, 5, 10, 20, 30, 50, 100];
+  const steps = validPack
+    ? Array.from({ length: pack - 1 }, (_, index) => index + 2)
+        .filter((step) => pack % step === 0)
+        .sort((left, right) => {
+          const leftRank = popularSteps.indexOf(left);
+          const rightRank = popularSteps.indexOf(right);
+          if (leftRank >= 0 && rightRank >= 0) return leftRank - rightRank;
+          if (leftRank >= 0) return -1;
+          if (rightRank >= 0) return 1;
+          return left - right;
+        })
+    : [];
+  const step = Number(stepValue);
+  const unavailableStep = stepValue !== "1" && !steps.includes(step);
 
   async function persist(preparation: UnitSalePreparation | null): Promise<void> {
     setError(null);
@@ -198,16 +217,31 @@ function PreparationForm({
           </div>
           <div>
             <Label htmlFor="unit-preparation-step">Продавать по, шт.</Label>
-            <Input
+            <Select
               id="unit-preparation-step"
-              inputMode="numeric"
+              value={stepValue}
               aria-describedby="unit-preparation-step-help"
               aria-invalid={Boolean(form.formState.errors.dispense_step)}
               {...form.register("dispense_step")}
-            />
+            >
+              <option value="1">Поштучно — любое количество</option>
+              {steps.map((quantity) => (
+                <option key={quantity} value={String(quantity)}>
+                  {quantity === pack ? `Целая упаковка — ${quantity} шт.` : `По ${quantity} шт.`}
+                </option>
+              ))}
+              {unavailableStep && (
+                <option value={stepValue}>По {stepValue} шт. — проверьте размер упаковки</option>
+              )}
+            </Select>
             <p id="unit-preparation-step-help" className="mt-1 text-xs text-foreground-muted">
-              Укажите 1, чтобы продавать любое количество: 1, 2, 3 штуки и больше. Укажите 10, чтобы
-              продавать только по 10, 20, 30 штук — например, целыми блистерами по 10 таблеток.
+              {!validPack
+                ? "Сначала укажите, сколько штук в упаковке — появятся подходящие варианты."
+                : unavailableStep
+                  ? "Выбранное количество не подходит для этой упаковки. Выберите другой вариант."
+                  : step === 1
+                    ? "Можно продать 1, 2, 3 штуки и больше."
+                    : `Можно продать только ${step}, ${step * 2}, ${step * 3} штук и так далее.`}
             </p>
             <FormError>{form.formState.errors.dispense_step?.message}</FormError>
           </div>

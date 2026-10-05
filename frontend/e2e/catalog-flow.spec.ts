@@ -142,12 +142,14 @@ test.describe("Catalog flow (owner)", () => {
       await expect(preparation.getByRole("status")).toContainText(
         "Продажа поштучно ещё недоступна",
       );
+      await preparation.getByLabel("Единиц в упаковке").fill("21");
+      await preparation.getByLabel("Продавать по, шт.").selectOption("3");
       await preparation.getByLabel("Единиц в упаковке").fill("20");
-      await preparation.getByLabel("Продавать по, шт.").fill("3");
+      await expect(preparation.getByLabel("Продавать по, шт.")).toHaveValue("3");
       await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
       await expect(preparation.getByRole("alert")).toContainText("без остатка");
-      await preparation.getByLabel("Продавать по, шт.").fill("1");
+      await preparation.getByLabel("Продавать по, шт.").selectOption("1");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
       await expect(preparation).toBeHidden();
       await expect(editor).toBeVisible();
