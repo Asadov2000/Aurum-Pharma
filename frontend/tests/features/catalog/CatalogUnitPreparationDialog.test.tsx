@@ -73,7 +73,7 @@ async function fillValid(price = "0,35") {
   await screen.findByLabelText("Единица отпуска");
   fireEvent.change(screen.getByLabelText("Единица отпуска"), { target: { value: "tablet" } });
   fireEvent.change(screen.getByLabelText("Единиц в упаковке"), { target: { value: "20" } });
-  fireEvent.change(screen.getByLabelText("Шаг отпуска"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Продавать по, шт."), { target: { value: "2" } });
   fireEvent.change(screen.getByLabelText(/Цена одной единицы/), { target: { value: price } });
 }
 
@@ -158,7 +158,7 @@ describe("CatalogUnitPreparationDialog", () => {
     const { onClose } = setup();
     await waitFor(() => expect(screen.getByLabelText("Единиц в упаковке")).toHaveValue("30"));
     expect(screen.getByLabelText("Единица отпуска")).toHaveValue("capsule");
-    expect(screen.getByLabelText("Шаг отпуска")).toHaveValue("5");
+    expect(screen.getByLabelText("Продавать по, шт.")).toHaveValue("5");
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
     fireEvent.click(screen.getByRole("button", { name: "Убрать подготовку" }));
     await waitFor(() =>
@@ -176,7 +176,7 @@ describe("CatalogUnitPreparationDialog", () => {
     const { onClose } = setup();
     await fillValid(price);
     fireEvent.change(screen.getByLabelText("Единиц в упаковке"), { target: { value: pack } });
-    fireEvent.change(screen.getByLabelText("Шаг отпуска"), { target: { value: step } });
+    fireEvent.change(screen.getByLabelText("Продавать по, шт."), { target: { value: step } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
@@ -197,10 +197,10 @@ describe("CatalogUnitPreparationDialog", () => {
     ["Единиц в упаковке", "1"],
     ["Единиц в упаковке", "10001"],
     ["Единиц в упаковке", "20.5"],
-    ["Шаг отпуска", "0"],
-    ["Шаг отпуска", "3"],
-    ["Шаг отпуска", "2.5"],
-    ["Шаг отпуска", "10001"],
+    ["Продавать по, шт.", "0"],
+    ["Продавать по, шт.", "3"],
+    ["Продавать по, шт.", "2.5"],
+    ["Продавать по, шт.", "10001"],
     ["Цена одной единицы", "0"],
     ["Цена одной единицы", "-1"],
     ["Цена одной единицы", "0.001"],
