@@ -150,6 +150,24 @@ def test_blister_size_accepts_maximum_pack_boundary() -> None:
     assert preparation.model_dump(mode="json")["units_per_blister"] == 10_000
 
 
+def test_preparation_response_schema_preserves_typed_fields_and_decimal_string() -> None:
+    schema = UnitSalePreparation.model_json_schema(mode="serialization")
+    assert set(schema["properties"]) == {
+        "version",
+        "state",
+        "unit",
+        "units_per_pack",
+        "units_per_blister",
+        "dispense_step",
+        "unit_price",
+    }
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["unit_price"]["type"] == "string"
+    assert schema["properties"]["units_per_pack"]["minimum"] == 2
+    assert schema["properties"]["units_per_pack"]["maximum"] == 10_000
+    assert "units_per_blister" not in schema["required"]
+
+
 @pytest.mark.parametrize(
     ("units_per_pack", "step", "quantity", "sale_format", "expected"),
     [
