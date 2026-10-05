@@ -23,8 +23,9 @@ import { listCatalog } from "./api";
 import { otherDosageForms, popularDosageForms, presetDosageForm } from "./dosageForms";
 import { CatalogTemplateField } from "./CatalogTemplateField";
 import { CatalogUnitPreparationDialog } from "./CatalogUnitPreparationDialog";
+import { describeQuantity } from "./packaging";
 import { useCatalogCreate } from "./useCatalogCreate";
-import { type CatalogItem } from "./types";
+import { type CatalogItem, type UnitSalePreparation } from "./types";
 
 const optionalText = z.string().trim().max(255, "Не более 255 символов").optional();
 
@@ -68,6 +69,7 @@ const schema = z
 
 type ParsedValues = z.infer<typeof schema>;
 type FormValues = Omit<ParsedValues, "dispensing_type" | "storage_type"> & {
+  unit_sale_preparation: UnitSalePreparation | null;
   dispensing_type: ParsedValues["dispensing_type"] | "";
   storage_type: ParsedValues["storage_type"] | "";
 };
@@ -116,6 +118,7 @@ export function CatalogItemForm({
 
   const form = useForm<FormValues>({
     defaultValues: {
+      unit_sale_preparation: item?.unit_sale_preparation ?? null,
       brand_name: item?.brand_name ?? initialName,
       inn: item?.inn ?? "",
       manufacturer: item?.manufacturer ?? "",
@@ -133,6 +136,7 @@ export function CatalogItemForm({
     },
   });
   const brandName = form.watch("brand_name").trim();
+  const preparation = form.watch("unit_sale_preparation");
   const identityFields = form.watch(["brand_name", "manufacturer", "form", "dosage", "pack_size"]);
   const selectedDosageForm = identityFields[2] ?? "";
   const dosageFormPreset = presetDosageForm(selectedDosageForm);
@@ -168,6 +172,7 @@ export function CatalogItemForm({
   useEffect(() => {
     setCustomDosageForm(Boolean(item?.form) && !presetDosageForm(item?.form));
     form.reset({
+      unit_sale_preparation: item?.unit_sale_preparation ?? null,
       brand_name: item?.brand_name ?? initialName,
       inn: item?.inn ?? "",
       manufacturer: item?.manufacturer ?? "",
@@ -241,7 +246,7 @@ export function CatalogItemForm({
             manufacturer: nullable(d.manufacturer),
             form: nullable(d.form),
             dosage: nullable(d.dosage),
-            pack_size: nullable(d.pack_size),
+            ...(preparation ? {} : { pack_size: nullable(d.pack_size) }),
             atx_code: nullable(d.atx_code),
             dispensing_type: d.dispensing_type,
             storage_type: d.storage_type,
@@ -400,13 +405,41 @@ export function CatalogItemForm({
             value={form.watch("dosage") ?? ""}
             inputProps={form.register("dosage")}
           />
-          <CatalogTemplateField
-            kind="pack_size"
-            label="Размер упаковки"
-            placeholder="20 таблеток"
-            value={form.watch("pack_size") ?? ""}
-            inputProps={form.register("pack_size")}
-          />
+          {preparation ? (
+            <div>
+              <Label htmlFor="pack_size">Размер упаковки</Label>
+              <Input
+                id="pack_size"
+                readOnly
+                value={describeQuantity(preparation.units_per_pack, preparation.unit)}
+                aria-describedby="catalog-pack-size-help"
+              />
+              {canPrepareUnits && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="mt-2"
+                  disabled={form.formState.isDirty || form.formState.isSubmitting}
+                  onClick={() => setUnitPreparationOpen(true)}
+                >
+                  Изменить состав упаковки
+                </Button>
+              )}
+              <p id="catalog-pack-size-help" className="mt-1 text-xs text-foreground-muted">
+                {form.formState.isDirty
+                  ? "Сначала сохраните изменения карточки."
+                  : "Размер берётся из состава упаковки. Вводить его повторно не нужно."}
+              </p>
+            </div>
+          ) : (
+            <CatalogTemplateField
+              kind="pack_size"
+              label="Размер упаковки"
+              placeholder="20 таблеток"
+              value={form.watch("pack_size") ?? ""}
+              inputProps={form.register("pack_size")}
+            />
+          )}
           <div>
             <Label htmlFor="atx_code">ATX-код</Label>
             <Input id="atx_code" {...form.register("atx_code")} />
@@ -650,7 +683,7 @@ export function CatalogItemForm({
           {topError}
         </p>
       )}
-      {item && canPrepareUnits && (
+      {item && canPrepareUnits && !preparation && (
         <div className="rounded-lg border border-border p-3">
           <Button
             type="button"
@@ -663,7 +696,7 @@ export function CatalogItemForm({
           <p className="mt-2 text-xs text-foreground-muted">
             {form.formState.isDirty
               ? "Сначала сохраните изменения карточки."
-              : "Состав упаковки, шаг отпуска и цена единицы. Продажа поштучно ещё недоступна."}
+              : "Количество в пачке и блистере, цена одной штуки. Продажа поштучно ещё недоступна."}
           </p>
         </div>
       )}
@@ -691,6 +724,13 @@ export function CatalogItemForm({
         <CatalogUnitPreparationDialog
           itemId={item.id}
           onClose={() => setUnitPreparationOpen(false)}
+          onSaved={(updated) => {
+            form.reset({
+              ...form.getValues(),
+              pack_size: updated.pack_size ?? "",
+              unit_sale_preparation: updated.unit_sale_preparation ?? null,
+            });
+          }}
         />
       )}
     </>

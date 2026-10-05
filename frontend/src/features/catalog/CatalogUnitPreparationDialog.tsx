@@ -9,6 +9,7 @@ import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 
 import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
+import { describeQuantity } from "./packaging";
 import { type CatalogItem, type UnitSalePreparation } from "./types";
 
 const integer = (minimum: number) =>
@@ -59,24 +60,13 @@ const schema = z
   });
 
 type Values = z.infer<typeof schema>;
-const quantityNames: Record<Values["unit"], readonly [string, string, string]> = {
-  tablet: ["таблетка", "таблетки", "таблеток"],
-  capsule: ["капсула", "капсулы", "капсул"],
-  ampoule: ["ампула", "ампулы", "ампул"],
-  sachet: ["саше", "саше", "саше"],
-  suppository: ["суппозиторий", "суппозитория", "суппозиториев"],
-};
-const quantityPlural = new Intl.PluralRules("ru");
-function describeQuantity(quantity: number, unit: Values["unit"]): string {
-  const plural = quantityPlural.select(quantity);
-  return `${quantity} ${quantityNames[unit][plural === "one" ? 0 : plural === "few" ? 1 : 2]}`;
-}
 interface Props {
   itemId: string;
   onClose: () => void;
+  onSaved?: (item: CatalogItem) => void;
 }
 
-export function CatalogUnitPreparationDialog({ itemId, onClose }: Props): JSX.Element {
+export function CatalogUnitPreparationDialog({ itemId, onClose, onSaved }: Props): JSX.Element {
   const { user } = useAuth();
   const canUpdate =
     hasPermission(user, "catalog.update") && permissionBranchScope(user, "catalog.update") === null;
@@ -90,10 +80,10 @@ export function CatalogUnitPreparationDialog({ itemId, onClose }: Props): JSX.El
       </Modal>
     );
   }
-  return <PreparationLoader itemId={itemId} onClose={onClose} />;
+  return <PreparationLoader itemId={itemId} onClose={onClose} onSaved={onSaved} />;
 }
 
-function PreparationLoader({ itemId, onClose }: Props): JSX.Element {
+function PreparationLoader({ itemId, onClose, onSaved }: Props): JSX.Element {
   const query = useCatalogItemQuery(itemId, true);
   if (query.isError) {
     return (
@@ -115,15 +105,17 @@ function PreparationLoader({ itemId, onClose }: Props): JSX.Element {
       </Modal>
     );
   }
-  return <PreparationForm key={itemId} item={query.data} onClose={onClose} />;
+  return <PreparationForm key={itemId} item={query.data} onClose={onClose} onSaved={onSaved} />;
 }
 
 function PreparationForm({
   item,
   onClose,
+  onSaved,
 }: {
   item: CatalogItem;
   onClose: () => void;
+  onSaved?: (item: CatalogItem) => void;
 }): JSX.Element {
   const saved = item.unit_sale_preparation;
   const update = useUpdateCatalogItem();
@@ -151,7 +143,16 @@ function PreparationForm({
   async function persist(preparation: UnitSalePreparation | null): Promise<void> {
     setError(null);
     try {
-      await update.mutateAsync({ id: item.id, payload: { unit_sale_preparation: preparation } });
+      const updated = await update.mutateAsync({
+        id: item.id,
+        payload: {
+          unit_sale_preparation: preparation,
+          ...(preparation
+            ? { pack_size: describeQuantity(preparation.units_per_pack, preparation.unit) }
+            : {}),
+        },
+      });
+      onSaved?.(updated);
       onClose();
     } catch (cause) {
       setError(
@@ -209,27 +210,38 @@ function PreparationForm({
           Продажа поштучно ещё недоступна. Сохранение не меняет остатки и цену упаковки.
         </p>
         <fieldset disabled={busy} className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="unit-preparation-unit">Единица отпуска</Label>
-            <Select id="unit-preparation-unit" {...form.register("unit")}>
-              <option value="tablet">Таблетка</option>
-              <option value="capsule">Капсула</option>
-              <option value="ampoule">Ампула</option>
-              <option value="sachet">Саше</option>
-              <option value="suppository">Суппозиторий</option>
-            </Select>
-            <FormError>{form.formState.errors.unit?.message}</FormError>
-          </div>
-          <div>
-            <Label htmlFor="unit-preparation-pack">Сколько штук в упаковке?</Label>
-            <Input
-              id="unit-preparation-pack"
-              inputMode="numeric"
-              placeholder="Например, 30"
-              aria-invalid={Boolean(form.formState.errors.units_per_pack)}
-              {...form.register("units_per_pack")}
-            />
+          <div className="sm:col-span-2">
+            <Label htmlFor="unit-preparation-pack">Размер упаковки</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                id="unit-preparation-pack"
+                inputMode="numeric"
+                placeholder="Например, 30"
+                aria-label="Количество в упаковке"
+                aria-describedby="unit-preparation-pack-help"
+                aria-invalid={Boolean(form.formState.errors.units_per_pack)}
+                {...form.register("units_per_pack")}
+              />
+              <Select
+                id="unit-preparation-unit"
+                aria-label="Что в упаковке"
+                {...form.register("unit")}
+              >
+                <option value="tablet">таблеток</option>
+                <option value="capsule">капсул</option>
+                <option value="ampoule">ампул</option>
+                <option value="sachet">саше</option>
+                <option value="suppository">суппозиториев</option>
+              </Select>
+            </div>
+            <p id="unit-preparation-pack-help" className="mt-1 text-xs text-foreground-muted">
+              Укажите общее количество во всей пачке. Например: 20 таблеток.
+              {item.pack_size && ` Сейчас в карточке: «${item.pack_size}».`}
+              {validPack &&
+                ` После сохранения: «${describeQuantity(pack, unit)}». Повторно вводить размер в карточке не нужно.`}
+            </p>
             <FormError>{form.formState.errors.units_per_pack?.message}</FormError>
+            <FormError>{form.formState.errors.unit?.message}</FormError>
           </div>
           <div className="space-y-3 sm:col-span-2">
             <Switch label="В пачке есть блистеры (плажки)" {...form.register("has_blister")} />
