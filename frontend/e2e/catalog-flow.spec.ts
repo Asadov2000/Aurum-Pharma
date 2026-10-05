@@ -32,7 +32,7 @@ test.describe("Catalog flow (owner)", () => {
     await dialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
     await dialog.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
     await dialog.getByLabel("Цена целой упаковки, TJS").fill("12.50");
-    await dialog.getByText("Настроить поштучную продажу", { exact: true }).click();
+    await dialog.getByRole("button", { name: "Добавить настройку", exact: true }).click();
     await dialog.getByLabel("Количество в упаковке").fill("20");
     await dialog.getByLabel("Что в упаковке").selectOption("capsule");
     await dialog.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
@@ -171,7 +171,15 @@ test.describe("Catalog flow (owner)", () => {
         .getByRole("button", { name: "Изменить позицию" })
         .click();
       const editor = page.getByRole("dialog", { name: `Изменить товар: ${name}` });
-      await editor.getByText("Настроить поштучную продажу", { exact: true }).click();
+      await expect(
+        editor.getByRole("heading", { name: "Целая упаковка", exact: true }),
+      ).toBeVisible();
+      await expect(
+        editor.getByRole("heading", { name: "Поштучно и блистерами", exact: true }),
+      ).toBeVisible();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
+      await editor.getByRole("button", { name: "Добавить настройку", exact: true }).click();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
       await expect(page.getByRole("dialog", { name: "Подготовка поштучного отпуска" })).toHaveCount(
         0,
       );
@@ -217,7 +225,14 @@ test.describe("Catalog flow (owner)", () => {
       await expect(
         editor.getByRole("textbox", { name: "Размер упаковки", exact: true }),
       ).toHaveCount(0);
-      await editor.getByText("Настроить поштучную продажу", { exact: true }).click();
+      await editor.getByRole("button", { name: "Убрать настройку", exact: true }).click();
+      await expect(
+        editor.getByRole("heading", { name: "Целая упаковка", exact: true }),
+      ).toBeVisible();
+      await expect(
+        editor.getByRole("heading", { name: "Поштучно и блистерами", exact: true }),
+      ).toBeVisible();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
       await expect(editor.getByLabel("Размер упаковки")).toHaveValue("20 таблеток");
       await editor.getByRole("button", { name: "Сохранить изменения" }).click();
       await expect(editor).toBeHidden();
