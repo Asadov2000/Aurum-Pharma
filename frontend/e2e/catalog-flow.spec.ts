@@ -142,15 +142,13 @@ test.describe("Catalog flow (owner)", () => {
       await expect(preparation.getByRole("status")).toContainText(
         "Продажа поштучно ещё недоступна",
       );
-      await preparation.getByLabel("Сколько штук в упаковке?").fill("21");
-      await preparation.getByRole("radio", { name: "По несколько штук", exact: true }).check();
-      await preparation.getByLabel("Сколько штук в одной порции?").selectOption("3");
       await preparation.getByLabel("Сколько штук в упаковке?").fill("20");
-      await expect(preparation.getByLabel("Сколько штук в одной порции?")).toHaveValue("3");
+      await preparation.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
+      await preparation.getByLabel("Сколько штук в одном блистере?").fill("3");
       await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
-      await expect(preparation.getByRole("alert")).toContainText("без остатка");
-      await preparation.getByRole("radio", { name: "Поштучно", exact: true }).check();
+      await expect(preparation.getByRole("alert")).toContainText("целое число блистеров");
+      await preparation.getByLabel("Сколько штук в одном блистере?").fill("10");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
       await expect(preparation).toBeHidden();
       await expect(editor).toBeVisible();
@@ -167,10 +165,12 @@ test.describe("Catalog flow (owner)", () => {
         unit: "tablet",
         units_per_pack: 20,
         dispense_step: 1,
+        units_per_blister: 10,
         unit_price: "1.50",
       });
       await open.click();
       await expect(preparation.getByLabel("Сколько штук в упаковке?")).toHaveValue("20");
+      await expect(preparation.getByLabel("Сколько штук в одном блистере?")).toHaveValue("10");
       await expect(preparation.getByLabel(/Цена одной единицы/)).toHaveValue("1.50");
       await preparation.getByRole("button", { name: "Убрать подготовку" }).click();
       await expect(preparation).toBeHidden();

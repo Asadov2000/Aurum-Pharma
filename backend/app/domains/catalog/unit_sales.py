@@ -10,9 +10,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     TypeAdapter,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -35,6 +37,7 @@ class UnitSalePreparation(BaseModel):
     state: Literal["prepared"] = "prepared"
     unit: DispenseUnit
     units_per_pack: int = Field(strict=True, ge=2, le=10_000)
+    units_per_blister: int | None = Field(default=None, strict=True, ge=2, le=10_000)
     dispense_step: int = Field(strict=True, ge=1, le=10_000)
     unit_price: Decimal = Field(gt=0, max_digits=14, decimal_places=2, allow_inf_nan=False)
 
@@ -49,7 +52,17 @@ class UnitSalePreparation(BaseModel):
     def validate_step(self) -> Self:
         if self.units_per_pack % self.dispense_step:
             raise ValueError("dispense_step must divide units_per_pack")
+        if self.units_per_blister is not None and self.units_per_pack % self.units_per_blister:
+            raise ValueError("units_per_blister must divide units_per_pack")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_preparation(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # Keep legacy metadata and immutable operation hashes byte-for-byte compatible.
+        result: dict[str, object] = handler(self)
+        if self.units_per_blister is None:
+            result.pop("units_per_blister", None)
+        return result
 
     @field_serializer("unit_price", when_used="json")
     def serialize_unit_price(self, value: Decimal) -> str:

@@ -15,7 +15,7 @@ from httpx import AsyncClient
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -46,8 +46,9 @@ def _preparation(**overrides: object) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("blister", [None, 10])
 async def test_http_preparation_crud_keeps_catalog_permission_contract(
-    client: AsyncClient, db_session: AsyncSession, make_tenant: TenantFactory
+    client: AsyncClient, db_session: AsyncSession, make_tenant: TenantFactory, blister: int | None
 ) -> None:
     tenant = await make_tenant()
     user = AppUser(
@@ -71,10 +72,11 @@ async def test_http_preparation_crud_keeps_catalog_permission_contract(
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[current_user] = override_user
     try:
+        preparation = _preparation() if blister is None else _preparation(units_per_blister=blister)
         payload = {
             "operation_id": str(uuid4()),
             "brand_name": "HTTP preparation",
-            "unit_sale_preparation": _preparation(),
+            "unit_sale_preparation": preparation,
         }
         denied = await client.post("/api/v1/catalog", json=payload)
         assert denied.status_code == 403
@@ -82,7 +84,7 @@ async def test_http_preparation_crud_keeps_catalog_permission_contract(
         actor.permission_scopes = {"catalog.create": None}
         created = await client.post("/api/v1/catalog", json=payload)
         assert created.status_code == 201, created.text
-        assert created.json()["unit_sale_preparation"] == _preparation()
+        assert created.json()["unit_sale_preparation"] == preparation
         item_id = created.json()["id"]
         denied_update = await client.patch(
             f"/api/v1/catalog/{item_id}", json={"unit_sale_preparation": None}
@@ -92,7 +94,7 @@ async def test_http_preparation_crud_keeps_catalog_permission_contract(
         actor.permission_scopes = {"catalog.view": None}
         read = await client.get(f"/api/v1/catalog/{item_id}")
         assert read.status_code == 200
-        assert read.json()["unit_sale_preparation"] == _preparation()
+        assert read.json()["unit_sale_preparation"] == preparation
         actor.permissions = {"catalog.update"}
         actor.permission_scopes = {"catalog.update": None}
         invalid = await client.patch(
@@ -100,12 +102,30 @@ async def test_http_preparation_crud_keeps_catalog_permission_contract(
             json={"unit_sale_preparation": _preparation(state="enabled")},
         )
         assert invalid.status_code == 422
+        for invalid_blister in (True, 2.5, 7, 60, 10001):
+            invalid_blister_response = await client.patch(
+                f"/api/v1/catalog/{item_id}",
+                json={"unit_sale_preparation": _preparation(units_per_blister=invalid_blister)},
+            )
+            assert invalid_blister_response.status_code == 422
         changed = await client.patch(
             f"/api/v1/catalog/{item_id}",
-            json={"unit_sale_preparation": _preparation(unit_price="2.50")},
+            json={"unit_sale_preparation": {**preparation, "unit_price": "2.50"}},
         )
         assert changed.status_code == 200
-        assert changed.json()["unit_sale_preparation"] == _preparation(unit_price="2.50")
+        assert changed.json()["unit_sale_preparation"] == {**preparation, "unit_price": "2.50"}
+        if blister is not None:
+            cleared_blister = await client.patch(
+                f"/api/v1/catalog/{item_id}",
+                json={"unit_sale_preparation": _preparation(units_per_blister=None)},
+            )
+            assert cleared_blister.status_code == 200
+            assert cleared_blister.json()["unit_sale_preparation"] == _preparation()
+            stored = await db_session.scalar(
+                text("SELECT unit_sale_preparation FROM tenant_catalog WHERE id=:id"),
+                {"id": UUID(item_id)},
+            )
+            assert stored == _preparation()
         cleared = await client.patch(
             f"/api/v1/catalog/{item_id}", json={"unit_sale_preparation": None}
         )
@@ -174,6 +194,14 @@ INVALID_OVERRIDES = [
     {"units_per_pack": 30.0},
     {"units_per_pack": True},
     {"units_per_pack": "30"},
+    {"units_per_blister": 1},
+    {"units_per_blister": 10001},
+    {"units_per_blister": 10.0},
+    {"units_per_blister": 2.5},
+    {"units_per_blister": True},
+    {"units_per_blister": "10"},
+    {"units_per_blister": 7},
+    {"units_per_blister": 60},
     {"dispense_step": 0},
     {"dispense_step": 4},
     {"dispense_step": 31},
@@ -277,6 +305,77 @@ async def test_null_preparation_preserves_pre_migration_creation_fingerprint(
         assert replay.id == legacy.id
 
 
+async def test_optional_blister_preserves_legacy_prepared_creation_fingerprint(
+    db_session: AsyncSession, make_tenant: TenantFactory
+) -> None:
+    tenant = await make_tenant()
+    operation_id = uuid4()
+    fields = {"brand_name": "Legacy prepared", "unit_sale_preparation": _preparation()}
+    canonical = CatalogItemCreate.model_validate(fields).model_dump(
+        mode="json", exclude={"operation_id", "confirm_distinct_item"}
+    )
+    # Reconstruct the previous release contract independently of the new serializer.
+    canonical["unit_sale_preparation"] = _preparation()
+    fingerprint = sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    legacy = await CatalogRepository(db_session).create_item(
+        tenant_id=tenant.id,
+        brand_name="Legacy prepared",
+        unit_sale_preparation=_preparation(),
+        operation_id=operation_id,
+        create_request_fingerprint=fingerprint,
+    )
+    service = CatalogService(CatalogRepository(db_session))
+    for preparation in (_preparation(), _preparation(units_per_blister=None)):
+        replay = await service.create_item(
+            tenant_id=tenant.id,
+            fields={**fields, "unit_sale_preparation": preparation},
+            operation_id=operation_id,
+        )
+        assert replay.id == legacy.id
+    with pytest.raises(ConflictError):
+        await service.create_item(
+            tenant_id=tenant.id,
+            fields={**fields, "unit_sale_preparation": _preparation(units_per_blister=10)},
+            operation_id=operation_id,
+        )
+
+
+async def test_blister_creation_retry_preserves_original_configuration(
+    db_session: AsyncSession, make_tenant: TenantFactory
+) -> None:
+    tenant = await make_tenant()
+    operation_id = uuid4()
+    service = CatalogService(CatalogRepository(db_session))
+    fields = {
+        "brand_name": "Blister prepared",
+        "unit_sale_preparation": _preparation(units_per_blister=10, unit_price="2"),
+    }
+    item = await service.create_item(tenant_id=tenant.id, fields=fields, operation_id=operation_id)
+    replay = await service.create_item(
+        tenant_id=tenant.id,
+        fields={
+            **fields,
+            "unit_sale_preparation": _preparation(units_per_blister=10, unit_price="2.00"),
+        },
+        operation_id=operation_id,
+    )
+    assert replay.id == item.id
+    for blister in (None, 5, 30):
+        with pytest.raises(ConflictError):
+            await service.create_item(
+                tenant_id=tenant.id,
+                fields={
+                    **fields,
+                    "unit_sale_preparation": _preparation(
+                        units_per_blister=blister, unit_price="2"
+                    ),
+                },
+                operation_id=operation_id,
+            )
+
+
 @pytest.mark.parametrize(
     "metadata",
     [
@@ -291,6 +390,17 @@ async def test_null_preparation_preserves_pre_migration_creation_fingerprint(
         _preparation(units_per_pack="30"),
         _preparation(units_per_pack=30.0),
         _preparation(units_per_pack=10000000000000000000000),
+        _preparation(units_per_blister=None),
+        _preparation(units_per_blister=True),
+        _preparation(units_per_blister="10"),
+        _preparation(units_per_blister=10.0),
+        _preparation(units_per_blister=2.5),
+        _preparation(units_per_blister=0),
+        _preparation(units_per_blister=1),
+        _preparation(units_per_blister=10001),
+        _preparation(units_per_blister=10000000000000000000000),
+        _preparation(units_per_blister=7),
+        _preparation(units_per_blister=60),
         _preparation(dispense_step=0),
         _preparation(dispense_step=4),
         _preparation(unit_price=1.5),
@@ -319,9 +429,34 @@ async def test_database_rejects_invalid_preparation_without_nullable_check_bypas
             )
 
 
-async def test_preparation_obeys_existing_tenant_rls(
-    db_engine: AsyncEngine, maintenance_engine: AsyncEngine
+@pytest.mark.parametrize(("pack", "blister"), [(2, 2), (30, 10), (30, 30), (10000, 10000)])
+async def test_database_accepts_blister_boundaries(
+    db_session: AsyncSession, make_tenant: TenantFactory, pack: int, blister: int
 ) -> None:
+    tenant = await make_tenant()
+    item = await CatalogService(CatalogRepository(db_session)).create_item(
+        tenant_id=tenant.id, fields={"brand_name": "Database blister boundary"}
+    )
+    metadata = _preparation(units_per_pack=pack, units_per_blister=blister)
+    await db_session.execute(
+        text(
+            "UPDATE tenant_catalog SET unit_sale_preparation=CAST(:value AS jsonb) " "WHERE id=:id"
+        ),
+        {"value": json.dumps(metadata), "id": item.id},
+    )
+    assert (
+        await db_session.scalar(
+            text("SELECT unit_sale_preparation FROM tenant_catalog WHERE id=:id"), {"id": item.id}
+        )
+        == metadata
+    )
+
+
+@pytest.mark.parametrize("blister", [None, 10])
+async def test_preparation_obeys_existing_tenant_rls(
+    db_engine: AsyncEngine, maintenance_engine: AsyncEngine, blister: int | None
+) -> None:
+    preparation = _preparation() if blister is None else _preparation(units_per_blister=blister)
     app_engine = create_async_engine(get_settings().DATABASE_URL_APP, poolclass=NullPool)
     for engine in (db_engine, maintenance_engine, app_engine):
         assert (engine.url.database or "").endswith("_test")
@@ -348,7 +483,7 @@ async def test_preparation_obeys_existing_tenant_rls(
                             "(tenant_id,brand_name,unit_sale_preparation) "
                             "VALUES (:tenant,'Prepared',CAST(:metadata AS jsonb)) RETURNING id"
                         ),
-                        {"tenant": tenant_id, "metadata": json.dumps(_preparation())},
+                        {"tenant": tenant_id, "metadata": json.dumps(preparation)},
                     )
                 )
         async with app_engine.begin() as connection:
@@ -366,7 +501,7 @@ async def test_preparation_obeys_existing_tenant_rls(
                     {"tenants": tenant_ids},
                 )
             ).all()
-            assert rows == [(catalog_ids[0], _preparation())]
+            assert rows == [(catalog_ids[0], preparation)]
             hidden = await connection.execute(
                 text("UPDATE tenant_catalog SET unit_sale_preparation=NULL WHERE id=:id"),
                 {"id": catalog_ids[1]},
@@ -477,6 +612,84 @@ async def test_preparation_migration_roundtrip_preserves_legacy_catalog(
             )
             == 0
         )
+
+    async with maintenance_engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            await connection.run_sync(rehearse)
+        finally:
+            await transaction.rollback()
+
+
+async def test_blister_migration_roundtrip_refuses_data_loss(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    source = (
+        Path(__file__).resolve().parents[3]
+        / "alembic"
+        / "versions"
+        / "0173_catalog_blister_preparation.py"
+    )
+    spec = importlib.util.spec_from_file_location("catalog_blister_migration", source)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    def rehearse(connection: Connection) -> None:
+        assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+        assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+        tenant_id = connection.scalar(
+            text(
+                "INSERT INTO tenant(name,contact_email) VALUES ('Blister migration', :email) "
+                "RETURNING id"
+            ),
+            {"email": f"migration-blister-{uuid4().hex}@example.invalid"},
+        )
+        connection.execute(
+            text("SELECT set_config('app.tenant_id', :tenant, true)"),
+            {"tenant": str(tenant_id)},
+        )
+        metadata = _preparation(units_per_blister=10)
+        item_id = connection.scalar(
+            text(
+                "INSERT INTO tenant_catalog(tenant_id,brand_name,unit_sale_preparation) "
+                "VALUES (:tenant,'Blister migration',CAST(:metadata AS jsonb)) RETURNING id"
+            ),
+            {"tenant": tenant_id, "metadata": json.dumps(metadata)},
+        )
+        select_metadata = text("SELECT unit_sale_preparation FROM tenant_catalog WHERE id=:id")
+        with Operations.context(MigrationContext.configure(connection)):
+            with pytest.raises(DBAPIError, match="Clear catalog units_per_blister"):
+                with connection.begin_nested():
+                    migration.downgrade()
+            assert connection.scalar(select_metadata, {"id": item_id}) == metadata
+            connection.execute(
+                text(
+                    "UPDATE tenant_catalog SET unit_sale_preparation="
+                    "unit_sale_preparation-'units_per_blister' WHERE id=:id"
+                ),
+                {"id": item_id},
+            )
+            migration.downgrade()
+            assert connection.scalar(select_metadata, {"id": item_id}) == _preparation()
+            with pytest.raises(IntegrityError, match="ck_tc_unit_sale_preparation"):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "UPDATE tenant_catalog SET unit_sale_preparation="
+                            "CAST(:metadata AS jsonb) WHERE id=:id"
+                        ),
+                        {"metadata": json.dumps(metadata), "id": item_id},
+                    )
+            migration.upgrade()
+            connection.execute(
+                text(
+                    "UPDATE tenant_catalog SET unit_sale_preparation="
+                    "CAST(:metadata AS jsonb) WHERE id=:id"
+                ),
+                {"metadata": json.dumps(metadata), "id": item_id},
+            )
+            assert connection.scalar(select_metadata, {"id": item_id}) == metadata
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()

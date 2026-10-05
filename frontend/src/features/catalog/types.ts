@@ -9,6 +9,7 @@ export interface UnitSalePreparation {
   state: "prepared";
   unit: "tablet" | "capsule" | "ampoule" | "sachet" | "suppository";
   units_per_pack: number;
+  units_per_blister?: number | null;
   dispense_step: number;
   unit_price: string;
 }
