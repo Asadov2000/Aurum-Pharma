@@ -41,7 +41,7 @@ const schema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["dispense_step"],
-        message: "Шаг отпуска должен делить упаковку без остатка",
+        message: "Упаковка должна делиться на это количество без остатка",
       });
     }
   });
@@ -197,15 +197,17 @@ function PreparationForm({
             <FormError>{form.formState.errors.units_per_pack?.message}</FormError>
           </div>
           <div>
-            <Label htmlFor="unit-preparation-step">Шаг отпуска</Label>
+            <Label htmlFor="unit-preparation-step">Продавать по, шт.</Label>
             <Input
               id="unit-preparation-step"
               inputMode="numeric"
+              aria-describedby="unit-preparation-step-help"
               aria-invalid={Boolean(form.formState.errors.dispense_step)}
               {...form.register("dispense_step")}
             />
-            <p className="mt-1 text-xs text-foreground-muted">
-              1 — по одной единице; 10 — только кратно десяти.
+            <p id="unit-preparation-step-help" className="mt-1 text-xs text-foreground-muted">
+              Укажите 1, чтобы продавать любое количество: 1, 2, 3 штуки и больше. Укажите 10, чтобы
+              продавать только по 10, 20, 30 штук — например, целыми блистерами по 10 таблеток.
             </p>
             <FormError>{form.formState.errors.dispense_step?.message}</FormError>
           </div>

@@ -143,11 +143,11 @@ test.describe("Catalog flow (owner)", () => {
         "Продажа поштучно ещё недоступна",
       );
       await preparation.getByLabel("Единиц в упаковке").fill("20");
-      await preparation.getByLabel("Шаг отпуска").fill("3");
+      await preparation.getByLabel("Продавать по, шт.").fill("3");
       await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
       await expect(preparation.getByRole("alert")).toContainText("без остатка");
-      await preparation.getByLabel("Шаг отпуска").fill("1");
+      await preparation.getByLabel("Продавать по, шт.").fill("1");
       await preparation.getByRole("button", { name: "Сохранить подготовку" }).click();
       await expect(preparation).toBeHidden();
       await expect(editor).toBeVisible();
