@@ -70,9 +70,9 @@ function setup() {
 }
 
 async function fillValid(price = "0,35") {
-  await screen.findByLabelText("Единица отпуска");
-  fireEvent.change(screen.getByLabelText("Единица отпуска"), { target: { value: "tablet" } });
-  fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), { target: { value: "20" } });
+  await screen.findByLabelText("Что в упаковке");
+  fireEvent.change(screen.getByLabelText("Что в упаковке"), { target: { value: "tablet" } });
+  fireEvent.change(screen.getByLabelText("Количество в упаковке"), { target: { value: "20" } });
   fireEvent.change(screen.getByLabelText(/Цена одной единицы/), { target: { value: price } });
 }
 
@@ -102,9 +102,7 @@ describe("CatalogUnitPreparationDialog", () => {
       </QueryClientProvider>
     );
     const first = render(view());
-    await waitFor(() =>
-      expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30"),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("30"));
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
     expect(calls.get).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
       signal: expect.any(AbortSignal),
@@ -128,7 +126,7 @@ describe("CatalogUnitPreparationDialog", () => {
     const reopened = render(view());
     await waitFor(() => expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("2.15"));
     expect(calls.get.mock.calls.length).toBeGreaterThan(requestsBeforeReopen);
-    expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30");
+    expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("30");
     reopened.unmount();
     client.clear();
   });
@@ -141,6 +139,7 @@ describe("CatalogUnitPreparationDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        pack_size: "20 таблеток",
         unit_sale_preparation: {
           version: 1,
           state: "prepared",
@@ -158,10 +157,8 @@ describe("CatalogUnitPreparationDialog", () => {
   it("restores saved values and explicitly removes preparation with null", async () => {
     calls.get.mockResolvedValue({ data: { ...ITEM, unit_sale_preparation: PREPARATION } });
     const { onClose } = setup();
-    await waitFor(() =>
-      expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30"),
-    );
-    expect(screen.getByLabelText("Единица отпуска")).toHaveValue("capsule");
+    await waitFor(() => expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("30"));
+    expect(screen.getByLabelText("Что в упаковке")).toHaveValue("capsule");
     expect(screen.queryByLabelText("Сколько штук в одном блистере?")).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
     fireEvent.click(screen.getByRole("button", { name: "Убрать подготовку" }));
@@ -179,7 +176,7 @@ describe("CatalogUnitPreparationDialog", () => {
   ])("preserves valid boundary values %s/%s/%s exactly", async (pack, blister, price) => {
     const { onClose } = setup();
     await fillValid(price);
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
+    fireEvent.change(screen.getByLabelText("Количество в упаковке"), {
       target: { value: pack },
     });
     fireEvent.click(screen.getByText("В пачке есть блистеры (плажки)", { exact: true }));
@@ -189,6 +186,7 @@ describe("CatalogUnitPreparationDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        pack_size: `${pack} ${pack === "2" ? "таблетки" : "таблеток"}`,
         unit_sale_preparation: {
           version: 1,
           state: "prepared",
@@ -204,9 +202,9 @@ describe("CatalogUnitPreparationDialog", () => {
   });
 
   it.each([
-    ["Сколько штук в упаковке?", "1"],
-    ["Сколько штук в упаковке?", "10001"],
-    ["Сколько штук в упаковке?", "20.5"],
+    ["Количество в упаковке", "1"],
+    ["Количество в упаковке", "10001"],
+    ["Количество в упаковке", "20.5"],
     ["Цена одной единицы", "0"],
     ["Цена одной единицы", "-1"],
     ["Цена одной единицы", "0.001"],
@@ -226,13 +224,16 @@ describe("CatalogUnitPreparationDialog", () => {
     setup();
     await screen.findByLabelText(/Цена одной единицы/);
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("");
-    expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("");
+    expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("");
+    expect(screen.getByText(/№20/)).toBeInTheDocument();
+    expect(screen.getByText("Размер упаковки", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Что в упаковке" })).toHaveValue("tablet");
     expect(calls.patch).not.toHaveBeenCalled();
   });
 
   it("shows only pack composition and requires an explicit blister size", async () => {
     setup();
-    await screen.findByLabelText("Сколько штук в упаковке?");
+    await screen.findByLabelText("Количество в упаковке");
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Сколько штук в одном блистере?")).not.toBeInTheDocument();
     expect(
@@ -257,6 +258,7 @@ describe("CatalogUnitPreparationDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        pack_size: "20 таблеток",
         unit_sale_preparation: {
           version: 1,
           state: "prepared",
@@ -299,6 +301,7 @@ describe("CatalogUnitPreparationDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        pack_size: "30 капсул",
         unit_sale_preparation: { ...saved, units_per_blister: null },
       }),
     );
@@ -307,15 +310,18 @@ describe("CatalogUnitPreparationDialog", () => {
   it("warns about a legacy dispensing step and resets it only on explicit save", async () => {
     calls.get.mockResolvedValue({ data: { ...ITEM, unit_sale_preparation: PREPARATION } });
     setup();
-    await screen.findByLabelText("Сколько штук в упаковке?");
-    expect(screen.getByText(/После сохранения/)).toBeInTheDocument();
+    await screen.findByLabelText("Количество в упаковке");
+    expect(screen.getByText(/Раньше была подготовлена продажа только по 5 шт/)).toHaveTextContent(
+      "После сохранения",
+    );
     expect(calls.patch).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Единица отпуска")).toHaveValue("capsule");
-    expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("30");
+    expect(screen.getByLabelText("Что в упаковке")).toHaveValue("capsule");
+    expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("30");
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() =>
       expect(calls.patch).toHaveBeenCalledExactlyOnceWith("/catalog/item-1", {
+        pack_size: "30 капсул",
         unit_sale_preparation: { ...PREPARATION, dispense_step: 1, units_per_blister: null },
       }),
     );
@@ -328,7 +334,7 @@ describe("CatalogUnitPreparationDialog", () => {
     fireEvent.change(screen.getByLabelText("Сколько штук в одном блистере?"), {
       target: { value: "10" },
     });
-    fireEvent.change(screen.getByLabelText("Сколько штук в упаковке?"), {
+    fireEvent.change(screen.getByLabelText("Количество в упаковке"), {
       target: { value: "21" },
     });
     expect(screen.getByLabelText("Сколько штук в одном блистере?")).toHaveValue("10");
@@ -349,7 +355,7 @@ describe("CatalogUnitPreparationDialog", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/Цена одной единицы/)).toHaveValue("1.25");
-    expect(screen.getByLabelText("Сколько штук в упаковке?")).toHaveValue("20");
+    expect(screen.getByLabelText("Количество в упаковке")).toHaveValue("20");
     calls.patch.mockResolvedValue({ data: ITEM });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить подготовку" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -371,7 +377,7 @@ describe("CatalogUnitPreparationDialog", () => {
       if (kind === "missing") auth.permissions = ["catalog.view"];
       else auth.updateScope = ["branch-1"];
       setup();
-      expect(screen.queryByLabelText("Единица отпуска")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Что в упаковке")).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Сохранить подготовку" }),
       ).not.toBeInTheDocument();

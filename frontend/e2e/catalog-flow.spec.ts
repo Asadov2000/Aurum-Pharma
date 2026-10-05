@@ -142,7 +142,7 @@ test.describe("Catalog flow (owner)", () => {
       await expect(preparation.getByRole("status")).toContainText(
         "Продажа поштучно ещё недоступна",
       );
-      await preparation.getByLabel("Сколько штук в упаковке?").fill("20");
+      await preparation.getByLabel("Количество в упаковке").fill("20");
       await preparation.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
       await preparation.getByLabel("Сколько штук в одном блистере?").fill("3");
       await preparation.getByLabel(/Цена одной единицы/).fill("1,50");
@@ -156,9 +156,11 @@ test.describe("Catalog flow (owner)", () => {
       expect(savedResponse.ok()).toBeTruthy();
       const saved = (await savedResponse.json()) as {
         base_price: string;
+        pack_size: string;
         unit_sale_preparation: unknown;
       };
       expect(saved.base_price).toBe("30.00");
+      expect(saved.pack_size).toBe("20 таблеток");
       expect(saved.unit_sale_preparation).toEqual({
         version: 1,
         state: "prepared",
@@ -168,8 +170,10 @@ test.describe("Catalog flow (owner)", () => {
         units_per_blister: 10,
         unit_price: "1.50",
       });
-      await open.click();
-      await expect(preparation.getByLabel("Сколько штук в упаковке?")).toHaveValue("20");
+      await expect(editor.getByLabel("Размер упаковки")).toHaveValue("20 таблеток");
+      await expect(editor.getByLabel("Размер упаковки")).toHaveAttribute("readonly", "");
+      await editor.getByRole("button", { name: "Изменить состав упаковки" }).click();
+      await expect(preparation.getByLabel("Количество в упаковке")).toHaveValue("20");
       await expect(preparation.getByLabel("Сколько штук в одном блистере?")).toHaveValue("10");
       await expect(preparation.getByLabel(/Цена одной единицы/)).toHaveValue("1.50");
       await preparation.getByRole("button", { name: "Убрать подготовку" }).click();
@@ -177,11 +181,13 @@ test.describe("Catalog flow (owner)", () => {
       const clearedResponse = await api.get(`catalog/${item.id}`);
       const cleared = (await clearedResponse.json()) as {
         base_price: string;
+        pack_size: string;
         unit_sale_preparation: unknown;
       };
       expect(clearedResponse.ok()).toBeTruthy();
       expect(cleared.unit_sale_preparation).toBeNull();
       expect(cleared.base_price).toBe("30.00");
+      expect(cleared.pack_size).toBe("20 таблеток");
     } finally {
       await apiAnon.dispose();
       await api.dispose();
