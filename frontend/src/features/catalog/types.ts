@@ -4,6 +4,15 @@ export type DispensingType = "prescription" | "otc" | "special";
 export type StorageType = "normal" | "cold" | "frozen";
 export type BarcodeType = "ean13" | "ean8" | "gs1_128" | "code128" | "qr" | "other";
 
+export interface UnitSalePreparation {
+  version: 1;
+  state: "prepared";
+  unit: "tablet" | "capsule" | "ampoule" | "sachet" | "suppository";
+  units_per_pack: number;
+  dispense_step: number;
+  unit_price: string;
+}
+
 export interface CatalogItem {
   id: string;
   tenant_id: string;
@@ -27,6 +36,7 @@ export interface CatalogItem {
   // Additive: available stock at the searched branch (POS passes branch_id).
   // Null/absent when searched without a branch.
   stock_available?: string | null;
+  unit_sale_preparation?: UnitSalePreparation | null;
 }
 
 export interface Barcode {
@@ -77,6 +87,7 @@ export interface CatalogItemCreatePayload {
 }
 
 export interface CatalogItemUpdatePayload {
+  unit_sale_preparation?: UnitSalePreparation | null;
   brand_name?: string;
   inn?: string | null;
   manufacturer?: string | null;

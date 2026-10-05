@@ -6,6 +6,9 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Switch } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
+import { permissionBranchScope } from "@/features/auth/branchPermissions";
 
 import {
   barcodeLabel,
@@ -19,6 +22,7 @@ import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
 import { listCatalog } from "./api";
 import { otherDosageForms, popularDosageForms, presetDosageForm } from "./dosageForms";
 import { CatalogTemplateField } from "./CatalogTemplateField";
+import { CatalogUnitPreparationDialog } from "./CatalogUnitPreparationDialog";
 import { useCatalogCreate } from "./useCatalogCreate";
 import { type CatalogItem } from "./types";
 
@@ -91,6 +95,10 @@ export function CatalogItemForm({
   const create = useCatalogCreate();
   const update = useUpdateCatalogItem();
   const [topError, setTopError] = useState<string | null>(null);
+  const [unitPreparationOpen, setUnitPreparationOpen] = useState(false);
+  const { user } = useAuth();
+  const canPrepareUnits =
+    hasPermission(user, "catalog.update") && permissionBranchScope(user, "catalog.update") === null;
   const [customDosageForm, setCustomDosageForm] = useState(
     () => Boolean(item?.form) && !presetDosageForm(item?.form),
   );
@@ -304,7 +312,7 @@ export function CatalogItemForm({
     ),
   );
 
-  return (
+  const cardForm = (
     <form
       onSubmit={(event) => {
         event.stopPropagation();
@@ -642,6 +650,23 @@ export function CatalogItemForm({
           {topError}
         </p>
       )}
+      {item && canPrepareUnits && (
+        <div className="rounded-lg border border-border p-3">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={form.formState.isDirty || form.formState.isSubmitting}
+            onClick={() => setUnitPreparationOpen(true)}
+          >
+            Подготовить поштучный отпуск
+          </Button>
+          <p className="mt-2 text-xs text-foreground-muted">
+            {form.formState.isDirty
+              ? "Сначала сохраните изменения карточки."
+              : "Состав упаковки, шаг отпуска и цена единицы. Продажа поштучно ещё недоступна."}
+          </p>
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
@@ -657,5 +682,17 @@ export function CatalogItemForm({
         </Button>
       </div>
     </form>
+  );
+
+  return (
+    <>
+      {cardForm}
+      {item && unitPreparationOpen && (
+        <CatalogUnitPreparationDialog
+          itemId={item.id}
+          onClose={() => setUnitPreparationOpen(false)}
+        />
+      )}
+    </>
   );
 }

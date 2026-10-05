@@ -38,11 +38,12 @@ export function useCatalogQuery(params: CatalogSearchParams, enabled = true) {
   });
 }
 
-export function useCatalogItemQuery(id: string | null) {
+export function useCatalogItemQuery(id: string | null, alwaysRefreshOnMount = false) {
   return useQuery({
     queryKey: catalogKeys.item(id ?? ""),
     queryFn: ({ signal }) => getCatalogItem(id as string, signal),
     enabled: id !== null,
+    refetchOnMount: alwaysRefreshOnMount ? "always" : true,
   });
 }
 
