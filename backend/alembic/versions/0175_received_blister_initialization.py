@@ -378,6 +378,17 @@ END $$;
 
 
 def _tables() -> None:
+    # Hardened migrations run as schema_owner, whose reference ACLs were restored
+    # by earlier migrations. Preserve them exactly while adding these foreign keys.
+    _sql("""
+      CREATE TEMP TABLE unit_stock_v2_reference_grants AS
+        SELECT oid::regclass::TEXT AS relation,
+          has_table_privilege('aurum_schema_owner',oid,'REFERENCES') AS granted
+        FROM pg_class WHERE oid IN ('public.tenant'::regclass,'public.branch'::regclass,
+          'public.tenant_catalog'::regclass,'public.app_user'::regclass);
+      GRANT REFERENCES ON public.tenant,public.branch,public.tenant_catalog,public.app_user
+        TO aurum_schema_owner;
+    """)
     old = _history("0162_prepared_unit_stock_ledger.py")
     identity = old.IDENTITY
     snapshot = _history("0174_incoming_blister_snapshot.py").SNAPSHOT_CHECK
@@ -444,6 +455,14 @@ def _tables() -> None:
           REFERENCES public.unit_stock_lot_v2(tenant_id,id,catalog_id) ON DELETE RESTRICT,
         ADD CONSTRAINT ck_ii_stock_source_v2_exclusive CHECK(
           num_nonnulls(created_batch_id,created_unit_lot_id,created_unit_lot_v2_id)<=1);
+    """)
+    _sql("""
+      DO $$ DECLARE r RECORD; BEGIN
+        FOR r IN SELECT * FROM pg_temp.unit_stock_v2_reference_grants WHERE NOT granted LOOP
+          EXECUTE format('REVOKE REFERENCES ON %s FROM aurum_schema_owner',r.relation);
+        END LOOP;
+      END $$;
+      DROP TABLE pg_temp.unit_stock_v2_reference_grants;
     """)
 
 

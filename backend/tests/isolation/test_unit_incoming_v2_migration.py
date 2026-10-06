@@ -66,7 +66,30 @@ async def test_physical_receiving_migration_roundtrip_or_preserves_sources(
                 SELECT count(*) FROM information_schema.columns WHERE table_name='incoming_item'
                   AND column_name='created_unit_lot_v2_id'
             """)) == 0
+            # Revoke as the actual owner: an unrelated role cannot revoke its grants.
+            # Owners retain grant options even after revoking ordinary REFERENCES.
+            owners = dict(connection.execute(text("""
+                SELECT relation.relname,owner.rolname FROM pg_class AS relation
+                JOIN pg_roles AS owner ON owner.oid=relation.relowner
+                WHERE relation.oid IN ('public.tenant'::regclass,'public.app_user'::regclass)
+            """)).all())
+            assert set(owners) == {"tenant", "app_user"}
+            for table in ("tenant", "app_user"):
+                assert owners[table] in {"aurum_schema_owner", "aurum_support"}
+                connection.execute(text(f"SET LOCAL ROLE {owners[table]}"))
+                connection.execute(
+                    text(f"REVOKE REFERENCES ON public.{table} FROM aurum_schema_owner")
+                )
+            connection.execute(text("SET LOCAL ROLE aurum_schema_owner"))
+            references = text(
+                "SELECT has_table_privilege('aurum_schema_owner',:table,'REFERENCES')"
+            )
+            for table in ("public.tenant", "public.app_user"):
+                assert connection.scalar(references, {"table": table}) is False
             migration.upgrade()
+            connection.execute(text("SET LOCAL ROLE aurum_schema_owner"))
+            for table in ("public.tenant", "public.app_user"):
+                assert connection.scalar(references, {"table": table}) is False
             assert (
                 connection.scalar(
                     text("""
