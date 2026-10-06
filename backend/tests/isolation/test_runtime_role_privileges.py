@@ -557,6 +557,8 @@ CUSTOM_FUNCTIONS = {
     "trg_guard_batch_qty_ledger",
     "trg_guard_batch_unit_packaging_preparation",
     "trg_validate_incoming_unit_packaging_preparation",
+    "trg_guard_batch_unit_snapshot_v2",
+    "trg_validate_incoming_unit_snapshot_v2",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -1080,6 +1082,8 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
     names = {
         "trg_guard_batch_unit_packaging_preparation",
         "trg_validate_incoming_unit_packaging_preparation",
+        "trg_guard_batch_unit_snapshot_v2",
+        "trg_validate_incoming_unit_snapshot_v2",
     }
     functions = {row["proname"]: row for row in rows if row["proname"] in names}
     assert set(functions) == names
@@ -1088,7 +1092,8 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
         assert row["support_can_execute"] is False
         assert row["public_can_execute"] is False
     assert {name for name, row in functions.items() if row["is_security_definer"]} == {
-        "trg_validate_incoming_unit_packaging_preparation"
+        "trg_validate_incoming_unit_packaging_preparation",
+        "trg_validate_incoming_unit_snapshot_v2",
     }
 
 
