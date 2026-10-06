@@ -22,6 +22,10 @@ from tests.domains.incoming.test_unit_acceptance_v2 import (
     accept_v2,
     seed_v2_incoming,
 )
+from tests.isolation.test_unit_dispensing_cost_v2_migration import (
+    downgrade_cost_for_roundtrip,
+    upgrade_cost_after_roundtrip,
+)
 from tests.isolation.test_unit_dispensing_v2_migration import _migration as _dispensing_migration
 
 db_session = receiving_session_fixture
@@ -59,6 +63,7 @@ async def test_physical_receiving_migration_roundtrip_or_preserves_sources(
                 assert error.value.orig.sqlstate == "55000"
                 return
             dispensing_migration = _dispensing_migration()
+            downgrade_cost_for_roundtrip(connection)
             dispensing_migration.downgrade()
             migration.downgrade()
             for table in TABLES_V2:
@@ -108,6 +113,7 @@ async def test_physical_receiving_migration_roundtrip_or_preserves_sources(
                   AND column_name='created_unit_lot_v2_id' AND udt_name='uuid' AND is_nullable='YES'
             """)) == 1
             dispensing_migration.upgrade()
+            upgrade_cost_after_roundtrip(connection)
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()

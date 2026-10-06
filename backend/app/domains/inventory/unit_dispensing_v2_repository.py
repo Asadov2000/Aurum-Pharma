@@ -18,6 +18,18 @@ from app.domains.inventory.unit_ledger_v2_models import (
 
 
 class UnitDispensingV2Repository(UnitLedgerRepository):
+    async def cart_command(
+        self, tenant_id: UUID, command_id: UUID
+    ) -> UnitStockCartCommandV2 | None:
+        return (
+            await self.session.scalars(
+                select(UnitStockCartCommandV2).where(
+                    UnitStockCartCommandV2.tenant_id == tenant_id,
+                    UnitStockCartCommandV2.id == command_id,
+                )
+            )
+        ).one_or_none()
+
     async def claim_cart(
         self, command: UnitStockCartCommandV2
     ) -> tuple[UnitStockCartCommandV2, bool]:
@@ -68,6 +80,7 @@ class UnitDispensingV2Repository(UnitLedgerRepository):
                     UnitStockMovementV2.command_id == command_id,
                 )
                 .order_by(UnitStockMovementV2.entry_order)
+                .execution_options(populate_existing=True)
             )
         )
 

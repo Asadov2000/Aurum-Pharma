@@ -8,7 +8,13 @@ from hashlib import sha256
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.core.errors import AurumError, BusinessRuleError, ConflictError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import utc_now
 from app.domains.catalog.unit_sales import MAX_BASE_UNITS
 from app.domains.foundation.repository import FoundationRepository
@@ -16,6 +22,10 @@ from app.domains.inventory.unit_allocation_v2 import (
     UnitCartLineV2,
     UnitCartStockPlanV2,
     plan_unit_cart_stock_v2,
+)
+from app.domains.inventory.unit_dispensing_v2_cost import (
+    UnitCartDispenseCostResultV2,
+    persisted_cost_result_v2,
 )
 from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
 from app.domains.inventory.unit_ledger_v2_models import (
@@ -153,6 +163,32 @@ def _stock(
 class PhysicalUnitLedgerV2Service:
     def __init__(self, repo: UnitDispensingV2Repository) -> None:
         self.repo = repo
+
+    async def cost_result(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        command_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+    ) -> UnitCartDispenseCostResultV2:
+        """Internal financial source; do not expose through physical or receipt APIs."""
+        if not isinstance(allowed_branch_ids, set) or branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Branch access denied")
+        if any(
+            not isinstance(value, UUID) for value in (tenant_id, branch_id, command_id, actor_id)
+        ):
+            raise PermissionDeniedError("Authenticated physical cart identifiers are required")
+        await self.repo.assert_received_actor(tenant_id, branch_id, actor_id)
+        command = await self.repo.cart_command(tenant_id, command_id)
+        if command is None:
+            raise NotFoundError("Physical cart not found")
+        if command.branch_id != branch_id:
+            raise PermissionDeniedError("Branch access denied")
+        return persisted_cost_result_v2(
+            command_id, await self.repo.movements(tenant_id, command_id)
+        )
 
     async def _result(self, tenant_id: UUID, command_id: UUID) -> UnitCartDispenseResultV2:
         lines = await self.repo.cart_lines(tenant_id, command_id)
