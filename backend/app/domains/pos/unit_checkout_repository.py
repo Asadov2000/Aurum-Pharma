@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.catalog.models import TenantCatalog
 from app.domains.inventory.unit_stock import OpenedPack, UnitPackaging, UnitStockBatch
+from app.domains.inventory.unit_stock_v2 import UnitStockBatchV2
 
 
 class UnitCheckoutRepository:
@@ -17,6 +18,15 @@ class UnitCheckoutRepository:
 
         self.session = session
         self.stock = UnitLedgerRepository(session)
+
+    async def lock_physical_batches(
+        self, tenant_id: UUID, branch_id: UUID, catalog_ids: list[UUID]
+    ) -> tuple[UnitStockBatchV2, ...]:
+        from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
+
+        return await UnitDispensingV2Repository(self.session).lock_stock_snapshots(
+            tenant_id, branch_id, catalog_ids
+        )
 
     async def lock_checkout_catalog(
         self, tenant_id: UUID, catalog_id: UUID
