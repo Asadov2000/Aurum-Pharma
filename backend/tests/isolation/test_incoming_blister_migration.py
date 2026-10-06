@@ -21,6 +21,7 @@ from tests.domains.incoming.test_unit_acceptance import (
 )
 from tests.domains.incoming.test_unit_acceptance import seed_prepared_incoming
 from tests.domains.inventory.test_unit_ledger import PACKAGING
+from tests.isolation.test_unit_incoming_v2_migration import _migration as _physical_migration
 
 db_session = receiving_session_fixture
 
@@ -56,6 +57,8 @@ async def test_blister_migration_roundtrip_or_preserves_historical_sources(
                         migration.downgrade()
                 assert error.value.orig.sqlstate == "55000"
                 return
+            physical_migration = _physical_migration()
+            physical_migration.downgrade()
             migration.downgrade()
             assert connection.scalar(text("""
                 SELECT count(*) FROM information_schema.columns
@@ -63,6 +66,7 @@ async def test_blister_migration_roundtrip_or_preserves_historical_sources(
                   AND column_name='unit_packaging_snapshot_v2'
             """)) == 0
             migration.upgrade()
+            physical_migration.upgrade()
             assert connection.scalar(text("""
                 SELECT count(*) FROM information_schema.columns
                 WHERE table_schema='public' AND table_name IN ('incoming_item','batch')
