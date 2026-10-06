@@ -6,7 +6,17 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Date, DateTime, Integer, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    FetchedValue,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -121,3 +131,16 @@ class UnitStockMovementV2(StockIdentity, Base):
     after_state: Mapped[dict[str, object] | None] = mapped_column(JSONB(none_as_null=True))
     sealed_start: Mapped[int | None] = mapped_column(BigInteger)
     sealed_count: Mapped[int | None] = mapped_column(BigInteger)
+    cost_pack_ordinal_start: Mapped[int | None] = mapped_column(
+        BigInteger, server_default=FetchedValue()
+    )
+    cost_pack_count: Mapped[int | None] = mapped_column(BigInteger, server_default=FetchedValue())
+    cost_unit_offset: Mapped[int | None] = mapped_column(BigInteger, server_default=FetchedValue())
+    cost_base_units: Mapped[int | None] = mapped_column(BigInteger, server_default=FetchedValue())
+    cost_original_pack_cost: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
+    cost_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
+    cost_version: Mapped[int | None] = mapped_column(Integer, server_default=FetchedValue())

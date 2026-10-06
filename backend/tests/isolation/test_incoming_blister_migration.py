@@ -21,6 +21,10 @@ from tests.domains.incoming.test_unit_acceptance import (
 )
 from tests.domains.incoming.test_unit_acceptance import seed_prepared_incoming
 from tests.domains.inventory.test_unit_ledger import PACKAGING
+from tests.isolation.test_unit_dispensing_cost_v2_migration import (
+    downgrade_cost_for_roundtrip,
+    upgrade_cost_after_roundtrip,
+)
 from tests.isolation.test_unit_dispensing_v2_migration import _migration as _dispensing_migration
 from tests.isolation.test_unit_incoming_v2_migration import _migration as _physical_migration
 
@@ -60,6 +64,7 @@ async def test_blister_migration_roundtrip_or_preserves_historical_sources(
                 return
             physical_migration = _physical_migration()
             dispensing_migration = _dispensing_migration()
+            downgrade_cost_for_roundtrip(connection)
             dispensing_migration.downgrade()
             physical_migration.downgrade()
             migration.downgrade()
@@ -71,6 +76,7 @@ async def test_blister_migration_roundtrip_or_preserves_historical_sources(
             migration.upgrade()
             physical_migration.upgrade()
             dispensing_migration.upgrade()
+            upgrade_cost_after_roundtrip(connection)
             assert connection.scalar(text("""
                 SELECT count(*) FROM information_schema.columns
                 WHERE table_schema='public' AND table_name IN ('incoming_item','batch')

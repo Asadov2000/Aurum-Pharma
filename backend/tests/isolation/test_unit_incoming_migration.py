@@ -18,6 +18,10 @@ from tests.domains.incoming.test_unit_acceptance import accept_prepared, seed_pr
 from tests.domains.incoming.test_unit_acceptance import (
     db_session as receiving_session_fixture,
 )
+from tests.isolation.test_unit_dispensing_cost_v2_migration import (
+    downgrade_cost_for_roundtrip,
+    upgrade_cost_after_roundtrip,
+)
 from tests.isolation.test_unit_dispensing_v2_migration import _migration as _dispensing_migration
 from tests.isolation.test_unit_incoming_v2_migration import _migration as _physical_migration
 from tests.isolation.test_unit_incoming_v2_migration import (
@@ -66,6 +70,7 @@ async def test_provenance_migration_roundtrip_or_preserves_bound_sources(
                 assert error.value.orig.sqlstate == "55000"
                 return
             dispensing_migration = _dispensing_migration()
+            downgrade_cost_for_roundtrip(connection)
             dispensing_migration.downgrade()
             physical_migration.downgrade()
             migration.downgrade()
@@ -82,6 +87,7 @@ async def test_provenance_migration_roundtrip_or_preserves_bound_sources(
             migration.upgrade()
             physical_migration.upgrade()
             dispensing_migration.upgrade()
+            upgrade_cost_after_roundtrip(connection)
             assert (
                 connection.scalar(
                     text(

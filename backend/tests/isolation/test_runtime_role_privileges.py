@@ -585,6 +585,7 @@ CUSTOM_FUNCTIONS = {
     "trg_unit_movement_v2_guard",
     "trg_unit_movement_v2_apply",
     "trg_unit_cart_v2_complete",
+    "trg_unit_movement_v2_cost_snapshot",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -1166,6 +1167,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "trg_unit_movement_v2_guard",
         "trg_unit_movement_v2_apply",
         "trg_unit_cart_v2_complete",
+        "trg_unit_movement_v2_cost_snapshot",
     }
     physical_functions = {row["proname"]: row for row in rows if row["proname"] in physical_names}
     assert set(physical_functions) == physical_names

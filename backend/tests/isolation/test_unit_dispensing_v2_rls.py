@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -33,6 +34,76 @@ from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
 )
 
 db_session = receiving_session_fixture
+
+
+async def test_cashier_physical_result_never_contains_financial_snapshot(
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+) -> None:
+    source = await receive_source(db_session)
+    await db_session.commit()
+    actor = await seed_receiving_actor(
+        db_engine, maintenance_engine, source.incoming.stock, permissions=("pos.sell",)
+    )
+    employee_source = replace(source, incoming=replace(source.incoming, actor_id=actor))
+    await set_receiving_context(db_session, source.incoming.stock, actor)
+    result = await dispense(db_session, employee_source, (cart_line(source, "unit", 3),))
+    for movement in result.movements:
+        assert not any(key.startswith("cost_") for key in asdict(movement))
+    # Financial posting needs this internal source even when the cashier cannot
+    # view procurement prices; its values are not part of the physical response.
+    financial = await PhysicalUnitLedgerV2Service(
+        UnitDispensingV2Repository(db_session)
+    ).cost_result(
+        tenant_id=source.incoming.stock.tenant_id,
+        branch_id=source.incoming.stock.branch_id,
+        command_id=result.command_id,
+        actor_id=actor,
+        allowed_branch_ids={source.incoming.stock.branch_id},
+    )
+    assert financial.total_amount > 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("cost_pack_ordinal_start", 2),
+        ("cost_pack_count", 2),
+        ("cost_unit_offset", 1),
+        ("cost_base_units", 4),
+        ("cost_original_pack_cost", Decimal("999.00")),
+        ("cost_amount", Decimal("999.00")),
+        ("cost_version", 2),
+    ],
+)
+async def test_forged_cost_snapshot_cancels_the_entire_physical_cart(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: int | Decimal,
+) -> None:
+    source = await receive_source(db_session)
+    insert_movement = UnitDispensingV2Repository.insert_movement
+
+    async def insert_forged(
+        repo: UnitDispensingV2Repository, movement: UnitStockMovementV2
+    ) -> None:
+        if movement.units_taken > 0:
+            setattr(movement, field, value)
+        await insert_movement(repo, movement)
+
+    monkeypatch.setattr(UnitDispensingV2Repository, "insert_movement", insert_forged)
+    with pytest.raises(DBAPIError):
+        await dispense(db_session, source, (cart_line(source, "unit", 3),))
+    assert await remaining(db_session, source) == 60
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM unit_stock_cart_command_v2 WHERE tenant_id=:tenant"),
+            {"tenant": source.incoming.stock.tenant_id},
+        )
+        == 0
+    )
 
 
 async def test_app_can_lock_its_stock_but_cannot_update_even_the_lock_permission_column(
@@ -67,6 +138,8 @@ async def test_cart_history_and_physical_states_are_immutable_outside_journal_tr
         ("unit_stock_opened_pack_v2", "remaining_units=30"),
         ("unit_stock_opened_pack_v2", "state=jsonb_set(state,'{loose_units}','30')"),
         ("unit_stock_movement_v2", "units_taken=4"),
+        ("unit_stock_movement_v2", "cost_amount=0"),
+        ("unit_stock_movement_v2", "cost_version=NULL"),
     ):
         for statement in (
             f"UPDATE {table} SET {assignment} WHERE tenant_id=:tenant",
@@ -242,6 +315,14 @@ async def test_employee_without_sale_permission_cannot_post_or_replay_cart(
     await set_receiving_context(db_session, source.incoming.stock, actor)
     with pytest.raises(PermissionDeniedError):
         await dispense(db_session, employee_source, lines, command_id=result.command_id)
+    with pytest.raises(PermissionDeniedError):
+        await PhysicalUnitLedgerV2Service(UnitDispensingV2Repository(db_session)).cost_result(
+            tenant_id=source.incoming.stock.tenant_id,
+            branch_id=source.incoming.stock.branch_id,
+            command_id=result.command_id,
+            actor_id=actor,
+            allowed_branch_ids={source.incoming.stock.branch_id},
+        )
 
 
 async def test_support_cannot_post_or_mutate_even_when_spoofing_the_actor(
@@ -312,3 +393,14 @@ async def test_physical_posting_audits_all_components_and_keeps_purchase_cost_pr
         .all()
     )
     assert records and set(records) == {"***"}
+    cost_records = (
+        await db_session.execute(
+            text(
+                "SELECT new_values->>'cost_original_pack_cost',new_values->>'cost_amount' "
+                "FROM audit_log WHERE tenant_id=:tenant AND table_name='unit_stock_movement_v2'"
+            ),
+            {"tenant": source.incoming.stock.tenant_id},
+        )
+    ).all()
+    assert cost_records and ("***", "***") in cost_records
+    assert set(cost_records) <= {("***", "***"), (None, None)}

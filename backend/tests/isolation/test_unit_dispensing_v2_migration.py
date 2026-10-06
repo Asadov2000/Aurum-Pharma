@@ -23,6 +23,10 @@ from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
     dispense,
     receive_source,
 )
+from tests.isolation.test_unit_dispensing_cost_v2_migration import (
+    downgrade_cost_for_roundtrip,
+    upgrade_cost_after_roundtrip,
+)
 
 db_session = receiving_session_fixture
 
@@ -54,6 +58,7 @@ async def test_dispensing_migration_roundtrip_or_preserves_stock_history(
                         migration.downgrade()
                 assert error.value.orig.sqlstate == "55000"
                 return
+            downgrade_cost_for_roundtrip(connection)
             migration.downgrade()
             for table in DISPENSING_TABLES:
                 assert (
@@ -69,6 +74,7 @@ async def test_dispensing_migration_roundtrip_or_preserves_stock_history(
                 )
             )
             migration.upgrade()
+            upgrade_cost_after_roundtrip(connection)
             for table in DISPENSING_TABLES:
                 assert (
                     connection.scalar(
@@ -110,6 +116,7 @@ async def test_downgrade_preserves_receiving_history_without_dispensing(
                         migration.downgrade()
                 assert error.value.orig.sqlstate == "55000"
             else:
+                downgrade_cost_for_roundtrip(connection)
                 migration.downgrade()
             assert (
                 connection.scalar(
@@ -127,6 +134,7 @@ async def test_downgrade_preserves_receiving_history_without_dispensing(
             )
             if not nonempty:
                 migration.upgrade()
+                upgrade_cost_after_roundtrip(connection)
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
