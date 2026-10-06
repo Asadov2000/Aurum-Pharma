@@ -52,11 +52,13 @@ async def test_unit_cart_empty_downgrade_roundtrip(
                 return
             # Rehearse the actual dependency order: 0172 adds a scoped FK to
             # unit cart rows even when both tables contain no unit intents.
+            migration("0179_unit_physical_cart_intents.py").downgrade()
             migration("0172_unit_prescription_links.py").downgrade()
             migration().downgrade()
             assert connection.scalar(text("SELECT to_regclass('pos_unit_cart_item')")) is None
             migration().upgrade()
             migration("0172_unit_prescription_links.py").upgrade()
+            migration("0179_unit_physical_cart_intents.py").upgrade()
             assert connection.scalar(text("""
                 SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
                 WHERE oid='pos_unit_cart_item'::regclass

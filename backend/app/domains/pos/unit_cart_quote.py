@@ -18,7 +18,10 @@ from app.domains.catalog.unit_sales import (
     UnitSalePreparation,
     quote_unit_sale,
 )
+from app.domains.inventory.unit_allocation_v2 import UnitCartLineV2
+from app.domains.inventory.unit_dispensing_v2_retail import quote_retail_line_v2
 from app.domains.inventory.unit_stock import UnitPackaging
+from app.domains.inventory.unit_stock_v2 import SaleFormatV2, UnitPackagingV2, to_base_units_v2
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cart_service import UnitCartService
 from app.domains.pos.unit_contracts import (
@@ -58,8 +61,33 @@ class UnitDraftQuoteLineV2(AmountsV2):
         return self
 
 
+class PhysicalUnitDraftQuoteLineV2(AmountsV2):
+    """Draft intent for physical stock, never a reserved or posted quantity."""
+
+    inventory_kind: Literal["physical_unit"] = "physical_unit"
+    id: UUID
+    position: Position
+    catalog_id: UUID
+    packaging: UnitPackagingV2
+    sale_format: SaleFormatV2
+    quantity: WholeQuantity
+    base_units: WholeQuantity
+
+    @model_validator(mode="after")
+    def original_arithmetic(self) -> Self:
+        units = to_base_units_v2(
+            self.packaging, sale_format=self.sale_format, quantity=self.quantity
+        )
+        with localcontext(EXACT_CONTEXT):
+            gross = self.original_retail_unit_price * self.quantity
+        if units != self.base_units or gross != self.gross_amount or self.net_amount <= 0:
+            raise ValueError("physical draft packaging, quantity and amounts differ")
+        return self
+
+
 DraftQuoteLineV2 = Annotated[
-    LegacyResultLineV2 | UnitDraftQuoteLineV2, Field(discriminator="inventory_kind")
+    LegacyResultLineV2 | UnitDraftQuoteLineV2 | PhysicalUnitDraftQuoteLineV2,
+    Field(discriminator="inventory_kind"),
 ]
 
 
@@ -114,7 +142,9 @@ class UnitCartQuoteService:
             units = await self.repository.list_items(tenant_id, sale_id)
             if not 1 <= len(legacy) + len(units) <= 200:
                 raise BusinessRuleError("Mixed cart must contain between one and 200 positions")
-            lines: list[LegacyResultLineV2 | UnitDraftQuoteLineV2] = []
+            lines: list[
+                LegacyResultLineV2 | UnitDraftQuoteLineV2 | PhysicalUnitDraftQuoteLineV2
+            ] = []
             try:
                 for row in legacy:
                     if row.parent_sale_item_id is not None or row.currency != "TJS":
@@ -144,6 +174,37 @@ class UnitCartQuoteService:
                     catalogs[catalog_id] = catalog
                 for item in units:
                     catalog = catalogs[item.catalog_id]
+                    if item.physical_packaging is not None:
+                        physical = UnitCartLineV2(
+                            id=item.id,
+                            catalog_id=item.catalog_id,
+                            packaging=UnitPackagingV2.model_validate(item.physical_packaging),
+                            sale_format=item.sale_format,
+                            quantity=item.quantity,
+                        )
+                        amounts = quote_retail_line_v2(physical, catalog, item.discount_amount)
+                        lines.append(
+                            PhysicalUnitDraftQuoteLineV2(
+                                id=item.id,
+                                position=len(lines) + 1,
+                                catalog_id=item.catalog_id,
+                                packaging=physical.packaging,
+                                sale_format=physical.sale_format,
+                                quantity=physical.quantity,
+                                base_units=to_base_units_v2(
+                                    physical.packaging,
+                                    sale_format=physical.sale_format,
+                                    quantity=physical.quantity,
+                                ),
+                                original_retail_unit_price=amounts.original_retail_unit_price,
+                                gross_amount=amounts.gross_amount,
+                                discount_amount=amounts.discount_amount,
+                                net_amount=amounts.net_amount,
+                            )
+                        )
+                        continue
+                    if item.sale_format == "blister":
+                        raise BusinessRuleError("Blister draft requires physical packaging")
                     UnitCartService._validate_price(
                         catalog, item.sale_format, item.quantity, item.discount_amount
                     )
