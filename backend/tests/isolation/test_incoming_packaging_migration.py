@@ -21,6 +21,7 @@ from app.domains.incoming.service import IncomingService
 from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from tests.domains.inventory.test_unit_ledger import PACKAGING, seed_ledger_context
+from tests.isolation.test_incoming_blister_migration import _migration as _blister_migration
 
 
 def _migration() -> ModuleType:
@@ -56,6 +57,10 @@ async def test_packaging_migration_roundtrip_or_preserves_snapshots(
                         migration.downgrade()
                 assert error.value.orig.sqlstate == "55000"
                 return
+            # Rehearse old migration at its historical schema, then restore head.
+            # The newer composition constraint references the v1 snapshot column.
+            blister_migration = _blister_migration()
+            blister_migration.downgrade()
             migration.downgrade()
             assert connection.scalar(text("""
                 SELECT count(*) FROM information_schema.columns
@@ -69,6 +74,7 @@ async def test_packaging_migration_roundtrip_or_preserves_snapshots(
                   AND column_name='unit_packaging_preparation'
                   AND is_nullable='YES' AND udt_name='jsonb'
             """)) == 2
+            blister_migration.upgrade()
             assert connection.scalar(text("""
                 SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal
                   AND tgname IN ('trg_guard_batch_unit_packaging_preparation',

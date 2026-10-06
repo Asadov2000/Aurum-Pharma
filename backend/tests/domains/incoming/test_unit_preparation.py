@@ -57,6 +57,10 @@ def _snapshot(factor: int = 20) -> dict[str, object]:
     }
 
 
+def _snapshot_v2(factor: int = 20, blister: int | None = None) -> dict[str, object]:
+    return {**_snapshot(factor), "version": 2, "units_per_blister": blister}
+
+
 def _fields(catalog_id: UUID, qty: str = "2") -> dict[str, object]:
     return {
         "catalog_id": catalog_id,
@@ -105,6 +109,8 @@ def test_prepare_flag_defaults_and_server_owned_snapshot() -> None:
     ):
         with pytest.raises(ValidationError):
             schema.model_validate({**fields, "unit_packaging_preparation": _snapshot()})
+        with pytest.raises(ValidationError):
+            schema.model_validate({**fields, "unit_packaging_snapshot_v2": _snapshot_v2()})
 
 
 @pytest.mark.parametrize("blister", [None, 10])
@@ -119,6 +125,7 @@ async def test_accept_copies_original_packaging_without_creating_unit_stock(
         document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
     )
     assert row.unit_packaging_preparation == _snapshot()
+    assert row.unit_packaging_snapshot_v2 == _snapshot_v2(blister=blister)
     catalog.unit_sale_preparation = None
     await db_session.flush()
 
@@ -135,6 +142,7 @@ async def test_accept_copies_original_packaging_without_creating_unit_stock(
     batch = batches[0]
     assert batch.id == original_batch_id == row.created_batch_id
     assert batch.unit_packaging_preparation == _snapshot()
+    assert batch.unit_packaging_snapshot_v2 == _snapshot_v2(blister=blister)
     assert batch.qty_initial == batch.qty_remaining == Decimal("2")
     assert (
         list(
@@ -160,10 +168,12 @@ async def test_legacy_fractional_incoming_does_not_capture_catalog_preparation(
         fields["prepare_unit_sale"] = False
     row = await service.add_item(document.id, fields=fields)
     assert row.unit_packaging_preparation is None
+    assert row.unit_packaging_snapshot_v2 is None
     await service.accept(document.id)
     batch = await db_session.get(Batch, row.created_batch_id)
     assert batch is not None
     assert batch.unit_packaging_preparation is None
+    assert batch.unit_packaging_snapshot_v2 is None
     assert batch.qty_remaining == Decimal("1.500")
 
 
@@ -197,14 +207,17 @@ async def test_prepared_retry_uses_original_snapshot_and_payload(
     db_session: AsyncSession, scaffold: Scaffold
 ) -> None:
     service, document, catalog = await _draft(db_session, scaffold)
+    catalog.unit_sale_preparation = {**_preparation(), "units_per_blister": 10}
+    await db_session.flush()
     operation_id = uuid4()
     fields = {**_fields(catalog.id), "prepare_unit_sale": True}
     row = await service.add_item(document.id, fields=fields, operation_id=operation_id)
-    catalog.unit_sale_preparation = _preparation(40)
+    catalog.unit_sale_preparation = {**_preparation(40), "units_per_blister": 20}
     await db_session.flush()
     repeated = await service.add_item(document.id, fields=fields, operation_id=operation_id)
     assert repeated.id == row.id
     assert repeated.unit_packaging_preparation == _snapshot()
+    assert repeated.unit_packaging_snapshot_v2 == _snapshot_v2(blister=10)
     await service.accept(document.id)
     accepted_retry = await service.add_item(document.id, fields=fields, operation_id=operation_id)
     assert accepted_retry.id == row.id
@@ -229,6 +242,7 @@ async def test_quantity_update_preserves_snapshot_and_disabling_allows_fraction(
     await db_session.flush()
     await service.update_item(document.id, row.id, fields={"qty": Decimal("3")})
     assert row.unit_packaging_preparation == _snapshot()
+    assert row.unit_packaging_snapshot_v2 == _snapshot_v2()
     with pytest.raises(BusinessRuleError):
         await service.update_item(document.id, row.id, fields={"qty": Decimal("1.5")})
     assert row.qty == Decimal("3")
@@ -236,6 +250,7 @@ async def test_quantity_update_preserves_snapshot_and_disabling_allows_fraction(
         document.id, row.id, fields={"qty": Decimal("1.5"), "prepare_unit_sale": False}
     )
     assert row.unit_packaging_preparation is None
+    assert row.unit_packaging_snapshot_v2 is None
     assert row.qty == Decimal("1.5")
 
 
@@ -246,14 +261,16 @@ async def test_explicit_repreparation_captures_current_catalog_packaging(
     row = await service.add_item(
         document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
     )
-    catalog.unit_sale_preparation = _preparation(40)
+    catalog.unit_sale_preparation = {**_preparation(40), "units_per_blister": 10}
     await db_session.flush()
     await service.update_item(document.id, row.id, fields={"prepare_unit_sale": True})
     assert row.unit_packaging_preparation == _snapshot(40)
+    assert row.unit_packaging_snapshot_v2 == _snapshot_v2(40, 10)
     await service.accept(document.id)
     batch = await db_session.get(Batch, row.created_batch_id)
     assert batch is not None
     assert batch.unit_packaging_preparation == _snapshot(40)
+    assert batch.unit_packaging_snapshot_v2 == _snapshot_v2(40, 10)
 
 
 @pytest.mark.parametrize("recapture", [False, True])
@@ -274,6 +291,7 @@ async def test_catalog_replacement_clears_or_explicitly_recaptures_snapshot(
     await service.update_item(document.id, row.id, fields=fields)
     assert row.catalog_id == replacement.id
     assert row.unit_packaging_preparation == (_snapshot(40) if recapture else None)
+    assert row.unit_packaging_snapshot_v2 == (_snapshot_v2(40) if recapture else None)
 
 
 async def test_preparation_obeys_tenant_and_branch_scope(
@@ -465,4 +483,150 @@ async def test_database_rejects_acceptance_with_missing_batch_snapshot(
     assert document.status == "draft"
     assert row.created_batch_id is None
     assert row.unit_packaging_preparation == _snapshot()
+    assert list((await db_session.scalars(select(Batch))).all()) == []
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        [],
+        None,
+        "prepared",
+        {},
+        {**_snapshot_v2(), "version": True},
+        {**_snapshot_v2(), "version": "2"},
+        {**_snapshot_v2(), "version": 1},
+        {**_snapshot_v2(), "unit": "pack"},
+        {**_snapshot_v2(), "units_per_pack": "20"},
+        {**_snapshot_v2(), "units_per_pack": True},
+        {**_snapshot_v2(), "units_per_pack": 20.5},
+        {**_snapshot_v2(), "units_per_pack": 1},
+        {**_snapshot_v2(), "units_per_pack": 10001},
+        {**_snapshot_v2(), "units_per_blister": "10"},
+        {**_snapshot_v2(), "units_per_blister": True},
+        {**_snapshot_v2(), "units_per_blister": 2.5},
+        {**_snapshot_v2(), "units_per_blister": 1},
+        {**_snapshot_v2(), "units_per_blister": 10001},
+        {**_snapshot_v2(), "units_per_blister": 3},
+        {**_snapshot_v2(), "dispense_step": "2"},
+        {**_snapshot_v2(), "dispense_step": 3},
+        {**_snapshot_v2(), "unit_price": "1.00"},
+        {key: value for key, value in _snapshot_v2().items() if key != "units_per_blister"},
+        _snapshot_v2(40),
+        {**_snapshot_v2(), "unit": "capsule"},
+        {**_snapshot_v2(), "dispense_step": 1},
+    ],
+)
+async def test_database_rejects_invalid_or_divergent_v2_snapshot(
+    db_session: AsyncSession, scaffold: Scaffold, snapshot: object
+) -> None:
+    service, document, catalog = await _draft(db_session, scaffold)
+    row = await service.add_item(
+        document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
+    )
+    with pytest.raises(DBAPIError, match="ck_ii_unit_packaging_snapshot_v2"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE incoming_item SET unit_packaging_snapshot_v2=CAST(:snapshot AS jsonb) "
+                    "WHERE id=:id"
+                ),
+                {"snapshot": json.dumps(snapshot), "id": row.id},
+            )
+    await db_session.refresh(row)
+    assert row.unit_packaging_snapshot_v2 == _snapshot_v2()
+
+
+async def test_database_preserves_v1_only_history_and_rejects_v2_without_v1(
+    db_session: AsyncSession, scaffold: Scaffold
+) -> None:
+    service, document, catalog = await _draft(db_session, scaffold)
+    legacy_row = await service.add_item(document.id, fields=_fields(catalog.id))
+    with pytest.raises(DBAPIError, match="ck_ii_unit_packaging_snapshot_v2"):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "UPDATE incoming_item SET unit_packaging_snapshot_v2=CAST(:snapshot AS jsonb) "
+                    "WHERE id=:id"
+                ),
+                {"snapshot": json.dumps(_snapshot_v2()), "id": legacy_row.id},
+            )
+    row = await service.add_item(
+        document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
+    )
+    await db_session.execute(
+        text("UPDATE incoming_item SET unit_packaging_snapshot_v2=NULL WHERE id=:id"),
+        {"id": row.id},
+    )
+    await db_session.refresh(row)
+    await service.accept(document.id)
+    batch = await db_session.get(Batch, row.created_batch_id)
+    assert batch is not None
+    assert batch.unit_packaging_snapshot_v2 is None
+    assert batch.unit_packaging_preparation == _snapshot()
+    for table, row_id in (("incoming_item", row.id), ("batch", batch.id)):
+        with pytest.raises(DBAPIError):
+            async with db_session.begin_nested():
+                await db_session.execute(
+                    text(
+                        f"UPDATE {table} SET unit_packaging_snapshot_v2=CAST(:snapshot AS jsonb) "
+                        "WHERE id=:id"
+                    ),
+                    {"snapshot": json.dumps(_snapshot_v2(blister=10)), "id": row_id},
+                )
+
+
+@pytest.mark.parametrize("blister", [None, 10])
+async def test_accepted_v2_source_and_batch_are_immutable(
+    db_session: AsyncSession, scaffold: Scaffold, blister: int | None
+) -> None:
+    service, document, catalog = await _draft(db_session, scaffold)
+    catalog.unit_sale_preparation = {
+        **_preparation(),
+        **({"units_per_blister": blister} if blister is not None else {}),
+    }
+    await db_session.flush()
+    row = await service.add_item(
+        document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
+    )
+    await service.accept(document.id)
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    for table, row_id in (("incoming_item", row.id), ("batch", row.created_batch_id)):
+        for value in (None, json.dumps(_snapshot_v2(blister=20 if blister == 10 else 10))):
+            with pytest.raises(DBAPIError):
+                async with db_session.begin_nested():
+                    await db_session.execute(
+                        text(
+                            f"UPDATE {table} SET "
+                            "unit_packaging_snapshot_v2=CAST(:snapshot AS jsonb) "
+                            "WHERE id=:id"
+                        ),
+                        {"snapshot": value, "id": row_id},
+                    )
+
+
+async def test_acceptance_rolls_back_missing_v2_batch_snapshot(
+    db_session: AsyncSession, scaffold: Scaffold, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, document, catalog = await _draft(db_session, scaffold)
+    row = await service.add_item(
+        document.id, fields={**_fields(catalog.id), "prepare_unit_sale": True}
+    )
+    document_id = document.id
+    original_create_batch = InventoryRepository.create_batch
+
+    async def create_without_v2(repository: InventoryRepository, **fields: object) -> Batch:
+        fields.pop("unit_packaging_snapshot_v2", None)
+        return await original_create_batch(repository, **fields)
+
+    monkeypatch.setattr(InventoryRepository, "create_batch", create_without_v2)
+    with pytest.raises(DBAPIError):
+        async with db_session.begin_nested():
+            await service.accept(document_id)
+            await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    await db_session.refresh(document)
+    await db_session.refresh(row)
+    assert document.status == "draft"
+    assert row.created_batch_id is None
+    assert row.unit_packaging_snapshot_v2 == _snapshot_v2()
     assert list((await db_session.scalars(select(Batch))).all()) == []

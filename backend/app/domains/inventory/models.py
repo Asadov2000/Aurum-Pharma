@@ -46,6 +46,9 @@ class Batch(Base):
     unit_packaging_preparation: Mapped[dict[str, object] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True
     )
+    unit_packaging_snapshot_v2: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     qty_remaining: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     block_reason: Mapped[str | None] = mapped_column(Text)

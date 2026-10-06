@@ -90,6 +90,9 @@ class IncomingItem(Base):
     unit_packaging_preparation: Mapped[dict[str, object] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True
     )
+    unit_packaging_snapshot_v2: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
