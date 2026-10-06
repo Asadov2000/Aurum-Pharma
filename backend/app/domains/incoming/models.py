@@ -99,6 +99,8 @@ class IncomingItem(Base):
     created_batch_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     # Scoped cross-domain FK and uniqueness are enforced by migration 0166.
     created_unit_lot_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Versioned journal ownership is exclusive; scoped FK is in migration 0175.
+    created_unit_lot_v2_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -111,6 +113,10 @@ class IncomingItem(Base):
         CheckConstraint(
             "created_unit_lot_id IS NULL OR created_batch_id IS NULL",
             name="ck_incoming_item_stock_source",
+        ),
+        CheckConstraint(
+            "num_nonnulls(created_batch_id, created_unit_lot_id, created_unit_lot_v2_id) <= 1",
+            name="ck_ii_stock_source_v2_exclusive",
         ),
         CheckConstraint("purchase_price >= 0", name="ck_ii_purchase_price"),
         CheckConstraint("sale_price >= 0", name="ck_ii_sale_price"),

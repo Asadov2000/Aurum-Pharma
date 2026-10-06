@@ -86,6 +86,9 @@ APPEND_ONLY_TABLES = {
     "unit_stock_lot",
     "unit_stock_opened_pack",
     "unit_stock_operation",
+    "unit_stock_entry_v2",
+    "unit_stock_lot_v2",
+    "unit_stock_operation_v2",
     "write_off",
 }
 
@@ -559,6 +562,14 @@ CUSTOM_FUNCTIONS = {
     "trg_validate_incoming_unit_packaging_preparation",
     "trg_guard_batch_unit_snapshot_v2",
     "trg_validate_incoming_unit_snapshot_v2",
+    "unit_incoming_v2_fingerprint",
+    "assert_unit_incoming_v2_source",
+    "trg_unit_incoming_v2_binding",
+    "trg_unit_stock_v2_actor",
+    "trg_unit_stock_v2_guard",
+    "trg_unit_stock_v2_apply",
+    "trg_unit_stock_v2_complete",
+    "trg_unit_incoming_v2_document",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -1100,6 +1111,27 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    v2_names = {
+        "unit_incoming_v2_fingerprint",
+        "assert_unit_incoming_v2_source",
+        "trg_unit_incoming_v2_binding",
+        "trg_unit_stock_v2_actor",
+        "trg_unit_stock_v2_guard",
+        "trg_unit_stock_v2_apply",
+        "trg_unit_stock_v2_complete",
+        "trg_unit_incoming_v2_document",
+    }
+    v2_functions = {row["proname"]: row for row in rows if row["proname"] in v2_names}
+    assert set(v2_functions) == v2_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in v2_functions.values()
+    )
+    assert {name for name, row in v2_functions.items() if row["is_security_definer"]} == (
+        v2_names - {"trg_unit_stock_v2_actor"}
+    )
     received_functions = {
         row["proname"]: row
         for row in rows

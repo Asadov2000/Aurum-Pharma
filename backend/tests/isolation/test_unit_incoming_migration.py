@@ -18,6 +18,10 @@ from tests.domains.incoming.test_unit_acceptance import accept_prepared, seed_pr
 from tests.domains.incoming.test_unit_acceptance import (
     db_session as receiving_session_fixture,
 )
+from tests.isolation.test_unit_incoming_v2_migration import _migration as _physical_migration
+from tests.isolation.test_unit_incoming_v2_migration import (
+    has_physical_history,
+)
 
 db_session = receiving_session_fixture
 
@@ -53,6 +57,14 @@ async def test_provenance_migration_roundtrip_or_preserves_bound_sources(
                     with connection.begin_nested():
                         migration.downgrade()
                 return
+            physical_migration = _physical_migration()
+            if has_physical_history(connection):
+                with pytest.raises(DBAPIError) as error:
+                    with connection.begin_nested():
+                        physical_migration.downgrade()
+                assert error.value.orig.sqlstate == "55000"
+                return
+            physical_migration.downgrade()
             migration.downgrade()
             assert (
                 connection.scalar(
@@ -65,6 +77,7 @@ async def test_provenance_migration_roundtrip_or_preserves_bound_sources(
                 == 0
             )
             migration.upgrade()
+            physical_migration.upgrade()
             assert (
                 connection.scalar(
                     text(
