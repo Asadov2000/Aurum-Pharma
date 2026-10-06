@@ -446,6 +446,17 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support,
         aurum_billing_worker, aurum_worker, aurum_catalog_worker;
+-- Internal physical retail snapshots are available only through their trigger.
+-- Fresh databases receive this function later, during migration 0178.
+DO $$
+BEGIN
+    IF pg_catalog.to_regprocedure('public.trg_unit_cart_v2_retail_snapshot()') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.trg_unit_cart_v2_retail_snapshot()
+            FROM PUBLIC, aurum_app, aurum_support, aurum_mailer,
+                aurum_billing_worker, aurum_worker, aurum_catalog_worker,
+                aurum_edge_cash_executor, aurum_edge_cash_owner;
+    END IF;
+END $$;
 CREATE TEMP TABLE allowed_edge_node_role (
     role_name TEXT PRIMARY KEY,
     role_oid OID NOT NULL UNIQUE
@@ -850,7 +861,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 177 THEN
+        IF revision_number < 1 OR revision_number > 178 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;

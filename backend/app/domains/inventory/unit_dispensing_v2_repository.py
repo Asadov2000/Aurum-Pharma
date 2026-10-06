@@ -42,6 +42,8 @@ class UnitDispensingV2Repository(UnitLedgerRepository):
                 branch_id=command.branch_id,
                 actor_id=command.actor_id,
                 request_hash=command.request_hash,
+                retail_version=command.retail_version,
+                currency=command.currency,
                 created_by=command.created_by,
             )
             .on_conflict_do_nothing()
@@ -68,6 +70,7 @@ class UnitDispensingV2Repository(UnitLedgerRepository):
                     UnitStockCartLineV2.command_id == command_id,
                 )
                 .order_by(UnitStockCartLineV2.position)
+                .execution_options(populate_existing=True)
             )
         )
 

@@ -87,6 +87,8 @@ class UnitStockCartCommandV2(CartAudit, Base):
     branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     actor_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    retail_version: Mapped[int | None] = mapped_column(Integer)
+    currency: Mapped[str | None] = mapped_column(Text)
 
 
 class UnitStockCartLineV2(CartAudit, Base):
@@ -101,6 +103,18 @@ class UnitStockCartLineV2(CartAudit, Base):
     sale_format: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     base_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    original_retail_unit_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
+    gross_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
+    discount_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
+    net_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 2), server_default=FetchedValue()
+    )
 
 
 class UnitStockOpenedPackV2(StockIdentity, Base):
