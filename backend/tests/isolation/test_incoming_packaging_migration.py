@@ -22,6 +22,7 @@ from app.domains.suppliers.repository import SuppliersRepository
 from app.domains.suppliers.service import SuppliersService
 from tests.domains.inventory.test_unit_ledger import PACKAGING, seed_ledger_context
 from tests.isolation.test_incoming_blister_migration import _migration as _blister_migration
+from tests.isolation.test_unit_dispensing_v2_migration import _migration as _dispensing_migration
 from tests.isolation.test_unit_incoming_v2_migration import _migration as _physical_migration
 
 
@@ -62,6 +63,8 @@ async def test_packaging_migration_roundtrip_or_preserves_snapshots(
             # The newer composition constraint references the v1 snapshot column.
             blister_migration = _blister_migration()
             physical_migration = _physical_migration()
+            dispensing_migration = _dispensing_migration()
+            dispensing_migration.downgrade()
             physical_migration.downgrade()
             blister_migration.downgrade()
             migration.downgrade()
@@ -79,6 +82,7 @@ async def test_packaging_migration_roundtrip_or_preserves_snapshots(
             """)) == 2
             blister_migration.upgrade()
             physical_migration.upgrade()
+            dispensing_migration.upgrade()
             assert connection.scalar(text("""
                 SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal
                   AND tgname IN ('trg_guard_batch_unit_packaging_preparation',

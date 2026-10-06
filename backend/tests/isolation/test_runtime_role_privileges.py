@@ -11,7 +11,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
@@ -63,6 +63,9 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "unit_stock_cart_command_v2",
+    "unit_stock_cart_line_v2",
+    "unit_stock_movement_v2",
     "pos_unit_cash_intent",
     "pos_unit_return_command",
     "pos_unit_return_slice",
@@ -93,6 +96,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "unit_stock_opened_pack_v2",
     "access_role_version",
     "access_role_version_permission",
     "authorization_policy_revision",
@@ -570,6 +574,17 @@ CUSTOM_FUNCTIONS = {
     "trg_unit_stock_v2_apply",
     "trg_unit_stock_v2_complete",
     "trg_unit_incoming_v2_document",
+    "unit_pack_v2_remaining",
+    "unit_pack_v2_initial_state",
+    "unit_pack_v2_assert_transition",
+    "unit_cart_v2_fingerprint",
+    "assert_unit_cart_v2_complete",
+    "trg_unit_cart_v2_actor",
+    "trg_unit_cart_v2_guard",
+    "trg_unit_pack_v2_projection_guard",
+    "trg_unit_movement_v2_guard",
+    "trg_unit_movement_v2_apply",
+    "trg_unit_cart_v2_complete",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -1031,6 +1046,34 @@ ORDER BY roles.role_name, relations.relname, attributes.attname
 """
 
 
+PHYSICAL_V2_COLUMN_PRIVILEGES_SQL = UNIT_STOCK_COLUMN_PRIVILEGES_SQL.replace(
+    "'unit_stock_operation', 'unit_stock_entry', 'unit_stock_lot', 'unit_stock_opened_pack'",
+    "'unit_stock_lot_v2', 'unit_stock_opened_pack_v2'",
+)
+
+
+async def _assert_all_stock_column_privileges(conn: AsyncConnection) -> None:
+    _assert_unit_stock_column_privileges(
+        list((await conn.execute(text(UNIT_STOCK_COLUMN_PRIVILEGES_SQL))).mappings())
+    )
+    _assert_physical_v2_column_privileges(
+        list((await conn.execute(text(PHYSICAL_V2_COLUMN_PRIVILEGES_SQL))).mappings())
+    )
+
+
+def _assert_physical_v2_column_privileges(rows: list[RowMapping]) -> None:
+    assert {row["relname"] for row in rows} == {"unit_stock_lot_v2", "unit_stock_opened_pack_v2"}
+    assert all(row["can_select"] for row in rows)
+    assert all(row["can_insert"] == (row["relname"] == "unit_stock_lot_v2") for row in rows)
+    assert all(not row["update_is_grantable"] for row in rows)
+    assert {
+        (row["role_name"], row["relname"], row["attname"]) for row in rows if row["can_update"]
+    } == {
+        ("aurum_app", "unit_stock_lot_v2", "updated_at"),
+        ("aurum_app", "unit_stock_opened_pack_v2", "updated_at"),
+    }
+
+
 def _assert_tenant_account_support_privileges(
     rows: list[RowMapping],
 ) -> None:
@@ -1111,6 +1154,30 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    physical_names = {
+        "unit_pack_v2_remaining",
+        "unit_pack_v2_initial_state",
+        "unit_pack_v2_assert_transition",
+        "unit_cart_v2_fingerprint",
+        "assert_unit_cart_v2_complete",
+        "trg_unit_cart_v2_actor",
+        "trg_unit_cart_v2_guard",
+        "trg_unit_pack_v2_projection_guard",
+        "trg_unit_movement_v2_guard",
+        "trg_unit_movement_v2_apply",
+        "trg_unit_cart_v2_complete",
+    }
+    physical_functions = {row["proname"]: row for row in rows if row["proname"] in physical_names}
+    assert set(physical_functions) == physical_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in physical_functions.values()
+    )
+    assert {name for name, row in physical_functions.items() if row["is_security_definer"]} == (
+        physical_names - {"trg_unit_cart_v2_actor"}
+    )
     v2_names = {
         "unit_incoming_v2_fingerprint",
         "assert_unit_incoming_v2_source",
@@ -1220,9 +1287,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         app_user_column_privileges = list(app_user_column_result.mappings())
         sync_outbox_column_result = await conn.execute(text(SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL))
         sync_outbox_column_privileges = list(sync_outbox_column_result.mappings())
-        _assert_unit_stock_column_privileges(
-            list((await conn.execute(text(UNIT_STOCK_COLUMN_PRIVILEGES_SQL))).mappings())
-        )
+        await _assert_all_stock_column_privileges(conn)
         tenant_account_result = await conn.execute(text(TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL))
         tenant_account_privileges = list(tenant_account_result.mappings())
 

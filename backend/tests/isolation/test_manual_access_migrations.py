@@ -46,6 +46,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "unit_stock_operation_v2",
             "unit_stock_lot_v2",
             "unit_stock_entry_v2",
+            "unit_stock_cart_command_v2",
+            "unit_stock_cart_line_v2",
+            "unit_stock_opened_pack_v2",
+            "unit_stock_movement_v2",
             "pos_unit_sale_command",
             "pos_unit_sale_line",
             "pos_unit_return_command",
@@ -54,7 +58,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "pos_unit_cash_intent",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169/0170/0171/0175. Preserve history and immutable/audit guards.
+        # 0160/0162/0165/0169/0170/0171/0175/0176. Preserve history and immutable/audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
               public.staff_pay_revision, public.unit_stock_operation,
@@ -62,6 +66,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.unit_stock_entry, public.pos_unit_sale_command,
               public.unit_stock_operation_v2, public.unit_stock_lot_v2,
               public.unit_stock_entry_v2,
+              public.unit_stock_cart_command_v2, public.unit_stock_cart_line_v2,
+              public.unit_stock_opened_pack_v2, public.unit_stock_movement_v2,
               public.pos_unit_sale_line, public.pos_unit_return_command,
               public.pos_unit_return_slice, public.pos_unit_cart_item,
               public.pos_unit_cash_intent IN ACCESS EXCLUSIVE MODE
@@ -77,6 +83,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.unit_stock_operation_v2'::regclass, 'public.unit_stock_lot_v2'::regclass,
               'public.unit_stock_entry_v2'::regclass,
+              'public.unit_stock_cart_command_v2'::regclass,
+              'public.unit_stock_cart_line_v2'::regclass,
+              'public.unit_stock_opened_pack_v2'::regclass,
+              'public.unit_stock_movement_v2'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
               'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
               'public.pos_unit_cart_item'::regclass, 'public.pos_unit_cash_intent'::regclass)
@@ -91,6 +101,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.unit_stock_operation_v2'::regclass, 'public.unit_stock_lot_v2'::regclass,
               'public.unit_stock_entry_v2'::regclass,
+              'public.unit_stock_cart_command_v2'::regclass,
+              'public.unit_stock_cart_line_v2'::regclass,
+              'public.unit_stock_opened_pack_v2'::regclass,
+              'public.unit_stock_movement_v2'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
               'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
               'public.pos_unit_cart_item'::regclass, 'public.pos_unit_cash_intent'::regclass)
@@ -105,6 +119,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_stock_opened_pack'::regclass, 'public.unit_stock_entry'::regclass,
               'public.unit_stock_operation_v2'::regclass, 'public.unit_stock_lot_v2'::regclass,
               'public.unit_stock_entry_v2'::regclass,
+              'public.unit_stock_cart_command_v2'::regclass,
+              'public.unit_stock_cart_line_v2'::regclass,
+              'public.unit_stock_opened_pack_v2'::regclass,
+              'public.unit_stock_movement_v2'::regclass,
               'public.pos_unit_sale_command'::regclass, 'public.pos_unit_sale_line'::regclass,
               'public.pos_unit_return_command'::regclass, 'public.pos_unit_return_slice'::regclass,
               'public.pos_unit_cart_item'::regclass, 'public.pos_unit_cash_intent'::regclass)
