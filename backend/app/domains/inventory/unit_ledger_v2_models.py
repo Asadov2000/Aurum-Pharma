@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Date, Integer, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Date, DateTime, Integer, Numeric, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -56,3 +56,68 @@ class UnitStockEntryV2(StockIdentity, Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     closed_delta: Mapped[int] = mapped_column(BigInteger, nullable=False)
     base_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class CartAudit:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class UnitStockCartCommandV2(CartAudit, Base):
+    __tablename__ = "unit_stock_cart_command_v2"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    actor_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UnitStockCartLineV2(CartAudit, Base):
+    __tablename__ = "unit_stock_cart_line_v2"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    command_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    line_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    packaging: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    sale_format: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    base_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class UnitStockOpenedPackV2(StockIdentity, Base):
+    __tablename__ = "unit_stock_opened_pack_v2"
+    __table_args__ = (UniqueConstraint("tenant_id", "id"),)
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    lot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    pack_ordinal: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    remaining_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class UnitStockMovementV2(StockIdentity, Base):
+    __tablename__ = "unit_stock_movement_v2"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    command_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    line_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    lot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    pack_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    entry_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    closed_delta: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    units_taken: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    before_state: Mapped[dict[str, object] | None] = mapped_column(JSONB(none_as_null=True))
+    after_state: Mapped[dict[str, object] | None] = mapped_column(JSONB(none_as_null=True))
+    sealed_start: Mapped[int | None] = mapped_column(BigInteger)
+    sealed_count: Mapped[int | None] = mapped_column(BigInteger)
