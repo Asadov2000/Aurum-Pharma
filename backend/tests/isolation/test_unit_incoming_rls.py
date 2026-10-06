@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import NotFoundError, PermissionDeniedError
@@ -93,6 +94,15 @@ async def test_foreign_branch_and_tenant_cannot_be_received_with_forged_allowed_
             )
             assert (
                 await db_session.scalar(
+                    text(
+                        "SELECT unit_packaging_snapshot_v2 FROM incoming_item WHERE document_id=:id"
+                    ),
+                    {"id": document.document_id},
+                )
+                is None
+            )
+            assert (
+                await db_session.scalar(
                     text("SELECT count(*) FROM incoming_item WHERE document_id=:id"),
                     {"id": document.document_id},
                 )
@@ -122,3 +132,25 @@ async def test_foreign_branch_and_tenant_cannot_be_received_with_forged_allowed_
             )
             == 0
         )
+
+
+async def test_app_cannot_mutate_accepted_batch_blister_history(
+    db_session: AsyncSession,
+) -> None:
+    incoming = await seed_prepared_incoming(db_session)
+    await IncomingService(IncomingRepository(db_session)).accept(
+        incoming.document_id, allowed_branch_ids={incoming.stock.branch_id}
+    )
+    batch_id = await db_session.scalar(
+        text("SELECT created_batch_id FROM incoming_item WHERE id=:id"),
+        {"id": incoming.item_ids[0]},
+    )
+    assert batch_id is not None
+    assert await db_session.scalar(text("SELECT current_user")) == "aurum_app"
+    for value in ("NULL", "jsonb_set(unit_packaging_snapshot_v2,'{units_per_blister}','10')"):
+        with pytest.raises(DBAPIError):
+            async with db_session.begin_nested():
+                await db_session.execute(
+                    text(f"UPDATE batch SET unit_packaging_snapshot_v2={value} WHERE id=:id"),
+                    {"id": batch_id},
+                )

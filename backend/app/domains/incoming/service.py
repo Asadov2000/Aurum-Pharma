@@ -45,6 +45,7 @@ from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.unit_ledger_repository import UnitLedgerRepository
 from app.domains.inventory.unit_ledger_service import PreparedUnitLedgerService
 from app.domains.inventory.unit_stock import UnitPackaging
+from app.domains.inventory.unit_stock_v2 import UnitPackagingV2
 from app.domains.suppliers.models import Supplier
 
 logger = structlog.get_logger("incoming.service")
@@ -260,9 +261,11 @@ class IncomingService:
         }
         prepare = payload.pop("prepare_unit_sale", False)
         if prepare is True:
-            payload["unit_packaging_preparation"] = await self._prepare_packaging(
+            preparation, snapshot = await self._prepare_packaging(
                 tenant_id=doc.tenant_id, catalog_id=fields["catalog_id"], qty=fields["qty"]
             )
+            payload["unit_packaging_preparation"] = preparation
+            payload["unit_packaging_snapshot_v2"] = snapshot
         elif prepare is not False:
             raise BusinessRuleError("prepare_unit_sale must be a boolean")
         item = await self.repo.create_item(**payload)
@@ -296,13 +299,16 @@ class IncomingService:
         if "prepare_unit_sale" in fields and type(prepare) is not bool:
             raise BusinessRuleError("prepare_unit_sale must be a boolean")
         if prepare is True:
-            payload["unit_packaging_preparation"] = await self._prepare_packaging(
+            preparation, snapshot = await self._prepare_packaging(
                 tenant_id=doc.tenant_id,
                 catalog_id=fields.get("catalog_id", item.catalog_id),
                 qty=fields.get("qty", item.qty),
             )
+            payload["unit_packaging_preparation"] = preparation
+            payload["unit_packaging_snapshot_v2"] = snapshot
         elif prepare is False or fields.get("catalog_id", item.catalog_id) != item.catalog_id:
             payload["unit_packaging_preparation"] = None
+            payload["unit_packaging_snapshot_v2"] = None
         elif item.unit_packaging_preparation is not None:
             validate_prepared_pack_quantity(
                 UnitPackaging.model_validate(item.unit_packaging_preparation),
@@ -397,6 +403,7 @@ class IncomingService:
                 sale_price=item.sale_price,
                 qty_initial=item.qty,
                 unit_packaging_preparation=item.unit_packaging_preparation,
+                unit_packaging_snapshot_v2=item.unit_packaging_snapshot_v2,
                 qty_remaining=Decimal("0"),  # raised by the trigger via insert_movement
                 created_by=actor_id,
             )
@@ -567,7 +574,7 @@ class IncomingService:
 
     async def _prepare_packaging(
         self, *, tenant_id: UUID, catalog_id: UUID, qty: Decimal
-    ) -> dict[str, object]:
+    ) -> tuple[dict[str, object], dict[str, object]]:
         catalog = await self.repo.get_catalog_for_preparation(
             tenant_id=tenant_id, catalog_id=catalog_id
         )
@@ -584,7 +591,13 @@ class IncomingService:
             dispense_step=preparation.dispense_step,
         )
         validate_prepared_pack_quantity(packaging, qty)
-        return packaging.model_dump(mode="json")
+        snapshot = UnitPackagingV2(
+            unit=preparation.unit,
+            units_per_pack=preparation.units_per_pack,
+            units_per_blister=preparation.units_per_blister,
+            dispense_step=preparation.dispense_step,
+        )
+        return packaging.model_dump(mode="json"), snapshot.model_dump(mode="json")
 
     @staticmethod
     def _assert_branch_allowed(

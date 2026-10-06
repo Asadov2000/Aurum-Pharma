@@ -294,6 +294,10 @@ async def test_prepared_acceptance_copies_saved_source_and_creates_no_legacy_sto
     assert lot.purchase_cost_per_pack == cost
     assert (lot.unit, lot.units_per_pack, lot.dispense_step) == ("tablet", 30, 1)
     assert lot.expires_at == date.today() + timedelta(days=180)
+    assert await db_session.scalar(
+        text("SELECT unit_packaging_snapshot_v2 FROM incoming_item WHERE id=:id"),
+        {"id": incoming.item_ids[0]},
+    ) == {**PACKAGING.model_dump(), "version": 2, "units_per_blister": None}
     for table in ("batch", "batch_movement"):
         assert (
             await db_session.scalar(
@@ -326,6 +330,33 @@ async def test_acceptance_uses_saved_packaging_after_current_catalog_changes(
         )
         == 30
     )
+
+
+async def test_prepared_unit_source_keeps_blister_history_after_catalog_changes(
+    db_session: AsyncSession,
+) -> None:
+    runtime = cast(ReceivingRuntime, db_session.info["receiving_runtime"])
+    await db_session.execute(
+        text(
+            "UPDATE tenant_catalog SET unit_sale_preparation="
+            "jsonb_set(unit_sale_preparation,'{units_per_blister}','10') WHERE id=:id"
+        ),
+        {"id": runtime.stock.catalog_id},
+    )
+    incoming = await seed_prepared_incoming(db_session)
+    await db_session.execute(
+        text(
+            "UPDATE tenant_catalog SET unit_sale_preparation="
+            "jsonb_set(unit_sale_preparation,'{units_per_blister}','15') WHERE id=:id"
+        ),
+        {"id": runtime.stock.catalog_id},
+    )
+    await accept_prepared(db_session, incoming)
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    assert await db_session.scalar(
+        text("SELECT unit_packaging_snapshot_v2 FROM incoming_item WHERE id=:id"),
+        {"id": incoming.item_ids[0]},
+    ) == {**PACKAGING.model_dump(), "version": 2, "units_per_blister": 10}
 
 
 async def test_invalid_second_item_rolls_back_first_item_and_header(
@@ -579,6 +610,9 @@ async def test_bound_source_cannot_be_changed_rebound_or_deleted(db_session: Asy
         "UPDATE incoming_item SET purchase_price=99 WHERE id=:id",
         "UPDATE incoming_item SET qty=3 WHERE id=:id",
         "UPDATE incoming_item SET unit_packaging_preparation=NULL WHERE id=:id",
+        "UPDATE incoming_item SET unit_packaging_snapshot_v2=NULL WHERE id=:id",
+        "UPDATE incoming_item SET unit_packaging_snapshot_v2="
+        "jsonb_set(unit_packaging_snapshot_v2,'{units_per_blister}','10') WHERE id=:id",
         "DELETE FROM incoming_item WHERE id=:id",
     ):
         with pytest.raises(DBAPIError):
