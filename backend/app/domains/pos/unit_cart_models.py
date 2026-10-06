@@ -16,10 +16,11 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.domains.catalog.unit_sales import SaleFormat
+from app.domains.inventory.unit_stock_v2 import SaleFormatV2
 from app.domains.pos.models import Base
 
 
@@ -41,7 +42,10 @@ class UnitCartItem(Base):
     sale_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     catalog_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
-    sale_format: Mapped[SaleFormat] = mapped_column(Text, nullable=False)
+    sale_format: Mapped[SaleFormatV2] = mapped_column(Text, nullable=False)
+    physical_packaging: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

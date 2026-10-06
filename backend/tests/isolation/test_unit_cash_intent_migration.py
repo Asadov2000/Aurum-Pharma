@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from tests.isolation.test_unit_cart_migration import migration as cart_migration
 
 
 def migration() -> ModuleType:
@@ -32,9 +33,11 @@ async def test_empty_roundtrip_or_nonempty_protection(maintenance_engine: AsyncE
                     with connection.begin_nested():
                         migration().downgrade()
                 return
+            cart_migration("0179_unit_physical_cart_intents.py").downgrade()
             migration().downgrade()
             assert connection.scalar(text("SELECT to_regclass('pos_unit_cash_intent')")) is None
             migration().upgrade()
+            cart_migration("0179_unit_physical_cart_intents.py").upgrade()
             assert connection.scalar(
                 text(
                     "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class "

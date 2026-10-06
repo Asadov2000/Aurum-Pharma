@@ -93,6 +93,10 @@ class UnitCheckoutPreparationService:
             units = await self.cart.list_items(tenant_id, sale.id)
             if not units:
                 raise BusinessRuleError("Unit checkout preparation requires unit cart positions")
+            if any(item.physical_packaging is not None for item in units):
+                raise BusinessRuleError(
+                    "Physical unit cart requires physical checkout; legacy stock cannot be used"
+                )
             legacy = await self.cart.list_legacy_items(tenant_id, sale.id)
             legacy_catalog_ids = {item.catalog_id for item in legacy}
             legacy_rx_required = False

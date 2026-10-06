@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal, localcontext
 from uuid import UUID
 
+from pydantic import SerializerFunctionWrapHandler, model_serializer
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import IntegrityError
 
@@ -17,6 +18,9 @@ from app.domains.catalog.unit_sales import (
     UnitSalePreparation,
     quote_unit_sale,
 )
+from app.domains.inventory.unit_allocation_v2 import UnitCartLineV2
+from app.domains.inventory.unit_dispensing_v2_retail import quote_retail_line_v2
+from app.domains.inventory.unit_stock_v2 import SaleFormatV2, UnitPackagingV2
 from app.domains.pos.models import Sale
 from app.domains.pos.unit_cart_models import UnitCartItem
 from app.domains.pos.unit_cart_repository import UnitCartRepository
@@ -36,9 +40,17 @@ class UnitCartItemSnapshot(FrozenContract):
     sale_id: UUID
     catalog_id: UUID
     position: Position
-    sale_format: SaleFormat
+    sale_format: SaleFormatV2
     quantity: WholeQuantity
     discount_amount: Money
+    physical_packaging: UnitPackagingV2 | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_snapshot(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        result: dict[str, object] = handler(self)
+        if self.physical_packaging is None:
+            result.pop("physical_packaging", None)
+        return result
 
 
 def _snapshot(item: UnitCartItem) -> UnitCartItemSnapshot:
@@ -52,6 +64,11 @@ def _snapshot(item: UnitCartItem) -> UnitCartItemSnapshot:
         sale_format=item.sale_format,
         quantity=item.quantity,
         discount_amount=item.discount_amount,
+        physical_packaging=(
+            UnitPackagingV2.model_validate(item.physical_packaging)
+            if item.physical_packaging is not None
+            else None
+        ),
     )
 
 
@@ -133,27 +150,72 @@ class UnitCartService:
         quantity: int,
         discount_amount: Decimal = Decimal("0.00"),
     ) -> UnitCartItemSnapshot:
-        if not isinstance(item_id, UUID) or not isinstance(catalog_id, UUID):
-            raise BusinessRuleError("Unit cart identifiers must be UUIDs")
-        if type(position) is not int or not 1 <= position <= 200:
-            raise BusinessRuleError("Unit cart position must be between 1 and 200")
+        return await self._upsert_item(
+            tenant_id=tenant_id,
+            sale_id=sale_id,
+            item_id=item_id,
+            catalog_id=catalog_id,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+            position=position,
+            sale_format=sale_format,
+            quantity=quantity,
+            discount_amount=discount_amount,
+            physical=False,
+        )
+
+    async def upsert_physical_item(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        item_id: UUID,
+        catalog_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+        position: int,
+        sale_format: SaleFormatV2,
+        quantity: int,
+        discount_amount: Decimal = Decimal("0.00"),
+    ) -> UnitCartItemSnapshot:
+        """Capture composition in an unpaid draft, never reserve or dispense stock."""
+        return await self._upsert_item(
+            tenant_id=tenant_id,
+            sale_id=sale_id,
+            item_id=item_id,
+            catalog_id=catalog_id,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+            position=position,
+            sale_format=sale_format,
+            quantity=quantity,
+            discount_amount=discount_amount,
+            physical=True,
+        )
+
+    async def _upsert_item(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        item_id: UUID,
+        catalog_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+        position: int,
+        sale_format: SaleFormatV2,
+        quantity: int,
+        discount_amount: Decimal,
+        physical: bool,
+    ) -> UnitCartItemSnapshot:
+        self._validate_item_identity(item_id, catalog_id, position)
         if (
             type(quantity) is not int
             or not 0 < quantity <= MAX_BASE_UNITS
-            or sale_format not in ("pack", "unit")
+            or sale_format not in (("pack", "blister", "unit") if physical else ("pack", "unit"))
         ):
             raise BusinessRuleError("Unit cart requires a valid format and whole positive quantity")
-        if (
-            not isinstance(discount_amount, Decimal)
-            or not discount_amount.is_finite()
-            or not 0 <= discount_amount <= MAX_MONEY
-        ):
-            raise BusinessRuleError("Unit cart discount must be a valid money amount")
-        with localcontext(EXACT_CONTEXT):
-            if discount_amount != discount_amount.quantize(Decimal("0.01")):
-                raise BusinessRuleError(
-                    "Unit cart discount must contain at most two decimal places"
-                )
+        self._validate_discount(discount_amount)
         async with self.repository.session.begin_nested():
             sale = await self.lock_editable_sale(tenant_id, sale_id, actor_id, allowed_branch_ids)
             item = await self.repository.get_item(tenant_id, item_id)
@@ -165,11 +227,23 @@ class UnitCartService:
                 raise ConflictError(
                     "Unit cart item identity belongs to another draft or catalog item"
                 )
+            if item is not None and (item.physical_packaging is not None) != physical:
+                raise ConflictError("Unit cart accounting mode cannot change")
             catalog = await self.repository.lock_catalog(tenant_id, catalog_id)
             if catalog is None:
                 raise NotFoundError("Catalog item not found")
-            self._validate_price(catalog, sale_format, quantity, discount_amount)
             items = await self.repository.list_items(tenant_id, sale_id)
+            if any((row.physical_packaging is not None) != physical for row in items):
+                raise ConflictError("Prepared and physical unit cart rows cannot be mixed")
+            packaging: UnitPackagingV2 | None = None
+            if physical:
+                packaging = self._physical_packaging(
+                    catalog, item, item_id, sale_format, quantity, discount_amount
+                )
+            else:
+                # The legacy method admitted only these two formats above.
+                legacy_format: SaleFormat = "pack" if sale_format == "pack" else "unit"
+                self._validate_price(catalog, legacy_format, quantity, discount_amount)
             if any(row.position == position and row.id != item_id for row in items):
                 raise ConflictError("Unit cart position is already occupied")
             if item is None:
@@ -185,6 +259,7 @@ class UnitCartService:
                     sale_format=sale_format,
                     quantity=quantity,
                     discount_amount=discount_amount,
+                    physical_packaging=packaging.model_dump(mode="json") if packaging else None,
                 )
             else:
                 item.position = position
@@ -193,6 +268,66 @@ class UnitCartService:
                 item.discount_amount = discount_amount
             await self.repository.save_item(item)
             return _snapshot(item)
+
+    @staticmethod
+    def _validate_item_identity(item_id: UUID, catalog_id: UUID, position: int) -> None:
+        if not isinstance(item_id, UUID) or not isinstance(catalog_id, UUID):
+            raise BusinessRuleError("Unit cart identifiers must be UUIDs")
+        if type(position) is not int or not 1 <= position <= 200:
+            raise BusinessRuleError("Unit cart position must be between 1 and 200")
+
+    @staticmethod
+    def _validate_discount(discount_amount: Decimal) -> None:
+        if (
+            not isinstance(discount_amount, Decimal)
+            or not discount_amount.is_finite()
+            or not 0 <= discount_amount <= MAX_MONEY
+        ):
+            raise BusinessRuleError("Unit cart discount must be a valid money amount")
+        with localcontext(EXACT_CONTEXT):
+            if discount_amount != discount_amount.quantize(Decimal("0.01")):
+                raise BusinessRuleError(
+                    "Unit cart discount must contain at most two decimal places"
+                )
+
+    @staticmethod
+    def _physical_packaging(
+        catalog: TenantCatalog,
+        item: UnitCartItem | None,
+        item_id: UUID,
+        sale_format: SaleFormatV2,
+        quantity: int,
+        discount_amount: Decimal,
+    ) -> UnitPackagingV2:
+        try:
+            preparation = UnitSalePreparation.model_validate(catalog.unit_sale_preparation)
+            packaging = UnitPackagingV2(
+                unit=preparation.unit,
+                units_per_pack=preparation.units_per_pack,
+                units_per_blister=preparation.units_per_blister,
+                dispense_step=preparation.dispense_step,
+            )
+            if (
+                item is not None
+                and UnitPackagingV2.model_validate(item.physical_packaging) != packaging
+            ):
+                raise ConflictError("Physical cart composition is stale; recreate the position")
+            quote_retail_line_v2(
+                UnitCartLineV2(
+                    id=item_id,
+                    catalog_id=catalog.id,
+                    packaging=packaging,
+                    sale_format=sale_format,
+                    quantity=quantity,
+                ),
+                catalog,
+                discount_amount,
+            )
+            return packaging
+        except ValueError as error:
+            raise BusinessRuleError(
+                "Valid physical packaging and retail prices are required"
+            ) from error
 
     async def remove_item(
         self,
