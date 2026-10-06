@@ -43,13 +43,26 @@ def _migration() -> ModuleType:
     return migration
 
 
+def _retail_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0178_unit_blister_retail_snapshot.py"
+    )
+    spec = importlib.util.spec_from_file_location("physical_retail_migration", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
 def downgrade_cost_for_roundtrip(connection: Connection) -> None:
     """Outer migration is removed only when its persisted history can be retained."""
+    _retail_migration().downgrade()
     _migration().downgrade()
 
 
 def upgrade_cost_after_roundtrip(connection: Connection) -> None:
     _migration().upgrade()
+    _retail_migration().upgrade()
 
 
 def _roundtrip_or_refuse_known_costs(connection: Connection) -> None:
@@ -63,11 +76,11 @@ def _roundtrip_or_refuse_known_costs(connection: Connection) -> None:
         if known:
             with pytest.raises(DBAPIError) as error:
                 with connection.begin_nested():
-                    _migration().downgrade()
+                    downgrade_cost_for_roundtrip(connection)
             assert error.value.orig.sqlstate == "55000"
         else:
-            _migration().downgrade()
-            _migration().upgrade()
+            downgrade_cost_for_roundtrip(connection)
+            upgrade_cost_after_roundtrip(connection)
 
 
 async def test_cost_migration_roundtrip_or_refuses_known_history(
@@ -92,11 +105,11 @@ async def test_cost_migration_roundtrip_or_refuses_known_history(
             if known:
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
-                        _migration().downgrade()
+                        downgrade_cost_for_roundtrip(connection)
                 assert error.value.orig.sqlstate == "55000"
             else:
-                _migration().downgrade()
-                _migration().upgrade()
+                downgrade_cost_for_roundtrip(connection)
+                upgrade_cost_after_roundtrip(connection)
             assert (
                 connection.execute(
                     text("SELECT to_jsonb(m) FROM unit_stock_movement_v2 m ORDER BY tenant_id,id")

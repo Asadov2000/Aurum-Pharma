@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Context, Decimal, localcontext
 from hashlib import sha256
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -16,7 +17,7 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.core.time import utc_now
-from app.domains.catalog.unit_sales import MAX_BASE_UNITS
+from app.domains.catalog.unit_sales import MAX_BASE_UNITS, MAX_MONEY
 from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.unit_allocation_v2 import (
     UnitCartLineV2,
@@ -28,6 +29,13 @@ from app.domains.inventory.unit_dispensing_v2_cost import (
     persisted_cost_result_v2,
 )
 from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
+from app.domains.inventory.unit_dispensing_v2_retail import (
+    UnitCartRetailResultV2,
+    UnitPricedCartLineV2,
+    UnitRetailAmountsV2,
+    persisted_retail_result_v2,
+    quote_retail_line_v2,
+)
 from app.domains.inventory.unit_ledger_v2_models import (
     UnitStockCartCommandV2,
     UnitStockCartLineV2,
@@ -75,9 +83,14 @@ class UnitCartDispenseResultV2:
     movements: tuple[UnitCartMovementResultV2, ...]
 
 
-def _fingerprint(tenant_id: UUID, branch_id: UUID, lines: tuple[UnitCartLineV2, ...]) -> str:
+def _fingerprint(
+    tenant_id: UUID,
+    branch_id: UUID,
+    lines: tuple[UnitCartLineV2, ...],
+    discounts: tuple[Decimal, ...] | None = None,
+) -> str:
     payload = [
-        "aurum-unit-cart-v2:1",
+        "aurum-unit-cart-v2:1" if discounts is None else "aurum-unit-cart-v2:retail:1",
         str(tenant_id),
         str(branch_id),
         [
@@ -92,7 +105,8 @@ def _fingerprint(tenant_id: UUID, branch_id: UUID, lines: tuple[UnitCartLineV2, 
                 line.sale_format,
                 line.quantity,
             ]
-            for line in lines
+            + ([] if discounts is None else [format(discounts[position], ".2f")])
+            for position, line in enumerate(lines)
         ],
     ]
     return sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
@@ -232,6 +246,74 @@ class PhysicalUnitLedgerV2Service:
         actor_id: UUID,
         allowed_branch_ids: set[UUID],
     ) -> UnitCartDispenseResultV2:
+        return await self._dispense_cart(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            command_id=command_id,
+            lines=lines,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+
+    async def dispense_priced_cart(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        command_id: UUID,
+        lines: tuple[UnitPricedCartLineV2, ...],
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+    ) -> UnitCartRetailResultV2:
+        """Internal immutable retail source, without accepting money or completing a sale."""
+        if (
+            not isinstance(lines, tuple)
+            or not 0 < len(lines) <= 200
+            or any(not isinstance(line, UnitPricedCartLineV2) for line in lines)
+        ):
+            raise BusinessRuleError("Retail cart requires between 1 and 200 priced lines")
+        try:
+            checked = tuple(
+                UnitPricedCartLineV2.model_validate(line.model_dump()) for line in lines
+            )
+            physical = tuple(
+                UnitCartLineV2.model_validate(line.model_dump(exclude={"discount_amount"}))
+                for line in checked
+            )
+        except ValueError as exc:
+            raise BusinessRuleError("Invalid retail cart input") from exc
+        async with self.repo.session.begin_nested():
+            await self._dispense_cart(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                command_id=command_id,
+                lines=physical,
+                actor_id=actor_id,
+                allowed_branch_ids=allowed_branch_ids,
+                discounts=tuple(line.discount_amount for line in checked),
+            )
+            cost = await self.cost_result(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                command_id=command_id,
+                actor_id=actor_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
+            return persisted_retail_result_v2(
+                command_id, await self.repo.cart_lines(tenant_id, command_id), cost
+            )
+
+    async def _dispense_cart(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        command_id: UUID,
+        lines: tuple[UnitCartLineV2, ...],
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+        discounts: tuple[Decimal, ...] | None = None,
+    ) -> UnitCartDispenseResultV2:
         if not isinstance(allowed_branch_ids, set) or branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
         if any(
@@ -239,6 +321,7 @@ class PhysicalUnitLedgerV2Service:
         ):
             raise PermissionDeniedError("Authenticated physical cart identifiers are required")
         lines, amounts = _checked_lines(lines)
+        request_hash = _fingerprint(tenant_id, branch_id, lines, discounts)
         async with self.repo.session.begin_nested():
             await self.repo.assert_received_actor(tenant_id, branch_id, actor_id)
             command, created = await self.repo.claim_cart(
@@ -247,21 +330,18 @@ class PhysicalUnitLedgerV2Service:
                     id=command_id,
                     branch_id=branch_id,
                     actor_id=actor_id,
-                    request_hash=_fingerprint(tenant_id, branch_id, lines),
+                    request_hash=request_hash,
+                    retail_version=1 if discounts is not None else None,
+                    currency="TJS" if discounts is not None else None,
                     created_by=actor_id,
                 )
             )
-            if command.branch_id != branch_id or command.request_hash != _fingerprint(
-                tenant_id, branch_id, lines
-            ):
+            if command.branch_id != branch_id or command.request_hash != request_hash:
                 raise ConflictError("Physical cart command was reused with different parameters")
             if not created:
                 return await self._result(tenant_id, command_id)
             catalog_ids = sorted({line.catalog_id for line in lines})
-            for catalog_id in catalog_ids:
-                catalog = await self.repo.lock_catalog(tenant_id, catalog_id)
-                if catalog is None or not catalog.is_active or catalog.deleted_at is not None:
-                    raise BusinessRuleError("Physical cart item is unavailable")
+            retail = await self._lock_retail_catalogs(tenant_id, catalog_ids, lines, discounts)
             lots = await self.repo.lock_physical_lots(tenant_id, branch_id, catalog_ids)
             packs = await self.repo.lock_physical_packs(tenant_id, [lot.id for lot in lots])
             settings = await FoundationRepository(self.repo.session).get_settings(tenant_id)
@@ -293,12 +373,50 @@ class PhysicalUnitLedgerV2Service:
                         quantity=line.quantity,
                         base_units=amounts[position],
                         created_by=actor_id,
+                        original_retail_unit_price=(
+                            retail[line.id].original_retail_unit_price
+                            if discounts is not None
+                            else None
+                        ),
+                        gross_amount=(
+                            retail[line.id].gross_amount if discounts is not None else None
+                        ),
+                        discount_amount=(
+                            retail[line.id].discount_amount if discounts is not None else None
+                        ),
+                        net_amount=retail[line.id].net_amount if discounts is not None else None,
                     )
                     for position, line in enumerate(lines)
                 ]
             )
             await self._post(plan, lots, lines, command)
             return await self._result(tenant_id, command_id)
+
+    async def _lock_retail_catalogs(
+        self,
+        tenant_id: UUID,
+        catalog_ids: list[UUID],
+        lines: tuple[UnitCartLineV2, ...],
+        discounts: tuple[Decimal, ...] | None,
+    ) -> dict[UUID, UnitRetailAmountsV2]:
+        retail: dict[UUID, UnitRetailAmountsV2] = {}
+        for catalog_id in catalog_ids:
+            catalog = await self.repo.lock_catalog(tenant_id, catalog_id)
+            if catalog is None or not catalog.is_active or catalog.deleted_at is not None:
+                raise BusinessRuleError("Physical cart item is unavailable")
+            if discounts is not None:
+                for position, line in enumerate(lines):
+                    if line.catalog_id == catalog_id:
+                        retail[line.id] = quote_retail_line_v2(line, catalog, discounts[position])
+        with localcontext(Context(prec=40)):
+            for values in (
+                tuple(value.gross_amount for value in retail.values()),
+                tuple(value.discount_amount for value in retail.values()),
+                tuple(value.net_amount for value in retail.values()),
+            ):
+                if sum(values, Decimal("0.00")) > MAX_MONEY:
+                    raise BusinessRuleError("Retail cart exceeds the money limit")
+        return retail
 
     async def _post(
         self,
