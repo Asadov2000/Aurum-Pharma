@@ -22,7 +22,10 @@ from tests.domains.incoming.test_unit_acceptance import (
     set_receiving_context,
 )
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import receive_source
-from tests.isolation.test_physical_cash_checkout_migration import migration as cash_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_cash_for_roundtrip,
+    upgrade_cash_after_roundtrip,
+)
 
 db_session = receiving_session_fixture
 
@@ -46,6 +49,18 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
         with Operations.context(MigrationContext.configure(connection)):
             query = text("SELECT to_jsonb(row) FROM unit_stock_lot_v2 row ORDER BY tenant_id,id")
             before = connection.execute(query).scalars().all()
+            if connection.scalar(
+                text(
+                    "SELECT EXISTS(SELECT 1 FROM pos_physical_checkout) OR EXISTS(SELECT 1 "
+                    "FROM unit_stock_cart_command_v2 WHERE checkout_sale_id IS NOT NULL)"
+                )
+            ):
+                with pytest.raises(DBAPIError) as error:
+                    with connection.begin_nested():
+                        downgrade_cash_for_roundtrip()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+                assert connection.execute(query).scalars().all() == before
+                return
             if any(row["blocking_revision"] or row["is_blocked"] for row in before):
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
@@ -58,7 +73,7 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
                 "'trg_unit_movement_v2_guard()'::regprocedure) ORDER BY proname"
             )
             original = connection.execute(guard_query).all()
-            cash_migration().downgrade()
+            downgrade_cash_for_roundtrip()
             migration().downgrade()
             assert not connection.scalar(
                 text(
@@ -70,7 +85,7 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
                 assert "l.is_blocked" not in function[1]
                 assert "NEW.blocking_revision" not in function[1]
             migration().upgrade()
-            cash_migration().upgrade()
+            upgrade_cash_after_roundtrip()
             assert connection.execute(query).scalars().all() == before
             assert connection.execute(guard_query).all() == original
 

@@ -19,7 +19,10 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.inventory.test_unit_cost_ledger_v2 import costs, priced_source
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import cart_line, dispense
-from tests.isolation.test_physical_cash_checkout_migration import migration as cash_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_cash_for_roundtrip,
+    upgrade_cash_after_roundtrip,
+)
 from tests.isolation.test_unit_physical_block_migration import migration as blocking_migration
 
 db_session = receiving_session_fixture
@@ -58,7 +61,7 @@ def _retail_migration() -> ModuleType:
 
 def downgrade_cost_for_roundtrip(connection: Connection) -> None:
     """Outer migration is removed only when its persisted history can be retained."""
-    cash_migration().downgrade()
+    downgrade_cash_for_roundtrip()
     blocking_migration().downgrade()
     _retail_migration().downgrade()
     _migration().downgrade()
@@ -68,7 +71,7 @@ def upgrade_cost_after_roundtrip(connection: Connection) -> None:
     _migration().upgrade()
     _retail_migration().upgrade()
     blocking_migration().upgrade()
-    cash_migration().upgrade()
+    upgrade_cash_after_roundtrip()
 
 
 def _roundtrip_or_refuse_known_costs(connection: Connection) -> None:
