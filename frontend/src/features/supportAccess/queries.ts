@@ -7,6 +7,7 @@ import {
   startSupportSession,
 } from "./api";
 import { type SupportAccessSessionCreate } from "./types";
+import { assertSupportAuthority, type SupportAuthority } from "./authority";
 
 export const supportAccessKeys = {
   capabilities: ["support-access", "capabilities"] as const,
@@ -33,10 +34,18 @@ export function useSupportSessions(enabled = true) {
 
 export function useStartSupportSession() {
   return useMutation({
-    mutationFn: (payload: SupportAccessSessionCreate) => startSupportSession(payload),
+    mutationFn: (request: { payload: SupportAccessSessionCreate; authority: SupportAuthority }) => {
+      assertSupportAuthority(request.authority);
+      return startSupportSession(request.payload);
+    },
   });
 }
 
 export function useRevokeSupportSession() {
-  return useMutation({ mutationFn: revokeSupportSession });
+  return useMutation({
+    mutationFn: (request: { sessionId: string; authority: SupportAuthority }) => {
+      assertSupportAuthority(request.authority);
+      return revokeSupportSession(request.sessionId);
+    },
+  });
 }

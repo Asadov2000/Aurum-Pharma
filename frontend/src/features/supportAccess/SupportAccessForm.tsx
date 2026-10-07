@@ -6,7 +6,12 @@ import { z } from "zod";
 import { Button, FormError, Label, Select, Textarea } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
 
-import { activateSupportContext } from "./context";
+import { activateSupportContext, SupportContextFailure } from "./context";
+import {
+  assertSupportAuthority,
+  captureSupportAuthority,
+  isSupportAuthorityCurrent,
+} from "./authority";
 import { useStartSupportSession, useSupportCapabilities } from "./queries";
 
 const schema = z.object({
@@ -78,18 +83,28 @@ export function SupportAccessForm({
 
     setTopError(null);
     onPendingChange?.(true);
+    const authority = captureSupportAuthority();
     try {
       const session = await startSession.mutateAsync({
-        tenant_id: tenantId,
-        reason: parsed.data.reason,
-        duration_minutes: parsed.data.duration_minutes,
-        capabilities: requested,
+        payload: {
+          tenant_id: tenantId,
+          reason: parsed.data.reason,
+          duration_minutes: parsed.data.duration_minutes,
+          capabilities: requested,
+        },
+        authority,
       });
-      await activateSupportContext(session);
+      assertSupportAuthority(authority);
+      const activatedAuthority = await activateSupportContext(session);
+      assertSupportAuthority(activatedAuthority);
       onClose();
       await navigate({ to: parsed.data.mode === "roles" ? "/roles" : "/users" });
     } catch (error) {
-      setTopError(describeApiError(error, "Не удалось открыть защищённый доступ"));
+      const failureAuthority = error instanceof SupportContextFailure ? error.authority : authority;
+      if (isSupportAuthorityCurrent(failureAuthority)) {
+        const original = error instanceof SupportContextFailure ? error.original : error;
+        setTopError(describeApiError(original, "Не удалось открыть защищённый доступ"));
+      }
     } finally {
       onPendingChange?.(false);
     }
