@@ -20,6 +20,7 @@ from tests.domains.inventory.test_unit_retail_ledger_v2 import (
     retail_line,
     retail_source,
 )
+from tests.isolation.test_physical_cash_checkout_migration import migration as cash_migration
 from tests.isolation.test_unit_physical_block_migration import migration as blocking_migration
 
 db_session = receiving_session_fixture
@@ -76,10 +77,12 @@ async def test_retail_migration_roundtrip_preserves_unpriced_history(
                         blocking_migration().downgrade()
                 assert error.value.orig.sqlstate == "55000"
             else:
+                cash_migration().downgrade()
                 blocking_migration().downgrade()
                 _migration().downgrade()
                 _migration().upgrade()
                 blocking_migration().upgrade()
+                cash_migration().upgrade()
             for table, before in original.items():
                 query = (
                     f"SELECT to_jsonb(row) FROM {table} row ORDER BY tenant_id,command_id,line_id"

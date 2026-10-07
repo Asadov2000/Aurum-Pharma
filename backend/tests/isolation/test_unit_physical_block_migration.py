@@ -22,6 +22,7 @@ from tests.domains.incoming.test_unit_acceptance import (
     set_receiving_context,
 )
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import receive_source
+from tests.isolation.test_physical_cash_checkout_migration import migration as cash_migration
 
 db_session = receiving_session_fixture
 
@@ -57,6 +58,7 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
                 "'trg_unit_movement_v2_guard()'::regprocedure) ORDER BY proname"
             )
             original = connection.execute(guard_query).all()
+            cash_migration().downgrade()
             migration().downgrade()
             assert not connection.scalar(
                 text(
@@ -68,6 +70,7 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
                 assert "l.is_blocked" not in function[1]
                 assert "NEW.blocking_revision" not in function[1]
             migration().upgrade()
+            cash_migration().upgrade()
             assert connection.execute(query).scalars().all() == before
             assert connection.execute(guard_query).all() == original
 
