@@ -94,6 +94,7 @@ class UnitStockCartCommandV2(CartAudit, Base):
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     retail_version: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str | None] = mapped_column(Text)
+    checkout_sale_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
 class UnitStockCartLineV2(CartAudit, Base):

@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_physical_checkout",
     "unit_stock_cart_command_v2",
     "unit_stock_cart_line_v2",
     "unit_stock_movement_v2",
@@ -223,6 +224,11 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_physical_checkout",
+    "trg_physical_stock_checkout_binding",
+    "trg_physical_checkout_guard",
+    "trg_physical_checkout_complete",
+    "trg_physical_checkout_cart_frozen",
     "trg_unit_prescription_guard",
     "trg_unit_cash_intent_guard",
     "trg_unit_cart_guard",
@@ -1158,6 +1164,24 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    cash_names = {
+        "assert_physical_checkout",
+        "trg_physical_stock_checkout_binding",
+        "trg_physical_checkout_guard",
+        "trg_physical_checkout_complete",
+        "trg_physical_checkout_cart_frozen",
+    }
+    cash_functions = {row["proname"]: row for row in rows if row["proname"] in cash_names}
+    assert set(cash_functions) == cash_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in cash_functions.values()
+    )
+    assert {name for name, row in cash_functions.items() if row["is_security_definer"]} == (
+        cash_names - {"trg_physical_stock_checkout_binding", "trg_physical_checkout_guard"}
+    )
     physical_names = {
         "unit_pack_v2_remaining",
         "unit_pack_v2_initial_state",
