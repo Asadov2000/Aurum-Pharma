@@ -580,6 +580,7 @@ CUSTOM_FUNCTIONS = {
     "unit_cart_v2_fingerprint",
     "assert_unit_cart_v2_complete",
     "trg_unit_cart_v2_actor",
+    "trg_unit_lot_v2_block_actor",
     "trg_unit_cart_v2_guard",
     "trg_unit_pack_v2_projection_guard",
     "trg_unit_movement_v2_guard",
@@ -1071,6 +1072,7 @@ def _assert_physical_v2_column_privileges(rows: list[RowMapping]) -> None:
     assert {
         (row["role_name"], row["relname"], row["attname"]) for row in rows if row["can_update"]
     } == {
+        ("aurum_app", "unit_stock_lot_v2", "is_blocked"),
         ("aurum_app", "unit_stock_lot_v2", "updated_at"),
         ("aurum_app", "unit_stock_opened_pack_v2", "updated_at"),
     }
@@ -1163,6 +1165,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "unit_cart_v2_fingerprint",
         "assert_unit_cart_v2_complete",
         "trg_unit_cart_v2_actor",
+        "trg_unit_lot_v2_block_actor",
         "trg_unit_cart_v2_guard",
         "trg_unit_pack_v2_projection_guard",
         "trg_unit_movement_v2_guard",
@@ -1180,7 +1183,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in physical_functions.values()
     )
     assert {name for name, row in physical_functions.items() if row["is_security_definer"]} == (
-        physical_names - {"trg_unit_cart_v2_actor"}
+        physical_names - {"trg_unit_cart_v2_actor", "trg_unit_lot_v2_block_actor"}
     )
     v2_names = {
         "unit_incoming_v2_fingerprint",
