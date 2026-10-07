@@ -67,9 +67,8 @@ export const api: AxiosInstance = axios.create({
 });
 
 interface RetryConfig extends InternalAxiosRequestConfig {
-  _authEpoch?: string | null;
-  _authSessionGeneration?: number;
-  _supportAccessRevision?: number;
+  _auth?: { generation: number; epoch: string | null };
+  _supportRevision?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
   _skipRefresh?: boolean;
@@ -137,25 +136,30 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
   return false;
 }
 
-function hasCurrentAuthority(config: RetryConfig): boolean {
+function hasAuthSession(generation: number, epoch: string | null): boolean {
+  return generation === getAuthSessionGeneration() && epoch === getAuthEpoch();
+}
+
+function hasCurrentAuthority(
+  config: RetryConfig,
+): config is RetryConfig & { _auth: { generation: number; epoch: string | null } } {
   return (
-    config._authSessionGeneration === getAuthSessionGeneration() &&
-    config._authEpoch === getAuthEpoch() &&
-    (config._supportAccessRevision === undefined ||
-      config._supportAccessRevision === getSupportAccessRevision())
+    config._auth !== undefined &&
+    hasAuthSession(config._auth.generation, config._auth.epoch) &&
+    (config._supportRevision === undefined ||
+      config._supportRevision === getSupportAccessRevision())
   );
 }
 
 api.interceptors.request.use((config) => {
   const cfg = config as RetryConfig;
-  if (cfg._authEpoch === undefined) cfg._authEpoch = getAuthEpoch();
-  cfg._authSessionGeneration ??= getAuthSessionGeneration();
+  cfg._auth ??= { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() };
   const pathname = supportContextPath(config);
   if (
     acceptsSupportContext(pathname, config.method) ||
     (pathname === "/admin/support-access/sessions" && config.method?.toUpperCase() === "POST")
   ) {
-    cfg._supportAccessRevision ??= getSupportAccessRevision();
+    cfg._supportRevision ??= getSupportAccessRevision();
   }
   if (!hasCurrentAuthority(cfg)) {
     throw new CanceledError("Authentication session changed", config);
@@ -190,7 +194,7 @@ export function refreshAccessToken(
   generation = getAuthSessionGeneration(),
   epoch = getAuthEpoch(),
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration() || epoch !== getAuthEpoch()) {
+  if (!hasAuthSession(generation, epoch)) {
     return Promise.resolve(null);
   }
   if (refreshing?.generation === generation && refreshing.epoch === epoch)
@@ -200,7 +204,7 @@ export function refreshAccessToken(
     epoch,
     promise: refresh()
       .then((token) => {
-        if (generation !== getAuthSessionGeneration() || epoch !== getAuthEpoch()) return null;
+        if (!hasAuthSession(generation, epoch)) return null;
         if (!token) onAuthFailure();
         return token;
       })
@@ -218,7 +222,7 @@ export function requestStepUpAccessToken(
   generation = getAuthSessionGeneration(),
   epoch = getAuthEpoch(),
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration() || epoch !== getAuthEpoch()) {
+  if (!hasAuthSession(generation, epoch)) {
     return Promise.resolve(null);
   }
   if (steppingUp?.generation === generation && steppingUp.epoch === epoch)
@@ -227,9 +231,7 @@ export function requestStepUpAccessToken(
     generation,
     epoch,
     promise: requestStepUp()
-      .then((token) =>
-        generation === getAuthSessionGeneration() && epoch === getAuthEpoch() ? token : null,
-      )
+      .then((token) => (hasAuthSession(generation, epoch) ? token : null))
       .finally(() => {
         if (steppingUp === pending) steppingUp = null;
       }),
@@ -268,14 +270,14 @@ api.interceptors.response.use(
     if (!original || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
-    const generation = original._authSessionGeneration;
+    const { generation, epoch } = original._auth;
     if (isSupportAccessInactive(error)) {
-      if (original._supportAccessRevision !== undefined) onSupportAccessFailure();
+      if (original._supportRevision !== undefined) onSupportAccessFailure();
       return Promise.reject(error);
     }
     if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
       original._stepUpRetry = true;
-      const newAccess = await requestStepUpAccessToken(generation, original._authEpoch);
+      const newAccess = await requestStepUpAccessToken(generation, epoch);
       if (!newAccess || !hasCurrentAuthority(original)) {
         return Promise.reject(error);
       }
@@ -295,7 +297,7 @@ api.interceptors.response.use(
 
     original._retry = true;
 
-    const newAccess = await refreshAccessToken(generation, original._authEpoch);
+    const newAccess = await refreshAccessToken(generation, epoch);
     if (!newAccess || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
@@ -311,9 +313,8 @@ export function withAuthSession(
 ): AxiosRequestConfig {
   return {
     ...(config ?? {}),
-    _authEpoch: getAuthEpoch(),
-    _authSessionGeneration: getAuthSessionGeneration(),
-    ...(bindSupportContext ? { _supportAccessRevision: getSupportAccessRevision() } : {}),
+    _auth: { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() },
+    ...(bindSupportContext ? { _supportRevision: getSupportAccessRevision() } : {}),
   } as AxiosRequestConfig;
 }
 
