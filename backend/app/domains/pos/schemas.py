@@ -661,9 +661,23 @@ class POSCommandRead(BaseModel):
     result: POSCommandResult
 
 
+class ReceiptLine(BaseModel):
+    """One printed line of a receipt — resolved name, no raw UUIDs."""
+
+    position: int
+    name: str
+    qty: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    total_price: Decimal
+    unit_label: str | None = None
+    quantity_description: str | None = None
+
+
 class SaleDetails(SaleRead):
     items: list[SaleItemRead]
     payments: list[PaymentRead]
+    physical_items: list[ReceiptLine] = Field(default_factory=list)
 
 
 class PrescriptionLogCreate(_PrescriptionFields):
@@ -909,17 +923,6 @@ class SaleList(BaseModel):
 # ---- receipt (print / PDF) ----
 
 
-class ReceiptLine(BaseModel):
-    """One printed line of a receipt — resolved name, no raw UUIDs."""
-
-    position: int
-    name: str
-    qty: Decimal
-    unit_price: Decimal
-    discount_amount: Decimal
-    total_price: Decimal
-
-
 class ReceiptPayment(BaseModel):
     method: str
     amount: Decimal
@@ -947,8 +950,8 @@ class ReceiptData(BaseModel):
     total: Decimal
     currency: str
     payments: list[ReceiptPayment]
-    paid_total: Decimal
-    change: Decimal
+    paid_total: Decimal | None
+    change: Decimal | None
 
 
 # ---- Z-report (shift close XLSX) ----

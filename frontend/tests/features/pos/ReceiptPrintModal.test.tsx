@@ -34,6 +34,18 @@ const BASE_RECEIPT: ReceiptData = {
 };
 
 describe("ReceiptDocument", () => {
+  it("does not invent tender or change when the historical receipt has neither", () => {
+    render(
+      <ReceiptDocument
+        data={{ ...BASE_RECEIPT, paid_total: null, change: null }}
+        contentWidth="80mm"
+      />,
+    );
+    expect(screen.getByText("ИТОГО")).toBeInTheDocument();
+    expect(screen.getByText("Наличные")).toBeInTheDocument();
+    expect(screen.queryByText("Принято")).not.toBeInTheDocument();
+    expect(screen.queryByText("Сдача")).not.toBeInTheDocument();
+  });
   it("shows sale tender, change and purchase footer", () => {
     render(<ReceiptDocument data={BASE_RECEIPT} contentWidth="80mm" />);
 
@@ -41,6 +53,33 @@ describe("ReceiptDocument", () => {
     expect(screen.getByText("Принято")).toBeInTheDocument();
     expect(screen.getByText("Сдача")).toBeInTheDocument();
     expect(screen.getByText("Спасибо за покупку!")).toBeInTheDocument();
+    expect(screen.getByText("1 × 6.50")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["шт.", "5.000", "5 таблеток"],
+    ["блист.", "2.000", "2 блистера по 10 табл."],
+    ["упак.", "1.000", "1 упаковка: 30 табл."],
+  ])("prints the historical quantity and unit %s", (unitLabel, qty, description) => {
+    render(
+      <ReceiptDocument
+        data={{
+          ...BASE_RECEIPT,
+          items: [
+            {
+              ...BASE_RECEIPT.items[0],
+              qty,
+              unit_label: unitLabel,
+              quantity_description: description,
+            },
+          ],
+        }}
+        contentWidth="58mm"
+      />,
+    );
+
+    expect(screen.getByText(description)).toBeInTheDocument();
+    expect(screen.getByText(`${Number(qty)} ${unitLabel} × 6.50`)).toBeInTheDocument();
   });
 
   it("identifies a refund without sale-only wording", () => {

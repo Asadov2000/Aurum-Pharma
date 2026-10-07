@@ -59,6 +59,8 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.physical_documents import PhysicalReceiptDocumentV3
+from app.domains.pos.physical_receipt_read import physical_receipt_lines, physical_receipt_snapshot
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
 from app.domains.pos.repository import (
     FavoriteCatalogRow,
@@ -2386,6 +2388,9 @@ class POSService:
     @staticmethod
     def get_receipt_item_names(sale: Sale) -> dict[int, str]:
         """Return immutable line names for a completed receipt snapshot."""
+        physical = physical_receipt_snapshot(sale)
+        if physical is not None:
+            return {line.position: line.name for line in physical.lines}
         if sale.receipt_snapshot is None:
             return {}
         try:
@@ -2395,6 +2400,12 @@ class POSService:
         if snapshot.sale_id != sale.id:
             raise AurumError("Receipt snapshot does not match the sale")
         return {line.position: line.name for line in snapshot.items}
+
+    @staticmethod
+    def get_physical_receipt_items(sale: Sale) -> list[ReceiptLine]:
+        """Read physical lines after the caller has authorized access to the sale."""
+        snapshot = physical_receipt_snapshot(sale)
+        return physical_receipt_lines(snapshot) if snapshot is not None else []
 
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
@@ -2595,6 +2606,42 @@ class POSService:
             change=change,
         )
 
+    async def _compose_physical_receipt_data(
+        self, sale: Sale, snapshot: PhysicalReceiptDocumentV3
+    ) -> ReceiptData:
+        # V3 stores retail facts, but not historical pharmacy/cashier display data.
+        tenant = await self.repo.session.get(Tenant, sale.tenant_id)
+        branch = await self.repo.session.get(Branch, sale.branch_id)
+        cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
+        timezone_name = await self._report_tz(sale.tenant_id)
+        try:
+            local_datetime = snapshot.completed_at.astimezone(ZoneInfo(timezone_name))
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+        return ReceiptData(
+            sale_id=sale.id,
+            is_refund=False,
+            status=sale.status,
+            pharmacy_name=tenant.name if tenant is not None else "",
+            branch_name=branch.name if branch is not None else "",
+            branch_address=branch.address if branch is not None else None,
+            branch_license=branch.license_number if branch is not None else None,
+            receipt_number=snapshot.receipt_number,
+            datetime=local_datetime,
+            cashier_name=cashier_name,
+            items=physical_receipt_lines(snapshot),
+            discount_total=sum((line.discount_amount for line in snapshot.lines), Decimal("0")),
+            total=snapshot.total_amount,
+            currency=snapshot.currency,
+            payments=[
+                ReceiptPayment(method=payment.method, amount=payment.amount)
+                for payment in snapshot.payments
+            ],
+            # Cash tender and change are not part of this version's saved receipt.
+            paid_total=None,
+            change=None,
+        )
+
     async def build_receipt(
         self,
         sale_id: UUID,
@@ -2616,6 +2663,9 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_view_branch_ids=allowed_view_branch_ids,
             )
+        physical = physical_receipt_snapshot(sale)
+        if physical is not None:
+            return await self._compose_physical_receipt_data(sale, physical)
         if sale.receipt_snapshot is not None:
             try:
                 snapshot = ReceiptData.model_validate(sale.receipt_snapshot)

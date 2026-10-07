@@ -168,6 +168,7 @@ export interface Sale {
 
 export interface SaleDetails extends Sale {
   items: SaleItem[];
+  physical_items?: ReceiptLine[];
   payments: Payment[];
 }
 
@@ -302,6 +303,8 @@ export interface ReceiptLine {
   unit_price: string;
   discount_amount: string;
   total_price: string;
+  unit_label?: string | null;
+  quantity_description?: string | null;
 }
 
 export interface ReceiptPayment {
@@ -326,8 +329,8 @@ export interface ReceiptData {
   total: string;
   currency: string;
   payments: ReceiptPayment[];
-  paid_total: string;
-  change: string;
+  paid_total: string | null;
+  change: string | null;
 }
 
 export type ReceiptWidth = "58" | "80" | "A4";
