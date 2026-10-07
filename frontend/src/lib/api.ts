@@ -8,7 +8,7 @@ import axios, {
 
 import { getAuthSessionGeneration } from "@/stores/auth";
 import { getAuthEpoch } from "@/features/auth/logoutState";
-import { getSupportAccessSessionId } from "@/stores/supportAccess";
+import { getSupportAccessRevision, getSupportAccessSessionId } from "@/stores/supportAccess";
 
 const DEV_API_BASE_URL = "http://localhost:8000/api/v1";
 const SAME_ORIGIN_API_BASE_URL = "/api/v1";
@@ -67,8 +67,8 @@ export const api: AxiosInstance = axios.create({
 });
 
 interface RetryConfig extends InternalAxiosRequestConfig {
-  _authEpoch?: string | null;
-  _authSessionGeneration?: number;
+  _auth?: { generation: number; epoch: string | null };
+  _supportRevision?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
   _skipRefresh?: boolean;
@@ -136,26 +136,45 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
   return false;
 }
 
-api.interceptors.request.use((config) => {
-  const cfg = config as RetryConfig;
-  if (cfg._authEpoch === undefined) cfg._authEpoch = getAuthEpoch();
-  cfg._authSessionGeneration ??= getAuthSessionGeneration();
-  if (
-    cfg._authSessionGeneration !== getAuthSessionGeneration() ||
-    cfg._authEpoch !== getAuthEpoch()
-  ) {
+function hasAuthSession(generation: number, epoch: string | null): boolean {
+  return generation === getAuthSessionGeneration() && epoch === getAuthEpoch();
+}
+
+function hasCurrentAuthority(
+  config: RetryConfig,
+): config is RetryConfig & { _auth: { generation: number; epoch: string | null } } {
+  return (
+    config._auth !== undefined &&
+    hasAuthSession(config._auth.generation, config._auth.epoch) &&
+    (config._supportRevision === undefined ||
+      config._supportRevision === getSupportAccessRevision())
+  );
+}
+
+function assertCurrentAuthority(config: RetryConfig): void {
+  if (!hasCurrentAuthority(config)) {
     throw new CanceledError("Authentication session changed", config);
   }
+}
+
+api.interceptors.request.use((config) => {
+  const cfg = config as RetryConfig;
+  cfg._auth ??= { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() };
+  const pathname = supportContextPath(config);
+  if (
+    acceptsSupportContext(pathname, config.method) ||
+    (pathname === "/admin/support-access/sessions" && config.method?.toUpperCase() === "POST")
+  ) {
+    cfg._supportRevision ??= getSupportAccessRevision();
+  }
+  assertCurrentAuthority(cfg);
   config.headers.delete("X-Aurum-Support-Session");
   if (cfg._skipAuth) return config;
   const token = getAccess();
-  if (cfg._authSessionGeneration !== getAuthSessionGeneration()) {
-    throw new CanceledError("Authentication session changed", config);
-  }
+  assertCurrentAuthority(cfg);
   if (token) {
     config.headers.set("Authorization", `Bearer ${token}`);
     const supportAccessSessionId = getSupportAccessSessionId();
-    const pathname = supportContextPath(config);
     if (supportAccessSessionId && acceptsSupportContext(pathname, config.method)) {
       config.headers.set("X-Aurum-Support-Session", supportAccessSessionId);
     }
@@ -167,49 +186,55 @@ api.interceptors.request.use((config) => {
 // we don't burn the refresh token twice and trigger reuse-detection.
 interface SessionTokenRequest {
   generation: number;
+  epoch: string | null;
   promise: Promise<string | null>;
 }
 
-let refreshing: SessionTokenRequest | null = null;
+type SessionTokenKind = "refresh" | "stepUp";
+const pendingTokenRequests: Record<SessionTokenKind, SessionTokenRequest | null> = {
+  refresh: null,
+  stepUp: null,
+};
 
-export function refreshAccessToken(
+function requestSessionToken(
+  kind: SessionTokenKind,
   generation = getAuthSessionGeneration(),
+  epoch = getAuthEpoch(),
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
-  if (refreshing?.generation === generation) return refreshing.promise;
+  if (!hasAuthSession(generation, epoch)) {
+    return Promise.resolve(null);
+  }
+  const current = pendingTokenRequests[kind];
+  if (current?.generation === generation && current.epoch === epoch) return current.promise;
   const pending: SessionTokenRequest = {
     generation,
-    promise: refresh()
+    epoch,
+    promise: (kind === "refresh" ? refresh : requestStepUp)()
       .then((token) => {
-        if (generation !== getAuthSessionGeneration()) return null;
-        if (!token) onAuthFailure();
+        if (!hasAuthSession(generation, epoch)) return null;
+        if (kind === "refresh" && !token) onAuthFailure();
         return token;
       })
       .finally(() => {
-        if (refreshing === pending) refreshing = null;
+        if (pendingTokenRequests[kind] === pending) pendingTokenRequests[kind] = null;
       }),
   };
-  refreshing = pending;
+  pendingTokenRequests[kind] = pending;
   return pending.promise;
 }
 
-let steppingUp: SessionTokenRequest | null = null;
+export function refreshAccessToken(
+  generation?: number,
+  epoch?: string | null,
+): Promise<string | null> {
+  return requestSessionToken("refresh", generation, epoch);
+}
 
 export function requestStepUpAccessToken(
-  generation = getAuthSessionGeneration(),
+  generation?: number,
+  epoch?: string | null,
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
-  if (steppingUp?.generation === generation) return steppingUp.promise;
-  const pending: SessionTokenRequest = {
-    generation,
-    promise: requestStepUp()
-      .then((token) => (generation === getAuthSessionGeneration() ? token : null))
-      .finally(() => {
-        if (steppingUp === pending) steppingUp = null;
-      }),
-  };
-  steppingUp = pending;
-  return pending.promise;
+  return requestSessionToken("stepUp", generation, epoch);
 }
 
 export function isMfaStepUpRequired(error: AxiosError): boolean {
@@ -232,32 +257,23 @@ export function isSupportAccessInactive(error: AxiosError): boolean {
 api.interceptors.response.use(
   (response) => {
     const cfg = response.config as RetryConfig;
-    if (
-      cfg._authSessionGeneration !== getAuthSessionGeneration() ||
-      cfg._authEpoch !== getAuthEpoch()
-    ) {
-      throw new CanceledError("Authentication session changed", response.config);
-    }
+    assertCurrentAuthority(cfg);
     return response;
   },
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
-    if (
-      !original ||
-      original._authSessionGeneration !== getAuthSessionGeneration() ||
-      original._authEpoch !== getAuthEpoch()
-    ) {
+    if (!original || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
-    const generation = original._authSessionGeneration;
+    const { generation, epoch } = original._auth;
     if (isSupportAccessInactive(error)) {
-      onSupportAccessFailure();
+      if (original._supportRevision !== undefined) onSupportAccessFailure();
       return Promise.reject(error);
     }
-    if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
+    if (!original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
       original._stepUpRetry = true;
-      const newAccess = await requestStepUpAccessToken(generation);
-      if (!newAccess || generation !== getAuthSessionGeneration()) {
+      const newAccess = await requestStepUpAccessToken(generation, epoch);
+      if (!newAccess || !hasCurrentAuthority(original)) {
         return Promise.reject(error);
       }
       original.headers.set("Authorization", `Bearer ${newAccess}`);
@@ -265,7 +281,6 @@ api.interceptors.response.use(
     }
 
     if (
-      !original ||
       original._skipAuth ||
       original._skipRefresh ||
       original._retry ||
@@ -276,14 +291,26 @@ api.interceptors.response.use(
 
     original._retry = true;
 
-    const newAccess = await refreshAccessToken(generation);
-    if (!newAccess || generation !== getAuthSessionGeneration()) {
+    const newAccess = await refreshAccessToken(generation, epoch);
+    if (!newAccess || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
     original.headers.set("Authorization", `Bearer ${newAccess}`);
     return api.request(original);
   },
 );
+
+// Capture before Axios schedules its asynchronous request interceptors.
+export function withAuthSession(
+  config?: AxiosRequestConfig,
+  bindSupportContext = false,
+): AxiosRequestConfig {
+  return {
+    ...(config ?? {}),
+    _auth: { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() },
+    ...(bindSupportContext ? { _supportRevision: getSupportAccessRevision() } : {}),
+  } as AxiosRequestConfig;
+}
 
 export function withoutAuth(config?: AxiosRequestConfig): AxiosRequestConfig {
   return { ...(config ?? {}), _skipAuth: true } as AxiosRequestConfig;

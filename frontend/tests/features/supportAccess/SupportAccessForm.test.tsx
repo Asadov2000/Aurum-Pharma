@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { captureSupportAuthority } from "@/features/supportAccess/authority";
+import { useAuthStore } from "@/stores/auth";
 
 const mocks = vi.hoisted(() => ({
   activate: vi.fn(),
@@ -13,6 +15,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@/features/supportAccess/context", () => ({
   activateSupportContext: (...args: unknown[]) => mocks.activate(...args),
+  SupportContextFailure: class extends Error {},
 }));
 
 vi.mock("@/features/supportAccess/queries", () => ({
@@ -49,7 +52,7 @@ const SESSION = {
 
 describe("SupportAccessForm", () => {
   beforeEach(() => {
-    mocks.activate.mockReset().mockResolvedValue(undefined);
+    mocks.activate.mockReset().mockImplementation(async () => captureSupportAuthority());
     mocks.mutate.mockReset().mockResolvedValue(SESSION);
     mocks.navigate.mockReset().mockResolvedValue(undefined);
   });
@@ -75,10 +78,19 @@ describe("SupportAccessForm", () => {
 
     await waitFor(() => expect(mocks.mutate).toHaveBeenCalledTimes(1));
     expect(mocks.mutate).toHaveBeenCalledWith({
-      tenant_id: SESSION.tenant_id,
-      reason: "Настройка ролей перед запуском",
-      duration_minutes: 10,
-      capabilities: ["users.view", "branches.view", "roles.create", "roles.update", "roles.assign"],
+      payload: {
+        tenant_id: SESSION.tenant_id,
+        reason: "Настройка ролей перед запуском",
+        duration_minutes: 10,
+        capabilities: [
+          "users.view",
+          "branches.view",
+          "roles.create",
+          "roles.update",
+          "roles.assign",
+        ],
+      },
+      authority: expect.any(Object),
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mocks.activate).toHaveBeenCalledWith(SESSION);
@@ -111,10 +123,13 @@ describe("SupportAccessForm", () => {
 
     await waitFor(() => expect(mocks.mutate).toHaveBeenCalledTimes(1));
     expect(mocks.mutate).toHaveBeenCalledWith({
-      tenant_id: SESSION.tenant_id,
-      reason: "Завершение подозрительных сеансов",
-      duration_minutes: 15,
-      capabilities: ["users.view", "users.block"],
+      payload: {
+        tenant_id: SESSION.tenant_id,
+        reason: "Завершение подозрительных сеансов",
+        duration_minutes: 15,
+        capabilities: ["users.view", "users.block"],
+      },
+      authority: expect.any(Object),
     });
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/users" });
   });
@@ -147,5 +162,26 @@ describe("SupportAccessForm", () => {
 
     await act(async () => resolveRequest(SESSION));
     await waitFor(() => expect(onPendingChange).toHaveBeenLastCalledWith(false));
+  });
+
+  it("does not activate or navigate after logout during session creation", async () => {
+    let resolveRequest!: (session: typeof SESSION) => void;
+    mocks.mutate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    const onClose = vi.fn();
+    render(<SupportAccessForm tenantId={SESSION.tenant_id} tenantName="Шифо" onClose={onClose} />);
+    fireEvent.change(screen.getByLabelText("Причина доступа"), {
+      target: { value: "Проверка защиты служебного доступа" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть доступ" }));
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledOnce());
+    useAuthStore.getState().clear();
+    await act(async () => resolveRequest(SESSION));
+    expect(mocks.activate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 });

@@ -7,12 +7,31 @@ import { useAuthStore } from "@/stores/auth";
 import { useSupportAccessStore } from "@/stores/supportAccess";
 
 import { revokeSupportSession } from "./api";
+import {
+  assertSupportAuthority,
+  captureSupportAuthority,
+  isSupportAuthorityCurrent,
+  type SupportAuthority,
+} from "./authority";
 import { type SupportAccessSession } from "./types";
 
-async function fetchFreshIdentity(): Promise<MeResponse> {
+export class SupportContextFailure extends Error {
+  constructor(
+    readonly original: unknown,
+    readonly authority: SupportAuthority,
+  ) {
+    super(original instanceof Error ? original.message : "Support access failed");
+  }
+}
+
+async function fetchFreshIdentity(authority: SupportAuthority): Promise<MeResponse> {
+  assertSupportAuthority(authority);
   await queryClient.cancelQueries();
+  assertSupportAuthority(authority);
   queryClient.clear();
-  return fetchMe();
+  const user = await fetchMe();
+  assertSupportAuthority(authority);
+  return user;
 }
 
 function commitIdentity(user: MeResponse | null): void {
@@ -40,30 +59,41 @@ async function revokeQuietly(sessionId: string): Promise<void> {
   }
 }
 
-async function reloadIdentity(): Promise<void> {
-  const user = await fetchFreshIdentity();
-  queryClient.setQueryData(meQueryKey, user);
-  useAuthStore.getState().setUser(user);
-}
-
-export async function activateSupportContext(session: SupportAccessSession): Promise<void> {
+export async function activateSupportContext(
+  session: SupportAccessSession,
+): Promise<SupportAuthority> {
   const previousUser = useAuthStore.getState().user;
+  if (previousUser?.id !== session.actor_user_id) {
+    throw new Error("Support access actor mismatch");
+  }
   useSupportAccessStore.getState().setActive(session);
+  const authority = captureSupportAuthority();
   try {
-    const user = await fetchFreshIdentity();
+    const user = await fetchFreshIdentity(authority);
     if (!isExpectedContext(user, session)) {
       throw new Error("Support access identity mismatch");
     }
     commitIdentity(user);
+    return captureSupportAuthority();
   } catch (error) {
-    useSupportAccessStore.getState().clear();
+    if (!isSupportAuthorityCurrent(authority)) throw error;
+    // Remove local elevation before waiting for the network. Capture only our
+    // synchronous transition; never adopt authority discovered after an await.
+    clearClientSupportContext();
+    const rollbackAuthority = captureSupportAuthority();
     await revokeQuietly(session.id);
-    commitIdentity(previousUser);
+    if (isSupportAuthorityCurrent(rollbackAuthority)) {
+      if (!previousUser?.support_access) commitIdentity(previousUser);
+      throw new SupportContextFailure(error, captureSupportAuthority());
+    }
     throw error;
   }
 }
 
-export async function clearSupportContext(): Promise<void> {
+export async function clearSupportContext(): Promise<SupportAuthority> {
   clearClientSupportContext();
-  await reloadIdentity();
+  const authority = captureSupportAuthority();
+  const user = await fetchFreshIdentity(authority);
+  commitIdentity(user);
+  return captureSupportAuthority();
 }

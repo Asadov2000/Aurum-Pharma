@@ -8,6 +8,7 @@ import {
   refreshAccessToken,
   requestStepUpAccessToken,
   resolveApiBaseUrl,
+  withAuthSession,
   withoutStepUp,
 } from "@/lib/api";
 import { useSupportAccessStore } from "@/stores/supportAccess";
@@ -299,7 +300,112 @@ describe("resolveApiBaseUrl", () => {
   });
 });
 
+describe("token request channels", () => {
+  it("shares promises within each channel while refresh and step-up run independently", async () => {
+    authenticate("cashier-1");
+    const refreshProof = deferred<string | null>();
+    const stepUpProof = deferred<string | null>();
+    const refreshTokens = vi.fn(() => refreshProof.promise);
+    const requestMfaStepUp = vi.fn(() => stepUpProof.promise);
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens,
+      requestMfaStepUp,
+      onAuthFailure: vi.fn(),
+    });
+
+    const refreshRequest = refreshAccessToken();
+    const stepUpRequest = requestStepUpAccessToken();
+    expect(refreshAccessToken()).toBe(refreshRequest);
+    expect(requestStepUpAccessToken()).toBe(stepUpRequest);
+    expect(stepUpRequest).not.toBe(refreshRequest);
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+    expect(requestMfaStepUp).toHaveBeenCalledTimes(1);
+
+    refreshProof.resolve("refreshed-access");
+    stepUpProof.resolve("confirmed-access");
+    await expect(refreshRequest).resolves.toBe("refreshed-access");
+    await expect(stepUpRequest).resolves.toBe("confirmed-access");
+  });
+
+  it("does not treat cancelled step-up as an authentication failure", async () => {
+    authenticate("cashier-1");
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: async () => "refreshed-access",
+      requestMfaStepUp: async () => null,
+      onAuthFailure,
+    });
+
+    await expect(requestStepUpAccessToken()).resolves.toBeNull();
+    expect(onAuthFailure).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().accessToken).toBe("access-cashier-1");
+  });
+
+  it.each(["refresh", "step-up"] as const)(
+    "permits another %s after rejection without clearing the other pending channel",
+    async (channel) => {
+      authenticate("cashier-1");
+      let rejectProof!: (reason: Error) => void;
+      const rejectedProof = new Promise<string | null>((_resolve, reject) => {
+        rejectProof = reject;
+      });
+      const otherProof = deferred<string | null>();
+      const rejectingProvider = vi
+        .fn()
+        .mockImplementationOnce(() => rejectedProof)
+        .mockResolvedValueOnce("retried-access");
+      const otherProvider = vi.fn(() => otherProof.promise);
+      const onAuthFailure = vi.fn();
+      const requestRejected = channel === "refresh" ? refreshAccessToken : requestStepUpAccessToken;
+      const requestOther = channel === "refresh" ? requestStepUpAccessToken : refreshAccessToken;
+      configureAuthHooks({
+        getAccessToken: () => useAuthStore.getState().accessToken,
+        refreshTokens: channel === "refresh" ? rejectingProvider : otherProvider,
+        requestMfaStepUp: channel === "refresh" ? otherProvider : rejectingProvider,
+        onAuthFailure,
+      });
+
+      const rejectedRequest = requestRejected();
+      const otherRequest = requestOther();
+      const rejection = expect(rejectedRequest).rejects.toThrow("offline");
+      rejectProof(new Error("offline"));
+      await rejection;
+      await expect(requestRejected()).resolves.toBe("retried-access");
+      expect(requestOther()).toBe(otherRequest);
+      expect(rejectingProvider).toHaveBeenCalledTimes(2);
+      expect(otherProvider).toHaveBeenCalledTimes(1);
+      expect(onAuthFailure).not.toHaveBeenCalled();
+
+      otherProof.resolve("other-channel-access");
+      await expect(otherRequest).resolves.toBe("other-channel-access");
+    },
+  );
+});
+
 describe("refreshAccessToken", () => {
+  it("does not clear auth when a pending refresh rejects the old cross-tab epoch", async () => {
+    let epoch: string | null = "old-session";
+    vi.spyOn(logoutState, "getAuthEpoch").mockImplementation(() => epoch);
+    authenticate("cashier-1");
+    const generation = getAuthSessionGeneration();
+    const proof = deferred<string | null>();
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: () => proof.promise,
+      requestMfaStepUp: async () => null,
+      onAuthFailure,
+    });
+    const pending = refreshAccessToken();
+    epoch = "new-session";
+    expect(getAuthSessionGeneration()).toBe(generation);
+    proof.resolve(null);
+    await expect(pending).resolves.toBeNull();
+    expect(onAuthFailure).not.toHaveBeenCalled();
+  });
+
   it("shares one refresh between concurrent requests", async () => {
     const refreshTokens = vi.fn(async () => "access");
     configureAuthHooks({
@@ -467,6 +573,167 @@ describe("MFA step-up interceptor", () => {
 });
 
 describe("support access request context", () => {
+  function activateSupport(): void {
+    useSupportAccessStore.getState().setActive({
+      id: "11111111-1111-4111-8111-111111111111",
+      tenant_id: "22222222-2222-4222-8222-222222222222",
+      tenant_name: "Аптека",
+      actor_user_id: "33333333-3333-4333-8333-333333333333",
+      reason: "Проверка доступа",
+      capabilities: ["users.view"],
+      is_read_only: true,
+      started_at: "2026-07-22T10:00:00Z",
+      expires_at: "2026-07-22T10:15:00Z",
+      revoked_at: null,
+    });
+  }
+
+  it.each([
+    [200, undefined],
+    [403, "support_access_inactive"],
+    [403, "mfa_step_up_required"],
+    [401, undefined],
+  ])("isolates a late %s %s response from a replaced support context", async (status, reason) => {
+    authenticate("support-user");
+    activateSupport();
+    const generation = getAuthSessionGeneration();
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const refreshTokens = vi.fn(async () => "new-access");
+    const requestMfaStepUp = vi.fn(async () => "new-access");
+    const onSupportAccessFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens,
+      requestMfaStepUp,
+      onAuthFailure: vi.fn(),
+      onSupportAccessFailure,
+    });
+    api.defaults.adapter = async (config) => {
+      started.resolve();
+      await release.promise;
+      if (status !== 200) throw apiError(config, status, reason);
+      return { data: {}, status, statusText: "OK", headers: {}, config };
+    };
+    const rejection = expect(api.get("/users")).rejects.toThrow(
+      status === 200 ? "Authentication session changed" : "Request failed",
+    );
+    await started.promise;
+    // Reusing the same session ID must still create a new authority boundary.
+    useSupportAccessStore.getState().clear();
+    activateSupport();
+    expect(getAuthSessionGeneration()).toBe(generation);
+    release.resolve();
+    await rejection;
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(requestMfaStepUp).not.toHaveBeenCalled();
+    expect(onSupportAccessFailure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [401, undefined],
+    [403, "mfa_step_up_required"],
+  ])(
+    "does not replay a support request after a pending proof resolves (%s)",
+    async (status, reason) => {
+      authenticate("support-user");
+      activateSupport();
+      const started = deferred<void>();
+      const proof = deferred<string | null>();
+      const requestProof = vi.fn(() => {
+        started.resolve();
+        return proof.promise;
+      });
+      configureAuthHooks({
+        getAccessToken: () => useAuthStore.getState().accessToken,
+        refreshTokens: requestProof,
+        requestMfaStepUp: requestProof,
+        onAuthFailure: vi.fn(),
+      });
+      const adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+        throw apiError(config, status, reason);
+      });
+      api.defaults.adapter = adapter;
+      const rejection = expect(api.get("/roles")).rejects.toThrow("Request failed");
+      await started.promise;
+      activateSupport();
+      proof.resolve("confirmed-access");
+      await rejection;
+      expect(adapter).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("rejects late support activation success after another context is selected", async () => {
+    authenticate("support-user");
+    const started = deferred<void>();
+    const release = deferred<void>();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: async () => null,
+      requestMfaStepUp: async () => null,
+      onAuthFailure: vi.fn(),
+    });
+    api.defaults.adapter = async (config) => {
+      started.resolve();
+      await release.promise;
+      return { data: {}, status: 200, statusText: "OK", headers: {}, config };
+    };
+    const rejection = expect(api.post("/admin/support-access/sessions", {})).rejects.toMatchObject({
+      code: "ERR_CANCELED",
+    });
+    await started.promise;
+    activateSupport();
+    release.resolve();
+    await rejection;
+  });
+
+  it("does not invalidate an unrelated route when the support context changes", async () => {
+    authenticate("support-user");
+    const started = deferred<void>();
+    const release = deferred<void>();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: async () => null,
+      requestMfaStepUp: async () => null,
+      onAuthFailure: vi.fn(),
+    });
+    api.defaults.adapter = async (config) => {
+      started.resolve();
+      await release.promise;
+      return { data: { status: "ok" }, status: 200, statusText: "OK", headers: {}, config };
+    };
+    const response = api.get("/tenant/settings");
+    await started.promise;
+    activateSupport();
+    release.resolve();
+    await expect(response).resolves.toMatchObject({ data: { status: "ok" } });
+  });
+
+  it("captures logout authority before Axios schedules a revoke request", async () => {
+    authenticate("support-user");
+    const config = withAuthSession();
+    const adapter = vi.fn();
+    api.defaults.adapter = adapter;
+    authenticate("another-user");
+    await expect(
+      api.delete("/admin/support-access/sessions/old-session", config),
+    ).rejects.toMatchObject({
+      code: "ERR_CANCELED",
+    });
+    expect(adapter).not.toHaveBeenCalled();
+  });
+
+  it("captures support authority before Axios schedules an activation request", async () => {
+    authenticate("support-user");
+    const config = withAuthSession(undefined, true);
+    const adapter = vi.fn();
+    api.defaults.adapter = adapter;
+    const request = api.post("/admin/support-access/sessions", {}, config);
+    activateSupport();
+    await expect(request).rejects.toMatchObject({ code: "ERR_CANCELED" });
+    expect(adapter).not.toHaveBeenCalled();
+  });
+
   it("adds the in-memory support session id only to authenticated requests", async () => {
     const headers: Array<string | undefined> = [];
     api.defaults.adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
