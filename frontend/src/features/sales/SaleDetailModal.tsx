@@ -112,7 +112,9 @@ export function SaleDetailModal({
                 <TR>
                   <TH>Товар</TH>
                   <TH className="text-right">Кол-во</TH>
-                  {!isRefund && <TH className="text-right">Возвращено</TH>}
+                  {!isRefund && (!data.physical_items?.length || data.items.length > 0) && (
+                    <TH className="text-right">Возвращено</TH>
+                  )}
                   <TH className="text-right">Цена</TH>
                   <TH className="text-right">Сумма</TH>
                 </TR>
@@ -130,6 +132,23 @@ export function SaleDetailModal({
                     {!isRefund && (
                       <TD className="text-right font-mono">{formatQty(it.refunded_qty ?? "0")}</TD>
                     )}
+                    <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
+                    <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
+                  </TR>
+                ))}
+                {data.physical_items?.map((it) => (
+                  <TR key={`physical-${it.position}`}>
+                    <TD>
+                      <p className="font-medium">{it.name}</p>
+                      {it.quantity_description && (
+                        <p className="text-xs text-foreground-muted">{it.quantity_description}</p>
+                      )}
+                    </TD>
+                    <TD className="text-right font-mono">
+                      {formatQty(it.qty)}
+                      {it.unit_label ? ` ${it.unit_label}` : ""}
+                    </TD>
+                    {!isRefund && data.items.length > 0 && <TD />}
                     <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
                     <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
                   </TR>

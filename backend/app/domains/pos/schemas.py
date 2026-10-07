@@ -7,7 +7,16 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.customer_returns.reasons import RefundReasonCode
@@ -661,9 +670,33 @@ class POSCommandRead(BaseModel):
     result: POSCommandResult
 
 
+class ReceiptLine(BaseModel):
+    """One printed line of a receipt — resolved name, no raw UUIDs."""
+
+    position: int
+    name: str
+    qty: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    total_price: Decimal
+    unit_label: str | None = None
+    quantity_description: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_receipt_line(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # Keep immutable legacy receipt JSON and operation hashes exactly as stored.
+        result: dict[str, object] = handler(self)
+        if self.unit_label is None:
+            result.pop("unit_label", None)
+        if self.quantity_description is None:
+            result.pop("quantity_description", None)
+        return result
+
+
 class SaleDetails(SaleRead):
     items: list[SaleItemRead]
     payments: list[PaymentRead]
+    physical_items: list[ReceiptLine] = Field(default_factory=list)
 
 
 class PrescriptionLogCreate(_PrescriptionFields):
@@ -909,17 +942,6 @@ class SaleList(BaseModel):
 # ---- receipt (print / PDF) ----
 
 
-class ReceiptLine(BaseModel):
-    """One printed line of a receipt — resolved name, no raw UUIDs."""
-
-    position: int
-    name: str
-    qty: Decimal
-    unit_price: Decimal
-    discount_amount: Decimal
-    total_price: Decimal
-
-
 class ReceiptPayment(BaseModel):
     method: str
     amount: Decimal
@@ -947,8 +969,8 @@ class ReceiptData(BaseModel):
     total: Decimal
     currency: str
     payments: list[ReceiptPayment]
-    paid_total: Decimal
-    change: Decimal
+    paid_total: Decimal | None
+    change: Decimal | None
 
 
 # ---- Z-report (shift close XLSX) ----

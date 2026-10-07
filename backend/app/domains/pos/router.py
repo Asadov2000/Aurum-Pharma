@@ -1299,6 +1299,7 @@ async def get_sale(
             for (si, batch_number, expires_at, days_to_expiry, current_name) in items
         ],
         payments=[PaymentRead.model_validate(p) for p in payments],
+        physical_items=service.get_physical_receipt_items(sale),
     )
 
 
