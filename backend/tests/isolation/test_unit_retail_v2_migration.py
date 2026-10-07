@@ -20,6 +20,7 @@ from tests.domains.inventory.test_unit_retail_ledger_v2 import (
     retail_line,
     retail_source,
 )
+from tests.isolation.test_unit_physical_block_migration import migration as blocking_migration
 
 db_session = receiving_session_fixture
 
@@ -67,9 +68,18 @@ async def test_retail_migration_roundtrip_preserves_unpriced_history(
                     with connection.begin_nested():
                         _migration().downgrade()
                 assert error.value.orig.sqlstate == "55000"
+            elif connection.scalar(
+                text("SELECT EXISTS(SELECT 1 FROM unit_stock_lot_v2 WHERE blocking_revision>0)")
+            ):
+                with pytest.raises(DBAPIError) as error:
+                    with connection.begin_nested():
+                        blocking_migration().downgrade()
+                assert error.value.orig.sqlstate == "55000"
             else:
+                blocking_migration().downgrade()
                 _migration().downgrade()
                 _migration().upgrade()
+                blocking_migration().upgrade()
             for table, before in original.items():
                 query = (
                     f"SELECT to_jsonb(row) FROM {table} row ORDER BY tenant_id,command_id,line_id"

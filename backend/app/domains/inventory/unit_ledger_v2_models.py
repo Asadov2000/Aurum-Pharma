@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     FetchedValue,
@@ -54,6 +55,10 @@ class UnitStockLotV2(StockIdentity, SourceSnapshot, Base):
     closed_packs: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     purchase_cost_per_pack: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     cost_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    blocking_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0"), server_onupdate=FetchedValue()
+    )
 
 
 class UnitStockEntryV2(StockIdentity, Base):

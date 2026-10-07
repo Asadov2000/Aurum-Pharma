@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.domains.inventory.unit_ledger_repository import UnitLedgerRepository
@@ -32,6 +32,7 @@ def physical_stock_snapshots_v2(
             created_at=lot.created_at,
             packaging=UnitPackagingV2.model_validate(lot.packaging),
             closed_packs=lot.closed_packs,
+            is_blocked=lot.is_blocked,
             opened_packs=tuple(
                 OpenedPackV2.model_validate(
                     {**pack.state, "id": pack.id, "opened_at": pack.opened_at}
@@ -45,6 +46,42 @@ def physical_stock_snapshots_v2(
 
 
 class UnitDispensingV2Repository(UnitLedgerRepository):
+    async def block_actor_allowed(self, tenant_id: UUID, branch_id: UUID, actor_id: UUID) -> bool:
+        authorized = await self.session.scalar(
+            text(
+                "SELECT current_user='aurum_app' AND NOT public.is_support_session() "
+                "AND public.current_app_user_id()=:actor "
+                "AND public.current_tenant_id()=:tenant AND "
+                "public.tenant_actor_has_scoped_permission(:tenant,'batches.update',:branch)"
+            ),
+            {"actor": actor_id, "tenant": tenant_id, "branch": branch_id},
+        )
+        return authorized is True
+
+    async def lock_physical_lot(
+        self, tenant_id: UUID, branch_id: UUID, lot_id: UUID
+    ) -> UnitStockLotV2 | None:
+        lot: UnitStockLotV2 | None = await self.session.scalar(
+            select(UnitStockLotV2)
+            .where(
+                UnitStockLotV2.tenant_id == tenant_id,
+                UnitStockLotV2.branch_id == branch_id,
+                UnitStockLotV2.id == lot_id,
+            )
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+        return lot
+
+    async def set_physical_blocked(self, lot: UnitStockLotV2, is_blocked: bool) -> None:
+        await self.session.execute(
+            update(UnitStockLotV2)
+            .where(UnitStockLotV2.tenant_id == lot.tenant_id, UnitStockLotV2.id == lot.id)
+            .values(is_blocked=is_blocked)
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.refresh(lot)
+
     async def lock_stock_snapshots(
         self, tenant_id: UUID, branch_id: UUID, catalog_ids: list[UUID]
     ) -> tuple[UnitStockBatchV2, ...]:
