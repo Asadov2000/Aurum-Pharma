@@ -300,6 +300,90 @@ describe("resolveApiBaseUrl", () => {
   });
 });
 
+describe("token request channels", () => {
+  it("shares promises within each channel while refresh and step-up run independently", async () => {
+    authenticate("cashier-1");
+    const refreshProof = deferred<string | null>();
+    const stepUpProof = deferred<string | null>();
+    const refreshTokens = vi.fn(() => refreshProof.promise);
+    const requestMfaStepUp = vi.fn(() => stepUpProof.promise);
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens,
+      requestMfaStepUp,
+      onAuthFailure: vi.fn(),
+    });
+
+    const refreshRequest = refreshAccessToken();
+    const stepUpRequest = requestStepUpAccessToken();
+    expect(refreshAccessToken()).toBe(refreshRequest);
+    expect(requestStepUpAccessToken()).toBe(stepUpRequest);
+    expect(stepUpRequest).not.toBe(refreshRequest);
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+    expect(requestMfaStepUp).toHaveBeenCalledTimes(1);
+
+    refreshProof.resolve("refreshed-access");
+    stepUpProof.resolve("confirmed-access");
+    await expect(refreshRequest).resolves.toBe("refreshed-access");
+    await expect(stepUpRequest).resolves.toBe("confirmed-access");
+  });
+
+  it("does not treat cancelled step-up as an authentication failure", async () => {
+    authenticate("cashier-1");
+    const onAuthFailure = vi.fn();
+    configureAuthHooks({
+      getAccessToken: () => useAuthStore.getState().accessToken,
+      refreshTokens: async () => "refreshed-access",
+      requestMfaStepUp: async () => null,
+      onAuthFailure,
+    });
+
+    await expect(requestStepUpAccessToken()).resolves.toBeNull();
+    expect(onAuthFailure).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().accessToken).toBe("access-cashier-1");
+  });
+
+  it.each(["refresh", "step-up"] as const)(
+    "permits another %s after rejection without clearing the other pending channel",
+    async (channel) => {
+      authenticate("cashier-1");
+      let rejectProof!: (reason: Error) => void;
+      const rejectedProof = new Promise<string | null>((_resolve, reject) => {
+        rejectProof = reject;
+      });
+      const otherProof = deferred<string | null>();
+      const rejectingProvider = vi
+        .fn()
+        .mockImplementationOnce(() => rejectedProof)
+        .mockResolvedValueOnce("retried-access");
+      const otherProvider = vi.fn(() => otherProof.promise);
+      const onAuthFailure = vi.fn();
+      const requestRejected = channel === "refresh" ? refreshAccessToken : requestStepUpAccessToken;
+      const requestOther = channel === "refresh" ? requestStepUpAccessToken : refreshAccessToken;
+      configureAuthHooks({
+        getAccessToken: () => useAuthStore.getState().accessToken,
+        refreshTokens: channel === "refresh" ? rejectingProvider : otherProvider,
+        requestMfaStepUp: channel === "refresh" ? otherProvider : rejectingProvider,
+        onAuthFailure,
+      });
+
+      const rejectedRequest = requestRejected();
+      const otherRequest = requestOther();
+      const rejection = expect(rejectedRequest).rejects.toThrow("offline");
+      rejectProof(new Error("offline"));
+      await rejection;
+      await expect(requestRejected()).resolves.toBe("retried-access");
+      expect(requestOther()).toBe(otherRequest);
+      expect(rejectingProvider).toHaveBeenCalledTimes(2);
+      expect(otherProvider).toHaveBeenCalledTimes(1);
+      expect(onAuthFailure).not.toHaveBeenCalled();
+
+      otherProof.resolve("other-channel-access");
+      await expect(otherRequest).resolves.toBe("other-channel-access");
+    },
+  );
+});
+
 describe("refreshAccessToken", () => {
   it("does not clear auth when a pending refresh rejects the old cross-tab epoch", async () => {
     let epoch: string | null = "old-session";

@@ -151,6 +151,12 @@ function hasCurrentAuthority(
   );
 }
 
+function assertCurrentAuthority(config: RetryConfig): void {
+  if (!hasCurrentAuthority(config)) {
+    throw new CanceledError("Authentication session changed", config);
+  }
+}
+
 api.interceptors.request.use((config) => {
   const cfg = config as RetryConfig;
   cfg._auth ??= { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() };
@@ -161,15 +167,11 @@ api.interceptors.request.use((config) => {
   ) {
     cfg._supportRevision ??= getSupportAccessRevision();
   }
-  if (!hasCurrentAuthority(cfg)) {
-    throw new CanceledError("Authentication session changed", config);
-  }
+  assertCurrentAuthority(cfg);
   config.headers.delete("X-Aurum-Support-Session");
   if (cfg._skipAuth) return config;
   const token = getAccess();
-  if (!hasCurrentAuthority(cfg)) {
-    throw new CanceledError("Authentication session changed", config);
-  }
+  assertCurrentAuthority(cfg);
   if (token) {
     config.headers.set("Authorization", `Bearer ${token}`);
     const supportAccessSessionId = getSupportAccessSessionId();
@@ -188,56 +190,51 @@ interface SessionTokenRequest {
   promise: Promise<string | null>;
 }
 
-let refreshing: SessionTokenRequest | null = null;
+type SessionTokenKind = "refresh" | "stepUp";
+const pendingTokenRequests: Record<SessionTokenKind, SessionTokenRequest | null> = {
+  refresh: null,
+  stepUp: null,
+};
 
-export function refreshAccessToken(
+function requestSessionToken(
+  kind: SessionTokenKind,
   generation = getAuthSessionGeneration(),
   epoch = getAuthEpoch(),
 ): Promise<string | null> {
   if (!hasAuthSession(generation, epoch)) {
     return Promise.resolve(null);
   }
-  if (refreshing?.generation === generation && refreshing.epoch === epoch)
-    return refreshing.promise;
+  const current = pendingTokenRequests[kind];
+  if (current?.generation === generation && current.epoch === epoch) return current.promise;
   const pending: SessionTokenRequest = {
     generation,
     epoch,
-    promise: refresh()
+    promise: (kind === "refresh" ? refresh : requestStepUp)()
       .then((token) => {
         if (!hasAuthSession(generation, epoch)) return null;
-        if (!token) onAuthFailure();
+        if (kind === "refresh" && !token) onAuthFailure();
         return token;
       })
       .finally(() => {
-        if (refreshing === pending) refreshing = null;
+        if (pendingTokenRequests[kind] === pending) pendingTokenRequests[kind] = null;
       }),
   };
-  refreshing = pending;
+  pendingTokenRequests[kind] = pending;
   return pending.promise;
 }
 
-let steppingUp: SessionTokenRequest | null = null;
+export function refreshAccessToken(
+  generation?: number,
+  epoch?: string | null,
+): Promise<string | null> {
+  return requestSessionToken("refresh", generation, epoch);
+}
 
 export function requestStepUpAccessToken(
-  generation = getAuthSessionGeneration(),
-  epoch = getAuthEpoch(),
+  generation?: number,
+  epoch?: string | null,
 ): Promise<string | null> {
-  if (!hasAuthSession(generation, epoch)) {
-    return Promise.resolve(null);
-  }
-  if (steppingUp?.generation === generation && steppingUp.epoch === epoch)
-    return steppingUp.promise;
-  const pending: SessionTokenRequest = {
-    generation,
-    epoch,
-    promise: requestStepUp()
-      .then((token) => (hasAuthSession(generation, epoch) ? token : null))
-      .finally(() => {
-        if (steppingUp === pending) steppingUp = null;
-      }),
-  };
-  steppingUp = pending;
-  return pending.promise;
+  return requestSessionToken("stepUp", generation, epoch);
 }
 
 export function isMfaStepUpRequired(error: AxiosError): boolean {
@@ -260,9 +257,7 @@ export function isSupportAccessInactive(error: AxiosError): boolean {
 api.interceptors.response.use(
   (response) => {
     const cfg = response.config as RetryConfig;
-    if (!hasCurrentAuthority(cfg)) {
-      throw new CanceledError("Authentication session changed", response.config);
-    }
+    assertCurrentAuthority(cfg);
     return response;
   },
   async (error: AxiosError) => {
@@ -275,7 +270,7 @@ api.interceptors.response.use(
       if (original._supportRevision !== undefined) onSupportAccessFailure();
       return Promise.reject(error);
     }
-    if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
+    if (!original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
       original._stepUpRetry = true;
       const newAccess = await requestStepUpAccessToken(generation, epoch);
       if (!newAccess || !hasCurrentAuthority(original)) {
@@ -286,7 +281,6 @@ api.interceptors.response.use(
     }
 
     if (
-      !original ||
       original._skipAuth ||
       original._skipRefresh ||
       original._retry ||
