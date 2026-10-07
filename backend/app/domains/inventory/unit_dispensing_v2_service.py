@@ -28,7 +28,10 @@ from app.domains.inventory.unit_dispensing_v2_cost import (
     UnitCartDispenseCostResultV2,
     persisted_cost_result_v2,
 )
-from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
+from app.domains.inventory.unit_dispensing_v2_repository import (
+    UnitDispensingV2Repository,
+    physical_stock_snapshots_v2,
+)
 from app.domains.inventory.unit_dispensing_v2_retail import (
     UnitCartRetailResultV2,
     UnitPricedCartLineV2,
@@ -41,12 +44,10 @@ from app.domains.inventory.unit_ledger_v2_models import (
     UnitStockCartLineV2,
     UnitStockLotV2,
     UnitStockMovementV2,
-    UnitStockOpenedPackV2,
 )
 from app.domains.inventory.unit_stock_v2 import (
     OpenedPackV2,
     UnitPackagingV2,
-    UnitStockBatchV2,
     to_base_units_v2,
 )
 
@@ -147,31 +148,6 @@ def _checked_lines(
     if sum(amounts) > MAX_BASE_UNITS:
         raise BusinessRuleError("Physical cart exceeds the stock limit")
     return lines, amounts
-
-
-def _stock(
-    lots: list[UnitStockLotV2], packs: list[UnitStockOpenedPackV2]
-) -> tuple[UnitStockBatchV2, ...]:
-    return tuple(
-        UnitStockBatchV2(
-            id=lot.id,
-            tenant_id=lot.tenant_id,
-            branch_id=lot.branch_id,
-            catalog_id=lot.catalog_id,
-            expires_at=lot.expires_at,
-            created_at=lot.created_at,
-            packaging=UnitPackagingV2.model_validate(lot.packaging),
-            closed_packs=lot.closed_packs,
-            opened_packs=tuple(
-                OpenedPackV2.model_validate(
-                    {**pack.state, "id": pack.id, "opened_at": pack.opened_at}
-                )
-                for pack in packs
-                if pack.lot_id == lot.id
-            ),
-        )
-        for lot in lots
-    )
 
 
 class PhysicalUnitLedgerV2Service:
@@ -353,7 +329,7 @@ class PhysicalUnitLedgerV2Service:
             try:
                 plan = plan_unit_cart_stock_v2(
                     lines=lines,
-                    batches=_stock(lots, packs),
+                    batches=physical_stock_snapshots_v2(lots, packs),
                     tenant_id=tenant_id,
                     branch_id=branch_id,
                     today=today,
