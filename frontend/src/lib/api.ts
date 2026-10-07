@@ -120,8 +120,10 @@ function supportContextPath(config: InternalAxiosRequestConfig): string | null {
 function acceptsSupportContext(pathname: string | null, method: string | undefined): boolean {
   if (pathname === null) return false;
   const normalizedMethod = (method ?? "GET").toUpperCase();
-  if (pathname === "/auth/me" || pathname === "/auth/profile") return normalizedMethod === "GET";
-  if (pathname === "/permissions" || pathname === "/templates") {
+  if (
+    ["/auth/me", "/auth/profile", "/permissions", "/templates", "/branches"].includes(pathname) ||
+    pathname.startsWith("/branches/")
+  ) {
     return normalizedMethod === "GET";
   }
   if (pathname === "/roles" || pathname.startsWith("/roles/")) {
@@ -129,9 +131,6 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
   }
   if (pathname === "/users" || pathname.startsWith("/users/")) {
     return ["GET", "POST", "PATCH", "DELETE"].includes(normalizedMethod);
-  }
-  if (pathname === "/branches" || pathname.startsWith("/branches/")) {
-    return normalizedMethod === "GET";
   }
   return false;
 }
@@ -237,10 +236,14 @@ export function requestStepUpAccessToken(
   return requestSessionToken("stepUp", generation, epoch);
 }
 
-export function isMfaStepUpRequired(error: AxiosError): boolean {
-  if (error.response?.status !== 403) return false;
+function accessFailureReason(error: AxiosError): unknown {
+  if (error.response?.status !== 403) return undefined;
   const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  const reason = data?.error?.details?.reason;
+  return data?.error?.details?.reason;
+}
+
+export function isMfaStepUpRequired(error: AxiosError): boolean {
+  const reason = accessFailureReason(error);
   return (
     reason === "mfa_step_up_required" ||
     reason === "password_step_up_required" ||
@@ -249,9 +252,7 @@ export function isMfaStepUpRequired(error: AxiosError): boolean {
 }
 
 export function isSupportAccessInactive(error: AxiosError): boolean {
-  if (error.response?.status !== 403) return false;
-  const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  return data?.error?.details?.reason === "support_access_inactive";
+  return accessFailureReason(error) === "support_access_inactive";
 }
 
 api.interceptors.response.use(
@@ -306,21 +307,21 @@ export function withAuthSession(
   bindSupportContext = false,
 ): AxiosRequestConfig {
   return {
-    ...(config ?? {}),
+    ...config,
     _auth: { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() },
     ...(bindSupportContext ? { _supportRevision: getSupportAccessRevision() } : {}),
   } as AxiosRequestConfig;
 }
 
 export function withoutAuth(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipAuth: true } as AxiosRequestConfig;
+  return { ...config, _skipAuth: true } as AxiosRequestConfig;
 }
 
 export function withoutRefresh(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipRefresh: true } as AxiosRequestConfig;
+  return { ...config, _skipRefresh: true } as AxiosRequestConfig;
 }
 
 // A proof request must not recursively open the dialog that is submitting it.
 export function withoutStepUp(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipRefresh: true, _stepUpRetry: true } as AxiosRequestConfig;
+  return { ...config, _skipRefresh: true, _stepUpRetry: true } as AxiosRequestConfig;
 }
