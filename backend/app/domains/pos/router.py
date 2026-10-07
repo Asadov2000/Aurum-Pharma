@@ -29,6 +29,7 @@ from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedEr
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.service import AuditService
 from app.domains.catalog.schemas import CatalogItemRead
+from app.domains.pos.physical_cart_router import router as physical_cart_router
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
     PaymentAdd,
@@ -85,6 +86,7 @@ from app.domains.pos.schemas import (
 from app.domains.pos.service import POSService
 
 router = APIRouter(prefix="/api/v1", tags=["pos"])
+router.include_router(physical_cart_router)
 
 
 async def _service(
