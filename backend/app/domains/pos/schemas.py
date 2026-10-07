@@ -7,7 +7,16 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.customer_returns.reasons import RefundReasonCode
@@ -672,6 +681,16 @@ class ReceiptLine(BaseModel):
     total_price: Decimal
     unit_label: str | None = None
     quantity_description: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_receipt_line(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # Keep immutable legacy receipt JSON and operation hashes exactly as stored.
+        result: dict[str, object] = handler(self)
+        if self.unit_label is None:
+            result.pop("unit_label", None)
+        if self.quantity_description is None:
+            result.pop("quantity_description", None)
+        return result
 
 
 class SaleDetails(SaleRead):
