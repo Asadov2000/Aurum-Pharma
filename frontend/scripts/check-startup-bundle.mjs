@@ -13,18 +13,20 @@ const routeBudgets = [
   {
     label: "Login /login",
     source: "src/features/auth/LoginPage.tsx",
-    maxRawBytes: 525 * 1024,
+    // Account-scoped sidebar storage is available before its lazy save bridge.
+    // Bound that small shared-shell cost without adding startup requests.
+    maxRawBytes: 530 * 1024,
     // ADR-0049 adds the shared durable logout/cookie coordination protocol.
     // Keep its bounded startup cost explicit rather than excluding auth chunks.
-    maxGzipBytes: 170 * 1024,
+    maxGzipBytes: 171 * 1024,
     maxRequests: 8,
   },
   {
     label: "Dashboard /",
     source: "src/features/dashboard/DashboardPage.tsx",
-    // The unified header keeps the entire profile menu available on its first
-    // offline opening. Bound its ~2 KiB eager cost; gzip and request caps stay fixed.
-    maxRawBytes: 438 * 1024,
+    // Keep the full offline profile menu and owner-scoped sidebar storage eager.
+    // The save engine remains lazy; the startup request cap stays fixed.
+    maxRawBytes: 440 * 1024,
     maxGzipBytes: 145 * 1024,
     maxRequests: 6,
   },

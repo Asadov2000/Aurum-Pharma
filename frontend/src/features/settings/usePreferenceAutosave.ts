@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "@/features/auth/hooks";
+import { getAuthSessionGeneration } from "@/stores/auth";
 
-import { useUpdateUserPreferences, useUserPreferencesQuery } from "./queries";
+import { useUserPreferencesQuery } from "./queries";
+import { useUpdateUserPreferences } from "./preferencesMutation";
+import {
+  preferenceQueueKey,
+  persistPreferencePatch,
+  type PreferencePatch,
+} from "./preferenceQueueStorage";
+import { parseWorkspace } from "./workspacePreferences";
+export { PREFERENCE_QUEUE_CHANGED_EVENT } from "./preferenceQueueStorage";
 import { parseQuickActionPreferences } from "./quickActions";
 import {
   type AccentPreference,
@@ -10,13 +19,9 @@ import {
   type DensityPreference,
   type ThemePreference,
   type UserPreferencesUpdate,
-  type WorkspacePreferences,
+  type UserPreferences,
 } from "./types";
 
-type PreferencePatch = Omit<UserPreferencesUpdate, "expected_version">;
-
-const STORAGE_PREFIX = "aurum:preferences-pending:v1";
-export const PREFERENCE_QUEUE_CHANGED_EVENT = "aurum:preferences-pending-changed";
 const PATCH_KEYS = new Set([
   "theme",
   "density",
@@ -30,14 +35,12 @@ const THEMES = new Set<ThemePreference>(["system", "light", "dark"]);
 const DENSITIES = new Set<DensityPreference>(["auto", "compact", "comfortable", "touch"]);
 const CONTRASTS = new Set<ContrastPreference>(["standard", "high"]);
 const ACCENTS = new Set<AccentPreference>(["teal", "blue", "violet", "green", "amber", "rose"]);
-const DESKTOP_MODES = new Set<WorkspacePreferences["desktop_mode"]>([
-  "auto",
-  "compact",
-  "expanded",
-]);
-
-export function usePreferenceAutosave(channel: string) {
+export function usePreferenceAutosave(
+  channel: string,
+  options?: { preserveWorkspaceStartRoute?: boolean },
+) {
   const { user } = useAuth();
+  const authGeneration = getAuthSessionGeneration();
   const scope = useMemo(
     () => `${user?.id ?? "anonymous"}:${user?.active_tenant_id ?? "global"}`,
     [user?.active_tenant_id, user?.id],
@@ -52,10 +55,14 @@ export function usePreferenceAutosave(channel: string) {
   const [hasPending, setHasPending] = useState(false);
   const mutateAsync = update.mutateAsync;
   const refetchPreferences = preferences.refetch;
+  const preserveWorkspaceStartRoute = options?.preserveWorkspaceStartRoute === true;
 
   const drain = useCallback(async () => {
     if (runningRef.current || versionRef.current === null || isEmpty(queueRef.current)) return;
     const generation = generationRef.current;
+    const sessionGeneration = getAuthSessionGeneration();
+    const active = () =>
+      generation === generationRef.current && sessionGeneration === getAuthSessionGeneration();
     runningRef.current = true;
     setHasPending(true);
 
@@ -63,21 +70,24 @@ export function usePreferenceAutosave(channel: string) {
       const batch = queueRef.current;
       queueRef.current = {};
       inFlightRef.current = batch;
-      persistPatch(scope, channel, { ...batch, ...queueRef.current });
+      persistPreferencePatch(scope, channel, { ...batch, ...queueRef.current });
       try {
-        const saved = await mutateAsync({
+        const payload: UserPreferencesUpdate = {
           expected_version: versionRef.current,
           ...batch,
-        });
-        if (generation !== generationRef.current) return;
+        };
+        const saved: UserPreferences = preserveWorkspaceStartRoute
+          ? await mutateAsync(payload, { preserveWorkspaceStartRoute: true })
+          : await mutateAsync(payload);
+        if (!active()) return;
         versionRef.current = saved.version;
         inFlightRef.current = {};
-        persistPatch(scope, channel, queueRef.current);
+        persistPreferencePatch(scope, channel, queueRef.current);
       } catch {
-        if (generation !== generationRef.current) return;
+        if (!active()) return;
         queueRef.current = { ...batch, ...queueRef.current };
         inFlightRef.current = {};
-        persistPatch(scope, channel, queueRef.current);
+        persistPreferencePatch(scope, channel, queueRef.current);
         runningRef.current = false;
         setHasPending(true);
         return;
@@ -86,7 +96,7 @@ export function usePreferenceAutosave(channel: string) {
 
     runningRef.current = false;
     setHasPending(false);
-  }, [channel, mutateAsync, scope]);
+  }, [channel, mutateAsync, preserveWorkspaceStartRoute, scope]);
 
   useEffect(() => {
     generationRef.current += 1;
@@ -96,7 +106,10 @@ export function usePreferenceAutosave(channel: string) {
     queueRef.current = restored;
     inFlightRef.current = {};
     setHasPending(!isEmpty(queueRef.current));
-  }, [channel, scope]);
+    return () => {
+      generationRef.current += 1;
+    };
+  }, [authGeneration, channel, scope]);
 
   useEffect(() => {
     if (!preferences.data) return;
@@ -107,7 +120,7 @@ export function usePreferenceAutosave(channel: string) {
   const enqueue = useCallback(
     (patch: PreferencePatch) => {
       queueRef.current = { ...queueRef.current, ...patch };
-      persistPatch(scope, channel, { ...inFlightRef.current, ...queueRef.current });
+      persistPreferencePatch(scope, channel, { ...inFlightRef.current, ...queueRef.current });
       setHasPending(true);
       void drain();
     },
@@ -115,7 +128,11 @@ export function usePreferenceAutosave(channel: string) {
   );
 
   const retry = useCallback(async () => {
+    const generation = generationRef.current;
+    const sessionGeneration = getAuthSessionGeneration();
     const refreshed = await refetchPreferences();
+    if (generation !== generationRef.current || sessionGeneration !== getAuthSessionGeneration())
+      return;
     if (refreshed.data) versionRef.current = refreshed.data.version;
     void drain();
   }, [drain, refetchPreferences]);
@@ -132,16 +149,13 @@ export function usePreferenceAutosave(channel: string) {
     retry,
     hasPending: hasPending || update.isPending,
     error: update.error,
+    confirmedVersion: versionRef.current,
   };
-}
-
-function storageKey(scope: string, channel: string): string {
-  return `${STORAGE_PREFIX}:${encodeURIComponent(scope)}:${encodeURIComponent(channel)}`;
 }
 
 export function readPendingPreferencePatch(scope: string, channel: string): PreferencePatch {
   try {
-    const raw = window.localStorage.getItem(storageKey(scope, channel));
+    const raw = window.localStorage.getItem(preferenceQueueKey(scope, channel));
     if (raw === null) return {};
     return parsePendingPatch(JSON.parse(raw)) ?? {};
   } catch {
@@ -186,55 +200,12 @@ function parsePendingPatch(value: unknown): PreferencePatch | null {
   return patch;
 }
 
-function parseWorkspace(value: unknown): WorkspacePreferences | null {
-  if (!isRecord(value) || !isSetMember(DESKTOP_MODES, value.desktop_mode)) return null;
-  const hiddenRoutes = parseRouteList(value.hidden_routes);
-  const favoriteRoutes = parseRouteList(value.favorite_routes);
-  const routeOrder = parseRouteList(value.route_order);
-  if (
-    hiddenRoutes === null ||
-    favoriteRoutes === null ||
-    routeOrder === null ||
-    typeof value.start_route !== "string" ||
-    value.start_route.length > 128
-  ) {
-    return null;
-  }
-  return {
-    desktop_mode: value.desktop_mode,
-    hidden_routes: hiddenRoutes,
-    favorite_routes: favoriteRoutes,
-    route_order: routeOrder,
-    start_route: value.start_route,
-  };
-}
-
-function parseRouteList(value: unknown): string[] | null {
-  return Array.isArray(value) &&
-    value.length <= 64 &&
-    value.every((item) => typeof item === "string")
-    ? value
-    : null;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isSetMember<T extends string>(values: ReadonlySet<T>, value: unknown): value is T {
   return typeof value === "string" && values.has(value as T);
-}
-
-function persistPatch(scope: string, channel: string, patch: PreferencePatch): void {
-  try {
-    if (isEmpty(patch)) window.localStorage.removeItem(storageKey(scope, channel));
-    else window.localStorage.setItem(storageKey(scope, channel), JSON.stringify(patch));
-  } catch {
-    // The in-memory queue remains authoritative until this page is closed.
-  }
-  window.dispatchEvent(
-    new CustomEvent(PREFERENCE_QUEUE_CHANGED_EVENT, { detail: { scope, channel } }),
-  );
 }
 
 function isEmpty(patch: PreferencePatch): boolean {

@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { type UserPreferences } from "@/features/settings/types";
 
 const authMock = vi.hoisted(() => ({
   logout: vi.fn(),
@@ -8,6 +10,7 @@ const authMock = vi.hoisted(() => ({
     email: "owner@aurum.tj",
     full_name: "Owner",
     home_tenant_id: "tenant-1",
+    active_tenant_id: "tenant-1",
     is_administrator: false,
     is_developer: false,
     is_tenant_owner: false,
@@ -16,18 +19,11 @@ const authMock = vi.hoisted(() => ({
 }));
 const layoutState = vi.hoisted(() => ({
   navigate: vi.fn(),
+  refetch: vi.fn(),
+  mutate: vi.fn(),
+  mutateAsync: vi.fn(),
   pathname: "/pos",
-  preferences: undefined as
-    | {
-        workspace: {
-          desktop_mode: "auto" | "compact" | "expanded";
-          hidden_routes: string[];
-          favorite_routes: string[];
-          route_order: string[];
-          start_route: string;
-        };
-      }
-    | undefined,
+  preferences: undefined as UserPreferences | undefined,
 }));
 
 vi.mock("@/features/auth/hooks", () => ({
@@ -64,8 +60,15 @@ vi.mock("@/features/tenantAccess/TenantAccessBanner", () => ({
 }));
 
 vi.mock("@/features/settings/queries", () => ({
-  useUserPreferencesQuery: () => ({ data: layoutState.preferences }),
-  useUpdateUserPreferences: () => ({ isPending: false, mutate: vi.fn() }),
+  useUserPreferencesQuery: () => ({ data: layoutState.preferences, refetch: layoutState.refetch }),
+}));
+vi.mock("@/features/settings/preferencesMutation", () => ({
+  useUpdateUserPreferences: () => ({
+    isPending: false,
+    error: null,
+    mutate: layoutState.mutate,
+    mutateAsync: layoutState.mutateAsync,
+  }),
 }));
 
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -277,6 +280,11 @@ describe("AppLayout shell", () => {
     layoutState.navigate.mockReset();
     layoutState.pathname = "/pos";
     layoutState.preferences = undefined;
+    layoutState.refetch
+      .mockReset()
+      .mockImplementation(async () => ({ data: layoutState.preferences }));
+    layoutState.mutate.mockReset();
+    layoutState.mutateAsync.mockReset().mockRejectedValue(new Error("offline"));
     authMock.user.permissions = ["catalog.view", "pos.sell"];
     authMock.logout.mockReset();
     setOnlineStatus(true);
@@ -591,6 +599,7 @@ describe("AppLayout shell", () => {
     authMock.user.permissions.push("billing.overview.view", "billing.invoice.view");
     layoutState.pathname = "/";
     layoutState.preferences = {
+      ...serverPreferences(),
       workspace: {
         desktop_mode: "expanded",
         hidden_routes: ["/catalog"],
@@ -617,13 +626,16 @@ describe("AppLayout shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Настроить боковую панель" }));
     const dialog = await screen.findByRole("dialog", { name: "Настроить меню" });
     expect(within(dialog).queryByText("Расчёты с Aurum")).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Показать все" }));
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Показать все" }));
+    });
     expect(screen.queryByRole("link", { name: "Расчёты с Aurum" })).not.toBeInTheDocument();
   });
 
   it("opens the saved accessible start route only once per browser session", async () => {
     layoutState.pathname = "/";
     layoutState.preferences = {
+      ...serverPreferences(),
       workspace: {
         desktop_mode: "auto",
         hidden_routes: [],
@@ -653,6 +665,25 @@ describe("AppLayout shell", () => {
     expect(layoutState.navigate).not.toHaveBeenCalled();
   });
 });
+
+function serverPreferences(): UserPreferences {
+  return {
+    theme: "system",
+    density: "auto",
+    contrast: "standard",
+    reduce_motion: false,
+    accent: "teal",
+    workspace: {
+      desktop_mode: "auto",
+      hidden_routes: [],
+      favorite_routes: [],
+      route_order: [],
+      start_route: "/",
+    },
+    version: 1,
+    updated_at: "2026-10-08T00:00:00Z",
+  };
+}
 
 function setOnlineStatus(isOnline: boolean): void {
   Object.defineProperty(window.navigator, "onLine", {

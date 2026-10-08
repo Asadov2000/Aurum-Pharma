@@ -14,7 +14,8 @@ import {
   type SidebarPreferences,
 } from "@/components/layout/sidebarPreferences";
 
-import { useUpdateUserPreferences, useUserPreferencesQuery } from "./queries";
+import { useUserPreferencesQuery } from "./queries";
+import { useUpdateUserPreferences } from "./preferencesMutation";
 import { SettingRow, SettingsNotice, SettingsSectionHeader } from "./SettingsPrimitives";
 
 export function AccountSettingsPanel(): JSX.Element {
