@@ -478,8 +478,21 @@ test.describe("POS sale (owner)", () => {
       );
 
       await page.evaluate(
-        (saleId) => window.localStorage.removeItem(`sales:pendingRefund:${saleId}`),
-        completedSale.sale_id,
+        ({ saleId, attemptId }) => {
+          // Simulate loss of this synthetic owner's local journal only;
+          // the server's frozen attempt must remain available for recovery.
+          for (const key of Object.keys(window.localStorage)) {
+            if (!key.startsWith("sales:pendingRefund:v2:")) continue;
+            const marker = JSON.parse(window.localStorage.getItem(key) ?? "null") as {
+              parentSaleId?: string;
+              refundAttemptId?: string;
+            } | null;
+            if (marker?.parentSaleId === saleId && marker.refundAttemptId === attemptId) {
+              window.localStorage.removeItem(key);
+            }
+          }
+        },
+        { saleId: completedSale.sale_id, attemptId: refundAttempt.id },
       );
       await page.reload();
       const recoveredSalesResponse = page.waitForResponse((response) => {
