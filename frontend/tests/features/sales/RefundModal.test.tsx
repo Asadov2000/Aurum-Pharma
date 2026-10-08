@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { type MeResponse } from "@/features/auth/types";
 import { type RefundAttempt } from "@/features/sales/types";
+import { useAuthStore } from "@/stores/auth";
 
 const mutateAsync = vi.fn();
 const getRefundResult = vi.fn();
@@ -21,12 +23,24 @@ const activeRefundAttemptResult = {
 const useActiveRefundAttemptQuery = vi.fn(
   (_parentSaleId: string, _enabled: boolean) => activeRefundAttemptResult,
 );
-const authResult = {
-  user: {
-    is_developer: false,
-    permissions: ["pos.refund", "pos.refund_external_confirm"],
-  },
+const TEST_USER: MeResponse = {
+  id: "user-1",
+  email: "synthetic@example.test",
+  full_name: "Synthetic cashier",
+  is_developer: false,
+  is_administrator: false,
+  home_tenant_id: "tenant-1",
+  active_tenant_id: "tenant-1",
+  status: "active",
+  last_login_at: null,
+  level: 4,
+  is_tenant_owner: false,
+  branch_assignments: { "tenant-1": "branch-1" },
+  permissions: ["pos.refund", "pos.refund_external_confirm"],
+  platform_capabilities: [],
+  support_access: null,
 };
+const authResult = { user: { ...TEST_USER } };
 const settingsResult = {
   data: { refund_reason_mode: "optional" },
   isLoading: false,
@@ -63,8 +77,10 @@ vi.mock("@/features/foundation/queries", () => ({
 import { type SaleDetails } from "@/features/pos/types";
 import { RefundModal } from "@/features/sales/RefundModal";
 import {
+  captureRefundRecoveryContext,
   createPendingRefundOperation,
   loadPendingRefundOperation,
+  pendingRefundOperationKey,
   savePendingRefundAttemptId,
 } from "@/features/sales/refundOperation";
 
@@ -116,6 +132,32 @@ const SALE: SaleDetails = {
   ],
 };
 
+function refundedSale(operationId: string, id = "return-1"): SaleDetails {
+  return {
+    ...SALE,
+    id,
+    sale_type: "return",
+    parent_sale_id: SALE.id,
+    operation_id: operationId,
+  };
+}
+
+function recoveryContext() {
+  const context = captureRefundRecoveryContext(SALE);
+  if (!context) throw new Error("synthetic refund authority unavailable");
+  return context;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const PENDING_ATTEMPT: RefundAttempt = {
   id: "attempt-1",
   tenant_id: "tenant-1",
@@ -166,27 +208,43 @@ const CONFIRMED_ATTEMPT: RefundAttempt = {
   ],
 };
 
+let createdAttempt = PENDING_ATTEMPT;
+
 describe("RefundModal", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    useAuthStore.setState({
+      accessToken: "synthetic-access",
+      user: { ...TEST_USER },
+      hydrated: true,
+    });
     mutateAsync.mockReset();
-    mutateAsync.mockResolvedValue({ id: "return-1" });
+    mutateAsync.mockImplementation(async ({ payload }: { payload: { operation_id: string } }) =>
+      refundedSale(payload.operation_id),
+    );
     getRefundResult.mockReset();
+    createdAttempt = PENDING_ATTEMPT;
     createRefundAttempt.mockReset();
-    createRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
+    createRefundAttempt.mockImplementation(async (_parentId: string, operationId: string) => {
+      createdAttempt = { ...PENDING_ATTEMPT, operation_id: operationId };
+      return createdAttempt;
+    });
     getActiveRefundAttempt.mockReset();
     getActiveRefundAttempt.mockResolvedValue(null);
     getRefundAttempt.mockReset();
     getRefundAttempt.mockResolvedValue(PENDING_ATTEMPT);
     beginRefundAttemptReconciliation.mockReset();
-    beginRefundAttemptReconciliation.mockResolvedValue({
-      ...PENDING_ATTEMPT,
+    beginRefundAttemptReconciliation.mockImplementation(async () => ({
+      ...createdAttempt,
       status: "requires_reconciliation",
-    });
+    }));
     confirmRefundAttempt.mockReset();
-    confirmRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
+    confirmRefundAttempt.mockImplementation(async () => ({
+      ...CONFIRMED_ATTEMPT,
+      operation_id: createdAttempt.operation_id,
+    }));
     voidRefundAttempt.mockReset();
-    voidRefundAttempt.mockResolvedValue({ ...PENDING_ATTEMPT, status: "voided" });
+    voidRefundAttempt.mockImplementation(async () => ({ ...createdAttempt, status: "voided" }));
     activeRefundAttemptResult.data = null;
     activeRefundAttemptResult.isFetching = false;
     activeRefundAttemptResult.isError = false;
@@ -195,6 +253,10 @@ describe("RefundModal", () => {
     useActiveRefundAttemptQuery.mockClear();
     authResult.user.permissions = ["pos.refund", "pos.refund_external_confirm"];
     settingsResult.data.refund_reason_mode = "optional";
+  });
+
+  afterEach(() => {
+    useAuthStore.getState().clear();
   });
 
   function selectRefundItem(): void {
@@ -233,7 +295,7 @@ describe("RefundModal", () => {
     expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeChecked();
     expect(screen.getByRole("button", { name: "Отменить заявку" })).toBeEnabled();
     expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
-    expect(loadPendingRefundOperation(SALE.id)).toMatchObject({
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toMatchObject({
       refundAttemptOperationId: PENDING_ATTEMPT.operation_id,
       refundAttemptId: PENDING_ATTEMPT.id,
       parentSaleId: SALE.id,
@@ -283,7 +345,7 @@ describe("RefundModal", () => {
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
     await waitFor(() => expect(useActiveRefundAttemptQuery).toHaveBeenCalledWith(SALE.id, true));
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Отменить заявку" })).not.toBeInTheDocument();
   });
@@ -325,9 +387,18 @@ describe("RefundModal", () => {
       ...CONFIRMED_ATTEMPT,
       reason: "quality_issue" as const,
     };
-    createRefundAttempt.mockResolvedValueOnce(boundAttempt);
-    beginRefundAttemptReconciliation.mockResolvedValueOnce(reconcilingAttempt);
-    confirmRefundAttempt.mockResolvedValueOnce(confirmedAttempt);
+    createRefundAttempt.mockImplementationOnce(async (_parentId: string, operationId: string) => {
+      createdAttempt = { ...boundAttempt, operation_id: operationId };
+      return createdAttempt;
+    });
+    beginRefundAttemptReconciliation.mockImplementationOnce(async () => ({
+      ...reconcilingAttempt,
+      operation_id: createdAttempt.operation_id,
+    }));
+    confirmRefundAttempt.mockImplementationOnce(async () => ({
+      ...confirmedAttempt,
+      operation_id: createdAttempt.operation_id,
+    }));
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
     expect(screen.getByRole("note")).toHaveTextContent("Возвращённый товар не поступит в продажу");
@@ -382,7 +453,7 @@ describe("RefundModal", () => {
       },
     });
     expect(onRefunded).toHaveBeenCalledWith("return-1");
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
   });
 
   it("lets a cashier create a request but hides confirmation controls without permission", async () => {
@@ -426,15 +497,19 @@ describe("RefundModal", () => {
       SALE.id,
       [{ sale_item_id: "item-1", qty: "1" }],
       true,
+      recoveryContext(),
     );
     if (!operation) throw new Error("refund operation was not persisted");
-    const updated = savePendingRefundAttemptId(operation, PENDING_ATTEMPT.id);
+    const updated = savePendingRefundAttemptId(operation, PENDING_ATTEMPT.id, recoveryContext());
     if (!updated) throw new Error("refund attempt was not persisted");
     getRefundResult.mockRejectedValue({
       isAxiosError: true,
       response: { status: 404, data: { detail: "not found" } },
     });
-    getRefundAttempt.mockResolvedValue(CONFIRMED_ATTEMPT);
+    getRefundAttempt.mockResolvedValue({
+      ...CONFIRMED_ATTEMPT,
+      operation_id: operation.refundAttemptOperationId,
+    });
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={() => undefined} />);
 
     expect(await screen.findByText(/Подтверждение восстановлено/i)).toBeInTheDocument();
@@ -452,7 +527,9 @@ describe("RefundModal", () => {
   it("recovers a committed refund when the final POST response is lost", async () => {
     const onRefunded = vi.fn();
     mutateAsync.mockRejectedValue(new Error("response lost"));
-    getRefundResult.mockResolvedValue({ id: "return-recovered" });
+    getRefundResult.mockImplementation(async (operationId: string) =>
+      refundedSale(operationId, "return-recovered"),
+    );
     render(
       <RefundModal
         sale={{
@@ -469,13 +546,15 @@ describe("RefundModal", () => {
 
     await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
     expect(onRefunded).toHaveBeenCalledWith("return-recovered");
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
   });
 
   it("recovers an electronic refund after the final response is lost without repeating confirmation", async () => {
     const onRefunded = vi.fn();
     mutateAsync.mockRejectedValue(new Error("response lost"));
-    getRefundResult.mockResolvedValue({ id: "return-electronic-recovered" });
+    getRefundResult.mockImplementation(async (operationId: string) =>
+      refundedSale(operationId, "return-electronic-recovered"),
+    );
     render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
 
     selectRefundItem();
@@ -491,7 +570,7 @@ describe("RefundModal", () => {
     expect(confirmRefundAttempt).toHaveBeenCalledTimes(1);
     expect(mutateAsync).toHaveBeenCalledTimes(1);
     expect(onRefunded).toHaveBeenCalledWith("return-electronic-recovered");
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
   });
 
   it("cancels a pending request without posting a return", async () => {
@@ -505,7 +584,7 @@ describe("RefundModal", () => {
 
     await waitFor(() => expect(voidRefundAttempt).toHaveBeenCalledWith("attempt-1"));
     expect(mutateAsync).not.toHaveBeenCalled();
-    expect(loadPendingRefundOperation(SALE.id)).toBeNull();
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
   });
 
   it("blocks submission when the recovery marker cannot be persisted", async () => {
@@ -523,4 +602,282 @@ describe("RefundModal", () => {
     expect(createRefundAttempt).not.toHaveBeenCalled();
     setItem.mockRestore();
   });
+
+  const authorityChanges = ["logout", "different user", "different tenant"] as const;
+  function changeAuthority(change: (typeof authorityChanges)[number]): void {
+    if (change === "logout") {
+      useAuthStore.getState().clear();
+    } else {
+      useAuthStore.getState().setUser({
+        ...TEST_USER,
+        ...(change === "different user" ? { id: "user-2" } : { active_tenant_id: "tenant-2" }),
+      });
+    }
+  }
+
+  it("does not automatically adopt another requester's active refund", async () => {
+    activeRefundAttemptResult.data = { ...PENDING_ATTEMPT, requested_by_user_id: "user-2" };
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={vi.fn()} />);
+
+    await act(async () => undefined);
+    expect(loadPendingRefundOperation(SALE.id, recoveryContext())).toBeNull();
+    expect(createRefundAttempt).not.toHaveBeenCalled();
+    expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+    expect(confirmRefundAttempt).not.toHaveBeenCalled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Вернуть Парацетамол 500 мг" })).toBeDisabled();
+  });
+
+  it("retains an unresolved request and blocks a new refund when active lookup returns null", async () => {
+    const context = recoveryContext();
+    const operation = createPendingRefundOperation(
+      SALE.id,
+      [{ sale_item_id: "item-1", qty: "1" }],
+      true,
+      context,
+    );
+    if (!operation) throw new Error("synthetic operation unavailable");
+    const key = pendingRefundOperationKey(SALE.id, context);
+    const original = window.localStorage.getItem(key);
+    getRefundResult.mockRejectedValue({ isAxiosError: true, response: { status: 404 } });
+    render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={vi.fn()} />);
+
+    await waitFor(() => expect(getActiveRefundAttempt).toHaveBeenCalledTimes(1));
+    await act(async () => undefined);
+    expect(window.localStorage.getItem(key)).toBe(original);
+    expect(loadPendingRefundOperation(SALE.id, context)).toEqual(operation);
+    expect(screen.getByRole("button", { name: "Зафиксировать сумму возврата" })).toBeDisabled();
+    expect(createRefundAttempt).not.toHaveBeenCalled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  describe.each(authorityChanges)("pending refund after %s", (change) => {
+    it.each(["success", "failure"] as const)(
+      "ignores a late create response: %s",
+      async (outcome) => {
+        const response = deferred<RefundAttempt>();
+        createRefundAttempt.mockReturnValueOnce(response.promise);
+        const onRefunded = vi.fn();
+        const context = recoveryContext();
+        const key = pendingRefundOperationKey(SALE.id, context);
+        render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
+        selectRefundItem();
+        fireEvent.click(screen.getByRole("button", { name: "Зафиксировать сумму возврата" }));
+        await waitFor(() => expect(createRefundAttempt).toHaveBeenCalledTimes(1));
+        const original = window.localStorage.getItem(key);
+        expect(original).not.toBeNull();
+
+        await act(async () => {
+          changeAuthority(change);
+          if (outcome === "success") response.resolve(PENDING_ATTEMPT);
+          else response.reject(new Error("late network failure"));
+        });
+
+        expect(window.localStorage.getItem(key)).toBe(original);
+        expect(getRefundResult).not.toHaveBeenCalled();
+        expect(getActiveRefundAttempt).not.toHaveBeenCalled();
+        expect(getRefundAttempt).not.toHaveBeenCalled();
+        expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+        expect(confirmRefundAttempt).not.toHaveBeenCalled();
+        expect(mutateAsync).not.toHaveBeenCalled();
+        expect(onRefunded).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["success", "failure"] as const)(
+      "preserves the financial operation after a late final POST: %s",
+      async (outcome) => {
+        const response = deferred<{ id: string }>();
+        mutateAsync.mockReturnValueOnce(response.promise);
+        const onRefunded = vi.fn();
+        const context = recoveryContext();
+        const key = pendingRefundOperationKey(SALE.id, context);
+        render(
+          <RefundModal
+            sale={{ ...SALE, payments: [{ ...SALE.payments[0]!, payment_method: "cash" }] }}
+            onClose={() => undefined}
+            onRefunded={onRefunded}
+          />,
+        );
+        selectRefundItem();
+        fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
+        await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+        const original = window.localStorage.getItem(key);
+        expect(original).not.toBeNull();
+
+        await act(async () => {
+          changeAuthority(change);
+          if (outcome === "success") response.resolve({ id: "late-return" });
+          else response.reject(new Error("late response lost"));
+        });
+
+        expect(window.localStorage.getItem(key)).toBe(original);
+        expect(getRefundResult).not.toHaveBeenCalled();
+        expect(getActiveRefundAttempt).not.toHaveBeenCalled();
+        expect(createRefundAttempt).not.toHaveBeenCalled();
+        expect(confirmRefundAttempt).not.toHaveBeenCalled();
+        expect(mutateAsync).toHaveBeenCalledTimes(1);
+        expect(onRefunded).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["found", "missing"] as const)(
+      "ignores a late recovery lookup: %s",
+      async (outcome) => {
+        const response = deferred<{ id: string }>();
+        getRefundResult.mockReturnValueOnce(response.promise);
+        const onRefunded = vi.fn();
+        const context = recoveryContext();
+        const operation = createPendingRefundOperation(
+          SALE.id,
+          [{ sale_item_id: "item-1", qty: "1" }],
+          true,
+          context,
+        );
+        if (!operation) throw new Error("synthetic operation unavailable");
+        const key = pendingRefundOperationKey(SALE.id, context);
+        const original = window.localStorage.getItem(key);
+        render(<RefundModal sale={SALE} onClose={() => undefined} onRefunded={onRefunded} />);
+        await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
+
+        await act(async () => {
+          changeAuthority(change);
+          if (outcome === "found") response.resolve({ id: "late-recovered-return" });
+          else response.reject({ isAxiosError: true, response: { status: 404 } });
+        });
+
+        expect(window.localStorage.getItem(key)).toBe(original);
+        expect(getActiveRefundAttempt).not.toHaveBeenCalled();
+        expect(getRefundAttempt).not.toHaveBeenCalled();
+        expect(beginRefundAttemptReconciliation).not.toHaveBeenCalled();
+        expect(mutateAsync).not.toHaveBeenCalled();
+        expect(onRefunded).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("preserves a pending financial command when its modal unmounts before success", async () => {
+    const response = deferred<{ id: string }>();
+    mutateAsync.mockReturnValueOnce(response.promise);
+    const onRefunded = vi.fn();
+    const context = recoveryContext();
+    const key = pendingRefundOperationKey(SALE.id, context);
+    const view = render(
+      <RefundModal
+        sale={{ ...SALE, payments: [{ ...SALE.payments[0]!, payment_method: "cash" }] }}
+        onClose={() => undefined}
+        onRefunded={onRefunded}
+      />,
+    );
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    const original = window.localStorage.getItem(key);
+    expect(original).not.toBeNull();
+    view.unmount();
+    await act(async () => response.resolve({ id: "late-return" }));
+
+    expect(window.localStorage.getItem(key)).toBe(original);
+    expect(getRefundResult).not.toHaveBeenCalled();
+    expect(onRefunded).not.toHaveBeenCalled();
+  });
+
+  it("finishes the same user's command after access token rotation", async () => {
+    const response = deferred<SaleDetails>();
+    mutateAsync.mockReturnValueOnce(response.promise);
+    const onRefunded = vi.fn();
+    const context = recoveryContext();
+    render(
+      <RefundModal
+        sale={{ ...SALE, payments: [{ ...SALE.payments[0]!, payment_method: "cash" }] }}
+        onClose={() => undefined}
+        onRefunded={onRefunded}
+      />,
+    );
+    selectRefundItem();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    const operation = loadPendingRefundOperation(SALE.id, context);
+    if (!operation) throw new Error("synthetic pending command unavailable");
+    await act(async () => {
+      useAuthStore.setState({ accessToken: "synthetic-rotated-access" });
+      response.resolve(refundedSale(operation.operationId, "return-after-rotation"));
+    });
+
+    expect(onRefunded).toHaveBeenCalledWith("return-after-rotation");
+    expect(loadPendingRefundOperation(SALE.id, context)).toBeNull();
+    expect(getRefundResult).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { tenant_id: "tenant-2" },
+    { branch_id: "branch-2" },
+    { register_id: "register-2" },
+    { parent_sale_id: "another-sale" },
+    { operation_id: "22222222-2222-4222-8222-222222222222" },
+    { sale_type: "sale" as const },
+    { status: "draft" as const },
+  ])("retains the original command when recovery returns unrelated data: %j", async (mismatch) => {
+    const context = recoveryContext();
+    const operation = createPendingRefundOperation(
+      SALE.id,
+      [{ sale_item_id: "item-1", qty: "1" }],
+      false,
+      context,
+    );
+    if (!operation) throw new Error("synthetic pending command unavailable");
+    const key = pendingRefundOperationKey(SALE.id, context);
+    const original = window.localStorage.getItem(key);
+    getRefundResult.mockResolvedValue({ ...refundedSale(operation.operationId), ...mismatch });
+    const onRefunded = vi.fn();
+    render(
+      <RefundModal
+        sale={{ ...SALE, payments: [{ ...SALE.payments[0]!, payment_method: "cash" }] }}
+        onClose={() => undefined}
+        onRefunded={onRefunded}
+      />,
+    );
+
+    await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
+    await act(async () => undefined);
+    expect(window.localStorage.getItem(key)).toBe(original);
+    expect(onRefunded).not.toHaveBeenCalled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Вернуть выбранное/ })).toBeDisabled();
+  });
+
+  it.each([401, 403, 500])(
+    "preserves the cash refund command after POST %s and a missing result",
+    async (status) => {
+      mutateAsync.mockRejectedValue({ isAxiosError: true, response: { status } });
+      getRefundResult.mockRejectedValue({ isAxiosError: true, response: { status: 404 } });
+      const context = recoveryContext();
+      const key = pendingRefundOperationKey(SALE.id, context);
+      const onRefunded = vi.fn();
+      render(
+        <RefundModal
+          sale={{ ...SALE, payments: [{ ...SALE.payments[0]!, payment_method: "cash" }] }}
+          onClose={() => undefined}
+          onRefunded={onRefunded}
+        />,
+      );
+      selectRefundItem();
+      fireEvent.click(screen.getByRole("button", { name: /Вернуть выбранное/ }));
+      await waitFor(() => expect(getRefundResult).toHaveBeenCalledTimes(1));
+      await act(async () => undefined);
+
+      const command = loadPendingRefundOperation(SALE.id, context);
+      expect(window.localStorage.getItem(key)).not.toBeNull();
+      expect(command).toMatchObject({
+        operationId: mutateAsync.mock.calls[0]?.[0]?.payload.operation_id,
+        refundAttemptOperationId: null,
+        refundAttemptId: null,
+      });
+      expect(getRefundResult).toHaveBeenCalledWith(command?.operationId);
+      expect(mutateAsync).toHaveBeenCalledTimes(1);
+      expect(createRefundAttempt).not.toHaveBeenCalled();
+      expect(onRefunded).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /Вернуть выбранное/ })).toBeDisabled();
+    },
+  );
 });
