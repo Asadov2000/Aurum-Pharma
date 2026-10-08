@@ -41,6 +41,7 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.unit_cart_models import UnitCartItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,6 +618,16 @@ class POSRepository:
             status="voided",
             voided_at=row["voided_at"],
             voided_by_sale_id=row["voided_by_sale_id"],
+        )
+
+    async def list_prepared_cart_items(self, tenant_id: UUID, sale_id: UUID) -> list[UnitCartItem]:
+        return list(
+            await self.session.scalars(
+                select(UnitCartItem)
+                .where(UnitCartItem.tenant_id == tenant_id, UnitCartItem.sale_id == sale_id)
+                .order_by(UnitCartItem.position)
+                .execution_options(populate_existing=True)
+            )
         )
 
     async def list_items(self, sale_id: UUID) -> list[SaleItem]:

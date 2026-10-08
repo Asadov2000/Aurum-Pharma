@@ -20,6 +20,7 @@ from pydantic import (
 
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.customer_returns.reasons import RefundReasonCode
+from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # Legacy clients can retry an operation created before QR became a distinct
@@ -697,6 +698,7 @@ class SaleDetails(SaleRead):
     items: list[SaleItemRead]
     payments: list[PaymentRead]
     physical_items: list[ReceiptLine] = Field(default_factory=list)
+    prepared_cart_items: list[UnitCartItemSnapshot] = Field(default_factory=list)
 
 
 class PrescriptionLogCreate(_PrescriptionFields):
