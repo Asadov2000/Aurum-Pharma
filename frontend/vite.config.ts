@@ -50,7 +50,7 @@ function splitRuntimeDependencies(id: string): string | undefined {
   // runtime helpers in its existing lazy chunk rather than adding three POS
   // startup requests; the settings form's Zod schema remains separate.
   if (
-    /\/src\/features\/(foundation\/(RecordActionMenu|recordActionPresentation)\.tsx|settings\/(useQuickActionPreferences|usePreferenceAutosave|quickActions|quickActionStorage)\.ts)$/.test(
+    /\/src\/features\/(foundation\/(RecordActionMenu|recordActionPresentation)\.tsx|settings\/(useQuickActionPreferences|usePreferenceAutosave|preferencesMutation|quickActions|quickActionStorage)\.ts)$/.test(
       normalizedId,
     )
   ) {
