@@ -57,7 +57,7 @@ class PhysicalCartOptionsRead(FrozenContract):
     stock_date: date
     packaging: UnitPackagingV2 | None
     currency: Literal["TJS"] = "TJS"
-    checkout_enabled: Literal[False] = False
+    checkout_enabled: Literal[True] = True
     stock_reserved: Literal[False] = False
     stock: PhysicalCartStockRead
     options: tuple[PhysicalCartFormatOption, PhysicalCartFormatOption, PhysicalCartFormatOption]

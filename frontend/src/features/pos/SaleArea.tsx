@@ -46,6 +46,8 @@ import {
   markPendingCompletion,
 } from "./completionOperation";
 import { type DraftInit, loadDraft, scopedDraftStorage } from "./draftStorage";
+import { hasPhysicalCashRecovery } from "./physicalCashRecoveryPresence";
+import { type PhysicalCashCheckoutResult } from "./physicalCashCheckout";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
   mergeCheckoutResult,
@@ -101,6 +103,10 @@ const ReceiptPrintModal = lazy(async () => {
 const PhysicalCartEditor = lazy(async () => {
   const module = await import("./PhysicalCartEditor");
   return { default: module.PhysicalCartEditor };
+});
+const PhysicalCashPanel = lazy(async () => {
+  const module = await import("./PhysicalCashPanel");
+  return { default: module.PhysicalCashPanel };
 });
 const QuickProducts = lazy(async () => {
   const module = await import("./QuickProducts");
@@ -247,10 +253,17 @@ export function SaleArea({
   const isOnline = useConnectivity().canUseServer;
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
+  const recoveryDraft = storageScope ? loadDraft(registerId, draftTtlMin, storageScope) : null;
+  const cashRecoveryRequired =
+    storageScope && recoveryDraft?.saleId
+      ? hasPhysicalCashRecovery(recoveryDraft.saleId, storageScope)
+      : false;
+  const completedReceiptRequired = canSell && recoveryDraft?.status === "completed";
 
   return (
     <div className="min-w-0 xl:h-full xl:min-h-0">
-      {hasShift && canSell && storageScope ? (
+      {((hasShift && canSell) || cashRecoveryRequired || completedReceiptRequired) &&
+      storageScope ? (
         <RegisterWorkspaceGate
           key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
           registerId={registerId}
@@ -262,6 +275,7 @@ export function SaleArea({
               storageScope={storageScope}
               registerId={registerId}
               branchId={shiftQuery.data?.branch_id ?? null}
+              hasOpenShift={hasShift && canSell}
               mode={mode}
               soundOn={soundOn}
               draftTtlMin={draftTtlMin}
@@ -272,6 +286,7 @@ export function SaleArea({
               cardTerminalId={cardTerminalId}
               qrTerminalId={qrTerminalId}
               canCloseShift={canCloseShift}
+              canOpenShift={canOpenShift}
               canReconcileExternalPayment={canReconcileExternalPayment}
               canExportReports={canExportReports}
               online={isOnline}
@@ -354,6 +369,7 @@ function ActiveWorkspace({
   storageScope,
   registerId,
   branchId,
+  hasOpenShift,
   mode,
   soundOn,
   draftTtlMin,
@@ -364,6 +380,7 @@ function ActiveWorkspace({
   cardTerminalId,
   qrTerminalId,
   canCloseShift,
+  canOpenShift,
   canReconcileExternalPayment,
   canExportReports,
   online,
@@ -373,6 +390,7 @@ function ActiveWorkspace({
   storageScope: PosStorageScope;
   registerId: string;
   branchId: string | null;
+  hasOpenShift: boolean;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
@@ -383,6 +401,7 @@ function ActiveWorkspace({
   cardTerminalId?: string | null;
   qrTerminalId?: string | null;
   canCloseShift: boolean;
+  canOpenShift: boolean;
   canReconcileExternalPayment: boolean;
   canExportReports: boolean;
   online: boolean;
@@ -401,6 +420,10 @@ function ActiveWorkspace({
 
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin, storageScope));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
+  const [physicalCashBlocked, setPhysicalCashBlocked] = useState(
+    () => init.saleId !== null && hasPhysicalCashRecovery(init.saleId, storageScope),
+  );
+  const physicalCashBlockedRef = useRef(physicalCashBlocked);
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
   const [pendingPayment, setPendingPayment] = useState<PendingPaymentOperation | null>(() =>
     init.saleId ? loadPendingPaymentOperation(init.saleId) : null,
@@ -556,9 +579,12 @@ function ActiveWorkspace({
         (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
-  const cartMutationPending = posCommand.blocked || physicalCartBusy || !online;
+  const cartMutationPending =
+    !hasOpenShift || posCommand.blocked || physicalCartBusy || physicalCashBlocked || !online;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const saleEditingBlocked =
+    !hasOpenShift ||
+    physicalCashBlocked ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -570,6 +596,8 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null);
   const scannerHardwareBlocked =
+    !hasOpenShift ||
+    physicalCashBlocked ||
     physicalCartActive ||
     !online ||
     completeSale.isPending ||
@@ -581,6 +609,7 @@ function ActiveWorkspace({
     pendingPayment !== null;
   const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
+    physicalCashBlocked ||
     physicalCartBusy ||
     !online ||
     completeSale.isPending ||
@@ -603,6 +632,7 @@ function ActiveWorkspace({
         stagedPayments.length > 0 ||
         prescription !== null));
   const registerSwitchBlocked =
+    physicalCashBlocked ||
     physicalCartBusy ||
     !online ||
     completeSale.isPending ||
@@ -725,6 +755,67 @@ function ActiveWorkspace({
       return true;
     },
     [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId, sessionIsActive],
+  );
+
+  const acceptPhysicalCash = useCallback(
+    async (result: PhysicalCashCheckoutResult, openCashDrawer: boolean): Promise<boolean> => {
+      if (
+        !sessionIsActive() ||
+        saleIdRef.current !== result.sale_id ||
+        result.register_id !== registerId ||
+        result.tenant_id !== storageScope.tenantId ||
+        result.cashier_id !== storageScope.userId
+      )
+        return false;
+      const refreshed = await refetchSale({ throwOnError: true });
+      if (!sessionIsActive() || saleIdRef.current !== result.sale_id) return false;
+      const completed = refreshed.data;
+      if (
+        !completed ||
+        completed.status !== "completed" ||
+        completed.id !== result.sale_id ||
+        completed.tenant_id !== result.tenant_id ||
+        completed.cashier_user_id !== result.cashier_id ||
+        completed.register_id !== result.register_id ||
+        completed.branch_id !== result.branch_id ||
+        completed.shift_id !== result.shift_id ||
+        completed.receipt_number !== result.receipt_number ||
+        completed.total_amount !== result.total_amount ||
+        completed.currency !== result.currency ||
+        completed.payments.length !== 1 ||
+        completed.payments[0]?.id !== result.operation_id ||
+        completed.payments[0]?.operation_id !== result.operation_id ||
+        completed.payments[0]?.sale_id !== result.sale_id ||
+        completed.payments[0]?.payment_method !== "cash" ||
+        completed.payments[0]?.amount !== result.total_amount ||
+        completed.payments[0]?.currency !== result.currency
+      )
+        throw new Error(
+          "Не удалось подтвердить завершённый чек. Проверьте эту же оплату повторно.",
+        );
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      if (openCashDrawer && openedDrawerOperationRef.current !== result.operation_id) {
+        requestDesktopCashDrawerOpen({
+          reason: "sale-completed",
+          registerId,
+          saleId: result.sale_id,
+        });
+        openedDrawerOperationRef.current = result.operation_id;
+      }
+      void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
+      setPhysicalEditorOpen(false);
+      return true;
+    },
+    [sessionIsActive, registerId, storageScope, refetchSale, persistCompletedReceipt, queryClient],
+  );
+
+  const updatePhysicalCashBlocked = useCallback(
+    (blocked: boolean) => {
+      if (!sessionIsActive()) return;
+      physicalCashBlockedRef.current = blocked;
+      setPhysicalCashBlocked(blocked);
+    },
+    [sessionIsActive],
   );
 
   const recoverCheckout = useCallback(
@@ -1735,6 +1826,10 @@ function ActiveWorkspace({
   };
 
   const startNewSale = (): boolean => {
+    if (physicalCashBlockedRef.current || !hasOpenShift) {
+      setTopError("Сначала проверьте текущую оплату и откройте смену.");
+      return false;
+    }
     if (posCommand.blocked) {
       setTopError("Сначала завершите сверку последней команды с сервером.");
       return false;
@@ -1963,6 +2058,7 @@ function ActiveWorkspace({
           <ShiftBar
             registerId={registerId}
             mode={mode}
+            canOpen={canOpenShift && !physicalCashBlocked}
             canClose={canCloseShift}
             canExportReport={canExportReports}
             closeBlocked={shiftCloseBlocked}
@@ -2237,16 +2333,44 @@ function ActiveWorkspace({
             className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
           >
             <div className="xl:h-full xl:min-h-0">
-              {physicalCartActive ? (
-                <section
-                  className="rounded-lg border border-border bg-surface p-4"
-                  aria-label="Оплата поштучной корзины"
-                >
-                  <h2 className="font-semibold">Оплата пока недоступна</h2>
-                  <p className="mt-2 text-sm text-foreground-muted">
-                    Корзина сохраняется в черновике. Подключение оплаты — следующий этап.
-                  </p>
-                </section>
+              {(physicalCartActive || physicalCashBlocked) &&
+              saleId &&
+              (branchId || sale?.branch_id) ? (
+                <Suspense fallback={<p role="status">Загрузка оплаты…</p>}>
+                  <PhysicalCashPanel
+                    key={saleId}
+                    saleId={saleId}
+                    branchId={branchId ?? sale!.branch_id}
+                    registerId={registerId}
+                    scope={storageScope}
+                    items={preparedItems}
+                    online={online}
+                    canPay={
+                      hasOpenShift &&
+                      isDraft &&
+                      preparedItems.length > 0 &&
+                      items.length === 0 &&
+                      recordedPayments.length === 0 &&
+                      stagedPayments.length === 0 &&
+                      !physicalCartBusy &&
+                      !posCommand.blocked &&
+                      !pendingCheckout &&
+                      !pendingPayment &&
+                      !completionUncertain &&
+                      !checkoutUncertain &&
+                      !checkoutReconciling &&
+                      !externalPaymentReviewRequired &&
+                      !saleQuery.isError &&
+                      !saleQuery.isPlaceholderData &&
+                      !paymentSettingsLoading &&
+                      !paymentSettingsUnavailable &&
+                      paymentMethods.includes("cash")
+                    }
+                    sessionIsActive={sessionIsActive}
+                    onBlockedChange={updatePhysicalCashBlocked}
+                    onCompleted={acceptPhysicalCash}
+                  />
+                </Suspense>
               ) : (
                 <PaymentPanel
                   totalDue={totalDue}
@@ -2302,7 +2426,7 @@ function ActiveWorkspace({
                   onComplete={() => void onComplete()}
                   completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
                   onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
-                  onNewSale={onNewSale}
+                  onNewSale={hasOpenShift ? onNewSale : undefined}
                   newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
                   touch={touch}
                   completeHint={keyboard ? "Завершить продажу (F4)" : undefined}

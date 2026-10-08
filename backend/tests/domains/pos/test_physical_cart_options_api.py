@@ -45,7 +45,7 @@ async def test_options_all_formats_prices_and_physical_stock_without_side_effect
         assert body["sale_id"] == str(source.sale.id)
         assert body["catalog_id"] == str(context.stock.catalog_id)
         assert body["currency"] == "TJS"
-        assert body["checkout_enabled"] is False and body["stock_reserved"] is False
+        assert body["checkout_enabled"] is True and body["stock_reserved"] is False
         assert body["stock"] == {"base_units": 60, "closed_packs": 2, "intact_blisters": 6}
         assert body["packaging"]["units_per_pack"] == 30
         assert body["packaging"]["units_per_blister"] == 10
