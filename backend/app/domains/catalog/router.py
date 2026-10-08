@@ -36,6 +36,7 @@ from app.core.errors import (
     ValidationError,
 )
 from app.core.storage import default_object_path, get_object, put_object, remove_object
+from app.core.transaction_cleanup import register_rollback_cleanup
 from app.domains.catalog.image_processing import process_catalog_image
 from app.domains.catalog.import_limits import MAX_IMPORT_FILE_BYTES
 from app.domains.catalog.import_parser import XLS_UNSUPPORTED_MESSAGE
@@ -513,18 +514,26 @@ async def import_upload(
     data = await _read_import_file(file, max_bytes=min(max_mb * 1024 * 1024, MAX_IMPORT_FILE_BYTES))
 
     object_name = new_import_object_name(tenant_id)
-    source_path = await run_in_threadpool(
-        put_object,
-        object_name=object_name,
-        data=data,
-        content_type=file.content_type or "text/csv",
-    )
+    source_path = default_object_path(object_name)
+    # Flush first: RLS and tenant write guards must pass before storage changes.
     job = await service.create_import_job(
         tenant_id=tenant_id,
         user_id=user.user_id,
         source_filename=file.filename or "upload.csv",
         source_path=source_path,
     )
+    await run_in_threadpool(
+        put_object,
+        object_name=object_name,
+        data=data,
+        content_type=file.content_type or "text/csv",
+    )
+
+    # A failed/unfinished put has an uncertain outcome; do not race a late write.
+    async def cleanup_upload() -> None:
+        await run_in_threadpool(remove_object, source_path)
+
+    register_rollback_cleanup(service.repo.session, cleanup_upload)
     return ImportJobRead.model_validate(job)
 
 
