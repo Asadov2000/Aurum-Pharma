@@ -287,6 +287,7 @@ test.describe("Catalog flow (owner)", () => {
       data: { brand_name: name, dispensing_type: "otc", storage_type: "normal" },
     });
     expect(createRes.ok()).toBeTruthy();
+    const created: { id: string } = await createRes.json();
     await apiAnon.dispose();
     await api.dispose();
 
@@ -307,10 +308,32 @@ test.describe("Catalog flow (owner)", () => {
         /\/api\/v1\/catalog\/[^/]+\/image$/.test(response.url()) &&
         response.ok(),
     );
+    const imageResponses = Promise.all(
+      ["thumbnail", "display"].map((variant) =>
+        page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname.startsWith(`/api/v1/catalog/${created.id}/image/`) &&
+            url.pathname.endsWith(`/${variant}`) &&
+            response.ok()
+          );
+        }),
+      ),
+    );
     await details
       .getByLabel("Выбрать фотографию товара")
       .setInputFiles("public/icons/icon-192.png");
     await uploadResponse;
+    for (const response of await imageResponses) {
+      expect(new URL(response.url()).searchParams.get("media-policy")).toBe("2");
+      expect(response.headers()["cache-control"]).toBe("private, no-store");
+      const vary = response
+        .headers()
+        .vary.toLowerCase()
+        .split(/\s*,\s*/);
+      expect(vary).toEqual(expect.arrayContaining(["authorization", "x-aurum-support-session"]));
+    }
 
     await expect(details.getByText("Фотография товара", { exact: true })).toBeVisible();
     await expect(details.getByRole("img", { name: `Упаковка ${name}` })).toBeVisible({

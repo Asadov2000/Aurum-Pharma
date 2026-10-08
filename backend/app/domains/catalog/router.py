@@ -338,7 +338,8 @@ async def get_catalog_image(
         content=raw,
         media_type="image/webp",
         headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
+            "Cache-Control": "private, no-store",
+            "Vary": "Authorization, X-Aurum-Support-Session",
             "Content-Disposition": "inline",
             "ETag": f'"{version}-{variant}"',
             "X-Content-Type-Options": "nosniff",
