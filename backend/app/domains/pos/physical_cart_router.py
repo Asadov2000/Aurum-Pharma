@@ -15,7 +15,12 @@ from app.core.deps import (
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError
-from app.domains.pos.physical_cart_schemas import PhysicalCartItemPut, PhysicalCartQuoteRead
+from app.domains.pos.physical_cart_options_service import PhysicalCartOptionsService
+from app.domains.pos.physical_cart_schemas import (
+    PhysicalCartItemPut,
+    PhysicalCartOptionsRead,
+    PhysicalCartQuoteRead,
+)
 from app.domains.pos.unit_cart_quote import UnitCartQuoteService
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cart_service import UnitCartItemSnapshot, UnitCartService
@@ -125,3 +130,22 @@ async def quote_physical_cart(
         allowed_branch_ids=branch_ids,
     )
     return PhysicalCartQuoteRead(quote=quote, revision_hash=quote.revision_hash)
+
+
+@router.get("/options/{catalog_id}", response_model=PhysicalCartOptionsRead)
+async def read_physical_cart_options(
+    sale_id: UUID,
+    catalog_id: UUID,
+    user: CartUser,
+    repository: CartRepository,
+    response: Response,
+) -> PhysicalCartOptionsRead:
+    response.headers["Cache-Control"] = "private, no-store"
+    tenant_id, branch_ids = await _cart_scope(sale_id, user, repository)
+    return await PhysicalCartOptionsService(repository).read(
+        tenant_id=tenant_id,
+        sale_id=sale_id,
+        catalog_id=catalog_id,
+        actor_id=user.user_id,
+        allowed_branch_ids=branch_ids,
+    )
