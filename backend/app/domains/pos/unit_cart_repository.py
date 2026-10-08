@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import exists, select, text
+from sqlalchemy import and_, exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import PermissionDeniedError
 from app.domains.catalog.models import TenantCatalog
+from app.domains.inventory.unit_ledger_v2_models import UnitStockLotV2, UnitStockOpenedPackV2
 from app.domains.pos.models import POSPaymentAttempt, Sale, SaleItem, SalePayment, Shift
 from app.domains.pos.unit_cart_models import UnitCartItem
 
@@ -122,3 +123,35 @@ class UnitCartRepository:
     async def delete_item(self, item: UnitCartItem) -> None:
         await self.session.delete(item)
         await self.session.flush()
+
+    async def read_physical_stock(
+        self, tenant_id: UUID, branch_id: UUID, catalog_id: UUID
+    ) -> tuple[list[UnitStockLotV2], list[UnitStockOpenedPackV2]]:
+        """One statement snapshot of lots and live remainders; never reserve stock."""
+        rows = await self.session.execute(
+            select(UnitStockLotV2, UnitStockOpenedPackV2)
+            .outerjoin(
+                UnitStockOpenedPackV2,
+                and_(
+                    UnitStockOpenedPackV2.tenant_id == UnitStockLotV2.tenant_id,
+                    UnitStockOpenedPackV2.lot_id == UnitStockLotV2.id,
+                    UnitStockOpenedPackV2.branch_id == branch_id,
+                    UnitStockOpenedPackV2.catalog_id == catalog_id,
+                    UnitStockOpenedPackV2.remaining_units > 0,
+                ),
+            )
+            .where(
+                UnitStockLotV2.tenant_id == tenant_id,
+                UnitStockLotV2.branch_id == branch_id,
+                UnitStockLotV2.catalog_id == catalog_id,
+            )
+            .order_by(UnitStockLotV2.id, UnitStockOpenedPackV2.id)
+            .execution_options(populate_existing=True)
+        )
+        lots: dict[UUID, UnitStockLotV2] = {}
+        packs: list[UnitStockOpenedPackV2] = []
+        for lot, pack in rows:
+            lots[lot.id] = lot
+            if pack is not None:
+                packs.append(pack)
+        return list(lots.values()), packs
