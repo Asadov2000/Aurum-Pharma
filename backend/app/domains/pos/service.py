@@ -105,6 +105,7 @@ from app.domains.pos.schemas import (
     ZReportPaymentBreakdown,
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
+from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
 from app.domains.sync.integrity import (
     canonical_json_hash,
@@ -2509,6 +2510,13 @@ class POSService:
         items = await self.repo.list_items_with_batch(sale.id)
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
+
+    async def get_prepared_cart_items(self, sale: Sale) -> list[UnitCartItemSnapshot]:
+        """Read intentions after the caller has authorized access to this sale."""
+        return [
+            UnitCartItemSnapshot.model_validate(item, from_attributes=True)
+            for item in await self.repo.list_prepared_cart_items(sale.tenant_id, sale.id)
+        ]
 
     # ---- receipt (print / PDF) ----
 

@@ -1,5 +1,6 @@
 import { type CatalogItem } from "@/features/catalog/types";
 import { type PosPaymentMethod } from "@/features/foundation/paymentSettings";
+import { type PhysicalCartItem } from "./physicalCart";
 
 // Mirrors backend Pydantic schemas in app/domains/pos/schemas.py.
 
@@ -169,6 +170,7 @@ export interface Sale {
 export interface SaleDetails extends Sale {
   items: SaleItem[];
   physical_items?: ReceiptLine[];
+  prepared_cart_items?: PhysicalCartItem[];
   payments: Payment[];
 }
 

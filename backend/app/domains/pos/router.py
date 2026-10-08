@@ -1302,6 +1302,7 @@ async def get_sale(
         ],
         payments=[PaymentRead.model_validate(p) for p in payments],
         physical_items=service.get_physical_receipt_items(sale),
+        prepared_cart_items=await service.get_prepared_cart_items(sale),
     )
 
 
