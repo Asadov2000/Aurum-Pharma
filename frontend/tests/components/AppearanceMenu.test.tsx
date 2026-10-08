@@ -15,6 +15,9 @@ vi.mock("@/features/auth/hooks", () => ({
 
 vi.mock("@/features/settings/queries", () => ({
   useUserPreferencesQuery: () => ({ data: state.preferences, refetch: state.refetch }),
+}));
+
+vi.mock("@/features/settings/preferencesMutation", () => ({
   useUpdateUserPreferences: () => ({ isPending: false, mutateAsync: state.mutateAsync }),
 }));
 
