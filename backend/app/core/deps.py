@@ -31,6 +31,7 @@ from app.core.errors import (
 )
 from app.core.redis import redis_client
 from app.core.security import decode_access_token
+from app.core.transaction_cleanup import managed_transaction_cleanup
 
 if TYPE_CHECKING:
     from app.domains.auth.repository import AuthRepository, AuthUserRecord
@@ -86,19 +87,25 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
     sessionmaker = SupportSessionLocal if use_support_pool else AppSessionLocal
 
     async with sessionmaker() as session:
-        async with session.begin():
-            await _seed_request_db_context(request, session)
-            try:
-                yield session
-            except DBAPIError as exc:
-                # Translate only our fixed database guard identifiers. Never
-                # expose SQL, parameters, or arbitrary database error contents.
-                from app.domains.tenant_access.errors import translate_guard_error
+        async with managed_transaction_cleanup(session) as cleanup:
+            async with session.begin():
+                try:
+                    await _seed_request_db_context(request, session)
+                    try:
+                        yield session
+                    except DBAPIError as exc:
+                        # Translate only our fixed database guard identifiers.
+                        # Never expose SQL or arbitrary database error contents.
+                        from app.domains.tenant_access.errors import translate_guard_error
 
-                translated = translate_guard_error(exc)
-                if translated is not None:
-                    raise translated from None
-                raise
+                        translated = translate_guard_error(exc)
+                        if translated is not None:
+                            raise translated from None
+                        raise
+                except BaseException as exc:
+                    cleanup.record_body_failure(exc)
+                    raise
+                cleanup.begin_commit()
 
 
 async def get_auth_db(request: Request) -> AsyncIterator[AsyncSession]:
