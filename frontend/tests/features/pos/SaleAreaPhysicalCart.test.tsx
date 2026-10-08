@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SaleArea } from "@/features/pos/SaleArea";
 import { draftKey } from "@/features/pos/draftStorage";
 import { type PhysicalCartItem } from "@/features/pos/physicalCart";
+import { type PhysicalCashCheckoutResult } from "@/features/pos/physicalCashCheckout";
+import { physicalCashRecoveryKey } from "@/features/pos/physicalCashRecoveryPresence";
 import {
   loadPhysicalCartRecovery,
   type PhysicalCartRecovery,
@@ -26,6 +28,8 @@ const calls = vi.hoisted(() => ({
   barcode: vi.fn(),
   attempt: vi.fn(),
   editor: vi.fn(),
+  panel: vi.fn(),
+  drawer: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", async (original) => ({
   ...(await original<typeof import("@tanstack/react-router")>()),
@@ -71,7 +75,7 @@ vi.mock("@/features/catalog/api", () => ({ findByBarcode: calls.barcode }));
 vi.mock("@/lib/desktopBridge", () => ({
   DESKTOP_BARCODE_SCANNED_EVENT: "aurum-desktop-barcode-scanned",
   normalizeDesktopBarcode: (raw: string) => raw.trim() || null,
-  requestDesktopCashDrawerOpen: vi.fn(),
+  requestDesktopCashDrawerOpen: calls.drawer,
 }));
 vi.mock("@/features/pos/usePosRegisterLock", () => ({
   usePosRegisterLock: () => ({ status: "owned", isOwner: true, message: null }),
@@ -89,6 +93,16 @@ vi.mock("@/features/pos/PhysicalCartEditor", () => ({
         <button disabled={props.disabled} onClick={() => void props.onChanged()}>
           Обновить физическую корзину
         </button>
+      </section>
+    );
+  },
+}));
+vi.mock("@/features/pos/PhysicalCashPanel", () => ({
+  PhysicalCashPanel: (props: { canPay: boolean; onBlockedChange: (blocked: boolean) => void }) => {
+    calls.panel(props);
+    return (
+      <section aria-label="Оплата наличными">
+        {props.canPay ? "Оплата доступна" : "Восстановление оплаты"}
       </section>
     );
   },
@@ -156,6 +170,78 @@ function sale(overrides: Partial<SaleDetails> = {}): SaleDetails {
     ...overrides,
   };
 }
+function physicalResult(
+  overrides: Partial<PhysicalCashCheckoutResult> = {},
+): PhysicalCashCheckoutResult {
+  return {
+    schema_version: 3,
+    document_kind: "physical_checkout",
+    tenant_id: "t-1",
+    branch_id: "b-1",
+    sale_id: "sale-1",
+    register_id: "reg-1",
+    shift_id: "sh-1",
+    cashier_id: "u-1",
+    operation_id: "operation-1",
+    event_id: "event-1",
+    stock_command_id: "stock-command-1",
+    created_at: "2026-10-08T08:05:00Z",
+    completed_at: "2026-10-08T08:06:00Z",
+    receipt_number: "R-1",
+    receipt_sequence: 1,
+    is_test: false,
+    lines: [
+      {
+        inventory_kind: "physical_unit",
+        id: physicalItem.id,
+        catalog_id: physicalItem.catalog_id,
+        position: 1,
+        name: "Аспирин",
+        packaging: physicalItem.physical_packaging!,
+        sale_format: "unit",
+        quantity: 2,
+        base_units: 2,
+        original_retail_unit_price: "25.00",
+        gross_amount: "50.00",
+        discount_amount: "0.00",
+        net_amount: "50.00",
+        money_version: 1,
+        currency: "TJS",
+      },
+    ],
+    payments: [{ id: "operation-1", method: "cash", amount: "50.00", currency: "TJS" }],
+    total_amount: "50.00",
+    currency: "TJS",
+    ...overrides,
+  };
+}
+type CashPanelCallbacks = {
+  onBlockedChange: (blocked: boolean) => void;
+  onCompleted: (result: PhysicalCashCheckoutResult, openDrawer: boolean) => Promise<boolean>;
+};
+async function cashPanelCallbacks(): Promise<CashPanelCallbacks> {
+  await screen.findByRole("region", { name: "Оплата наличными" });
+  return calls.panel.mock.calls.at(-1)?.[0] as CashPanelCallbacks;
+}
+function completedSale(overrides: Partial<SaleDetails> = {}): SaleDetails {
+  return sale({
+    status: "completed",
+    receipt_number: "R-1",
+    operation_id: "draft-create-operation",
+    payments: [
+      {
+        id: "operation-1",
+        operation_id: "operation-1",
+        sale_id: "sale-1",
+        payment_method: "cash",
+        amount: "50.00",
+        currency: "TJS",
+      },
+    ],
+    completed_at: "2026-10-08T08:06:00Z",
+    ...overrides,
+  });
+}
 function mount(mode: "keyboard" | "touch" = "keyboard") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -188,14 +274,17 @@ describe("SaleArea physical cart integration", () => {
       JSON.stringify({ saleId: "sale-1", nameById: { "c-1": "Аспирин" }, savedAt: Date.now() }),
     );
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it.each(["keyboard", "touch"] as const)(
-    "restores physical rows and blocks all payment entry points in %s mode",
+    "restores physical rows and prevents legacy payment entry points in %s mode",
     async (mode) => {
       mount(mode);
       await screen.findByRole("region", { name: "Физическая корзина" });
-      expect(screen.getByText("Оплата пока недоступна")).toBeInTheDocument();
+      expect(await screen.findByRole("region", { name: "Оплата наличными" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Карта" })).not.toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Быстрая оплата" })).not.toBeInTheDocument();
@@ -219,6 +308,268 @@ describe("SaleArea physical cart integration", () => {
     await act(async () => undefined);
     expect(calls.barcode).not.toHaveBeenCalled();
     expect(calls.addItem).not.toHaveBeenCalled();
+  });
+
+  it("locks editing and register switching immediately when cash begins", async () => {
+    mount();
+    await screen.findByRole("region", { name: "Оплата наличными" });
+    const panel = calls.panel.mock.calls.at(-1)?.[0] as {
+      onBlockedChange: (blocked: boolean) => void;
+    };
+    act(() => panel.onBlockedChange(true));
+    expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(calls.create).not.toHaveBeenCalled();
+  });
+
+  it("mounts recovery for a completed sale even after the shift closes", async () => {
+    calls.shift.mockResolvedValue(null);
+    calls.sale.mockResolvedValue(sale({ status: "completed", receipt_number: "R-1" }));
+    localStorage.setItem(physicalCashRecoveryKey("sale-1", POS_SCOPE), "unresolved");
+    mount();
+    expect(await screen.findByText("Восстановление оплаты")).toBeInTheDocument();
+    expect(calls.panel.mock.calls.at(-1)?.[0].canPay).toBe(false);
+    expect(screen.queryByRole("region", { name: "Физическая корзина" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the completed receipt visible after closed-shift recovery is acknowledged", async () => {
+    calls.shift.mockResolvedValue(null);
+    calls.sale.mockResolvedValue(completedSale());
+    const recoveryKey = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+    localStorage.setItem(recoveryKey, "pending-original-operation");
+    mount();
+    const panel = await cashPanelCallbacks();
+    let accepted = false;
+    await act(async () => {
+      accepted = await panel.onCompleted(physicalResult(), false);
+    });
+    expect(accepted).toBe(true);
+    act(() => {
+      localStorage.removeItem(recoveryKey);
+      panel.onBlockedChange(false);
+    });
+    expect(await screen.findByText("Чек № R-1 оформлен")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Печать чека" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Оплата наличными" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Физическая корзина" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Новая продажа/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(calls.create).not.toHaveBeenCalled();
+    expect(screen.getByText("Чек № R-1 оформлен")).toBeInTheDocument();
+  });
+
+  it("restores a saved completed receipt without a pending operation or open shift", async () => {
+    calls.shift.mockResolvedValue(null);
+    calls.sale.mockResolvedValue(completedSale());
+    localStorage.setItem(
+      draftKey("reg-1", POS_SCOPE),
+      JSON.stringify({
+        saleId: "sale-1",
+        status: "completed",
+        nameById: { "c-1": "Аспирин" },
+        savedAt: Date.now(),
+      }),
+    );
+    mount();
+    expect(await screen.findByText("Чек № R-1 оформлен")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Печать чека" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Оплата наличными" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Новая продажа/ })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "F2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(calls.create).not.toHaveBeenCalled();
+    expect(calls.addItem).not.toHaveBeenCalled();
+    expect(calls.addPayment).not.toHaveBeenCalled();
+  });
+
+  it("confirms and persists the completed physical receipt before accepting payment", async () => {
+    mount();
+    const panel = await cashPanelCallbacks();
+    act(() => panel.onBlockedChange(true));
+    calls.sale.mockResolvedValue(completedSale());
+    let accepted = false;
+    await act(async () => {
+      accepted = await panel.onCompleted(physicalResult(), true);
+    });
+    expect(accepted).toBe(true);
+    expect(JSON.parse(localStorage.getItem(draftKey("reg-1", POS_SCOPE)) ?? "null")).toMatchObject({
+      saleId: "sale-1",
+      status: "completed",
+    });
+    expect(calls.drawer).toHaveBeenCalledExactlyOnceWith({
+      reason: "sale-completed",
+      registerId: "reg-1",
+      saleId: "sale-1",
+    });
+    await act(async () => {
+      expect(await panel.onCompleted(physicalResult(), true)).toBe(true);
+    });
+    expect(calls.drawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cash recovery blocked when the completed receipt cannot be persisted", async () => {
+    mount();
+    const panel = await cashPanelCallbacks();
+    act(() => panel.onBlockedChange(true));
+    const key = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+    localStorage.setItem(key, "pending-original-operation");
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key, value) {
+      if (key === draftKey("reg-1", POS_SCOPE))
+        throw new DOMException("Full", "QuotaExceededError");
+      originalSetItem.call(this, key, value);
+    });
+    calls.sale.mockResolvedValue(completedSale());
+    let accepted = true;
+    await act(async () => {
+      accepted = await panel.onCompleted(physicalResult(), true);
+    });
+    expect(accepted).toBe(false);
+    expect(localStorage.getItem(key)).toBe("pending-original-operation");
+    expect(
+      await screen.findByText(/Чек завершён, но не удалось сохранить ссылку/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Оплата наличными" })).toBeInTheDocument();
+    expect(calls.drawer).not.toHaveBeenCalled();
+  });
+
+  it.each(["tenant_id", "cashier_id", "register_id", "sale_id"] as const)(
+    "rejects a physical cash result with another %s before refetch or receipt persistence",
+    async (field) => {
+      mount();
+      const panel = await cashPanelCallbacks();
+      const before = calls.sale.mock.calls.length;
+      const storedDraft = localStorage.getItem(draftKey("reg-1", POS_SCOPE));
+      await act(async () => {
+        expect(await panel.onCompleted(physicalResult({ [field]: "other" }), true)).toBe(false);
+      });
+      expect(calls.sale).toHaveBeenCalledTimes(before);
+      expect(localStorage.getItem(draftKey("reg-1", POS_SCOPE))).toBe(storedDraft);
+      expect(calls.drawer).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "branch_id",
+    "shift_id",
+    "receipt_number",
+    "total_amount",
+    "tenant_id",
+    "cashier_user_id",
+    "currency",
+  ] as const)("does not accept a result when the server receipt disagrees on %s", async (field) => {
+    mount();
+    const panel = await cashPanelCallbacks();
+    act(() => panel.onBlockedChange(true));
+    const key = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+    localStorage.setItem(key, "pending-original-operation");
+    calls.sale.mockResolvedValue(
+      completedSale({ [field]: field === "total_amount" ? "51.00" : "other" }),
+    );
+    await act(async () => {
+      await expect(panel.onCompleted(physicalResult(), true)).rejects.toThrow(
+        "Не удалось подтвердить завершённый чек",
+      );
+    });
+    expect(localStorage.getItem(key)).toBe("pending-original-operation");
+    expect(screen.getByRole("region", { name: "Оплата наличными" })).toBeInTheDocument();
+    expect(calls.drawer).not.toHaveBeenCalled();
+  });
+
+  it.each(["id", "operation_id", "sale_id", "payment_method", "amount", "currency"] as const)(
+    "does not accept a receipt whose payment disagrees on %s",
+    async (field) => {
+      mount();
+      const panel = await cashPanelCallbacks();
+      act(() => panel.onBlockedChange(true));
+      const key = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+      localStorage.setItem(key, "pending-original-operation");
+      const paid = completedSale();
+      const payment = paid.payments[0]!;
+      calls.sale.mockResolvedValue(
+        completedSale({
+          payments: [
+            {
+              ...payment,
+              [field]: field === "amount" ? "51.00" : field === "payment_method" ? "card" : "other",
+            },
+          ],
+        }),
+      );
+      await act(async () => {
+        await expect(panel.onCompleted(physicalResult(), true)).rejects.toThrow(
+          "Не удалось подтвердить завершённый чек",
+        );
+      });
+      expect(localStorage.getItem(key)).toBe("pending-original-operation");
+      expect(screen.getByRole("region", { name: "Оплата наличными" })).toBeInTheDocument();
+      expect(calls.drawer).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["missing", "extra"] as const)(
+    "does not accept a completed receipt with a %s payment",
+    async (kind) => {
+      mount();
+      const panel = await cashPanelCallbacks();
+      act(() => panel.onBlockedChange(true));
+      const key = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+      localStorage.setItem(key, "pending-original-operation");
+      const paid = completedSale();
+      calls.sale.mockResolvedValue(
+        completedSale({
+          payments:
+            kind === "missing"
+              ? []
+              : [
+                  ...paid.payments,
+                  {
+                    ...paid.payments[0]!,
+                    id: "another-payment",
+                    operation_id: "another-operation",
+                  },
+                ],
+        }),
+      );
+      await act(async () => {
+        await expect(panel.onCompleted(physicalResult(), true)).rejects.toThrow(
+          "Не удалось подтвердить завершённый чек",
+        );
+      });
+      expect(localStorage.getItem(key)).toBe("pending-original-operation");
+      expect(calls.drawer).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not accept the old cashier's receipt if the account changes during verification", async () => {
+    mount();
+    const panel = await cashPanelCallbacks();
+    const key = physicalCashRecoveryKey("sale-1", POS_SCOPE);
+    localStorage.setItem(key, "pending-original-operation");
+    const originalDraft = localStorage.getItem(draftKey("reg-1", POS_SCOPE));
+    let resolveSale: (value: SaleDetails) => void = () => {
+      throw new Error("Verification has not started");
+    };
+    calls.sale.mockImplementationOnce(
+      () =>
+        new Promise<SaleDetails>((resolve) => {
+          resolveSale = resolve;
+        }),
+    );
+    let verification: Promise<boolean>;
+    act(() => {
+      verification = panel.onCompleted(physicalResult(), true);
+    });
+    act(() => authenticatePos({ tenantId: "t-1", userId: "u-2" }));
+    let accepted = true;
+    await act(async () => {
+      resolveSale(completedSale());
+      accepted = await verification;
+    });
+    expect(accepted).toBe(false);
+    expect(localStorage.getItem(key)).toBe("pending-original-operation");
+    expect(localStorage.getItem(draftKey("reg-1", POS_SCOPE))).toBe(originalDraft);
+    expect(calls.drawer).not.toHaveBeenCalled();
   });
 
   it("keeps a mixed legacy/physical draft read-only instead of enabling old payment", async () => {

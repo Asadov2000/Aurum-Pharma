@@ -104,7 +104,7 @@ test("persists pack, blister and unit draft rows without enabling payment", asyn
     await expect(editor.getByRole("listitem")).toHaveCount(3);
     await expect(editor.getByText(medicine.brand_name, { exact: true })).toHaveCount(3);
     await expect(page.getByRole("region", { name: "К оплате", exact: true })).toHaveCount(0);
-    await expect(page.getByText("Оплата пока недоступна", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Оплата наличными" })).toBeVisible();
     await page.keyboard.press("F4");
     await page.keyboard.press("Enter");
     await expect(editor).toBeVisible();

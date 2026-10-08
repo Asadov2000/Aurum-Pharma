@@ -187,7 +187,9 @@ const resultSchema = z
   );
 export type PhysicalCashCheckoutResult = z.infer<typeof resultSchema>;
 const statusShape = { operation_id: operationId, sale_id: uuid };
-const statusSchema = z.discriminatedUnion("state", [
+// Three strict literal-state variants preserve the same contract while reusing
+// the union runtime already shipped by the form bundle.
+const statusSchema = z.union([
   z.object({ ...statusShape, state: z.literal("not_found") }).strict(),
   z.object({ ...statusShape, state: z.literal("saved_draft"), saved_intent: savedSchema }).strict(),
   z
@@ -281,15 +283,45 @@ function canonicalJson(value: unknown): string {
       .join(",")}}`;
   return JSON.stringify(value);
 }
-async function verifyQuoteHash(intent: SavedPhysicalCashIntent): Promise<void> {
+async function quoteHash(quote: z.infer<typeof quoteSchema>): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(canonicalJson(intent.confirmation.quote)),
+    new TextEncoder().encode(canonicalJson(quote)),
   );
-  const hash = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-  if (hash !== intent.confirmation.request.expected_revision_hash)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function parsePhysicalCashQuote(
+  data: unknown,
+  saleId: string,
+  branchId: string,
+  registerId: string,
+  scope: PosStorageScope,
+) {
+  const parsed = z
+    .object({
+      quote: quoteSchema,
+      revision_hash: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+    .strict()
+    .parse(data);
+  if (
+    parsed.quote.sale_id !== saleId ||
+    parsed.quote.branch_id !== branchId ||
+    parsed.quote.register_id !== registerId ||
+    parsed.quote.tenant_id !== scope.tenantId ||
+    parsed.quote.cashier_id !== scope.userId ||
+    (await quoteHash(parsed.quote)) !== parsed.revision_hash
+  )
+    throw new Error("Расчёт не соответствует текущей корзине или кассиру");
+  return parsed;
+}
+
+async function verifyQuoteHash(intent: SavedPhysicalCashIntent): Promise<void> {
+  if (
+    (await quoteHash(intent.confirmation.quote)) !==
+    intent.confirmation.request.expected_revision_hash
+  )
     throw new Error("Сохранённая корзина не соответствует подтверждённой оплате");
 }
 function assertSession(guard: () => boolean): void {

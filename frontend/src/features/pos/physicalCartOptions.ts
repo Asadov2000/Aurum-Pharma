@@ -35,7 +35,7 @@ export interface PhysicalCartOptions {
   stock_date: string;
   packaging: PhysicalPackaging | null;
   currency: "TJS";
-  checkout_enabled: false;
+  checkout_enabled: boolean;
   stock_reserved: false;
   stock: {
     base_units: number;

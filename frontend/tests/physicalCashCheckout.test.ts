@@ -7,6 +7,7 @@ import {
   completePhysicalCash,
   getPhysicalCashOperation,
   parsePhysicalCashCheckoutResult,
+  parsePhysicalCashQuote,
   parsePhysicalCashOperationStatus,
   parseSavedPhysicalCashIntent,
   savePhysicalCashIntent,
@@ -227,6 +228,30 @@ describe("physical cash contracts", () => {
   });
 });
 describe("physical cash API", () => {
+  it("binds a reviewed draft to its owner, workstation and original hash", async () => {
+    const wrapped = { quote, revision_hash: request.expected_revision_hash };
+    expect(
+      await parsePhysicalCashQuote(
+        wrapped,
+        quote.sale_id,
+        quote.branch_id,
+        quote.register_id,
+        scope,
+      ),
+    ).toEqual(wrapped);
+    await expect(
+      parsePhysicalCashQuote(wrapped, quote.sale_id, id(33), quote.register_id, scope),
+    ).rejects.toThrow();
+    await expect(
+      parsePhysicalCashQuote(
+        { ...wrapped, revision_hash: "a".repeat(64) },
+        quote.sale_id,
+        quote.branch_id,
+        quote.register_id,
+        scope,
+      ),
+    ).rejects.toThrow();
+  });
   it("uses the fixed complete request for both writes and fixed operation for recovery", async () => {
     const seen: string[] = [];
     api.defaults.adapter = async (config) => {

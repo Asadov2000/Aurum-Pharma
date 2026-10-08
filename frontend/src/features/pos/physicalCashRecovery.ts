@@ -10,7 +10,10 @@ import {
   type CashConfirmationRequest,
   type PhysicalCashCheckoutResult,
 } from "./physicalCashCheckout";
-import { capturePosSessionGuard, posStorageKey, type PosStorageScope } from "./posStorageScope";
+import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
+import { physicalCashRecoveryKey } from "./physicalCashRecoveryPresence";
+
+export { physicalCashRecoveryKey } from "./physicalCashRecoveryPresence";
 
 const pendingSchema = z
   .object({
@@ -24,10 +27,6 @@ const pendingSchema = z
 
 export type PendingPhysicalCash = z.infer<typeof pendingSchema>;
 export type PhysicalCashInput = Omit<CashConfirmationRequest, "operation_id">;
-
-export function physicalCashRecoveryKey(saleId: string, scope: PosStorageScope): string {
-  return posStorageKey("aurum:physical-cash-recovery:v1:", saleId, scope);
-}
 
 /** Never expire or delete an unreadable financial intent: its outcome may be committed. */
 export function loadPendingPhysicalCash(

@@ -36,6 +36,16 @@ function packageNameFromModuleId(id: string): string | undefined {
 
 function splitRuntimeDependencies(id: string): string | undefined {
   const normalizedId = id.replaceAll("\\", "/");
+  // Recovery is shared by the eager draft reader and lazy payment panel.
+  // Keep those small primitives with the existing lazy controls, so the panel
+  // cannot absorb POSPage's route entry or add a POS startup request.
+  if (
+    /\/src\/features\/pos\/(operationId|operationStorage|posStorageScope|physicalCashRecoveryPresence)\.ts$/.test(
+      normalizedId,
+    )
+  ) {
+    return "ui-controls";
+  }
   // Shared controls travel with lazy pages, rather than being evaluated by
   // the UI barrel at startup. Group them to avoid extra network requests.
   if (/\/src\/components\/ui\/(Input|Label|FormError)\.tsx$/.test(normalizedId)) {
