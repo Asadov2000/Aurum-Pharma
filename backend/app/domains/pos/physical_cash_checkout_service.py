@@ -1,4 +1,4 @@
-"""Atomic internal physical cash checkout, without a public POS or Edge endpoint."""
+"""Atomic physical cash checkout; the caller owns the transaction."""
 
 from uuid import UUID
 
@@ -16,7 +16,11 @@ from app.domains.pos.unit_cart_quote import PhysicalUnitDraftQuoteLineV2
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cash_confirmation import CashConfirmationRequestV2
 from app.domains.pos.unit_cash_intent_repository import UnitCashIntentRepository
-from app.domains.pos.unit_cash_intent_service import UnitCashIntentService, cash_intent_request_hash
+from app.domains.pos.unit_cash_intent_service import (
+    SavedCashIntentV2,
+    UnitCashIntentService,
+    cash_intent_request_hash,
+)
 from app.domains.pos.unit_checkout_preparation import UnitCheckoutPreparationService
 from app.domains.pos.unit_checkout_repository import UnitCheckoutRepository
 from app.domains.pos.unit_contracts import CheckoutPaymentV2
@@ -25,6 +29,31 @@ from app.domains.pos.unit_contracts import CheckoutPaymentV2
 class PhysicalCashCheckoutService:
     def __init__(self, repository: PhysicalCashCheckoutRepository) -> None:
         self.repository = repository
+
+    async def save_intent(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+        request: CashConfirmationRequestV2,
+    ) -> SavedCashIntentV2:
+        """Keep incompatible confirmations out of this physical-only channel."""
+        async with self.repository.session.begin_nested():
+            saved = await UnitCashIntentService(
+                UnitCashIntentRepository(self.repository.session)
+            ).save(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                allowed_branch_ids=allowed_branch_ids,
+                request=request,
+            )
+            if not all(
+                isinstance(line, PhysicalUnitDraftQuoteLineV2)
+                for line in saved.confirmation.quote.lines
+            ):
+                raise ConflictError("Physical cash confirmation requires a physical cart")
+            return saved
 
     async def complete(
         self,
@@ -70,6 +99,7 @@ class PhysicalCashCheckoutService:
                     or result.completed_at != sale.completed_at
                 ):
                     raise AurumError("Stored physical checkout is inconsistent")
+                await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
                 return result
             prepared = await UnitCheckoutPreparationService(
                 UnitCheckoutRepository(self.repository.session)
@@ -81,6 +111,8 @@ class PhysicalCashCheckoutService:
             )
             if prepared.confirmation != saved:
                 raise ConflictError("Physical checkout cash confirmation changed")
+            # Preparation can wait for stock locks while access changes elsewhere.
+            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             quote = saved.confirmation.quote
             lines: list[PhysicalUnitDraftQuoteLineV2] = []
             for line in quote.lines:
@@ -121,6 +153,8 @@ class PhysicalCashCheckoutService:
             if allocation is None:
                 raise AurumError("Physical checkout receipt allocation failed")
             sequence, number = allocation
+            # Stock posting and receipt allocation can also wait on concurrent writers.
+            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             completed_at = utc_now()
             result = PhysicalCheckoutResultV3(
                 schema_version=3,
@@ -191,4 +225,5 @@ class PhysicalCashCheckoutService:
             )
             await self.repository.complete_sale(sale, receipt, completed_at)
             await self.repository.validate_completion()
+            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             return result

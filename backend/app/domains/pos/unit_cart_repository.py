@@ -31,7 +31,9 @@ class UnitCartRepository:
                 "SELECT current_user='aurum_app' AND session_user='aurum_app' "
                 "AND NOT public.is_support_session() "
                 "AND public.current_app_user_id()=:actor "
-                "AND public.current_tenant_id()=:tenant" + branch_clause
+                "AND public.current_tenant_id()=:tenant "
+                "AND EXISTS (SELECT 1 FROM public.app_user "
+                "WHERE id=:actor AND status='active')" + branch_clause
             ),
             {"tenant": tenant_id, "actor": actor_id, "branch": branch_id},
         )

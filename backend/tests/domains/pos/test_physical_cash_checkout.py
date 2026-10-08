@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -17,7 +17,7 @@ from app.domains.inventory.unit_dispensing_v2_service import PhysicalUnitLedgerV
 from app.domains.inventory.unit_ledger_v2_repository import UnitLedgerV2Repository
 from app.domains.inventory.unit_ledger_v2_service import PreparedUnitLedgerV2Service
 from app.domains.inventory.unit_physical_blocking import PhysicalLotBlockingService
-from app.domains.inventory.unit_stock_v2 import SaleFormatV2
+from app.domains.inventory.unit_stock_v2 import SaleFormatV2, UnitStockBatchV2
 from app.domains.pos.models import Sale
 from app.domains.pos.physical_cash_checkout_repository import PhysicalCashCheckoutRepository
 from app.domains.pos.physical_cash_checkout_service import PhysicalCashCheckoutService
@@ -27,6 +27,7 @@ from app.domains.pos.physical_documents import (
     build_physical_receipt,
 )
 from app.domains.pos.unit_cash_confirmation import CashConfirmationRequestV2
+from app.domains.pos.unit_checkout_repository import UnitCheckoutRepository
 from tests.domains.incoming.test_unit_acceptance import (
     ReceivingRuntime,
     seed_receiving_actor,
@@ -514,3 +515,67 @@ async def test_simultaneous_same_sale_and_cash_operation_waits_then_replays_once
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await db_session.rollback()
+
+
+async def test_access_revoked_while_waiting_for_stock_rolls_back_checkout(
+    db_session: AsyncSession,
+    maintenance_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = await checkout_source(db_session)
+    await put_physical(db_session, source.sale.id, quantity=5)
+    request = await saved_request(db_session, source.sale)
+    context = runtime(db_session)
+    before = await facts(db_session)
+    await db_session.commit()
+    entered = asyncio.Event()
+    original_lock = UnitCheckoutRepository.lock_physical_batches
+
+    async def signal_stock_wait(
+        repository: UnitCheckoutRepository,
+        tenant_id: UUID,
+        branch_id: UUID,
+        catalog_ids: list[UUID],
+    ) -> tuple[UnitStockBatchV2, ...]:
+        entered.set()
+        return await original_lock(repository, tenant_id, branch_id, catalog_ids)
+
+    monkeypatch.setattr(UnitCheckoutRepository, "lock_physical_batches", signal_stock_wait)
+
+    async def checkout() -> PhysicalCheckoutResultV3:
+        async with context.factory() as caller:
+            caller.info["receiving_runtime"] = context
+            await set_receiving_context(caller, context.stock, context.actor_id)
+            return await complete(caller, request)
+
+    async with context.factory() as blocker:
+        await set_receiving_context(blocker, context.stock, context.actor_id)
+        await blocker.execute(
+            text("SELECT id FROM unit_stock_lot_v2 WHERE id=:id FOR UPDATE"),
+            {"id": source.stock.lot_id},
+        )
+        task = asyncio.create_task(checkout())
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+            async with maintenance_engine.begin() as owner:
+                await owner.execute(
+                    text("UPDATE app_user SET status='blocked' WHERE id=:id"),
+                    {"id": context.actor_id},
+                )
+            await blocker.rollback()
+            with pytest.raises(PermissionDeniedError):
+                await asyncio.wait_for(task, timeout=5)
+        finally:
+            await blocker.rollback()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            async with maintenance_engine.begin() as owner:
+                await owner.execute(
+                    text("UPDATE app_user SET status='active' WHERE id=:id"),
+                    {"id": context.actor_id},
+                )
+    await set_receiving_context(db_session, context.stock, context.actor_id)
+    assert await facts(db_session) == before
