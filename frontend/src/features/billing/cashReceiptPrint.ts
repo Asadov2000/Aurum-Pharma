@@ -1,19 +1,63 @@
+import { getAuthEpoch, subscribeLogoutState } from "@/features/auth/logoutState";
+import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
+
 import { formatBillingDateTime, formatBillingMoney } from "./format";
 import { type CashReceipt } from "./cashTypes";
 
 /** Builds an isolated print document using text nodes, never customer HTML. */
 export async function printCashReceipt(receipt: CashReceipt): Promise<void> {
+  const { user, accessToken } = useAuthStore.getState();
+  if (!user || !accessToken) return;
+  const generation = getAuthSessionGeneration();
+  const epoch = getAuthEpoch();
+  const isCurrentAuthority = () => {
+    const current = useAuthStore.getState();
+    return (
+      !!current.accessToken &&
+      current.user?.id === user.id &&
+      current.user?.active_tenant_id === user.active_tenant_id &&
+      getAuthSessionGeneration() === generation &&
+      getAuthEpoch() === epoch
+    );
+  };
   const frame = document.createElement("iframe");
   frame.title = "Печать подтверждения приёма наличных";
   frame.setAttribute("aria-hidden", "true");
   frame.setAttribute("sandbox", "allow-same-origin allow-modals");
   frame.style.cssText = "position:fixed;width:0;height:0;border:0;left:-9999px";
   document.body.appendChild(frame);
-  const cleanup = () => frame.remove();
+  let disposed = false;
+  let timeout: number | undefined;
+  let unsubscribeAuth: (() => void) | undefined;
+  let unsubscribeLogout: (() => void) | undefined;
+  let printWindow: Window | null = null;
+  let cancelWaiting: (() => void) | undefined;
+  const cancelled = new Promise<void>((resolve) => {
+    cancelWaiting = resolve;
+  });
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    if (timeout !== undefined) window.clearTimeout(timeout);
+    printWindow?.removeEventListener("afterprint", cleanup);
+    unsubscribeAuth?.();
+    unsubscribeLogout?.();
+    frame.remove();
+    cancelWaiting?.();
+  };
+  const checkAuthority = () => {
+    if (!isCurrentAuthority()) cleanup();
+  };
   try {
     const doc = frame.contentDocument;
-    const printWindow = frame.contentWindow;
+    printWindow = frame.contentWindow;
     if (!doc || !printWindow) throw new Error("Print frame unavailable");
+    printWindow.addEventListener("afterprint", cleanup, { once: true });
+    timeout = window.setTimeout(cleanup, 120_000);
+    unsubscribeAuth = useAuthStore.subscribe(checkAuthority);
+    unsubscribeLogout = subscribeLogoutState(checkAuthority);
+    checkAuthority();
+    if (disposed) return;
     doc.title = `${receipt.title} ${receipt.document_number}`;
     doc.documentElement.lang = "ru";
     const style = doc.createElement("style");
@@ -57,10 +101,15 @@ export async function printCashReceipt(receipt: CashReceipt): Promise<void> {
       "footer",
       "Подтверждение для учёта взаиморасчётов с Aurum Pharma. Не является фискальным чеком.",
     );
-    if (doc.fonts) await doc.fonts.ready;
-    printWindow.addEventListener("afterprint", cleanup, { once: true });
-    window.setTimeout(cleanup, 120_000);
+    if (doc.fonts) await Promise.race([doc.fonts.ready, cancelled]);
+    checkAuthority();
+    if (disposed || !frame.isConnected) {
+      cleanup();
+      return;
+    }
     printWindow.focus();
+    checkAuthority();
+    if (disposed) return;
     printWindow.print();
   } catch (error) {
     cleanup();
