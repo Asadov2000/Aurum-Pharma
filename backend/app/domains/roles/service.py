@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 import structlog
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.exc import DBAPIError
 
 from app.core.errors import (
@@ -1656,7 +1657,15 @@ class RolesService:
     async def invalidate_user_perms(self, user_id: UUID, tenant_id: UUID) -> None:
         if self.redis is None:
             return
-        await self.redis.delete(perms_cache_key(user_id, tenant_id))
+        # Authorization reads the database; legacy cache cleanup must not roll
+        # back a successful membership change or session revocation.
+        try:
+            await self.redis.delete(perms_cache_key(user_id, tenant_id))
+        except RedisError as exc:
+            logger.warning(
+                "perms_cache_cleanup_failed", scope="user", error_type=type(exc).__name__
+            )
+            return
         logger.info(
             "perms_cache_invalidated",
             user_id=str(user_id),
@@ -1671,7 +1680,13 @@ class RolesService:
         if self.redis is None or not user_ids:
             return
         keys = [perms_cache_key(user_id, tenant_id) for user_id in set(user_ids)]
-        await self.redis.delete(*keys)
+        try:
+            await self.redis.delete(*keys)
+        except RedisError as exc:
+            logger.warning(
+                "perms_cache_cleanup_failed", scope="role", error_type=type(exc).__name__
+            )
+            return
         logger.info(
             "perms_cache_invalidated_for_role_users",
             tenant_id=str(tenant_id),
@@ -1682,6 +1697,12 @@ class RolesService:
         if self.redis is None:
             return
         pattern = f"{PERMS_CACHE_PREFIX}:{user_id}:*"
-        async for key in self.redis.scan_iter(match=pattern):
-            await self.redis.delete(key)
+        try:
+            async for key in self.redis.scan_iter(match=pattern):
+                await self.redis.delete(key)
+        except RedisError as exc:
+            logger.warning(
+                "perms_cache_cleanup_failed", scope="all_tenants", error_type=type(exc).__name__
+            )
+            return
         logger.info("perms_cache_purged_for_user", user_id=str(user_id))
