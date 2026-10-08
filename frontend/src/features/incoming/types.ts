@@ -2,6 +2,11 @@
 
 // Backend uses these literal values: draft / accepted / rejected.
 export type IncomingStatus = "draft" | "accepted" | "rejected";
+export type IncomingStockMode = "legacy_pack" | "prepared_unit_v1" | "physical_unit_v2";
+export interface IncomingAcceptPayload {
+  stock_mode: "legacy_pack" | "physical_unit_v2";
+  expected_revision?: string;
+}
 
 export interface IncomingDocument {
   id: string;
@@ -18,6 +23,7 @@ export interface IncomingDocument {
   created_at: string;
   updated_at: string;
   accepted_at: string | null;
+  stock_mode?: IncomingStockMode | null;
   branch_name?: string | null;
   supplier_name?: string | null;
 }
@@ -50,6 +56,8 @@ export interface IncomingItem {
 
 export interface IncomingDocumentWithItems extends IncomingDocument {
   items: IncomingItem[];
+  acceptance_revision?: string | null;
+  physical_receiving_ready?: boolean;
 }
 
 export interface IncomingDraftFields {
