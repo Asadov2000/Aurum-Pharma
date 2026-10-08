@@ -155,7 +155,7 @@ test("receives prepared packs through the explicit physical stock choice", async
         await api.patch(`catalog/${product.id}`, {
           data: {
             unit_sale_preparation: {
-              version: 2,
+              version: 1,
               state: "prepared",
               unit: "tablet",
               units_per_pack: 20,
