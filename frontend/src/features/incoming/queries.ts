@@ -14,6 +14,7 @@ import {
 } from "./api";
 import {
   type IncomingDocumentCreatePayload,
+  type IncomingAcceptPayload,
   type IncomingDocumentUpdatePayload,
   type IncomingItemCreatePayload,
   type IncomingItemUpdatePayload,
@@ -117,8 +118,10 @@ export function useDeleteIncomingItem() {
 export function useAcceptIncoming() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => acceptIncoming(id),
-    onSuccess: (_data, id) => {
+    mutationFn: (args: string | { id: string; payload: IncomingAcceptPayload }) =>
+      typeof args === "string" ? acceptIncoming(args) : acceptIncoming(args.id, args.payload),
+    onSuccess: (_data, args) => {
+      const id = typeof args === "string" ? args : args.id;
       void qc.invalidateQueries({ queryKey: ["incoming", "list"] });
       void qc.invalidateQueries({ queryKey: incomingKeys.doc(id) });
       // Accepting creates batches → refresh inventory.

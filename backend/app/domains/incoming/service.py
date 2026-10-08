@@ -33,6 +33,7 @@ from app.domains.catalog.models import TenantCatalog
 from app.domains.catalog.unit_sales import UnitSalePreparation
 from app.domains.foundation.models import Branch
 from app.domains.foundation.repository import FoundationRepository
+from app.domains.incoming.acceptance import AcceptanceMode, acceptance_revision
 from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.incoming.repository import (
     IncomingDocumentDetails,
@@ -493,6 +494,39 @@ class IncomingService:
             )
             return doc
 
+    async def accept_for_stock(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+        stock_mode: AcceptanceMode,
+        expected_revision: str | None = None,
+    ) -> IncomingDocument:
+        """Confirm an explicit stock journal against the locked draft content."""
+        doc = await self.repo.get_document_for_update(document_id)
+        if doc is None or doc.tenant_id != tenant_id:
+            raise NotFoundError("Incoming document not found")
+        self._assert_branch_allowed(doc.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if stock_mode == "physical_unit_v2":
+            if doc.status == "draft":
+                if expected_revision is None:
+                    raise BusinessRuleError("Проверьте поставку перед приёмкой")
+                items = await self.repo.list_items(document_id)
+                if acceptance_revision(doc, items) != expected_revision:
+                    raise ConflictError("Поставка изменилась. Обновите и проверьте её ещё раз")
+            return await self.accept_prepared_v2(
+                document_id,
+                actor_id=actor_id,
+                allowed_branch_ids=(
+                    {doc.branch_id} if allowed_branch_ids is None else allowed_branch_ids
+                ),
+            )
+        return await self.accept(
+            document_id, actor_id=actor_id, allowed_branch_ids=allowed_branch_ids
+        )
+
     async def accept_prepared_v2(
         self,
         document_id: UUID,
@@ -502,7 +536,7 @@ class IncomingService:
     ) -> IncomingDocument:
         """Receive a new document into its sole version-two stock journal.
 
-        This internal path has no HTTP caller. A savepoint covers every line;
+        Explicit HTTP confirmation selects this path. A savepoint covers every line;
         the outer commit must pass deferred source and journal completeness.
         """
         if not isinstance(actor_id, UUID) or not isinstance(allowed_branch_ids, set):

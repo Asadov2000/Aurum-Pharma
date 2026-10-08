@@ -28,12 +28,12 @@ import { cn } from "@/lib/utils";
 
 import { AddItemForm } from "./AddItemForm";
 import { deleteIncomingDraftRow } from "./api";
+import { IncomingAcceptDialog } from "./IncomingAcceptDialog";
 import { InvoiceImportForm } from "./InvoiceImportForm";
 import { pharmacyCalendarDate } from "./calendar";
 import { statusLabel, statusTone } from "./labels";
 import { NewIncomingForm } from "./NewIncomingForm";
 import {
-  useAcceptIncoming,
   useDeleteIncomingItem,
   useIncomingDocQuery,
   useIncomingDraftRowsQuery,
@@ -45,7 +45,6 @@ export function IncomingDetailPage(): JSX.Element {
   const { user } = useAuth();
   const { id } = useParams({ from: "/incoming/$id" });
   const incoming = useIncomingDocQuery(id);
-  const accept = useAcceptIncoming();
   const reject = useRejectIncoming();
   const deleteItem = useDeleteIncomingItem();
   const [adding, setAdding] = useState(false);
@@ -62,7 +61,7 @@ export function IncomingDetailPage(): JSX.Element {
   const [topError, setTopError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [docAction, setDocAction] = useState<"accept" | "reject" | null>(null);
-  const [checkingAccept, setCheckingAccept] = useState(false);
+  const [acceptBlocked, setAcceptBlocked] = useState(false);
   const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
   const [deleteItemError, setDeleteItemError] = useState<string | null>(null);
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
@@ -106,7 +105,7 @@ export function IncomingDetailPage(): JSX.Element {
   }
 
   const isDraft = doc.status === "draft";
-  const canEdit = hasPermissionForBranch(user, "incoming.create", doc.branch_id);
+  const canEdit = !acceptBlocked && hasPermissionForBranch(user, "incoming.create", doc.branch_id);
   const canFinalize = hasPermissionForBranch(user, "incoming.finalize", doc.branch_id);
   const editableBranchScope = permissionBranchScope(user, "incoming.create");
   const title = doc.document_number ? `Приёмка № ${doc.document_number}` : "Приёмка без номера";
@@ -120,31 +119,8 @@ export function IncomingDetailPage(): JSX.Element {
     !drafts.data ||
     drafts.data.length > 0;
 
-  const onAccept = async () => {
-    if (!canFinalize || accept.isPending || checkingAccept || draftsBlockAccept) return;
-    setCheckingAccept(true);
-    setTopError(null);
-    setActionMessage(null);
-    try {
-      const currentDrafts = await drafts.refetch();
-      if (currentDrafts.isError || !currentDrafts.data || currentDrafts.data.length > 0) {
-        setTopError(
-          "Сначала завершите или удалите незавершённые позиции. Проверка черновиков должна завершиться успешно.",
-        );
-        return;
-      }
-      await accept.mutateAsync(doc.id);
-      setDocAction(null);
-      setActionMessage("Товары приняты на склад. Документ теперь доступен только для просмотра.");
-    } catch (error) {
-      setTopError(describeApiError(error, "Не удалось принять приход"));
-    } finally {
-      setCheckingAccept(false);
-    }
-  };
-
   const onReject = async () => {
-    if (!canFinalize || reject.isPending) return;
+    if (!canFinalize || acceptBlocked || reject.isPending) return;
     setTopError(null);
     setActionMessage(null);
     try {
@@ -384,7 +360,11 @@ export function IncomingDetailPage(): JSX.Element {
           </div>
           {canEdit && isDraft && (
             <div className="flex flex-wrap gap-2">
-              <Button className="min-h-11" variant="secondary" onClick={() => setImportingInvoice(true)}>
+              <Button
+                className="min-h-11"
+                variant="secondary"
+                onClick={() => setImportingInvoice(true)}
+              >
                 Загрузить накладную
               </Button>
               <Button className="min-h-11" onClick={() => setAdding(true)}>
@@ -460,7 +440,11 @@ export function IncomingDetailPage(): JSX.Element {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-            <Button variant="secondary" onClick={() => setDocAction("reject")}>
+            <Button
+              variant="secondary"
+              disabled={acceptBlocked}
+              onClick={() => setDocAction("reject")}
+            >
               Отклонить
             </Button>
             <Button
@@ -542,29 +526,19 @@ export function IncomingDetailPage(): JSX.Element {
         </Modal>
       )}
 
-      {canFinalize && (
-        <ConfirmDialog
+      {canFinalize && user?.id && (
+        <IncomingAcceptDialog
+          key={JSON.stringify([doc.tenant_id, user.id, doc.id])}
+          document={doc}
+          userId={user.id}
           open={docAction === "accept"}
-          title="Принять товары на склад"
-          message={
-            <>
-              <span className="block">
-                Будет создано партий: {doc.items.length}. Количество:{" "}
-                {formatQuantity(summary.quantity)}. Закупочная сумма:{" "}
-                {formatMoney(doc.total_amount, doc.currency)}.
-              </span>
-              <span className="mt-2 block font-medium">
-                После принятия документ и его позиции нельзя изменить.
-              </span>
-              {topError && <span className="mt-2 block text-danger">{topError}</span>}
-            </>
-          }
-          confirmLabel="Принять на склад"
-          isLoading={accept.isPending || checkingAccept}
-          onConfirm={() => void onAccept()}
-          onCancel={() => {
-            setDocAction(null);
-            setTopError(null);
+          onBlockedChange={setAcceptBlocked}
+          onClose={() => setDocAction(null)}
+          onAccepted={() => {
+            void incoming.refetch();
+            setActionMessage(
+              "Товары приняты на склад. Документ теперь доступен только для просмотра.",
+            );
           }}
         />
       )}

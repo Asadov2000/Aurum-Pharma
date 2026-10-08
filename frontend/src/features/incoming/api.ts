@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 
 import {
   type IncomingDocument,
+  type IncomingAcceptPayload,
   type IncomingDraftRow,
   type IncomingDraftSavePayload,
   type IncomingDocumentCreatePayload,
@@ -84,8 +85,11 @@ export async function deleteIncomingItem(documentId: string, itemId: string): Pr
   await api.delete(`/incoming/${documentId}/items/${itemId}`);
 }
 
-export async function acceptIncoming(id: string): Promise<IncomingDocument> {
-  const { data } = await api.post<IncomingDocument>(`/incoming/${id}/accept`);
+export async function acceptIncoming(
+  id: string,
+  payload?: IncomingAcceptPayload,
+): Promise<IncomingDocument> {
+  const { data } = await api.post<IncomingDocument>(`/incoming/${id}/accept`, payload);
   return data;
 }
 
