@@ -56,3 +56,36 @@ export interface ResolveCustomerReturnPayload {
   reason_code: CustomerReturnReasonCode;
   comment: string | null;
 }
+
+export interface PhysicalCustomerReturnItem {
+  operation_id: string;
+  line_id: string;
+  lot_id: string;
+  branch_id: string;
+  branch_name: string;
+  report_timezone: string;
+  parent_sale_id: string;
+  parent_receipt_number: string;
+  return_sale_id: string | null;
+  return_receipt_number: string | null;
+  catalog_id: string;
+  catalog_name: string;
+  base_units: number;
+  unit_label: string;
+  batch_number: string | null;
+  expires_at: string;
+  received_at: string;
+  refund_reason: string | null;
+  refund_comment: string | null;
+  intake_kind: "cash_refund" | "zero_return";
+  status: "pending";
+}
+
+export interface PhysicalCustomerReturnList {
+  items: PhysicalCustomerReturnItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export type PhysicalCustomerReturnSearchParams = Omit<CustomerReturnSearchParams, "status">;

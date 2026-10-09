@@ -229,6 +229,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "physical_customer_return_queue",
     "trg_physical_cash_refund_guard",
     "trg_physical_zero_return_guard",
     "trg_physical_cash_refund_complete",
@@ -615,6 +616,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "physical_customer_return_queue",
     "unit_lot_is_received_for_report",
     "unit_lot_has_received_source",
     "command_staff_pay",

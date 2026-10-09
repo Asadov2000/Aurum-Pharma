@@ -28,6 +28,65 @@ interface CheckoutResult {
   payments: { id: string; method: string; amount: string }[];
 }
 
+async function verifyQuarantineQueue(
+  page: Page,
+  api: APIRequestContext,
+  medicineName: string,
+  operationId: string,
+  expectedUnits: number[],
+  withoutPayout: boolean,
+): Promise<void> {
+  const response = await api.get("customer-returns/physical", {
+    params: { search: medicineName },
+  });
+  expect(response.ok()).toBe(true);
+  const queue = (await response.json()) as {
+    total: number;
+    items: { operation_id: string; base_units: number; unit_label: string; intake_kind: string }[];
+  };
+  expect(queue.total).toBe(expectedUnits.length);
+  expect(queue.items.map((item) => item.base_units).sort((a, b) => a - b)).toEqual(expectedUnits);
+  expect(queue.items.every((item) => item.operation_id === operationId)).toBe(true);
+  expect(queue.items.every((item) => item.unit_label === "табл.")).toBe(true);
+  expect(
+    queue.items.every(
+      (item) => item.intake_kind === (withoutPayout ? "zero_return" : "cash_refund"),
+    ),
+  ).toBe(true);
+  expect(JSON.stringify(queue)).not.toMatch(
+    /cost_amount|total_cost|purchase_cost|result_payload|receipt_payload/,
+  );
+
+  await page.goto("/batches");
+  await page.getByRole("button", { name: "Возвраты покупателей", exact: true }).click();
+  await page.getByRole("button", { name: "Физические возвраты", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Физические возвраты в карантине", exact: true });
+  const filtered = page.waitForResponse((result) => {
+    const url = new URL(result.url());
+    return (
+      url.pathname === "/api/v1/customer-returns/physical" &&
+      url.searchParams.get("search") === medicineName
+    );
+  });
+  await panel.getByLabel("Поиск", { exact: true }).fill(medicineName);
+  expect((await filtered).ok()).toBe(true);
+  const table = panel.getByRole("table", { name: "Очередь физических возвратов" });
+  await expect(table.getByRole("row")).toHaveCount(expectedUnits.length + 1);
+  for (const units of expectedUnits) {
+    await expect(table.getByRole("cell", { name: `${units} табл.`, exact: true })).toBeVisible();
+  }
+  await expect(panel.getByRole("button", { name: "Принять решение", exact: true })).toHaveCount(0);
+  if (withoutPayout)
+    await expect(table.getByText("Принят без выплаты", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const cards = panel.getByRole("article", {
+    name: `${medicineName}, физический возврат`,
+    exact: true,
+  });
+  await expect(cards).toHaveCount(expectedUnits.length);
+  await expect(cards.first()).toBeVisible();
+}
+
 async function receivePhysicalStock(api: APIRequestContext, branchId: string, catalogId: string) {
   const supplier = await seedSupplier(api, uniqueName("Physical refund supplier"));
   const created = await api.post("incoming", {
@@ -339,6 +398,14 @@ test("refunds units, blister and pack once after a lost response and reload", as
       parent_status: "completed",
       remaining: 48,
     });
+    await verifyQuarantineQueue(
+      page,
+      api,
+      medicine.brand_name,
+      refund.operation_id,
+      [2, 10, 20],
+      false,
+    );
   } finally {
     await api.dispose();
     await anonymous.dispose();
@@ -563,7 +630,10 @@ test("receives a zero-amount unit without a shift or second operation after resp
     const recoveryWrites: string[] = [];
     page.on("request", (request) => {
       const path = new URL(request.url()).pathname;
-      if (request.method() !== "GET" && path.startsWith(`/api/v1/sales/${sale.sale_id}/physical-`)) {
+      if (
+        request.method() !== "GET" &&
+        path.startsWith(`/api/v1/sales/${sale.sale_id}/physical-`)
+      ) {
         recoveryWrites.push(`${request.method()} ${path}`);
       }
     });
@@ -602,6 +672,7 @@ test("receives a zero-amount unit without a shift or second operation after resp
     await expect(dialog).not.toBeVisible();
     expect(submitted).toEqual([result.operation_id]);
     expect(recoveryWrites).toEqual([]);
+    await verifyQuarantineQueue(page, api, medicine.brand_name, result.operation_id, [1], true);
   } finally {
     await api.dispose();
     await anonymous.dispose();
