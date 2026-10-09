@@ -80,7 +80,9 @@ def _roundtrip_or_refuse_known_costs(connection: Connection) -> None:
             text(
                 "SELECT EXISTS(SELECT 1 FROM unit_stock_movement_v2 "
                 "WHERE cost_version IS NOT NULL) OR "
-                "EXISTS(SELECT 1 FROM unit_stock_lot_v2 WHERE blocking_revision>0)"
+                "EXISTS(SELECT 1 FROM unit_stock_lot_v2 WHERE blocking_revision>0) OR "
+                "EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                "EXISTS(SELECT 1 FROM pos_physical_checkout)"
             )
         )
         if known:
@@ -109,7 +111,10 @@ async def test_cost_migration_roundtrip_or_refuses_known_history(
             known = connection.scalar(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM unit_stock_movement_v2 "
-                    "WHERE cost_version IS NOT NULL)"
+                    "WHERE cost_version IS NOT NULL) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_checkout) OR "
+                    "EXISTS(SELECT 1 FROM unit_stock_lot_v2 WHERE blocking_revision>0)"
                 )
             )
             if known:
