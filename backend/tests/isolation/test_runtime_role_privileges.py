@@ -64,6 +64,9 @@ NO_DELETE_TABLES = {
 
 APPEND_ONLY_TABLES = {
     "pos_physical_checkout",
+    "pos_physical_return_command",
+    "pos_physical_return_line",
+    "pos_physical_return_slice",
     "unit_stock_cart_command_v2",
     "unit_stock_cart_line_v2",
     "unit_stock_movement_v2",
@@ -224,6 +227,8 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_physical_return_guard",
+    "trg_physical_return_complete",
     "assert_physical_checkout",
     "trg_physical_stock_checkout_binding",
     "trg_physical_checkout_guard",
@@ -1164,6 +1169,18 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
+    return_names = {"trg_physical_return_guard", "trg_physical_return_complete"}
+    return_functions = {row["proname"]: row for row in rows if row["proname"] in return_names}
+    assert set(return_functions) == return_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in return_functions.values()
+    )
+    assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
+        "trg_physical_return_complete"
+    }
     cash_names = {
         "assert_physical_checkout",
         "trg_physical_stock_checkout_binding",
@@ -1294,10 +1311,71 @@ async def app_engine_privileges() -> AsyncIterator[AsyncEngine]:
         await engine.dispose()
 
 
+async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection) -> None:
+    journal_privileges = list((await conn.execute(text("""
+                    SELECT roles.rolname,relations.relname,checks.privilege,
+                      has_table_privilege(roles.oid,relations.oid,checks.privilege) AS granted,
+                      has_table_privilege(roles.oid,relations.oid,
+                        checks.privilege||' WITH GRANT OPTION') AS grantable
+                    FROM pg_catalog.pg_class relations
+                    JOIN pg_catalog.pg_namespace schemas ON schemas.oid=relations.relnamespace
+                    CROSS JOIN pg_catalog.pg_roles roles
+                    CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
+                      ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
+                    WHERE schemas.nspname='public' AND relations.relname IN (
+                      'pos_physical_return_command','pos_physical_return_line',
+                      'pos_physical_return_slice')
+                    AND roles.rolname IN ('aurum_app','aurum_support','aurum_worker',
+                      'aurum_catalog_worker','aurum_billing_worker','aurum_mailer',
+                      'aurum_edge_cash_executor')
+                """))).mappings())
+    journal_tables = {
+        "pos_physical_return_command",
+        "pos_physical_return_line",
+        "pos_physical_return_slice",
+    }
+    journal_roles = {row["rolname"] for row in journal_privileges}
+    assert {"aurum_app", "aurum_support", "aurum_worker"} <= journal_roles
+    journal_actual: dict[tuple[str, str], set[str]] = {
+        (role, table): set() for role in journal_roles for table in journal_tables
+    }
+    for row in journal_privileges:
+        assert row["grantable"] is False
+        if row["granted"]:
+            journal_actual[(row["rolname"], row["relname"])].add(row["privilege"])
+    assert journal_actual == {
+        (role, table): (
+            {"SELECT", "INSERT"}
+            if role == "aurum_app"
+            else {"SELECT"} if role == "aurum_support" else set()
+        )
+        for role in journal_roles
+        for table in journal_tables
+    }
+
+
+def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
+    expected = {
+        **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
+        **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
+        **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
+        **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
+        **{table: set() for table in NO_ACCESS_TABLES},
+    }
+    actual: dict[str, set[str]] = {relation: set() for relation in expected}
+    for row in rows:
+        assert row["relname"] in expected
+        assert row["is_grantable"] is False
+        if row["has_privilege"]:
+            actual[row["relname"]].add(row["privilege"])
+    assert actual == expected
+
+
 async def test_runtime_role_has_only_row_level_table_privileges(
     support_engine_privileges: AsyncEngine,
 ) -> None:
     async with support_engine_privileges.connect() as conn:
+        await _assert_physical_return_journal_table_privileges(conn)
         relation_result = await conn.execute(text(RELATION_PRIVILEGES_SQL))
         relation_privileges = list(relation_result.mappings())
         defaults_result = await conn.execute(text(DEFAULT_PRIVILEGES_SQL))
@@ -1322,21 +1400,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         tenant_account_result = await conn.execute(text(TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL))
         tenant_account_privileges = list(tenant_account_result.mappings())
 
-    expected_relations = {
-        **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
-        **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
-        **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
-        **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
-        **{table: set() for table in NO_ACCESS_TABLES},
-    }
-    actual_relations: dict[str, set[str]] = {relation: set() for relation in expected_relations}
-    for row in relation_privileges:
-        assert row["relname"] in expected_relations
-        assert row["is_grantable"] is False
-        if row["has_privilege"]:
-            actual_relations[row["relname"]].add(row["privilege"])
-
-    assert actual_relations == expected_relations
+    _assert_runtime_relation_privileges(relation_privileges)
     assert default_privileges == []
     assert database_privileges == {
         "app_can_connect": True,

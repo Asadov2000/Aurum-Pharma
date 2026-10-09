@@ -34,7 +34,19 @@ def compatibility_migration() -> ModuleType:
     return module
 
 
+def return_journal_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0183_physical_return_journal.py"
+    )
+    spec = importlib.util.spec_from_file_location("physical_return_journal_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_cash_for_roundtrip() -> None:
+    return_journal_migration().downgrade()
     compatibility_migration().downgrade()
     migration().downgrade()
 
@@ -42,6 +54,7 @@ def downgrade_cash_for_roundtrip() -> None:
 def upgrade_cash_after_roundtrip() -> None:
     migration().upgrade()
     compatibility_migration().upgrade()
+    return_journal_migration().upgrade()
 
 
 async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
@@ -52,7 +65,8 @@ async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
         with Operations.context(MigrationContext.configure(connection)):
             history = connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_checkout) OR EXISTS(SELECT 1 "
+                    "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_checkout) OR EXISTS(SELECT 1 "
                     "FROM unit_stock_cart_command_v2 WHERE checkout_sale_id IS NOT NULL)"
                 )
             )
