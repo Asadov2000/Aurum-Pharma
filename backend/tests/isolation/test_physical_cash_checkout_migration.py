@@ -46,6 +46,7 @@ def return_journal_migration() -> ModuleType:
 
 
 def downgrade_cash_for_roundtrip() -> None:
+    cash_refund_migration().downgrade()
     return_journal_migration().downgrade()
     compatibility_migration().downgrade()
     migration().downgrade()
@@ -55,6 +56,16 @@ def upgrade_cash_after_roundtrip() -> None:
     migration().upgrade()
     compatibility_migration().upgrade()
     return_journal_migration().upgrade()
+    cash_refund_migration().upgrade()
+
+
+def cash_refund_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / ("alembic/versions/0184_physical_cash_refund.py")
+    spec = importlib.util.spec_from_file_location("physical_cash_refund_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
@@ -119,11 +130,22 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
         )
         before = connection.execute(query).one()
         with Operations.context(MigrationContext.configure(connection)):
+            history = connection.scalar(
+                text("SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund)")
+            )
+            if history:
+                with pytest.raises(DBAPIError) as error:
+                    with connection.begin_nested():
+                        cash_refund_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+                return
+            cash_refund_migration().downgrade()
             compatibility_migration().downgrade()
             previous = connection.execute(query).one()
             assert "v_physical_cash BOOLEAN" not in previous[0]
             assert previous[1:] == before[1:]
             compatibility_migration().upgrade()
+            cash_refund_migration().upgrade()
             assert connection.execute(query).one() == before
 
     async with maintenance_engine.connect() as connection:
