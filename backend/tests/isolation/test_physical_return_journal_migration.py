@@ -32,6 +32,7 @@ from tests.domains.pos.test_physical_return_journal import TABLES, journal_facts
 from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
+from tests.isolation.test_physical_cash_checkout_migration import cash_refund_migration
 
 db_session = receiving_session_fixture
 
@@ -221,14 +222,17 @@ async def test_migration_roundtrip_preserves_rls_acl_or_refuses_committed_histor
             if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_physical_return_command)")):
                 with pytest.raises(DBAPIError):
                     with connection.begin_nested():
+                        cash_refund_migration().downgrade()
                         migration().downgrade()
                 return
+            cash_refund_migration().downgrade()
             migration().downgrade()
             for table in TABLES:
                 assert (
                     connection.scalar(text("SELECT to_regclass(:table)"), {"table": table}) is None
                 )
             migration().upgrade()
+            cash_refund_migration().upgrade()
             for table in TABLES:
                 assert (
                     connection.scalar(
