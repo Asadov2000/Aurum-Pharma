@@ -32,7 +32,10 @@ from tests.domains.pos.test_physical_return_journal import TABLES, journal_facts
 from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
-from tests.isolation.test_physical_cash_checkout_migration import cash_refund_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_refund_for_roundtrip,
+    upgrade_refund_after_roundtrip,
+)
 
 db_session = receiving_session_fixture
 
@@ -219,20 +222,29 @@ async def test_migration_roundtrip_preserves_rls_acl_or_refuses_committed_histor
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
         with Operations.context(MigrationContext.configure(connection)):
+            guards = text(
+                "SELECT proname,pg_get_functiondef(oid),proowner,proacl,prosecdef FROM pg_proc "
+                "WHERE pronamespace='public'::regnamespace AND proname IN "
+                "('trg_physical_return_guard','trg_physical_return_complete',"
+                "'trg_physical_cash_refund_guard','trg_guard_sale_immutability') ORDER BY proname"
+            )
+            original_guards = connection.execute(guards).all()
             if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_physical_return_command)")):
                 with pytest.raises(DBAPIError):
                     with connection.begin_nested():
-                        cash_refund_migration().downgrade()
+                        downgrade_refund_for_roundtrip()
                         migration().downgrade()
+                assert connection.execute(guards).all() == original_guards
                 return
-            cash_refund_migration().downgrade()
+            downgrade_refund_for_roundtrip()
             migration().downgrade()
             for table in TABLES:
                 assert (
                     connection.scalar(text("SELECT to_regclass(:table)"), {"table": table}) is None
                 )
             migration().upgrade()
-            cash_refund_migration().upgrade()
+            upgrade_refund_after_roundtrip()
+            assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (
                     connection.scalar(

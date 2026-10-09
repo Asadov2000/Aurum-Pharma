@@ -1,6 +1,8 @@
 """Atomic internal cash payout paired with physical quarantine history."""
 
 import json
+import re
+from decimal import Decimal, localcontext
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -16,12 +18,56 @@ from app.domains.pos.physical_cash_refund_schemas import (
     PhysicalCashRefundResultV3,
 )
 from app.domains.pos.physical_documents import PhysicalCheckoutResultV3
-from app.domains.pos.physical_return_allocation import PhysicalReturnSelection
+from app.domains.pos.physical_return_allocation import PhysicalReturnSelection, plan_physical_return
 from app.domains.pos.physical_return_journal_repository import PhysicalReturnJournalRepository
+from app.domains.pos.physical_return_journal_schemas import PhysicalReturnJournalResult
 from app.domains.pos.physical_return_journal_service import (
     PhysicalReturnJournalService,
     physical_return_fingerprint,
 )
+from app.domains.pos.unit_contracts import EXACT_CONTEXT
+
+
+def _normalize_reason(
+    reason_code: str | None, comment: str | None
+) -> tuple[str | None, str | None]:
+    # The established refund normalizer is shared without introducing its eager
+    # POS router imports into this internal module's import path.
+    from app.domains.pos.service import POSService
+
+    if (reason_code is not None and not isinstance(reason_code, str)) or (
+        comment is not None and not isinstance(comment, str)
+    ):
+        raise BusinessRuleError("Refund reason and comment must be text")
+    return POSService._normalize_refund_intent(reason_code, comment)
+
+
+def _validate_expected_amount(expected: Decimal | None) -> None:
+    if expected is None:
+        return
+    with localcontext(EXACT_CONTEXT):
+        if (
+            not isinstance(expected, Decimal)
+            or not expected.is_finite()
+            or not Decimal("0") < expected <= Decimal("999999999999.99")
+            or expected != expected.quantize(Decimal("0.01"))
+        ):
+            raise BusinessRuleError("Reviewed refund amount must be positive money in whole cents")
+
+
+def _check_expected_amount(actual: Decimal, expected: Decimal | None) -> None:
+    if expected is not None and actual != expected:
+        raise ConflictError("Refund amount changed; review the return again")
+
+
+def _replay(
+    existing: PhysicalCashRefund, fingerprint: str, expected: Decimal | None
+) -> PhysicalCashRefundResultV3:
+    if existing.request_hash != fingerprint:
+        raise ConflictError("Refund operation was used for a different request")
+    result = PhysicalCashRefundResultV3.model_validate(existing.result_payload)
+    _check_expected_amount(result.total_amount, expected)
+    return result
 
 
 def physical_cash_refund_fingerprint(
@@ -30,8 +76,16 @@ def physical_cash_refund_fingerprint(
     parent_sale_id: UUID,
     shift_id: UUID,
     selections: tuple[PhysicalReturnSelection, ...],
+    *,
+    reason_code: str | None = None,
+    comment: str | None = None,
+    review_hash: str | None = None,
 ) -> str:
-    payload = {
+    if review_hash is not None and (
+        not isinstance(review_hash, str) or re.fullmatch(r"[0-9a-f]{64}", review_hash) is None
+    ):
+        raise BusinessRuleError("Refund review hash is invalid")
+    payload: dict[str, object] = {
         "version": 3,
         "kind": "physical_cash_refund",
         "tenant_id": str(tenant_id),
@@ -42,6 +96,16 @@ def physical_cash_refund_fingerprint(
             tenant_id, actor_id, parent_sale_id, selections
         ),
     }
+    reason_code, comment = _normalize_reason(reason_code, comment)
+    if reason_code is not None or comment is not None or review_hash is not None:
+        payload.update(
+            version=4,
+            reason_code=reason_code,
+            comment_hash=(
+                sha256(comment.encode("utf-8")).hexdigest() if comment is not None else None
+            ),
+            review_hash=review_hash,
+        )
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -58,6 +122,10 @@ class PhysicalCashRefundService:
         parent_sale_id: UUID,
         shift_id: UUID,
         selections: tuple[PhysicalReturnSelection, ...],
+        reason_code: str | None = None,
+        comment: str | None = None,
+        expected_total_amount: Decimal | None = None,
+        expected_revision_hash: str | None = None,
     ) -> PhysicalCashRefundResultV3:
         if not all(
             isinstance(value, UUID)
@@ -77,8 +145,17 @@ class PhysicalCashRefundService:
             PhysicalReturnSelection(UUID(str(s.line_id)), s.sale_format, s.quantity)
             for s in selections
         )
+        reason_code, comment = _normalize_reason(reason_code, comment)
+        _validate_expected_amount(expected_total_amount)
         fingerprint = physical_cash_refund_fingerprint(
-            tenant_id, actor_id, parent_sale_id, shift_id, selections
+            tenant_id,
+            actor_id,
+            parent_sale_id,
+            shift_id,
+            selections,
+            reason_code=reason_code,
+            comment=comment,
+            review_hash=expected_revision_hash,
         )
         journal = PhysicalReturnJournalRepository(self.repository.session)
         checkout = await journal.get_checkout(tenant_id, parent_sale_id)
@@ -93,9 +170,7 @@ class PhysicalCashRefundService:
                 raise BusinessRuleError("Completed original physical sale required")
             existing = await self.repository.get(tenant_id, operation_id)
             if existing is not None:
-                if existing.request_hash != fingerprint:
-                    raise ConflictError("Refund operation was used for a different request")
-                return PhysicalCashRefundResultV3.model_validate(existing.result_payload)
+                return _replay(existing, fingerprint, expected_total_amount)
             if await journal.get_command(tenant_id, operation_id) is not None:
                 raise ConflictError("Return operation already exists without a cash refund")
             shift = await self.repository.lock_shift(tenant_id, shift_id)
@@ -111,12 +186,18 @@ class PhysicalCashRefundService:
                 tenant_id, parent.branch_id, parent.register_id
             ):
                 raise BusinessRuleError("Refund requires an active original register")
-            received = await PhysicalReturnJournalService(journal).receive(
+            received = await self._receive_reviewed(
+                journal=journal,
+                original=PhysicalCheckoutResultV3.model_validate(checkout.result_payload),
                 tenant_id=tenant_id,
                 actor_id=actor_id,
                 operation_id=operation_id,
                 parent_sale_id=parent_sale_id,
                 selections=selections,
+                reason_code=reason_code,
+                comment=comment,
+                expected_total_amount=expected_total_amount,
+                expected_revision_hash=expected_revision_hash,
             )
             if received.total_amount <= 0:
                 raise BusinessRuleError(
@@ -201,6 +282,9 @@ class PhysicalCashRefundService:
                     actor_id=actor_id,
                     payment_id=operation_id,
                     request_hash=fingerprint,
+                    reason_code=reason_code,
+                    comment=comment,
+                    review_hash=expected_revision_hash,
                     result_payload=result.model_dump(mode="json"),
                     receipt_payload=receipt.model_dump(mode="json"),
                     created_by=actor_id,
@@ -217,3 +301,58 @@ class PhysicalCashRefundService:
             await self.repository.validate_completion()
             await journal.assert_actor(tenant_id, actor_id, parent.branch_id)
             return result
+
+    async def _receive_reviewed(
+        self,
+        *,
+        journal: PhysicalReturnJournalRepository,
+        original: PhysicalCheckoutResultV3,
+        tenant_id: UUID,
+        actor_id: UUID,
+        operation_id: UUID,
+        parent_sale_id: UUID,
+        selections: tuple[PhysicalReturnSelection, ...],
+        reason_code: str | None,
+        comment: str | None,
+        expected_total_amount: Decimal | None,
+        expected_revision_hash: str | None,
+    ) -> PhysicalReturnJournalResult:
+        # Caller holds the original sale lock. Policy remains stable until commit.
+        settings = await self.repository.get_settings_for_pos(tenant_id)
+        if settings is None:
+            raise AurumError("POS settings are unavailable")
+        if settings.refund_reason_mode == "off" and (
+            reason_code is not None or comment is not None
+        ):
+            raise BusinessRuleError("Refund reason fields are disabled")
+        if (
+            settings.refund_reason_mode in {"required", "required_with_text"}
+            and reason_code is None
+        ):
+            raise BusinessRuleError("Refund reason is required")
+        if settings.refund_reason_mode == "required_with_text" and comment is None:
+            raise BusinessRuleError("Refund comment is required")
+        from app.domains.pos.physical_cash_refund_review import physical_refund_revision
+
+        cursors = await journal.cursors(tenant_id, original.stock_command_id)
+        if (
+            expected_revision_hash is not None
+            and expected_revision_hash != physical_refund_revision(original, cursors, selections)
+        ):
+            raise ConflictError("Refund history changed; review the return again")
+        try:
+            plan = plan_physical_return(
+                original,
+                selections,
+                returned_base_units=cursors,
+            )
+        except ValueError as error:
+            raise BusinessRuleError(str(error)) from error
+        _check_expected_amount(plan.total_amount, expected_total_amount)
+        return await PhysicalReturnJournalService(journal).receive(
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            operation_id=operation_id,
+            parent_sale_id=parent_sale_id,
+            selections=selections,
+        )

@@ -60,7 +60,7 @@ describe("SaleDetailModal physical receipt", () => {
     details.data = { ...sale };
   });
 
-  it("shows physical units without inventing batch or refund information", () => {
+  it("shows physical units and allows the dedicated refund action without invented batch data", () => {
     details.data = {
       ...sale,
       physical_items: [
@@ -82,7 +82,7 @@ describe("SaleDetailModal physical receipt", () => {
     expect(screen.getByText("2 блист.")).toBeInTheDocument();
     expect(screen.queryByText(/Партия/)).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Возвращено" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Оформить возврат" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Оформить возврат" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Печать чека" })).toBeInTheDocument();
   });
 
