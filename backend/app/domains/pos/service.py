@@ -59,6 +59,11 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.physical_cash_refund_read import (
+    physical_cash_refund_lines,
+    physical_cash_refund_snapshot,
+)
+from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundReceiptV3
 from app.domains.pos.physical_documents import PhysicalReceiptDocumentV3
 from app.domains.pos.physical_receipt_read import physical_receipt_lines, physical_receipt_snapshot
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
@@ -2389,6 +2394,9 @@ class POSService:
     @staticmethod
     def get_receipt_item_names(sale: Sale) -> dict[int, str]:
         """Return immutable line names for a completed receipt snapshot."""
+        refund = physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return {line.position: line.name for line in refund.lines}
         physical = physical_receipt_snapshot(sale)
         if physical is not None:
             return {line.position: line.name for line in physical.lines}
@@ -2405,6 +2413,9 @@ class POSService:
     @staticmethod
     def get_physical_receipt_items(sale: Sale) -> list[ReceiptLine]:
         """Read physical lines after the caller has authorized access to the sale."""
+        refund = physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return physical_cash_refund_lines(refund)
         snapshot = physical_receipt_snapshot(sale)
         return physical_receipt_lines(snapshot) if snapshot is not None else []
 
@@ -2615,7 +2626,7 @@ class POSService:
         )
 
     async def _compose_physical_receipt_data(
-        self, sale: Sale, snapshot: PhysicalReceiptDocumentV3
+        self, sale: Sale, snapshot: PhysicalReceiptDocumentV3 | PhysicalCashRefundReceiptV3
     ) -> ReceiptData:
         # V3 stores retail facts, but not historical pharmacy/cashier display data.
         tenant = await self.repo.session.get(Tenant, sale.tenant_id)
@@ -2628,23 +2639,36 @@ class POSService:
             raise AurumError("Tenant report timezone is invalid") from exc
         return ReceiptData(
             sale_id=sale.id,
-            is_refund=False,
+            is_refund=isinstance(snapshot, PhysicalCashRefundReceiptV3),
             status=sale.status,
             pharmacy_name=tenant.name if tenant is not None else "",
             branch_name=branch.name if branch is not None else "",
             branch_address=branch.address if branch is not None else None,
             branch_license=branch.license_number if branch is not None else None,
             receipt_number=snapshot.receipt_number,
+            original_receipt_number=(
+                snapshot.parent_receipt_number
+                if isinstance(snapshot, PhysicalCashRefundReceiptV3)
+                else None
+            ),
             datetime=local_datetime,
             cashier_name=cashier_name,
-            items=physical_receipt_lines(snapshot),
+            items=(
+                physical_cash_refund_lines(snapshot)
+                if isinstance(snapshot, PhysicalCashRefundReceiptV3)
+                else physical_receipt_lines(snapshot)
+            ),
             discount_total=sum((line.discount_amount for line in snapshot.lines), Decimal("0")),
             total=snapshot.total_amount,
             currency=snapshot.currency,
-            payments=[
-                ReceiptPayment(method=payment.method, amount=payment.amount)
-                for payment in snapshot.payments
-            ],
+            payments=(
+                [ReceiptPayment(method="cash", amount=snapshot.total_amount)]
+                if isinstance(snapshot, PhysicalCashRefundReceiptV3)
+                else [
+                    ReceiptPayment(method=payment.method, amount=payment.amount)
+                    for payment in snapshot.payments
+                ]
+            ),
             # Cash tender and change are not part of this version's saved receipt.
             paid_total=None,
             change=None,
@@ -2671,6 +2695,9 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_view_branch_ids=allowed_view_branch_ids,
             )
+        refund = physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return await self._compose_physical_receipt_data(sale, refund)
         physical = physical_receipt_snapshot(sale)
         if physical is not None:
             return await self._compose_physical_receipt_data(sale, physical)
