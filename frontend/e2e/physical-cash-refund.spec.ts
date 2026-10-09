@@ -344,3 +344,266 @@ test("refunds units, blister and pack once after a lost response and reload", as
     await anonymous.dispose();
   }
 });
+
+interface ZeroReturnResult {
+  kind: "physical_zero_return";
+  state: "prepared_quarantine";
+  operation_id: string;
+  parent_sale_id: string;
+  total_amount: string;
+  lines: { line_id: string; base_units: number; offset: number }[];
+}
+
+interface ZeroReturnFacts {
+  zero_markers: number;
+  journal_commands: number;
+  sales: number;
+  payments: number;
+  original_hash: string;
+  receipt_counter_hash: string;
+  remaining: number;
+}
+
+function zeroReturnFacts(parentId: string, catalogId: string): ZeroReturnFacts {
+  for (const value of [parentId, catalogId]) {
+    expect(value).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+  }
+  // Read-only aggregates and fingerprints avoid exposing receipt contents.
+  const sql = `SELECT json_build_object(
+    'zero_markers', (SELECT count(*) FROM pos_physical_zero_return WHERE parent_sale_id='${parentId}'),
+    'journal_commands', (SELECT count(*) FROM pos_physical_return_command WHERE parent_sale_id='${parentId}'),
+    'sales', (SELECT count(*) FROM sale WHERE branch_id=(SELECT branch_id FROM sale WHERE id='${parentId}')),
+    'payments', (SELECT count(*) FROM sale_payment p JOIN sale s ON s.id=p.sale_id
+      WHERE s.branch_id=(SELECT branch_id FROM sale WHERE id='${parentId}')),
+    'original_hash', (SELECT md5(to_jsonb(s)::text) FROM sale s WHERE id='${parentId}'),
+    'receipt_counter_hash', (SELECT md5(jsonb_agg(to_jsonb(c) ORDER BY to_jsonb(c)::text)::text)
+      FROM register_receipt_counter c WHERE c.register_id=(SELECT register_id FROM sale WHERE id='${parentId}')),
+    'remaining', (SELECT sum(l.closed_packs * 20 + COALESCE(
+      (SELECT sum(p.remaining_units) FROM unit_stock_opened_pack_v2 p WHERE p.lot_id=l.id), 0))
+      FROM unit_stock_lot_v2 l WHERE l.catalog_id='${catalogId}')
+  );`;
+  return JSON.parse(
+    dockerExec(E2E_POSTGRES_CONTAINER, [
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      E2E_POSTGRES_DB,
+      "-At",
+      "-c",
+      sql,
+    ]).trim(),
+  ) as ZeroReturnFacts;
+}
+
+async function completeDiscountedPack(
+  api: APIRequestContext,
+  registerId: string,
+  catalogId: string,
+): Promise<CheckoutResult> {
+  expect(
+    (
+      await api.post("shifts/open", {
+        data: { register_id: registerId, opening_cash: "0.00" },
+      })
+    ).ok(),
+  ).toBe(true);
+  const created = await api.post("sales", {
+    data: { operation_id: crypto.randomUUID(), register_id: registerId },
+  });
+  expect(created.ok()).toBe(true);
+  const sale = (await created.json()) as { id: string };
+  const item = await api.put(`sales/${sale.id}/physical-cart/items/${crypto.randomUUID()}`, {
+    data: {
+      catalog_id: catalogId,
+      position: 1,
+      sale_format: "pack",
+      quantity: 1,
+      discount_amount: "9.99",
+    },
+  });
+  expect(item.ok()).toBe(true);
+  const quoted = await api.get(`sales/${sale.id}/physical-cart/quote`);
+  expect(quoted.ok()).toBe(true);
+  const quote = (await quoted.json()) as { revision_hash: string; quote: { total_amount: string } };
+  expect(quote.quote.total_amount).toBe("0.01");
+  const confirmation = {
+    operation_id: crypto.randomUUID(),
+    sale_id: sale.id,
+    expected_revision_hash: quote.revision_hash,
+    expected_total_amount: "0.01",
+    cash_tendered: "0.01",
+  };
+  expect(
+    (await api.post(`sales/${sale.id}/physical-cash/intent`, { data: confirmation })).ok(),
+  ).toBe(true);
+  const completed = await api.post(`sales/${sale.id}/physical-cash/complete`, {
+    data: confirmation,
+  });
+  expect(completed.ok()).toBe(true);
+  return (await completed.json()) as CheckoutResult;
+}
+
+test("receives a zero-amount unit without a shift or second operation after response loss", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Zero return branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("Zero return register"));
+    const medicine = await seedCatalogItem(api, uniqueName("Zero return medicine"), "10.00");
+    expect(
+      (
+        await api.patch(`catalog/${medicine.id}`, {
+          data: {
+            unit_sale_preparation: {
+              version: 1,
+              state: "prepared",
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+              unit_price: "0.50",
+            },
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await receivePhysicalStock(api, branch.id, medicine.id);
+    const sale = await completeDiscountedPack(api, register.id, medicine.id);
+    expect(sale.total_amount).toBe("0.01");
+    expect(
+      (
+        await api.post(`shifts/${sale.shift_id}/close`, {
+          data: { closing_cash_actual: "0.01" },
+        })
+      ).ok(),
+    ).toBe(true);
+    const before = zeroReturnFacts(sale.sale_id, medicine.id);
+    expect(before).toMatchObject({
+      zero_markers: 0,
+      journal_commands: 0,
+      sales: 1,
+      payments: 1,
+      remaining: 60,
+    });
+
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/sales");
+    await openRefund(page, sale);
+    const dialog = page.getByRole("dialog", { name: "Возврат лекарства", exact: true });
+    await dialog.getByRole("checkbox", { name: medicine.brand_name, exact: true }).check();
+    await dialog.getByLabel("Что возвращают", { exact: true }).selectOption("unit");
+    await dialog.getByLabel("Количество", { exact: true }).fill("1");
+    const reason = dialog.getByLabel(/^Причина возврата/);
+    if (await reason.count()) {
+      await reason.selectOption("customer_cancelled");
+      await dialog.getByLabel(/^Пояснение/).fill("Изолированная проверка приёма без выплаты");
+    }
+    const quoting = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${sale.sale_id}/physical-cash-refunds/quote`,
+    );
+    await dialog.getByRole("button", { name: "Рассчитать возврат", exact: true }).click();
+    const quoteResponse = await quoting;
+    expect(quoteResponse.ok()).toBe(true);
+    expect(await quoteResponse.json()).toMatchObject({ total_amount: "0.00", currency: "TJS" });
+    const receive = dialog.getByRole("button", {
+      name: "Принять в карантин без выплаты",
+      exact: true,
+    });
+    await expect(receive).toBeEnabled();
+
+    let completed: ZeroReturnResult | null = null;
+    let blockStatus = false;
+    const submitted: string[] = [];
+    await page.route(
+      `**/api/v1/sales/${sale.sale_id}/physical-zero-returns/operations/*`,
+      async (route) => {
+        if (blockStatus) await route.abort("failed");
+        else await route.continue();
+      },
+    );
+    await page.route(
+      `**/api/v1/sales/${sale.sale_id}/physical-zero-returns/complete`,
+      async (route) => {
+        submitted.push((route.request().postDataJSON() as { operation_id: string }).operation_id);
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        completed = (await response.json()) as ZeroReturnResult;
+        blockStatus = true;
+        await route.abort("failed");
+      },
+    );
+    await receive.click();
+    await expect.poll(() => completed !== null).toBe(true);
+    const result = completed as ZeroReturnResult | null;
+    if (!result) throw new Error("Zero return completion response was not observed");
+    expect(result).toMatchObject({
+      kind: "physical_zero_return",
+      state: "prepared_quarantine",
+      parent_sale_id: sale.sale_id,
+      total_amount: "0.00",
+      lines: [{ base_units: 1, offset: 0 }],
+    });
+    expect(result).not.toHaveProperty("receipt");
+    expect(result).not.toHaveProperty("sale_id");
+    expect(result).not.toHaveProperty("payment_id");
+    await expect(
+      dialog.getByRole("heading", { name: "Проверяем ранее отправленный возврат" }),
+    ).toBeVisible();
+
+    const recoveryWrites: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() !== "GET" && path.startsWith(`/api/v1/sales/${sale.sale_id}/physical-`)) {
+        recoveryWrites.push(`${request.method()} ${path}`);
+      }
+    });
+    await page.reload();
+    await openRefund(page, sale);
+    await expect(
+      dialog.getByRole("heading", { name: "Проверяем ранее отправленный возврат" }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    const check = dialog.getByRole("button", { name: "Проверить результат", exact: true });
+    await expect(check).toBeEnabled();
+    blockStatus = false;
+    const recovering = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${sale.sale_id}/physical-zero-returns/operations/${result.operation_id}`,
+    );
+    await check.click();
+    const recovery = await recovering;
+    expect(recovery.ok()).toBe(true);
+    expect(await recovery.json()).toEqual(result);
+    await expect(
+      dialog.getByRole("heading", { name: "Товар принят в карантин", exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Открыть чек возврата", exact: true }),
+    ).toHaveCount(0);
+    expect(submitted).toEqual([result.operation_id]);
+    expect(zeroReturnFacts(sale.sale_id, medicine.id)).toEqual({
+      ...before,
+      zero_markers: 1,
+      journal_commands: 1,
+    });
+    await dialog.getByRole("button", { name: "Готово", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(submitted).toEqual([result.operation_id]);
+    expect(recoveryWrites).toEqual([]);
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});

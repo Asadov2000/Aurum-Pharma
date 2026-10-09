@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_physical_zero_return",
     "pos_physical_cash_refund",
     "pos_physical_checkout",
     "pos_physical_return_command",
@@ -229,6 +230,7 @@ RUNTIME_VIEWS = {
 
 CUSTOM_FUNCTIONS = {
     "trg_physical_cash_refund_guard",
+    "trg_physical_zero_return_guard",
     "trg_physical_cash_refund_complete",
     "trg_physical_return_guard",
     "trg_physical_return_complete",
@@ -1176,6 +1178,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "trg_physical_return_guard",
         "trg_physical_return_complete",
         "trg_physical_cash_refund_guard",
+        "trg_physical_zero_return_guard",
         "trg_physical_cash_refund_complete",
     }
     return_functions = {row["proname"]: row for row in rows if row["proname"] in return_names}
@@ -1332,12 +1335,13 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
                       'pos_physical_return_command','pos_physical_return_line',
-                      'pos_physical_return_slice','pos_physical_cash_refund')
+                      'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
                     AND roles.rolname IN ('aurum_app','aurum_support','aurum_worker',
                       'aurum_catalog_worker','aurum_billing_worker','aurum_mailer',
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "pos_physical_zero_return",
         "pos_physical_cash_refund",
         "pos_physical_return_command",
         "pos_physical_return_line",

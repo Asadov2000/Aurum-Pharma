@@ -81,7 +81,12 @@ async def test_refund_migration_roundtrip_preserves_guards_or_refuses_history(
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         with Operations.context(MigrationContext.configure(connection)):
-            if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund)")):
+            if connection.scalar(
+                text(
+                    "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_zero_return)"
+                )
+            ):
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
                         downgrade_refund_for_roundtrip()
