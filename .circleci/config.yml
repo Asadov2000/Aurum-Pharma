@@ -1,4 +1,4 @@
-# Full CI migration validation; automatic triggers remain disabled until verified.
+# Full required CI matrix; PR/default-branch triggers are configured in CircleCI.
 version: 2.1
 commands:
   setup-linux-tools:
