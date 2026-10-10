@@ -6,7 +6,7 @@ set -eu
 : "${POSTGRES_PASSWORD_FILE:?POSTGRES_PASSWORD_FILE is required}"
 
 [ "${CI:-}" = "true" ] \
-    && [ "${GITHUB_ACTIONS:-}" = "true" ] \
+    && { [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CIRCLECI:-}" = "true" ]; } \
     && [ "${AURUM_DISPOSABLE_DB_CONFIRM:-}" = "destroy-this-database" ] || {
     echo "Edge dispatcher tests require an explicitly disposable CI database" >&2
     exit 1
