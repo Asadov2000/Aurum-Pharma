@@ -9,6 +9,7 @@ case "$(uname -s)" in
 esac
 
 project="aurum-recovery-ci-$$"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 root="$(mktemp -d "${TMPDIR:-/tmp}/aurum-recovery-ci.XXXXXX")"
 secrets="$root/secrets"
 repository="$root/repository"
@@ -30,6 +31,11 @@ cleanup() {
     status=$?
     set +e
     if [ "$status" -ne 0 ]; then
+        # One-shot containers use --rm; events retain their termination metadata.
+        docker events --since "$started_at" --until 0s \
+            --filter "label=com.docker.compose.project=$project" \
+            --filter event=oom --filter event=die \
+            --format '{{.Actor.Attributes.name}} event={{.Action}} exit={{index .Actor.Attributes "exitCode"}}' >&2
         # Inspect only termination/resource metadata; container env contains secrets.
         for container in $(docker ps -aq --filter "label=com.docker.compose.project=$project"); do
             docker inspect --format \
@@ -354,11 +360,12 @@ ALTER TABLE public.recovery_probe OWNER TO aurum_schema_owner;
 SQL
 
 compose run --rm minio-init
+# Bound unknown-length upload buffers for tiny fixtures under the existing limit.
 compose run --rm --entrypoint /bin/sh minio-init -ec '
     root_user="$(cat /run/secrets/MINIO_ROOT_USER)"
     root_password="$(cat /run/secrets/MINIO_ROOT_PASSWORD)"
     mc --config-dir /tmp/.mc alias set local https://minio:9000 "$root_user" "$root_password" >/dev/null
-    printf verified | mc --config-dir /tmp/.mc pipe local/aurum/recovery/probe.txt >/dev/null
+    printf verified | mc --config-dir /tmp/.mc pipe --part-size 16MiB local/aurum/recovery/probe.txt >/dev/null
 '
 
 compose --profile backup run --rm backup
@@ -449,7 +456,7 @@ compose --profile offsite-test run --rm --entrypoint /bin/sh offsite-test-init -
         echo "COMPLIANCE Object Lock unexpectedly allowed version deletion" >&2
         exit 1
     fi
-    if printf denied | mc --config-dir /tmp/restore pipe \
+    if printf denied | mc --config-dir /tmp/restore pipe --part-size 16MiB \
         restore/aurum-offsite-test/aurum-ci/forbidden-object >/dev/null 2>&1; then
         echo "Read-only restore credential unexpectedly uploaded an object" >&2
         exit 1
@@ -507,7 +514,7 @@ compose --profile offsite-test run --rm --no-deps \
         append/aurum-offsite-test/aurum-ci/repository \
         --name "*" --print "{}" | head -n 1)"
     test -n "$object"
-    printf malicious-latest-version | mc --config-dir /tmp/append pipe "$object" >/dev/null
+    printf malicious-latest-version | mc --config-dir /tmp/append pipe --part-size 16MiB "$object" >/dev/null
 '
 
 compose --profile offsite-trust-sign run --rm --no-deps \
