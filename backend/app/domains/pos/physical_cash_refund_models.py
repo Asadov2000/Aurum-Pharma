@@ -26,6 +26,9 @@ class PhysicalCashRefund(Base):
     actor_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     payment_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    comment: Mapped[str | None] = mapped_column(Text)
+    review_hash: Mapped[str | None] = mapped_column(Text)
     result_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     receipt_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

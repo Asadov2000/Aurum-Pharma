@@ -46,7 +46,7 @@ def return_journal_migration() -> ModuleType:
 
 
 def downgrade_cash_for_roundtrip() -> None:
-    cash_refund_migration().downgrade()
+    downgrade_refund_for_roundtrip()
     return_journal_migration().downgrade()
     compatibility_migration().downgrade()
     migration().downgrade()
@@ -56,7 +56,7 @@ def upgrade_cash_after_roundtrip() -> None:
     migration().upgrade()
     compatibility_migration().upgrade()
     return_journal_migration().upgrade()
-    cash_refund_migration().upgrade()
+    upgrade_refund_after_roundtrip()
 
 
 def cash_refund_migration() -> ModuleType:
@@ -66,6 +66,27 @@ def cash_refund_migration() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def cash_refund_policy_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0185_physical_cash_refund_policy.py"
+    )
+    spec = importlib.util.spec_from_file_location("physical_cash_refund_policy_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def downgrade_refund_for_roundtrip() -> None:
+    cash_refund_policy_migration().downgrade()
+    cash_refund_migration().downgrade()
+
+
+def upgrade_refund_after_roundtrip() -> None:
+    cash_refund_migration().upgrade()
+    cash_refund_policy_migration().upgrade()
 
 
 async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
@@ -136,16 +157,16 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
             if history:
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
-                        cash_refund_migration().downgrade()
+                        downgrade_refund_for_roundtrip()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 return
-            cash_refund_migration().downgrade()
+            downgrade_refund_for_roundtrip()
             compatibility_migration().downgrade()
             previous = connection.execute(query).one()
             assert "v_physical_cash BOOLEAN" not in previous[0]
             assert previous[1:] == before[1:]
             compatibility_migration().upgrade()
-            cash_refund_migration().upgrade()
+            upgrade_refund_after_roundtrip()
             assert connection.execute(query).one() == before
 
     async with maintenance_engine.connect() as connection:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { Badge, Button, Modal, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
@@ -11,6 +11,11 @@ import { describeApiError } from "@/lib/errorMessages";
 import { useSaleDetailsQuery } from "./queries";
 import { RefundModal } from "./RefundModal";
 import { type SaleListItem } from "./types";
+
+const PhysicalRefundModal = lazy(async () => {
+  const module = await import("./PhysicalRefundModal");
+  return { default: module.PhysicalRefundModal };
+});
 
 export function SaleDetailModal({
   row,
@@ -186,7 +191,7 @@ export function SaleDetailModal({
             {canRefund &&
               data.sale_type === "sale" &&
               data.status === "completed" &&
-              hasRefundableItems && (
+              (hasRefundableItems || (data.physical_items?.length ?? 0) > 0) && (
                 <Button onClick={() => setRefundOpen(true)}>Оформить возврат</Button>
               )}
             <Button variant="ghost" onClick={onClose}>
@@ -196,16 +201,31 @@ export function SaleDetailModal({
         </div>
       )}
 
-      {canRefund && refundOpen && data && (
-        <RefundModal
-          sale={data}
-          onClose={() => setRefundOpen(false)}
-          onRefunded={(returnSaleId) => {
-            setRefundOpen(false);
-            setCurrentId(returnSaleId); // show the fresh return receipt
-          }}
-        />
-      )}
+      {canRefund &&
+        refundOpen &&
+        data &&
+        ((data.physical_items?.length ?? 0) > 0 ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <PhysicalRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(false)}
+              onRefunded={(returnSaleId) => {
+                setRefundOpen(false);
+                setCurrentId(returnSaleId);
+              }}
+            />
+          </Suspense>
+        ) : (
+          <RefundModal
+            sale={data}
+            onClose={() => setRefundOpen(false)}
+            onRefunded={(returnSaleId) => {
+              setRefundOpen(false);
+              setCurrentId(returnSaleId); // show the fresh return receipt
+            }}
+          />
+        ))}
 
       {printOpen && data && (
         <ReceiptPrintModal

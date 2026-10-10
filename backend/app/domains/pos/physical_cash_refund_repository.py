@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domains.foundation.models import Register
+from app.domains.foundation.models import Register, TenantSettings
+from app.domains.foundation.repository import FoundationRepository
 from app.domains.pos.models import Sale, SalePayment, Shift
 from app.domains.pos.physical_cash_refund_models import PhysicalCashRefund
 from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundReceiptV3
@@ -23,6 +24,9 @@ class PhysicalCashRefundRepository:
             )
         )
         return result
+
+    async def get_settings_for_pos(self, tenant_id: UUID) -> TenantSettings | None:
+        return await FoundationRepository(self.session).get_settings_for_pos(tenant_id)
 
     async def lock_shift(self, tenant_id: UUID, shift_id: UUID) -> Shift | None:
         result: Shift | None = await self.session.scalar(

@@ -19,7 +19,10 @@ from tests.domains.pos.test_physical_cash_checkout import complete
 from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
-from tests.isolation.test_physical_cash_checkout_migration import cash_refund_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_refund_for_roundtrip,
+    upgrade_refund_after_roundtrip,
+)
 
 db_session = receiving_session_fixture
 
@@ -81,7 +84,7 @@ async def test_refund_migration_roundtrip_preserves_guards_or_refuses_history(
             if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund)")):
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
-                        cash_refund_migration().downgrade()
+                        downgrade_refund_for_roundtrip()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 return
             guard = text(
@@ -89,9 +92,9 @@ async def test_refund_migration_roundtrip_preserves_guards_or_refuses_history(
                 "WHERE oid='trg_guard_sale_immutability()'::regprocedure"
             )
             original = connection.execute(guard).one()
-            cash_refund_migration().downgrade()
+            downgrade_refund_for_roundtrip()
             assert connection.scalar(text("SELECT to_regclass('pos_physical_cash_refund')")) is None
-            cash_refund_migration().upgrade()
+            upgrade_refund_after_roundtrip()
             assert connection.execute(guard).one() == original
             assert (
                 connection.scalar(

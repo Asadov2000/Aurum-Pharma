@@ -741,7 +741,7 @@ async def get_current_shift(
         CurrentUser,
         Depends(
             require_any_branch_permission(
-                "pos.shift_open", "pos.shift_close", "pos.sell", policy="resource"
+                "pos.shift_open", "pos.shift_close", "pos.sell", "pos.refund", policy="resource"
             )
         ),
     ],
@@ -756,6 +756,7 @@ async def get_current_shift(
             "pos.shift_open",
             "pos.shift_close",
             "pos.sell",
+            "pos.refund",
         ),
         allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
