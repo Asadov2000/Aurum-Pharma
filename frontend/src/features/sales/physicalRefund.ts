@@ -54,6 +54,11 @@ export const physicalRefundRequestSchema = z
   .strict();
 export type PhysicalRefundRequest = z.infer<typeof physicalRefundRequestSchema>;
 export type PhysicalRefundInput = Omit<PhysicalRefundRequest, "operation_id">;
+export const physicalZeroReturnRequestSchema = physicalRefundRequestSchema
+  .omit({ shift_id: true, expected_total_amount: true })
+  .strict();
+export type PhysicalZeroReturnRequest = z.infer<typeof physicalZeroReturnRequestSchema>;
+export type PhysicalZeroReturnInput = Omit<PhysicalZeroReturnRequest, "operation_id">;
 
 const optionsSchema = z
   .object({
@@ -189,6 +194,103 @@ const statusSchema = z.union([
 export type PhysicalRefundCompleted = z.infer<typeof completedSchema>;
 export type PhysicalRefundStatus = z.infer<typeof statusSchema>;
 
+const zeroReturnPreparedSchema = z
+  .object({
+    version: z.literal(1),
+    kind: z.literal("physical_zero_return"),
+    operation_id: uuid,
+    parent_sale_id: uuid,
+    tenant_id: uuid,
+    branch_id: uuid,
+    actor_id: uuid,
+    state: z.literal("prepared_quarantine"),
+    currency: z.literal("TJS"),
+    total_amount: z.literal("0.00"),
+    lines: z
+      .array(z.object({ line_id: uuid, base_units: whole, offset }).strict())
+      .min(1)
+      .max(200),
+  })
+  .strict()
+  .refine((value) => new Set(value.lines.map((line) => line.line_id)).size === value.lines.length);
+const zeroReturnStatusSchema = z.union([statusSchema.options[0], zeroReturnPreparedSchema]);
+export type PhysicalZeroReturnPrepared = z.infer<typeof zeroReturnPreparedSchema>;
+export type PhysicalZeroReturnStatus = z.infer<typeof zeroReturnStatusSchema>;
+export type PhysicalReturnResult = PhysicalRefundCompleted | PhysicalZeroReturnPrepared;
+export type PhysicalReturnStatus = PhysicalRefundStatus | PhysicalZeroReturnStatus;
+export interface PhysicalZeroReturnScope extends PosStorageScope {
+  branchId: string;
+  registerId: string;
+}
+
+/** Counts are derived from server packaging, never from mutable persisted acknowledgments. */
+export function parsePhysicalZeroReturnStatus(
+  data: unknown,
+  parentId: string,
+  request: PhysicalZeroReturnRequest,
+  scope: PhysicalZeroReturnScope,
+  options?: PhysicalRefundOptions,
+  reviewedQuote?: PhysicalRefundQuote,
+): PhysicalZeroReturnStatus {
+  const status = zeroReturnStatusSchema.parse(data);
+  if (status.operation_id !== request.operation_id || status.parent_sale_id !== parentId)
+    throw new Error("Ответ относится к другой операции возврата.");
+  if (status.state === "not_found") return status;
+  if (
+    status.tenant_id !== scope.tenantId ||
+    status.actor_id !== scope.userId ||
+    status.branch_id !== scope.branchId ||
+    !options ||
+    options.parent_sale_id !== parentId ||
+    options.branch_id !== scope.branchId ||
+    options.register_id !== scope.registerId ||
+    status.lines.length !== request.items.length
+  )
+    throw new Error("Подтверждение карантина относится к другому аккаунту или набору товаров.");
+  for (const item of request.items) {
+    const original = options.lines.find((line) => line.line_id === item.line_id);
+    const returned = status.lines.find((line) => line.line_id === item.line_id);
+    const size =
+      item.sale_format === "pack"
+        ? original?.packaging.units_per_pack
+        : item.sale_format === "blister"
+          ? original?.packaging.units_per_blister
+          : 1;
+    if (
+      !original ||
+      !returned ||
+      !size ||
+      BigInt(item.quantity) * BigInt(size) !== BigInt(returned.base_units) ||
+      (item.sale_format === "unit" && item.quantity % original.packaging.dispense_step !== 0) ||
+      BigInt(returned.offset) + BigInt(returned.base_units) > BigInt(original.returned_base_units)
+    )
+      throw new Error("Подтверждение карантина не соответствует выбранным товарам.");
+  }
+  if (reviewedQuote) {
+    const quote = quoteSchema.parse(reviewedQuote);
+    if (
+      quote.parent_sale_id !== parentId ||
+      quote.revision_hash !== request.expected_revision_hash ||
+      quote.total_amount !== "0.00" ||
+      quote.lines.length !== request.items.length ||
+      !request.items.every((item) =>
+        quote.lines.some((line) => {
+          const returned = status.lines.find((candidate) => candidate.line_id === item.line_id);
+          return (
+            line.line_id === item.line_id &&
+            line.sale_format === item.sale_format &&
+            line.quantity === item.quantity &&
+            line.base_units === returned?.base_units &&
+            line.offset === returned.offset
+          );
+        }),
+      )
+    )
+      throw new Error("Подтверждение карантина не соответствует проверенному расчёту.");
+  }
+  return status;
+}
+
 export function parsePhysicalRefundStatus(
   data: unknown,
   parentId: string,
@@ -301,5 +403,57 @@ export async function completePhysicalRefund(
   requireActive(active);
   const result = parsePhysicalRefundStatus(data, parentId, validated);
   if (result.state !== "completed") throw new Error("Возврат ещё не подтверждён.");
+  return result;
+}
+
+const zeroPath = (parentId: string): string =>
+  `/sales/${encodeURIComponent(parentId)}/physical-zero-returns`;
+async function validateZeroReturnResponse(
+  data: unknown,
+  parentId: string,
+  request: PhysicalZeroReturnRequest,
+  scope: PhysicalZeroReturnScope,
+  reviewedQuote?: PhysicalRefundQuote,
+): Promise<PhysicalZeroReturnStatus> {
+  const status = zeroReturnStatusSchema.parse(data);
+  const options =
+    status.state === "prepared_quarantine"
+      ? await getPhysicalRefundOptions(parentId, scope.branchId, scope.registerId, scope)
+      : undefined;
+  return parsePhysicalZeroReturnStatus(status, parentId, request, scope, options, reviewedQuote);
+}
+export async function getPhysicalZeroReturnStatus(
+  parentId: string,
+  request: PhysicalZeroReturnRequest,
+  scope: PhysicalZeroReturnScope,
+): Promise<PhysicalZeroReturnStatus> {
+  const active = capturePosSessionGuard(scope);
+  requireActive(active);
+  const validated = physicalZeroReturnRequestSchema.parse(request);
+  const { data } = await api.get<unknown>(
+    `${zeroPath(parentId)}/operations/${validated.operation_id}`,
+    { timeout: 8_000 },
+  );
+  requireActive(active);
+  const result = await validateZeroReturnResponse(data, parentId, validated, scope);
+  requireActive(active);
+  return result;
+}
+export async function completePhysicalZeroReturn(
+  parentId: string,
+  request: PhysicalZeroReturnRequest,
+  scope: PhysicalZeroReturnScope,
+  reviewedQuote?: PhysicalRefundQuote,
+): Promise<PhysicalZeroReturnPrepared> {
+  const active = capturePosSessionGuard(scope);
+  requireActive(active);
+  const validated = physicalZeroReturnRequestSchema.parse(request);
+  const { data } = await api.post<unknown>(`${zeroPath(parentId)}/complete`, validated, {
+    timeout: 15_000,
+  });
+  requireActive(active);
+  const result = await validateZeroReturnResponse(data, parentId, validated, scope, reviewedQuote);
+  requireActive(active);
+  if (result.state !== "prepared_quarantine") throw new Error("Карантин ещё не подтверждён.");
   return result;
 }

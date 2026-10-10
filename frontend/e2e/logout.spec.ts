@@ -27,6 +27,18 @@ async function expectSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: "Меню профиля", exact: true })).toBeVisible();
 }
 
+async function openBootstrappedSession(page: Page): Promise<void> {
+  const initialRefresh = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === refreshPath && response.request().method() === "POST",
+  );
+  await page.goto("/");
+  const response = await initialRefresh;
+  expect(response.status()).toBe(200);
+  expect(await response.finished()).toBeNull();
+  await expectSignedIn(page);
+}
+
 async function expectSignedOut(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
@@ -124,11 +136,10 @@ test.describe("Durable browser logout", () => {
 
   test("logout immediately closes both tabs sharing the browser session", async ({ page }) => {
     await loginInBrowser(page, OWNER);
-    await page.goto("/");
-    await expectSignedIn(page);
+    // Drain each initial refresh before counting requests made during logout.
+    await openBootstrappedSession(page);
     const otherPage = await page.context().newPage();
-    await otherPage.goto("/");
-    await expectSignedIn(otherPage);
+    await openBootstrappedSession(otherPage);
 
     let refreshRequests = 0;
     page.context().on("request", (request) => {

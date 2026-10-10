@@ -7,6 +7,7 @@ import {
 import {
   acknowledgePhysicalRefund,
   inspectPhysicalRefund,
+  isZeroPhysicalReturn,
   loadPhysicalRefund,
   physicalRefundKey,
   runPhysicalRefund,
@@ -46,6 +47,7 @@ const input: PhysicalRefundInput = {
 function pending() {
   const value = loadPhysicalRefund(scope);
   if (!value) throw new Error("Missing fixture intent");
+  if (isZeroPhysicalReturn(value)) throw new Error("Expected cash fixture intent");
   return value;
 }
 function completed() {

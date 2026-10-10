@@ -15,7 +15,7 @@ import {
   quotePhysicalRefund,
   refundCents,
   refundReasonSchema,
-  type PhysicalRefundCompleted,
+  type PhysicalReturnResult,
   type PhysicalRefundItem,
   type PhysicalRefundOptions,
   type PhysicalRefundQuote,
@@ -23,9 +23,11 @@ import {
 import {
   acknowledgePhysicalRefund,
   inspectPhysicalRefund,
+  isZeroPhysicalReturn,
   loadPhysicalRefund,
   physicalRefundKey,
   runPhysicalRefund,
+  runPhysicalZeroReturn,
   resetRejectedPhysicalRefund,
   type PendingPhysicalRefund,
   type PhysicalRefundScope,
@@ -98,7 +100,7 @@ export function PhysicalRefundModal({
   );
   const [options, setOptions] = useState<PhysicalRefundOptions | null>(null);
   const [pending, setPending] = useState<PendingPhysicalRefund | null>(null);
-  const [completed, setCompleted] = useState<PhysicalRefundCompleted | null>(null);
+  const [completed, setCompleted] = useState<PhysicalReturnResult | null>(null);
   const [calculation, setCalculation] = useState<{
     key: string;
     quote: PhysicalRefundQuote;
@@ -147,7 +149,7 @@ export function PhysicalRefundModal({
         setPending(stored);
         if (stored) {
           const status = await inspectPhysicalRefund(scope);
-          if (active() && status?.state === "completed") setCompleted(status);
+          if (active() && status && status.state !== "not_found") setCompleted(status);
           return;
         }
         const available = await getPhysicalRefundOptions(
@@ -230,7 +232,9 @@ export function PhysicalRefundModal({
     }
   });
   const submitRefund = form.handleSubmit(async (values) => {
-    if (!scope || locked || !quote || !ownOpenShift || !options) return;
+    if (!scope || locked || !quote || !options) return;
+    const zeroReturn = refundCents(quote.total_amount) === 0n;
+    if (!zeroReturn && !ownOpenShift) return;
     if (
       (options.reason_mode === "required" || options.reason_mode === "required_with_text") &&
       !values.reason_code
@@ -245,14 +249,19 @@ export function PhysicalRefundModal({
     setBusy(true);
     setError(null);
     try {
-      const result = await runPhysicalRefund(scope, {
-        shift_id: ownOpenShift.id,
+      const input = {
         items: selectedItems(values),
-        expected_total_amount: quote.total_amount,
         expected_revision_hash: quote.revision_hash,
         reason_code: options.reason_mode === "off" ? null : values.reason_code || null,
         comment: options.reason_mode === "off" ? null : values.comment.trim() || null,
-      });
+      };
+      const result = zeroReturn
+        ? await runPhysicalZeroReturn(scope, input, quote)
+        : await runPhysicalRefund(scope, {
+            ...input,
+            shift_id: ownOpenShift!.id,
+            expected_total_amount: quote.total_amount,
+          });
       if (active()) setCompleted(result);
     } catch (reason) {
       if (active()) setError(describeApiError(reason));
@@ -273,13 +282,19 @@ export function PhysicalRefundModal({
     setBusy(true);
     setError(null);
     try {
-      const result = retry ? await runPhysicalRefund(scope) : await inspectPhysicalRefund(scope);
+      const result = retry
+        ? pending && isZeroPhysicalReturn(pending)
+          ? await runPhysicalZeroReturn(scope)
+          : await runPhysicalRefund(scope)
+        : await inspectPhysicalRefund(scope);
       if (active()) {
         setBlocked(false);
-        if (result?.state === "completed") setCompleted(result);
+        if (result && result.state !== "not_found") setCompleted(result);
         else
           setError(
-            "Сервер пока не подтвердил возврат. Деньги повторно не выдавайте. Можно проверить ещё раз или повторить ту же операцию.",
+            pending && isZeroPhysicalReturn(pending)
+              ? "Сервер пока не подтвердил карантин. Новую операцию не создавайте. Можно проверить ещё раз или повторить ту же операцию."
+              : "Сервер пока не подтвердил возврат. Деньги повторно не выдавайте. Можно проверить ещё раз или повторить ту же операцию.",
           );
       }
     } catch (reason) {
@@ -303,7 +318,7 @@ export function PhysicalRefundModal({
     try {
       const status = await resetRejectedPhysicalRefund(scope);
       if (!active()) return;
-      if (status.state === "completed") {
+      if (status.state !== "cleared") {
         setCompleted(status);
         return;
       }
@@ -347,8 +362,13 @@ export function PhysicalRefundModal({
           );
         void queryClient.invalidateQueries({ queryKey: ["sales", "list"] });
         void queryClient.invalidateQueries({ queryKey: salesKeys.detail(scope.parentSaleId) });
-        void queryClient.invalidateQueries({ queryKey: salesKeys.detail(completed.sale_id) });
-        onRefunded(completed.sale_id);
+        if (completed.state === "prepared_quarantine") {
+          onRefunded(completed.parent_sale_id);
+          onClose();
+        } else {
+          void queryClient.invalidateQueries({ queryKey: salesKeys.detail(completed.sale_id) });
+          onRefunded(completed.sale_id);
+        }
       }
     } catch (reason) {
       if (active()) setError(describeApiError(reason));
@@ -379,24 +399,36 @@ export function PhysicalRefundModal({
         )}
         {completed ? (
           <div className="space-y-3 rounded-lg border p-4">
-            <h3 className="font-semibold">Возврат оформлен</h3>
-            <p>
-              К выдаче наличными: <strong>{completed.total_amount} TJS</strong>.
-            </p>
-            <p className="text-sm text-foreground-muted">
-              Чек возврата № {completed.receipt.receipt_number}. Повторно выдавать деньги по этой
-              операции не нужно.
-            </p>
+            <h3 className="font-semibold">
+              {completed.state === "prepared_quarantine"
+                ? "Товар принят в карантин"
+                : "Возврат оформлен"}
+            </h3>
+            {completed.state === "prepared_quarantine" ? (
+              <p>Товар помещён в карантин без выплаты денег. Он не доступен для продажи.</p>
+            ) : (
+              <>
+                <p>
+                  К выдаче наличными: <strong>{completed.total_amount} TJS</strong>.
+                </p>
+                <p className="text-sm text-foreground-muted">
+                  Чек возврата № {completed.receipt.receipt_number}. Повторно выдавать деньги по
+                  этой операции не нужно.
+                </p>
+              </>
+            )}
             <Button disabled={busy} onClick={() => void openCompleted()}>
-              Открыть чек возврата
+              {completed.state === "prepared_quarantine" ? "Готово" : "Открыть чек возврата"}
             </Button>
           </div>
         ) : pending ? (
           <div className="space-y-3 rounded-lg border p-4">
             <h3 className="font-semibold">Проверяем ранее отправленный возврат</h3>
             <p className="text-sm">
-              Сумма: {pending.request.expected_total_amount} TJS. Товары и причина сохранены. Новый
-              возврат пока недоступен.
+              {isZeroPhysicalReturn(pending)
+                ? "Карантин без выплаты денег."
+                : `Сумма: ${pending.request.expected_total_amount} TJS.`}{" "}
+              Товары и причина сохранены. Новый возврат пока недоступен.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button disabled={busy} onClick={() => void recover(false)}>
@@ -530,12 +562,13 @@ export function PhysicalRefundModal({
                 </p>
                 {refundCents(quote.total_amount) === 0n && (
                   <p className="mt-2 text-sm">
-                    За выбранный товар деньги не взимались. Денежный возврат оформить нельзя.
+                    По исходному чеку сумма возврата за выбранное количество — 0,00 TJS. Примите
+                    товар в карантин без выплаты.
                   </p>
                 )}
               </div>
             )}
-            {!ownOpenShift && (
+            {!ownOpenShift && (!quote || refundCents(quote.total_amount) > 0n) && (
               <p className="text-sm text-foreground-muted">
                 Для выдачи денег откройте свою смену на кассе исходной продажи.
               </p>
@@ -547,11 +580,13 @@ export function PhysicalRefundModal({
               <Button
                 type="button"
                 disabled={
-                  locked || !quote || refundCents(quote.total_amount) === 0n || !ownOpenShift
+                  locked || !quote || (refundCents(quote.total_amount) > 0n && !ownOpenShift)
                 }
                 onClick={() => void submitRefund()}
               >
-                Оформить возврат наличными
+                {quote && refundCents(quote.total_amount) === 0n
+                  ? "Принять в карантин без выплаты"
+                  : "Оформить возврат наличными"}
               </Button>
             </div>
           </form>

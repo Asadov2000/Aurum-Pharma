@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   inspect: vi.fn(),
   run: vi.fn(),
+  runZero: vi.fn(),
   ack: vi.fn(),
   shift: vi.fn(),
   invalidate: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/features/sales/physicalRefundRecovery", async (original) => ({
   loadPhysicalRefund: mocks.load,
   inspectPhysicalRefund: mocks.inspect,
   runPhysicalRefund: mocks.run,
+  runPhysicalZeroReturn: mocks.runZero,
   acknowledgePhysicalRefund: mocks.ack,
 }));
 const sale: SaleDetails = {
@@ -253,6 +255,99 @@ describe("physical refund dialog safe recovery", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("повреждён");
     expect(screen.getByRole("button", { name: "Оформить возврат наличными" })).toBeDisabled();
     expect(mocks.options).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+  it("accepts zero allocation into quarantine without an open shift or a cash receipt", async () => {
+    const zeroQuote = {
+      parent_sale_id: sale.id,
+      revision_hash: "a".repeat(64),
+      total_amount: "0.00",
+      currency: "TJS",
+      lines: [
+        {
+          line_id: uuid(7),
+          sale_format: "unit",
+          quantity: 1,
+          base_units: 1,
+          offset: 0,
+          gross_amount: "2.00",
+          discount_amount: "2.00",
+          net_amount: "0.00",
+        },
+      ],
+    };
+    mocks.quote.mockResolvedValue(zeroQuote);
+    mocks.runZero.mockResolvedValue({
+      version: 1,
+      kind: "physical_zero_return",
+      state: "prepared_quarantine",
+      operation_id: uuid(8),
+      parent_sale_id: sale.id,
+      tenant_id: sale.tenant_id,
+      branch_id: sale.branch_id,
+      actor_id: uuid(2),
+      currency: "TJS",
+      total_amount: "0.00",
+      lines: [{ line_id: uuid(7), base_units: 1, offset: 0 }],
+    });
+    mocks.ack.mockResolvedValue(true);
+    const onClose = vi.fn();
+    const onRefunded = vi.fn();
+    render(<PhysicalRefundModal sale={sale} onClose={onClose} onRefunded={onRefunded} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Парацетамол 500 мг" }));
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    const accept = await screen.findByRole("button", { name: "Принять в карантин без выплаты" });
+    expect(accept).toBeEnabled();
+    expect(screen.queryByText(/Для выдачи денег откройте/)).not.toBeInTheDocument();
+    fireEvent.click(accept);
+    await screen.findByText("Товар принят в карантин");
+    expect(mocks.runZero).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSaleId: sale.id }),
+      {
+        items: [{ line_id: uuid(7), sale_format: "unit", quantity: 1 }],
+        expected_revision_hash: "a".repeat(64),
+        reason_code: null,
+        comment: null,
+      },
+      zeroQuote,
+    );
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Открыть чек возврата" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/К выдаче наличными/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await waitFor(() => expect(onRefunded).toHaveBeenCalledWith(sale.id));
+    expect(onClose).toHaveBeenCalled();
+    expect(mocks.invalidate.mock.calls).toEqual([
+      [{ queryKey: ["sales", "list"] }],
+      [{ queryKey: ["sales", "detail", sale.id] }],
+    ]);
+  });
+  it("reloads a persisted zero operation using inspection and explicit zero retry only", async () => {
+    mocks.load.mockReturnValue({
+      version: 1,
+      kind: "physical_zero_return",
+      tenantId: uuid(1),
+      userId: uuid(2),
+      parentSaleId: sale.id,
+      branchId: sale.branch_id,
+      registerId: sale.register_id,
+      definiteRejected: false,
+      request: {
+        operation_id: uuid(8),
+        items: [{ line_id: uuid(7), sale_format: "unit", quantity: 1 }],
+        expected_revision_hash: "a".repeat(64),
+        reason_code: null,
+        comment: null,
+      },
+    });
+    mocks.runZero.mockRejectedValue(new Error("Сервер пока недоступен"));
+    render(<PhysicalRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
+    await screen.findByText(/Карантин без выплаты денег/);
+    await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(1));
+    expect(mocks.runZero).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить эту операцию" }));
+    await waitFor(() => expect(mocks.runZero).toHaveBeenCalledTimes(1));
     expect(mocks.run).not.toHaveBeenCalled();
   });
 });
