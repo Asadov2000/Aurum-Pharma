@@ -8,7 +8,7 @@ set -eu
 : "${ROLE_BOOTSTRAP_SCRIPT:?ROLE_BOOTSTRAP_SCRIPT is required}"
 
 [ "${CI:-}" = "true" ] \
-    && [ "${GITHUB_ACTIONS:-}" = "true" ] \
+    && { [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CIRCLECI:-}" = "true" ]; } \
     && [ "${AURUM_DISPOSABLE_DB_CONFIRM:-}" = "destroy-this-database" ] || {
     echo "Edge identity tooling tests are restricted to an explicitly disposable CI database" >&2
     exit 1

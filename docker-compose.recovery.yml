@@ -45,7 +45,7 @@ services:
     cap_drop:
       - ALL
     pids_limit: 64
-    mem_limit: 128m
+    mem_limit: "${AURUM_MAINTENANCE_MEMORY_LIMIT:-256m}"
     cpus: "0.25"
     restart: "no"
 
@@ -296,7 +296,7 @@ services:
     cap_drop:
       - ALL
     pids_limit: 64
-    mem_limit: 128m
+    mem_limit: "${AURUM_MAINTENANCE_MEMORY_LIMIT:-256m}"
     cpus: "0.25"
     restart: "no"
 

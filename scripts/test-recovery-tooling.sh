@@ -30,6 +30,12 @@ cleanup() {
     status=$?
     set +e
     if [ "$status" -ne 0 ]; then
+        # Inspect only termination/resource metadata; container env contains secrets.
+        for container in $(docker ps -aq --filter "label=com.docker.compose.project=$project"); do
+            docker inspect --format \
+                '{{.Name}} exit={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} memory_limit={{.HostConfig.Memory}}' \
+                "$container" >&2
+        done
         docker compose \
             -p "$project" \
             --env-file .env.production.example \
