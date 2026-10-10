@@ -33,6 +33,7 @@ import { describeApiError } from "@/lib/errorMessages";
 import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useCustomerReturnsQuery, useResolveCustomerReturn } from "./queries";
+import { PhysicalCustomerReturnsPanel } from "./PhysicalCustomerReturnsPanel";
 import {
   type CustomerReturnDispositionType,
   type CustomerReturnItem,
@@ -64,6 +65,31 @@ const dateTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
 });
 
 export function CustomerReturnsPanel(): JSX.Element {
+  const [queue, setQueue] = useState<"packages" | "physical">("packages");
+  return (
+    <div className="space-y-4">
+      <div role="group" aria-label="Вид возвратов" className="flex flex-wrap gap-2">
+        <Button
+          variant={queue === "packages" ? "primary" : "secondary"}
+          aria-pressed={queue === "packages"}
+          onClick={() => setQueue("packages")}
+        >
+          Возвраты упаковками
+        </Button>
+        <Button
+          variant={queue === "physical" ? "primary" : "secondary"}
+          aria-pressed={queue === "physical"}
+          onClick={() => setQueue("physical")}
+        >
+          Физические возвраты
+        </Button>
+      </div>
+      {queue === "packages" ? <PackageCustomerReturnsPanel /> : <PhysicalCustomerReturnsPanel />}
+    </div>
+  );
+}
+
+function PackageCustomerReturnsPanel(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("customer-returns");
   const canResolve = hasPermission(user, "customer_returns.resolve");
