@@ -500,10 +500,8 @@ workflows:
       - production-containers:
           requires:
             - "tooling-linux"
-      - tooling-linux:
-
-      - tooling-windows:
-
+      - "tooling-linux"
+      - "tooling-windows"
       - ci-gate:
           requires:
             - "backend"
