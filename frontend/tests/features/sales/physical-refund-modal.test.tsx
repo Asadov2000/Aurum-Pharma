@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   ack: vi.fn(),
   shift: vi.fn(),
+  invalidate: vi.fn(),
+}));
+vi.mock("@tanstack/react-query", async (original) => ({
+  ...(await original<typeof import("@tanstack/react-query")>()),
+  useQueryClient: () => ({ invalidateQueries: mocks.invalidate }),
 }));
 const uuid = (value: number): string =>
   `10000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -174,7 +179,39 @@ describe("physical refund dialog safe recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Проверить результат" }));
     await waitFor(() => expect(mocks.inspect).toHaveBeenCalledTimes(2));
     expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
   });
+  it.each([true, false])(
+    "refreshes sale caches only after a verified acknowledgment (acknowledged: %s)",
+    async (acknowledged) => {
+      mocks.load.mockReturnValue({ request: { expected_total_amount: "4.00" } });
+      mocks.inspect.mockResolvedValue({
+        state: "completed",
+        operation_id: uuid(8),
+        sale_id: uuid(9),
+        total_amount: "4.00",
+        receipt: { receipt_number: "R-2" },
+      });
+      mocks.ack.mockResolvedValue(acknowledged);
+      const onRefunded = vi.fn();
+      render(<PhysicalRefundModal sale={sale} onClose={vi.fn()} onRefunded={onRefunded} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Открыть чек возврата" }));
+      await waitFor(() => expect(mocks.ack).toHaveBeenCalledTimes(1));
+      if (acknowledged) {
+        await waitFor(() => expect(onRefunded).toHaveBeenCalledWith(uuid(9)));
+        expect(mocks.invalidate.mock.calls).toEqual([
+          [{ queryKey: ["sales", "list"] }],
+          [{ queryKey: ["sales", "detail", sale.id] }],
+          [{ queryKey: ["sales", "detail", uuid(9)] }],
+        ]);
+      } else {
+        expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось подтвердить");
+        expect(mocks.invalidate).not.toHaveBeenCalled();
+        expect(onRefunded).not.toHaveBeenCalled();
+      }
+      expect(mocks.run).not.toHaveBeenCalled();
+    },
+  );
   it("offers recalculation immediately when retry receives a definitive server rejection", async () => {
     const stored = {
       version: 1,
@@ -206,6 +243,7 @@ describe("physical refund dialog safe recovery", () => {
     expect(await screen.findByRole("button", { name: "Пересчитать возврат" })).toBeEnabled();
     expect(mocks.run).toHaveBeenCalledTimes(1);
     expect(mocks.options).not.toHaveBeenCalled();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
   });
   it("a malformed journal blocks a new operation and remains visible as an error", async () => {
     mocks.load.mockImplementation(() => {

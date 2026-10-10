@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm, type Resolver, type ResolverResult } from "react-hook-form";
 import { z } from "zod";
@@ -29,6 +30,7 @@ import {
   type PendingPhysicalRefund,
   type PhysicalRefundScope,
 } from "./physicalRefundRecovery";
+import { salesKeys } from "./queries";
 
 const formSchema = z.object({
   lines: z.array(
@@ -74,6 +76,7 @@ export function PhysicalRefundModal({
   onClose: () => void;
   onRefunded: (saleId: string) => void;
 }): JSX.Element {
+  const queryClient = useQueryClient();
   const [scope] = useState<PhysicalRefundScope | null>(() => {
     const current = currentPosStorageScope();
     return current && current.tenantId === sale.tenant_id
@@ -342,6 +345,9 @@ export function PhysicalRefundModal({
           throw new Error(
             "Не удалось подтвердить сохранённый результат. Проверьте возврат ещё раз.",
           );
+        void queryClient.invalidateQueries({ queryKey: ["sales", "list"] });
+        void queryClient.invalidateQueries({ queryKey: salesKeys.detail(scope.parentSaleId) });
+        void queryClient.invalidateQueries({ queryKey: salesKeys.detail(completed.sale_id) });
         onRefunded(completed.sale_id);
       }
     } catch (reason) {
