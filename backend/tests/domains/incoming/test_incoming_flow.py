@@ -187,13 +187,15 @@ async def test_list_incoming_is_searchable_and_paginated(
     )
     await service.accept(documents[0].id)
 
-    page_rows, total = await service.list_documents(page=2, page_size=2)
+    # Committed security fixtures from other branches may exist in the test database.
+    page_rows, total = await service.list_documents(branch_id=branch.id, page=2, page_size=2)
     search_rows, search_total = await service.list_documents(
+        branch_id=branch.id,
         document_number="пр-103",
         page=1,
         page_size=2,
     )
-    summary = await service.summarize_documents()
+    summary = await service.summarize_documents(branch_id=branch.id)
 
     assert total == 5
     assert [row.document.document_number for row in page_rows] == ["ПР-102", "ПР-103"]
