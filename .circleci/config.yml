@@ -1,0 +1,513 @@
+# Full required CI matrix; PR/default-branch triggers are configured in CircleCI.
+version: 2.1
+commands:
+  setup-linux-tools:
+    steps:
+      - run:
+          name: "CI runtime tools"
+          command: "bash .circleci/scripts/setup-linux-tools.sh"
+jobs:
+  backend:
+    machine:
+      image: "ubuntu-2404:current"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - "setup-linux-tools"
+      - run:
+          name: "Disposable PostgreSQL and Redis services"
+          command: "bash .circleci/scripts/backend-services.sh"
+      - run:
+          name: "Pinned Poetry"
+          command: "python -m pip install poetry==2.3.4"
+      - run:
+          name: "Validate dependency lock"
+          command: "bash ../.circleci/scripts/backend-04.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Install locked dependencies"
+          command: "bash ../.circleci/scripts/backend-05.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Start MinIO"
+          command: "bash ../.circleci/scripts/backend-07.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Build a real legacy 0066 database"
+          command: "bash ../.circleci/scripts/backend-08.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Bootstrap separated PostgreSQL roles and privileges"
+          command: "bash ../.circleci/scripts/backend-09.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Verify cluster-safe migration roundtrip"
+          command: "bash ../.circleci/scripts/backend-10.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Verify revision bootstrap fails closed"
+          command: "bash ../.circleci/scripts/backend-11.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Ruff"
+          command: "bash ../.circleci/scripts/backend-12.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Black"
+          command: "bash ../.circleci/scripts/backend-13.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Mypy"
+          command: "bash ../.circleci/scripts/backend-14.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Pytest"
+          command: "bash ../.circleci/scripts/backend-15.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Verify Edge cash dispatcher boundary"
+          command: "bash ../.circleci/scripts/backend-16.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Verify inactive Edge database identity lifecycle"
+          command: "bash ../.circleci/scripts/backend-17.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Stop MinIO"
+          command: "bash ../.circleci/scripts/backend-19.sh"
+          working_directory: "~/project/backend"
+          when: "always"
+      - run:
+          name: "Verify complete backend evidence"
+          command: |
+            python scripts/verify-backend-shards.py backend/test-results --expected-shards 1
+            mkdir -p ci-evidence/backend
+            cp backend/test-results/pytest.xml backend/test-results/shard.json ci-evidence/backend/
+      - store_test_results:
+          path: "backend/test-results"
+      - persist_to_workspace:
+          root: "."
+          paths:
+            - "ci-evidence/backend"
+    environment:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      ENVIRONMENT: "development"
+      DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test"
+      DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test"
+      DATABASE_URL_MIGRATION: "postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test"
+      DATABASE_URL_MAILER: "postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test"
+      DATABASE_URL_BILLING_WORKER: "postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test"
+      DATABASE_URL_WORKER: "postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test"
+      DATABASE_URL_CATALOG_WORKER: "postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_APP: "postgresql+asyncpg://aurum_app:aurum_app_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_SUPPORT: "postgresql+asyncpg://aurum_support:aurum_support_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_MIGRATION: "postgresql+asyncpg://aurum_migrator:aurum_migrator_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_MAILER: "postgresql+asyncpg://aurum_mailer:aurum_mailer_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_BILLING_WORKER: "postgresql+asyncpg://aurum_billing_worker:aurum_billing_worker_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_WORKER: "postgresql+asyncpg://aurum_worker:aurum_worker_pw@localhost:5432/aurum_test"
+      TEST_DATABASE_URL_CATALOG_WORKER: "postgresql+asyncpg://aurum_catalog_worker:aurum_catalog_worker_pw@localhost:5432/aurum_test"
+      REDIS_URL: "redis://localhost:6379/0"
+      TEST_REDIS_URL: "redis://localhost:6379/0"
+      JWT_SECRET: "ci-only-secret-do-not-use-outside-tests-123456"
+      CORS_ORIGINS: "[\"http://localhost:5173\"]"
+      MINIO_ENDPOINT: "localhost:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_BUCKET: "aurum"
+      MINIO_SECURE: "false"
+      POSTGRES_SERVICE_ID: "aurum-ci-postgres"
+      AURUM_DISPOSABLE_DB_CONFIRM: "destroy-this-database"
+  frontend:
+    docker:
+      - image: "cimg/node:24.0"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - run:
+          name: "Pinned pnpm"
+          command: "sudo npm install --global pnpm@9.12.0"
+      - run:
+          name: "Install locked dependencies"
+          command: "bash ../.circleci/scripts/frontend-03.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Typecheck"
+          command: "bash ../.circleci/scripts/frontend-04.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Verify approved brand assets"
+          command: "bash ../.circleci/scripts/frontend-05.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Lint"
+          command: "bash ../.circleci/scripts/frontend-06.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Unit tests"
+          command: "bash ../.circleci/scripts/frontend-07.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Production build"
+          command: "bash ../.circleci/scripts/frontend-09.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Public website static and unit checks"
+          command: "bash .circleci/scripts/frontend-10.sh"
+      - run:
+          name: "Public website production build"
+          command: "bash .circleci/scripts/frontend-11.sh"
+          environment:
+            APP_URL: "https://app.example.test/login"
+      - store_test_results:
+          path: "frontend/test-results"
+      - store_artifacts:
+          path: "website/dist"
+          destination: "public-website-preview"
+  dependency-audit:
+    machine:
+      image: "ubuntu-2404:current"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - "setup-linux-tools"
+      - run:
+          name: "Pinned Poetry"
+          command: "python -m pip install poetry==2.3.4"
+      - run:
+          name: "Install locked Python dependencies"
+          command: "bash ../.circleci/scripts/dependency-audit-04.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Audit Python dependencies"
+          command: "bash ../.circleci/scripts/dependency-audit-05.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Install locked JavaScript dependencies"
+          command: "bash ../.circleci/scripts/dependency-audit-08.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Audit JavaScript dependencies"
+          command: "bash ../.circleci/scripts/dependency-audit-09.sh"
+          working_directory: "~/project/frontend"
+    environment:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+  e2e:
+    machine:
+      image: "ubuntu-2404:current"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - "setup-linux-tools"
+      - run:
+          name: "Install locked frontend dependencies"
+          command: "bash ../.circleci/scripts/e2e-03.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Install Chromium"
+          command: "bash ../.circleci/scripts/e2e-06.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Public website browser checks"
+          command: "bash .circleci/scripts/e2e-07.sh"
+      - run:
+          name: "Start isolated application stack"
+          command: "bash .circleci/scripts/e2e-08.sh"
+      - run:
+          name: "Migrate and seed disposable E2E database"
+          command: "bash .circleci/scripts/e2e-09.sh"
+      - run:
+          name: "Restart frontend and wait for HTTP readiness"
+          command: "bash .circleci/scripts/e2e-10.sh"
+      - run:
+          name: "Run Playwright E2E"
+          command: "bash ../.circleci/scripts/e2e-11.sh"
+          working_directory: "~/project/frontend"
+      - run:
+          name: "Verify isolated backend runner with real JWT and cookie tests"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/e2e-12.ps1"
+      - run:
+          name: "Show service logs on failure"
+          command: "bash .circleci/scripts/e2e-13.sh"
+          when: "on_fail"
+      - run:
+          name: "Stop isolated application stack"
+          command: "bash .circleci/scripts/e2e-15.sh"
+          when: "always"
+      - store_test_results:
+          path: "frontend/test-results"
+      - store_artifacts:
+          path: "frontend/playwright-report"
+    environment:
+      CI: "true"
+      COMPOSE_FILE: "docker-compose.e2e.yml"
+      COMPOSE_PROJECT_NAME: "aurum-e2e-ci"
+      E2E_API_URL: "http://localhost:18000/api/v1"
+      E2E_BASE_URL: "http://localhost:15173"
+      E2E_POSTGRES_DB: "aurum"
+      E2E_RETRIES: "1"
+  production-containers:
+    machine:
+      image: "ubuntu-2404:current"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - "setup-linux-tools"
+      - run:
+          name: "Validate production Compose model"
+          command: "bash .circleci/scripts/production-containers-01.sh"
+      - run:
+          name: "Smoke test production internal TLS"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-02.ps1"
+      - run:
+          name: "Check production Dockerfiles"
+          command: "bash .circleci/scripts/production-containers-03.sh"
+      - run:
+          name: "Build production images"
+          command: |
+            docker buildx create --use --name aurum-ci-builder
+            docker buildx build --pull --load --no-cache-filter runtime -f backend/Dockerfile.production -t aurum-backend:ci backend
+      - run:
+          name: "Verify catalog storage permissions against isolated MinIO"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-06.ps1"
+      - run:
+          name: "Verify worker Redis permissions and network boundaries"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-07.ps1"
+      - run:
+          name: "Verify internal resources with mailer egress"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-08.ps1"
+      - run:
+          name: "Verify committed catalog imports and repeated barcodes"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-09.ps1"
+      - run:
+          name: "Build production images"
+          command: |
+            docker buildx build --pull --load --no-cache-filter runtime -f frontend/Dockerfile.production -t aurum-gateway:ci frontend
+            docker buildx build --pull --load --no-cache-filter runtime -f infra/backup/Dockerfile -t aurum-backup:ci -t aurum-pharma-backup:ci infra/backup
+      - run:
+          name: "Test encrypted backup and isolated restore"
+          command: "bash .circleci/scripts/production-containers-12.sh"
+      - run:
+          name: "Test encrypted read-only Edge recovery"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File .circleci/scripts/production-containers-13.ps1"
+      - run:
+          name: "Scan repository for committed secrets"
+          command: "bash .circleci/scripts/production-containers-14.sh"
+      - run:
+          name: "Scan production Dockerfiles for high-risk configuration"
+          command: "bash .circleci/scripts/production-containers-15.sh"
+      - run:
+          name: "Scan production images for fixable vulnerabilities"
+          command: "bash .circleci/scripts/production-containers-16.sh"
+      - run:
+          name: "Generate CycloneDX SBOMs"
+          command: "bash .circleci/scripts/production-containers-17.sh"
+      - run:
+          name: "Validate Prometheus configuration and alert rules"
+          command: "bash .circleci/scripts/production-containers-19.sh"
+      - run:
+          name: "Verify hardened image metadata"
+          command: "bash .circleci/scripts/production-containers-20.sh"
+      - run:
+          name: "Validate production Caddy configuration"
+          command: "bash .circleci/scripts/production-containers-21.sh"
+      - run:
+          name: "Smoke-test hardened gateway runtime"
+          command: "bash .circleci/scripts/production-containers-22.sh"
+      - store_artifacts:
+          path: ".circleci-tmp/sbom"
+          destination: "production-sbom"
+  tooling-linux:
+    machine:
+      image: "ubuntu-2404:current"
+    resource_class: "medium"
+    steps:
+      - "checkout"
+      - "setup-linux-tools"
+      - run:
+          name: "test-verification-tools"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-verification-tools.ps1"
+      - run:
+          name: "test-pilot-readiness"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-pilot-readiness.ps1"
+      - run:
+          name: "test-production-host-preflight"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-production-host-preflight.ps1"
+      - run:
+          name: "test-demo-cors-origins"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-demo-cors-origins.ps1"
+      - run:
+          name: "test-demo-broker-rollout"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-demo-broker-rollout.ps1"
+      - run:
+          name: "test-windows-tpm-readiness"
+          command: "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-windows-tpm-readiness.ps1"
+      - run:
+          name: "Backend shard report validation"
+          command: "python scripts/test-backend-shards.py"
+      - run:
+          name: "Disposable database safety guards"
+          command: "python scripts/test-disposable-ci-guards.py"
+  tooling-windows:
+    machine:
+      image: "windows-server-2022-gui:current"
+    resource_class: "windows.medium"
+    shell: "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass"
+    steps:
+      - "checkout"
+      - run:
+          name: "Install .NET 10 SDK"
+          command: |
+            Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile .circleci/dotnet-install.ps1
+            & .circleci/dotnet-install.ps1 -Channel 10.0 -InstallDir "$env:USERPROFILE/dotnet"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-verification-tools"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-verification-tools.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-pilot-readiness"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-pilot-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-production-host-preflight"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-production-host-preflight.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-demo-cors-origins"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-cors-origins.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-demo-broker-rollout"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-broker-rollout.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-windows-tpm-readiness"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-tpm-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-manage-edge-cash-identity"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-manage-edge-cash-identity.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-verification-tools"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-verification-tools.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-pilot-readiness"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-pilot-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-demo-cors-origins"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-cors-origins.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-demo-broker-rollout"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-broker-rollout.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-windows-tpm-readiness"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-tpm-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-manage-edge-cash-identity"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-manage-edge-cash-identity.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Backend shard report validation"
+          command: |
+            python scripts/test-backend-shards.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Disposable database safety guards"
+          command: |
+            python scripts/test-disposable-ci-guards.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore desktop tests"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --runtime win-x64 --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Test desktop core"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet test desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --configuration Release --runtime win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore read-only TPM probe"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --runtime win-x64 --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Build read-only TPM probe"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet build desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --configuration Release --runtime win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore Windows host"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --runtime win-x64 --locked-mode -p:PublishReadyToRun=true
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Build packaged Windows host"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet build desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --configuration Release --runtime win-x64 --no-restore -p:Platform=x64 -p:PublishReadyToRun=true
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  ci-gate:
+    docker:
+      - image: "cimg/python:3.12"
+    resource_class: "small"
+    steps:
+      - "checkout"
+      - attach_workspace:
+          at: "."
+      - run:
+          name: "Validate complete backend test evidence"
+          command: "python scripts/verify-backend-shards.py ci-evidence/backend --expected-shards 1"
+workflows:
+  full-ci:
+    jobs:
+      - backend:
+          requires:
+            - "tooling-linux"
+      - frontend:
+          requires:
+            - "tooling-linux"
+      - dependency-audit:
+          requires:
+            - "tooling-linux"
+      - e2e:
+          requires:
+            - "tooling-linux"
+      - production-containers:
+          requires:
+            - "tooling-linux"
+      - "tooling-linux"
+      - "tooling-windows"
+      - ci-gate:
+          requires:
+            - "backend"
+            - "frontend"
+            - "dependency-audit"
+            - "e2e"
+            - "production-containers"
+            - "tooling-linux"
+            - "tooling-windows"
