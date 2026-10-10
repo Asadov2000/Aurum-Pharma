@@ -1,11 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  merge_group:
+  # Manual fallback. Automatic verification is provided by CircleCI full-ci.
   workflow_dispatch:
     inputs:
       backend_shards:
@@ -13,9 +9,6 @@ on:
         type: choice
         options: ["2", "1"]
         default: "2"
-  schedule:
-    # 06:30 in Tajikistan (UTC+5): catches dependency and runner drift daily.
-    - cron: "30 1 * * *"
 
 permissions:
   contents: read
