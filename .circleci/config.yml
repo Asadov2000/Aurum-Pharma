@@ -1,0 +1,51 @@
+# Connectivity pilot only: this workflow does not replace the required CI gate.
+# Runs only on the pilot branch; no deployments, secrets, caches, or schedules.
+version: 2.1
+
+jobs:
+  pilot-linux:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify backend shard evidence validator
+          no_output_timeout: 5m
+          command: timeout 120s python scripts/test-backend-shards.py
+
+  pilot-windows:
+    machine:
+      image: windows-server-2022-gui:current
+    resource_class: windows.medium
+    shell: powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass
+    steps:
+      - checkout
+      - run:
+          name: Verify existing Windows tooling with isolated fixtures
+          no_output_timeout: 5m
+          command: |
+            $ErrorActionPreference = 'Stop'
+            $scripts = @(
+              'scripts/test-demo-cors-origins.ps1',
+              'scripts/test-demo-broker-rollout.ps1',
+              'scripts/test-manage-edge-cash-identity.ps1'
+            )
+            foreach ($script in $scripts) {
+              & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+
+workflows:
+  free-connectivity-pilot:
+    jobs:
+      - pilot-linux:
+          filters:
+            branches:
+              only: codex/circleci-free-pilot
+      - pilot-windows:
+          requires:
+            - pilot-linux
+          filters:
+            branches:
+              only: codex/circleci-free-pilot
