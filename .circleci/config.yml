@@ -486,63 +486,25 @@ workflows:
   full-ci:
     jobs:
       - backend:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "tooling-linux"
       - frontend:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "tooling-linux"
       - dependency-audit:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "tooling-linux"
       - e2e:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "tooling-linux"
       - production-containers:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "tooling-linux"
       - tooling-linux:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
+
       - tooling-windows:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
+
       - ci-gate:
-          filters:
-            branches:
-              only:
-                - "codex/circleci-free-pilot"
-                - "main"
           requires:
             - "backend"
             - "frontend"
