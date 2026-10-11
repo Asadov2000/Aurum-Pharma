@@ -10,6 +10,12 @@ from app.domains.pos.mixed_documents import LegacyResultLineV4, MixedCheckoutRes
 from app.domains.pos.mixed_return_allocation import LegacyReturnSelection, MixedReturnSelection
 
 
+def _selection(selection: MixedReturnSelection) -> list[str | int]:
+    if isinstance(selection, LegacyReturnSelection):
+        return [str(selection.line_id), "legacy_pack", format(selection.quantity, ".3f")]
+    return [str(selection.line_id), "physical_unit", selection.sale_format, selection.quantity]
+
+
 def mixed_refund_revision(
     checkout: MixedCheckoutResultV4,
     legacy_cursors: Mapping[UUID, Decimal],
@@ -33,16 +39,7 @@ def mixed_refund_revision(
             for line in sorted(checkout.lines, key=lambda line: str(line.id))
         ],
         "selections": [
-            (
-                [str(selection.line_id), "legacy_pack", format(selection.quantity, ".3f")]
-                if isinstance(selection, LegacyReturnSelection)
-                else [
-                    str(selection.line_id),
-                    "physical_unit",
-                    selection.sale_format,
-                    selection.quantity,
-                ]
-            )
+            _selection(selection)
             for selection in sorted(selections, key=lambda selection: str(selection.line_id))
         ],
     }
