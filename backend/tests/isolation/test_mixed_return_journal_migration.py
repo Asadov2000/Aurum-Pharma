@@ -259,7 +259,7 @@ async def test_mixed_journal_is_immutable_and_audit_hides_payload_and_costs(
     )
 
 
-async def test_refund_only_actor_can_read_source_but_cannot_access_other_scope(
+async def test_refund_only_actor_cannot_access_other_refund_scope(
     db_session: AsyncSession, db_engine: AsyncEngine, maintenance_engine: AsyncEngine
 ) -> None:
     source = await _source(db_session)
@@ -290,8 +290,30 @@ async def test_refund_only_actor_can_read_source_but_cannot_access_other_scope(
     )
     await set_receiving_context(db_session, foreign, foreign_actor)
     assert await _journal_counts(db_session) == (0, 0, 0)
-    for table in ("pos_mixed_checkout", "sale_item", "unit_stock_cart_line_v2"):
+    for table in ("pos_mixed_checkout", "unit_stock_cart_line_v2"):
         assert await db_session.scalar(text(f"SELECT count(*) FROM {table}")) == 0
+    legacy_identity = {"tenant": source.tenant_id, "id": source.lines[0].id}
+    # Legacy sale_item has always used tenant-wide SELECT. This journal does not
+    # replace that historical policy; its refund source must have a visible,
+    # authorized mixed marker before legacy rows can be used.
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM sale_item WHERE tenant_id=:tenant AND id=:id"),
+            legacy_identity,
+        )
+        == 1
+    )
+    assert (
+        await db_session.scalar(
+            text(
+                "SELECT count(*) FROM sale_item item JOIN pos_mixed_checkout checkout "
+                "ON checkout.tenant_id=item.tenant_id AND checkout.sale_id=item.sale_id "
+                "WHERE item.tenant_id=:tenant AND item.id=:id"
+            ),
+            legacy_identity,
+        )
+        == 0
+    )
     with pytest.raises((PermissionDeniedError, NotFoundError)):
         await _receive(db_session, source, actor_id=foreign_actor)
     with pytest.raises(DBAPIError):
@@ -319,6 +341,13 @@ async def test_refund_only_actor_can_read_source_but_cannot_access_other_scope(
         text("SELECT set_config('app.tenant_id',:tenant,true)"), {"tenant": str(uuid4())}
     )
     assert await _journal_counts(db_session) == (0, 0, 0)
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM sale_item WHERE tenant_id=:tenant AND id=:id"),
+            legacy_identity,
+        )
+        == 0
+    )
 
 
 async def test_support_session_cannot_insert_mixed_quarantine_history(
