@@ -116,6 +116,7 @@ class UnitDispensingV2Repository(UnitLedgerRepository):
                 retail_version=command.retail_version,
                 currency=command.currency,
                 checkout_sale_id=command.checkout_sale_id,
+                mixed_checkout_sale_id=command.mixed_checkout_sale_id,
                 created_by=command.created_by,
             )
             .on_conflict_do_nothing()

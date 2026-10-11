@@ -3998,6 +3998,8 @@ class POSService:
         self,
         sale: Sale,
         items: list[SaleItem],
+        *,
+        actor_id: UUID | None = None,
     ) -> None:
         await self._lock_sellable_catalogs(sale, items)
         settings = await FoundationRepository(self.repo.session).get_settings_for_pos(
@@ -4035,6 +4037,7 @@ class POSService:
                     source_table="sale",
                     source_id=sale.id,
                     operation_key=f"pos:sale:{sale.id}:sale:{batch_id}",
+                    created_by=actor_id,
                 )
             except (IntegrityError, InternalError) as exc:
                 # The trigger and CHECK remain the final barrier if stock

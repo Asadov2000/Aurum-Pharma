@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_mixed_checkout",
     "pos_physical_zero_return",
     "pos_physical_cash_refund",
     "pos_physical_checkout",
@@ -229,6 +230,13 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_mixed_checkout",
+    "trg_mixed_stock_checkout_binding",
+    "trg_mixed_checkout_guard",
+    "trg_mixed_checkout_complete",
+    "trg_mixed_checkout_cart_frozen",
+    "trg_mixed_checkout_movement_frozen",
+    "trg_mixed_checkout_return_boundary",
     "physical_customer_return_queue",
     "trg_physical_cash_refund_guard",
     "trg_physical_zero_return_guard",
@@ -1211,6 +1219,26 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     )
     assert {name for name, row in cash_functions.items() if row["is_security_definer"]} == (
         cash_names - {"trg_physical_stock_checkout_binding", "trg_physical_checkout_guard"}
+    )
+    mixed_names = {
+        "assert_mixed_checkout",
+        "trg_mixed_stock_checkout_binding",
+        "trg_mixed_checkout_guard",
+        "trg_mixed_checkout_complete",
+        "trg_mixed_checkout_cart_frozen",
+        "trg_mixed_checkout_movement_frozen",
+        "trg_mixed_checkout_return_boundary",
+    }
+    mixed_functions = {row["proname"]: row for row in rows if row["proname"] in mixed_names}
+    assert set(mixed_functions) == mixed_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in mixed_functions.values()
+    )
+    assert {name for name, row in mixed_functions.items() if row["is_security_definer"]} == (
+        mixed_names - {"trg_mixed_stock_checkout_binding", "trg_mixed_checkout_guard"}
     )
     physical_names = {
         "unit_pack_v2_remaining",

@@ -241,6 +241,7 @@ class PhysicalUnitLedgerV2Service:
         actor_id: UUID,
         allowed_branch_ids: set[UUID],
         checkout_sale_id: UUID | None = None,
+        mixed_checkout_sale_id: UUID | None = None,
     ) -> UnitCartRetailResultV2:
         """Internal immutable retail source, without accepting money or completing a sale."""
         if (
@@ -269,6 +270,7 @@ class PhysicalUnitLedgerV2Service:
                 allowed_branch_ids=allowed_branch_ids,
                 discounts=tuple(line.discount_amount for line in checked),
                 checkout_sale_id=checkout_sale_id,
+                mixed_checkout_sale_id=mixed_checkout_sale_id,
             )
             cost = await self.cost_result(
                 tenant_id=tenant_id,
@@ -292,6 +294,7 @@ class PhysicalUnitLedgerV2Service:
         allowed_branch_ids: set[UUID],
         discounts: tuple[Decimal, ...] | None = None,
         checkout_sale_id: UUID | None = None,
+        mixed_checkout_sale_id: UUID | None = None,
     ) -> UnitCartDispenseResultV2:
         if not isinstance(allowed_branch_ids, set) or branch_id not in allowed_branch_ids:
             raise PermissionDeniedError("Branch access denied")
@@ -314,12 +317,14 @@ class PhysicalUnitLedgerV2Service:
                     currency="TJS" if discounts is not None else None,
                     created_by=actor_id,
                     checkout_sale_id=checkout_sale_id,
+                    mixed_checkout_sale_id=mixed_checkout_sale_id,
                 )
             )
             if (
                 command.branch_id != branch_id
                 or command.request_hash != request_hash
                 or command.checkout_sale_id != checkout_sale_id
+                or command.mixed_checkout_sale_id != mixed_checkout_sale_id
             ):
                 raise ConflictError("Physical cart command was reused with different parameters")
             if not created:

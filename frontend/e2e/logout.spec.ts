@@ -88,8 +88,8 @@ test.describe("Durable browser logout", () => {
     page,
   }) => {
     await loginInBrowser(page, OWNER);
-    await page.goto("/");
-    await expectSignedIn(page);
+    // Drain startup cookie rotation before observing logout and counting later refreshes.
+    await openBootstrappedSession(page);
     expect(await hasRefreshCookie(page.context())).toBe(true);
 
     let blockLogout = true;
