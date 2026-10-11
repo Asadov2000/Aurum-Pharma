@@ -72,6 +72,14 @@ Assert-True -Condition ($firstPlan.compose_file -ceq (Join-Path (Split-Path $PSS
 $pytestCommand = @($firstPlan.commands[0])
 Assert-True -Condition (($pytestCommand -join "|") -ceq "-m|pytest|tests/domains/catalog|tests/isolation/test_catalog_rls.py|-q|--tb=short") -Because "remaining arguments preserve multiple selected targets and pytest options"
 Assert-True -Condition (@($secondPlan.services).Count -eq 0) -Because "a static Ruff check does not start databases or queues"
+$staticPlan = & {
+    function docker { throw "Static PlanOnly attempted to execute Docker." }
+    $json = & $runner -Check Static -PlanOnly
+    ($json -join [Environment]::NewLine) | ConvertFrom-Json
+}
+Assert-True -Condition (@($staticPlan.services).Count -eq 0) -Because "Static plans no database, queue or storage services"
+$staticCommands = @($staticPlan.commands | ForEach-Object { $_ -join '|' })
+Assert-True -Condition (($staticCommands -join ';') -ceq '-m|ruff|check|app|tests;-m|black|--check|app|tests;-m|mypy|app') -Because "Static plans all three unchanged quality checks in order"
 
 $shellArguments = @('-NoProfile')
 if ($env:OS -eq 'Windows_NT') { $shellArguments += @('-ExecutionPolicy', 'Bypass') }
@@ -200,6 +208,82 @@ foreach ($imageCase in @(
     $envIndex = [Array]::IndexOf($compose, '--env-file')
     $nullDevice = if ($env:OS -eq 'Windows_NT') { 'NUL' } else { '/dev/null' }
     Assert-True -Condition ($envIndex -ge 0 -and $compose[$envIndex + 1] -ceq $nullDevice) -Because "Compose receives an explicit empty env file"
+}
+
+foreach ($batchCase in @(
+    @{ Check = 'Static'; Failure = ''; Expected = 'ruff|black|mypy' },
+    @{ Check = 'Static'; Failure = 'ruff'; Expected = 'ruff' },
+    @{ Check = 'Static'; Failure = 'black'; Expected = 'ruff|black' },
+    @{ Check = 'Static'; Failure = 'mypy'; Expected = 'ruff|black|mypy' },
+    @{ Check = 'All'; Failure = 'black'; Expected = 'ruff|black' },
+    @{ Check = 'All'; Failure = ''; Expected = 'ruff|black|mypy|pytest' }
+)) {
+    & {
+        $script:fixtureCalls = New-Object 'System.Collections.Generic.List[object]'
+        function Invoke-BackendVerifyDocker {
+            param([string[]]$Arguments, [switch]$Capture)
+            Assert-True -Condition ([string]::IsNullOrEmpty($env:COMPOSE_FILE)) -Because "batched checks clear host Compose overrides"
+            $script:fixtureCalls.Add(@($Arguments))
+            if ($Capture) { return '' }
+            if ($batchCase.Failure -and $Arguments -contains $batchCase.Failure) {
+                $failure = New-Object System.Exception('Fixture batch failure')
+                $failure.Data['ExitCode'] = 37
+                throw $failure
+            }
+        }
+        $oldComposeFile = $env:COMPOSE_FILE
+        $env:COMPOSE_FILE = 'shared-batch-fixture.yml'
+        $code = 0
+        try {
+            try { Invoke-BackendIsolated -SelectedCheck $batchCase.Check -TestArguments @('tests', '-q') }
+            catch {
+                if (-not $_.Exception.Data.Contains('ExitCode')) { throw }
+                $code = $_.Exception.Data['ExitCode']
+            }
+            Assert-True -Condition ($env:COMPOSE_FILE -ceq 'shared-batch-fixture.yml') -Because "batch success and failures restore caller Compose configuration"
+        }
+        finally { $env:COMPOSE_FILE = $oldComposeFile }
+        $expectedCode = if ($batchCase.Failure) { 37 } else { 0 }
+        Assert-True -Condition ($code -eq $expectedCode) -Because "a batch preserves the exact failed check exit code"
+        $builds = @($script:fixtureCalls | Where-Object { $_[0] -ceq 'build' })
+        Assert-True -Condition ($builds.Count -eq 1) -Because "a batch builds the isolated tools image once"
+        $checks = @($script:fixtureCalls | Where-Object {
+            $_ -contains 'ruff' -or $_ -contains 'black' -or $_ -contains 'mypy' -or $_ -contains 'pytest'
+        })
+        $modules = @($checks | ForEach-Object { $_[[Array]::IndexOf($_, '-m') + 1] })
+        Assert-True -Condition (($modules -join '|') -ceq $batchCase.Expected) -Because "quality checks precede pytest and stop immediately on failure"
+        foreach ($checkCall in $checks) {
+            Assert-True -Condition ($checkCall -contains '--no-deps' -and $checkCall -contains 'tools') -Because "quality checks never implicitly start dependency services"
+        }
+        $downs = @($script:fixtureCalls | Where-Object { $_ -contains 'down' })
+        Assert-True -Condition ($downs.Count -eq 1) -Because "every batch cleans up its isolated project once"
+        $composeCall = $checks[0]
+        $projectIndex = [Array]::IndexOf($composeCall, '--project-name')
+        $ownedProject = $composeCall[$projectIndex + 1]
+        Assert-BackendVerifyProjectName -ProjectName $ownedProject
+        foreach ($checkCall in @($checks) + @($downs)) {
+            Assert-True -Condition ($checkCall -contains $ownedProject) -Because "all batch checks and cleanup use the same unique project"
+        }
+        $serviceCalls = @($script:fixtureCalls | Where-Object {
+            $_ -contains 'up' -or $_ -contains 'bootstrap' -or $_ -contains 'app.migrate' -or $_ -contains 'app.db_owner_migrate'
+        })
+        if ($batchCase.Check -eq 'Static' -or $batchCase.Failure) {
+            Assert-True -Condition ($serviceCalls.Count -eq 0) -Because "Static and failed All quality checks never start services or bootstrap a database"
+        }
+        else {
+            $upIndex = -1
+            $lastStaticIndex = -1
+            $pytestIndex = -1
+            for ($index = 0; $index -lt $script:fixtureCalls.Count; $index++) {
+                $call = $script:fixtureCalls[$index]
+                if ($call -contains 'up') { $upIndex = $index }
+                if ($call -contains 'mypy') { $lastStaticIndex = $index }
+                if ($call -contains 'pytest') { $pytestIndex = $index }
+            }
+            Assert-True -Condition ($lastStaticIndex -lt $upIndex -and $upIndex -lt $pytestIndex) -Because "All starts database services only after static checks and before pytest"
+            Assert-True -Condition (@($serviceCalls | Where-Object { $_ -contains 'bootstrap' }).Count -eq 3) -Because "All preserves the complete historical database bootstrap lifecycle"
+        }
+    }
 }
 
 Write-Host "Backend isolation self-test passed: $script:assertions assertions." -ForegroundColor Green
