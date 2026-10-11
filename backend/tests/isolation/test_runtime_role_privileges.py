@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_mixed_checkout",
     "pos_physical_zero_return",
     "pos_physical_cash_refund",
     "pos_physical_checkout",

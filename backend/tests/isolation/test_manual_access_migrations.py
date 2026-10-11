@@ -62,9 +62,11 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "pos_physical_return_slice",
             "pos_physical_cash_refund",
             "pos_physical_zero_return",
+            "pos_mixed_checkout",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184. Preserve history and audit guards.
+        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188.
+        # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
               public.staff_pay_revision, public.unit_stock_operation,
@@ -79,7 +81,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.pos_unit_cash_intent, public.pos_physical_checkout,
               public.pos_physical_return_command, public.pos_physical_return_line,
               public.pos_physical_return_slice, public.pos_physical_cash_refund,
-              public.pos_physical_zero_return
+              public.pos_physical_zero_return, public.pos_mixed_checkout
               IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
@@ -104,7 +106,9 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,
               'public.pos_physical_return_slice'::regclass,
-              'public.pos_physical_cash_refund'::regclass,'public.pos_physical_zero_return'::regclass)
+              'public.pos_physical_cash_refund'::regclass,
+              'public.pos_physical_zero_return'::regclass,
+              'public.pos_mixed_checkout'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -127,7 +131,9 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,
               'public.pos_physical_return_slice'::regclass,
-              'public.pos_physical_cash_refund'::regclass,'public.pos_physical_zero_return'::regclass)
+              'public.pos_physical_cash_refund'::regclass,
+              'public.pos_physical_zero_return'::regclass,
+              'public.pos_mixed_checkout'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -150,7 +156,9 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,
               'public.pos_physical_return_slice'::regclass,
-              'public.pos_physical_cash_refund'::regclass,'public.pos_physical_zero_return'::regclass)
+              'public.pos_physical_cash_refund'::regclass,
+              'public.pos_physical_zero_return'::regclass,
+              'public.pos_mixed_checkout'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()
