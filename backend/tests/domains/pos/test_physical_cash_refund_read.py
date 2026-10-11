@@ -331,7 +331,7 @@ def test_pure_adapter_preserves_exact_discounted_amount_without_fractional_price
         ("schema_version", True),
         ("receipt_number", "Wrong"),
         ("receipt_sequence", 1),
-        ("parent_sale_id", str(uuid4())),
+        pytest.param("parent_sale_id", str(uuid4()), id="parent-sale-id-mismatch"),
         ("completed_at", "2026-10-09T09:30:00Z"),
         ("is_test", True),
         ("currency", "USD"),
