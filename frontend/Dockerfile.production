@@ -22,9 +22,13 @@ RUN pnpm build
 
 FROM ${GO_IMAGE} AS caddy-builder
 
+ARG TARGETARCH
+
 WORKDIR /src
 
-RUN set -eu; \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    set -eu; \
     go mod init aurum.local/caddy; \
     attempt=1; \
     while true; do \

@@ -1,6 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/recovery-build-mode.sh"
+aurum_recovery_validate_build_mode
+
 case "$(uname -s)" in
     MINGW*|MSYS*)
         export MSYS_NO_PATHCONV=1
@@ -340,7 +343,7 @@ compose() {
         "$@"
 }
 
-compose --profile backup build backup
+aurum_recovery_prepare_backup
 compose up -d --wait postgres minio
 
 docker exec -i "${project}-postgres-1" psql \
