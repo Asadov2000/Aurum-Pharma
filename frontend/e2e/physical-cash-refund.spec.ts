@@ -2,6 +2,7 @@ import { request, test, type APIRequestContext, type Page } from "@playwright/te
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 import {
+  addPosItemToCart,
   apiContext,
   apiLogin,
   catalogSearchKey,
@@ -9,12 +10,232 @@ import {
   expect,
   loginInBrowser,
   OWNER,
+  seedAcceptedBatch,
   seedBranch,
   seedCatalogItem,
   seedRegister,
   seedSupplier,
   uniqueName,
 } from "./helpers";
+
+interface MixedCashResult {
+  schema_version: 4;
+  document_kind: "mixed_checkout";
+  sale_id: string;
+  operation_id: string;
+  shift_id: string;
+  receipt_number: string;
+  total_amount: string;
+  lines: { inventory_kind: string; quantity: string | number; net_amount: string }[];
+  payments: { id: string; amount: string; method: string }[];
+}
+
+test("recovers one mixed cash sale after response loss and closing the shift", async ({ page }) => {
+  test.setTimeout(150_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Mixed cash branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("Mixed cash register"));
+    const supplier = await seedSupplier(api, uniqueName("Mixed cash supplier"));
+    const legacy = await seedCatalogItem(api, uniqueName("Mixed legacy medicine"), "10.00");
+    const physical = await seedCatalogItem(api, uniqueName("Mixed unit medicine"), "10.00");
+    const expiry = new Date();
+    expiry.setUTCDate(expiry.getUTCDate() + 180);
+    const batch = await seedAcceptedBatch(api, {
+      branchId: branch.id,
+      supplierId: supplier.id,
+      catalogId: legacy.id,
+      qty: "4",
+      purchasePrice: "5.00",
+      salePrice: "10.00",
+      expiresAt: expiry.toISOString().slice(0, 10),
+    });
+    expect(
+      (
+        await api.patch(`catalog/${physical.id}`, {
+          data: {
+            unit_sale_preparation: {
+              version: 1,
+              state: "prepared",
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+              unit_price: "0.50",
+            },
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await receivePhysicalStock(api, branch.id, physical.id);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену", exact: true }).click();
+    await expect(page.getByText("Смена открыта")).toBeVisible();
+    await addPosItemToCart(page, {
+      brandName: legacy.brand_name,
+      qty: "1",
+      expectedCartItems: 1,
+    });
+    // The physical editor must remain reachable after adding an ordinary pack.
+    await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+    const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
+    await editor.getByLabel("Название лекарства").fill(catalogSearchKey(physical.brand_name));
+    await editor.getByRole("option", { name: new RegExp(physical.brand_name) }).click();
+    await editor.getByRole("radio", { name: "Поштучно", exact: true }).click();
+    await editor.getByLabel("Количество, шт.", { exact: true }).fill("2");
+    const added = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
+    );
+    await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+    const addedResponse = await added;
+    expect(addedResponse.ok()).toBe(true);
+    const { sale_id: saleId } = (await addedResponse.json()) as { sale_id: string };
+    const cash = page.getByRole("region", { name: "Оплата наличными", exact: true });
+    await expect(cash.getByText("11.00 TJS", { exact: true })).toBeVisible();
+    await cash.getByLabel("Получено наличными, TJS").fill("20");
+
+    const submitted: string[] = [];
+    const wrongPaymentPaths: string[] = [];
+    let completed: MixedCashResult | null = null;
+    let blockStatus = false;
+    page.on("request", (req) => {
+      const path = new URL(req.url()).pathname;
+      if (
+        req.method() === "POST" &&
+        (path.startsWith(`/api/v1/sales/${saleId}/physical-cash/`) ||
+          [
+            `/api/v1/sales/${saleId}/checkout`,
+            `/api/v1/sales/${saleId}/complete`,
+            `/api/v1/sales/${saleId}/payments`,
+          ].includes(path))
+      )
+        wrongPaymentPaths.push(path);
+    });
+    await page.route(`**/api/v1/sales/${saleId}/mixed-cash/operations/*`, async (route) => {
+      if (blockStatus) await route.abort("failed");
+      else await route.continue();
+    });
+    await page.route(`**/api/v1/sales/${saleId}/mixed-cash/complete`, async (route) => {
+      submitted.push((route.request().postDataJSON() as { operation_id: string }).operation_id);
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      completed = (await response.json()) as MixedCashResult;
+      blockStatus = true;
+      await route.abort("failed");
+    });
+    await cash.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+    await expect.poll(() => completed !== null).toBe(true);
+    const result = completed as MixedCashResult | null;
+    if (!result) throw new Error("Mixed cash completion response was not observed");
+    expect(result).toMatchObject({
+      schema_version: 4,
+      document_kind: "mixed_checkout",
+      sale_id: saleId,
+      total_amount: "11.00",
+      lines: [
+        { inventory_kind: "legacy_pack", quantity: "1.000", net_amount: "10.00" },
+        { inventory_kind: "physical_unit", quantity: 2, net_amount: "1.00" },
+      ],
+      payments: [{ method: "cash", amount: "11.00" }],
+    });
+    const recoveryEntries = () =>
+      page.evaluate(() =>
+        Object.entries(localStorage).filter(([key]) =>
+          key.startsWith("aurum:mixed-cash-recovery:v1:"),
+        ),
+      );
+    await expect.poll(async () => (await recoveryEntries()).length).toBe(1);
+    await expect(
+      cash.getByRole("button", { name: "Проверить и завершить оплату", exact: true }),
+    ).toBeEnabled();
+    const pendingBytes = (await recoveryEntries())[0]?.[1];
+    expect(pendingBytes).toBeDefined();
+    expect(JSON.parse(pendingBytes ?? "null")).toMatchObject({
+      request: { operation_id: result.operation_id },
+    });
+    await expect(
+      page.getByText(`Чек № ${result.receipt_number} оформлен`, { exact: true }),
+    ).toHaveCount(0);
+    expect(
+      (
+        await api.post(`shifts/${result.shift_id}/close`, {
+          data: { closing_cash_actual: "111.00" },
+        })
+      ).ok(),
+    ).toBe(true);
+    await page.reload();
+    const recover = cash.getByRole("button", { name: "Проверить и завершить оплату", exact: true });
+    await expect(cash.getByRole("alert")).toBeVisible();
+    await expect(recover).toBeEnabled();
+    expect((await recoveryEntries())[0]?.[1]).toBe(pendingBytes);
+    blockStatus = false;
+    await recover.click();
+    await expect(
+      page.getByText(`Чек № ${result.receipt_number} оформлен`, { exact: true }),
+    ).toBeVisible();
+    await expect.poll(async () => (await recoveryEntries()).length).toBe(0);
+    expect(submitted).toEqual([result.operation_id]);
+    expect(wrongPaymentPaths).toEqual([]);
+    const status = await api.get(`sales/${saleId}/mixed-cash/operations/${result.operation_id}`);
+    expect(status.ok()).toBe(true);
+    expect(await status.json()).toMatchObject({ state: "completed", result });
+    const savedBatch = await api.get(`batches/${batch.id}`);
+    expect(savedBatch.ok()).toBe(true);
+    expect(await savedBatch.json()).toMatchObject({ qty_remaining: "3.000" });
+    // This helper runs SELECT only in the launcher's disposable E2E database.
+    for (const value of [saleId, physical.id])
+      expect(value).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+    const sql = `SELECT json_build_object(
+      'markers', (SELECT count(*) FROM pos_mixed_checkout WHERE sale_id='${saleId}'),
+      'payments', (SELECT count(*) FROM sale_payment WHERE sale_id='${saleId}'),
+      'movements', (SELECT count(*) FROM batch_movement WHERE source_table='sale' AND source_id='${saleId}' AND movement_type='sale'),
+      'commands', (SELECT count(*) FROM unit_stock_cart_command_v2 WHERE mixed_checkout_sale_id='${saleId}'),
+      'receipt_version', (SELECT receipt_snapshot->>'schema_version' FROM sale WHERE id='${saleId}'),
+      'remaining', (SELECT sum(l.closed_packs*20+COALESCE((SELECT sum(p.remaining_units) FROM unit_stock_opened_pack_v2 p WHERE p.lot_id=l.id),0)) FROM unit_stock_lot_v2 l WHERE l.catalog_id='${physical.id}')
+    );`;
+    expect(
+      JSON.parse(
+        dockerExec(E2E_POSTGRES_CONTAINER, [
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          E2E_POSTGRES_DB,
+          "-At",
+          "-c",
+          sql,
+        ]).trim(),
+      ) as unknown,
+    ).toEqual({
+      markers: 1,
+      payments: 1,
+      movements: 1,
+      commands: 1,
+      receipt_version: "4",
+      remaining: 78,
+    });
+    await page.getByRole("button", { name: "Печать чека", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Печать чека", exact: true })).toBeVisible();
+    await expect(
+      page.locator(".receipt-print").getByText(legacy.brand_name, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".receipt-print").getByText(physical.brand_name, { exact: true }),
+    ).toBeVisible();
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});
 
 interface CheckoutResult {
   schema_version: number;

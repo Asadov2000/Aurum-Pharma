@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { draftKey, loadDraft } from "@/features/pos/draftStorage";
 import {
   hasPhysicalCashRecovery,
+  hasMixedCashRecovery,
+  hasCashRecovery,
+  mixedCashRecoveryKey,
   physicalCashRecoveryKey,
 } from "@/features/pos/physicalCashRecoveryPresence";
 
@@ -80,4 +83,19 @@ describe("physical cash bootstrap and draft retention", () => {
     expect(loadDraft(registerId, 30, POS_SCOPE)).toMatchObject({ saleId: null, expired: true });
     expect(localStorage.getItem(draftKey(registerId, POS_SCOPE))).toBeNull();
   });
+  it.each(["", "{broken", "null"])(
+    "retains old drafts for unreadable mixed payment bytes: %s",
+    (raw) => {
+      const draft = saveOldDraft();
+      const mixedKey = mixedCashRecoveryKey(saleId, POS_SCOPE);
+      localStorage.setItem(mixedKey, raw);
+      expect(hasMixedCashRecovery(saleId, POS_SCOPE)).toBe(true);
+      expect(hasPhysicalCashRecovery(saleId, POS_SCOPE)).toBe(false);
+      expect(hasCashRecovery(saleId, POS_SCOPE)).toBe(true);
+      expect(loadDraft(registerId, 30, POS_SCOPE)).toMatchObject({ saleId, expired: false });
+      expect(localStorage.getItem(mixedKey)).toBe(raw);
+      expect(localStorage.getItem(draftKey(registerId, POS_SCOPE))).toBe(draft);
+      expect(hasCashRecovery(saleId, { ...POS_SCOPE, userId: "another-cashier" })).toBe(false);
+    },
+  );
 });

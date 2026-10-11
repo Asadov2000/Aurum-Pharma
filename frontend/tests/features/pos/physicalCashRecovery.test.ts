@@ -305,8 +305,7 @@ describe("physical cash durable recovery", () => {
       this: Storage,
       storageKey: string,
     ) {
-      reads += 1;
-      if (reads === 2) throw new Error("read-back blocked");
+      if (storageKey === key && ++reads === 2) throw new Error("read-back blocked");
       return read.call(this, storageKey);
     });
     await expect(runPhysicalCash(saleId, scope, input)).rejects.toThrow("сохранить");

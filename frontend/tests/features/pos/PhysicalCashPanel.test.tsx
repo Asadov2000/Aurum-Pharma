@@ -5,6 +5,7 @@ import { PhysicalCashPanel } from "@/features/pos/PhysicalCashPanel";
 import { type PhysicalCartItem } from "@/features/pos/physicalCart";
 import { type PhysicalCashCheckoutResult } from "@/features/pos/physicalCashCheckout";
 import { type PendingPhysicalCash } from "@/features/pos/physicalCashRecovery";
+import { type SaleItem } from "@/features/pos/types";
 
 const api = vi.hoisted(() => ({
   quote: vi.fn(),
@@ -13,6 +14,22 @@ const api = vi.hoisted(() => ({
   status: vi.fn(),
   run: vi.fn(),
   ack: vi.fn(),
+}));
+const mixedApi = vi.hoisted(() => ({
+  parse: vi.fn(),
+  load: vi.fn(),
+  status: vi.fn(),
+  run: vi.fn(),
+  ack: vi.fn(),
+}));
+vi.mock("@/features/pos/mixedCashCheckout", () => ({
+  getMixedCashOperation: mixedApi.status,
+  parseMixedCashQuote: mixedApi.parse,
+}));
+vi.mock("@/features/pos/mixedCashRecovery", () => ({
+  loadPendingMixedCash: mixedApi.load,
+  runMixedCash: mixedApi.run,
+  acknowledgeMixedCash: mixedApi.ack,
 }));
 vi.mock("@/features/pos/physicalCart", () => ({ getPhysicalCartQuote: api.quote }));
 vi.mock("@/features/pos/physicalCashCheckout", () => ({
@@ -117,6 +134,54 @@ const result: PhysicalCashCheckoutResult = {
   total_amount: "3.75",
   currency: "TJS",
 };
+const legacyItem: SaleItem = {
+  id: uuid(13),
+  sale_id: saleId,
+  catalog_id: uuid(14),
+  batch_id: uuid(15),
+  qty: "1",
+  unit_price: "10.00",
+  total_price: "10.00",
+  discount_amount: "0",
+  currency: "TJS",
+  position: 5,
+};
+const mixedQuote = {
+  ...quote,
+  quote: {
+    ...quote.quote,
+    lines: [
+      {
+        inventory_kind: "legacy_pack" as const,
+        id: legacyItem.id,
+        catalog_id: legacyItem.catalog_id,
+        batch_id: legacyItem.batch_id,
+        position: 1,
+        quantity: "1.000",
+        original_retail_unit_price: "10.00",
+        gross_amount: "10.00",
+        discount_amount: "0.00",
+        net_amount: "10.00",
+        money_version: 1 as const,
+        currency: "TJS" as const,
+      },
+      { ...line, position: 2 },
+    ],
+    total_amount: "13.75",
+  },
+};
+const mixedPending = {
+  ...pending,
+  request: { ...pending.request, expected_total_amount: "13.75", cash_tendered: "20.00" },
+};
+const mixedResult = {
+  ...result,
+  schema_version: 4 as const,
+  document_kind: "mixed_checkout" as const,
+  lines: mixedQuote.quote.lines.map((value) => ({ ...value, name: "Лекарство" })),
+  payments: [{ ...result.payments[0]!, amount: "13.75" }],
+  total_amount: "13.75",
+};
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((accept) => {
@@ -145,6 +210,7 @@ describe("PhysicalCashPanel", () => {
     vi.resetAllMocks();
     active = true;
     api.load.mockReturnValue(null);
+    mixedApi.load.mockReturnValue(null);
     api.quote.mockResolvedValue(quote);
     api.parse.mockResolvedValue(quote);
     api.status.mockResolvedValue({ state: "saved_draft" });
@@ -314,5 +380,121 @@ describe("PhysicalCashPanel", () => {
       await screen.findByText("Корзина изменилась. Обновите сумму перед оплатой."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Завершить продажу" })).toBeDisabled();
+  });
+  it("pays both kinds through mixed cash using canonical positions and exact legacy decimals", async () => {
+    mixedApi.parse.mockResolvedValue(mixedQuote);
+    mixedApi.run.mockImplementation(() => {
+      mixedApi.load.mockReturnValue(mixedPending);
+      return Promise.resolve(mixedResult);
+    });
+    mixedApi.ack.mockImplementation(() => {
+      mixedApi.load.mockReturnValue(null);
+      return true;
+    });
+    const beforeStart = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PhysicalCashPanel
+        {...props()}
+        kind="mixed"
+        legacyItems={[legacyItem]}
+        items={[{ ...item, position: 8 }]}
+        beforeStart={beforeStart}
+      />,
+    );
+    await fill();
+    fireEvent.change(screen.getByLabelText("Получено наличными, TJS"), { target: { value: "20" } });
+    expect(screen.getByText("6.25 TJS")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
+    await waitFor(() => expect(mixedApi.ack).toHaveBeenCalledOnce());
+    expect(mixedApi.run).toHaveBeenCalledWith(
+      saleId,
+      scope,
+      expect.objectContaining({ expected_total_amount: "13.75", cash_tendered: "20.00" }),
+    );
+    expect(beforeStart.mock.invocationCallOrder[0]).toBeLessThan(
+      mixedApi.run.mock.invocationCallOrder[0],
+    );
+    expect(completed).toHaveBeenCalledWith(mixedResult, true);
+    expect(api.run).not.toHaveBeenCalled();
+  });
+  it("rejects changed legacy facts before a mixed payment", async () => {
+    mixedApi.parse.mockResolvedValue(mixedQuote);
+    render(
+      <PhysicalCashPanel {...props()} kind="mixed" legacyItems={[{ ...legacyItem, qty: "2" }]} />,
+    );
+    expect(
+      await screen.findByText("Корзина изменилась. Обновите сумму перед оплатой."),
+    ).toBeInTheDocument();
+    expect(mixedApi.run).not.toHaveBeenCalled();
+  });
+  it("recovers a mixed receipt with an empty completed cart and closed shift using GET only", async () => {
+    mixedApi.load.mockReturnValue(mixedPending);
+    mixedApi.status.mockResolvedValue({ state: "completed", result: mixedResult });
+    mixedApi.ack.mockImplementation(() => {
+      mixedApi.load.mockReturnValue(null);
+      return true;
+    });
+    render(<PhysicalCashPanel {...props()} kind="mixed" items={[]} canPay={false} />);
+    await waitFor(() => expect(mixedApi.ack).toHaveBeenCalledOnce());
+    expect(completed).toHaveBeenCalledWith(mixedResult, false);
+    expect(mixedApi.run).not.toHaveBeenCalled();
+    expect(api.status).not.toHaveBeenCalled();
+    expect(api.quote).not.toHaveBeenCalled();
+  });
+  it("releases editing without creating a financial operation when the prescription check fails", async () => {
+    mixedApi.parse.mockResolvedValue(mixedQuote);
+    render(
+      <PhysicalCashPanel
+        {...props()}
+        kind="mixed"
+        legacyItems={[legacyItem]}
+        beforeStart={async () => {
+          throw new Error("Сначала заполните рецепт.");
+        }}
+      />,
+    );
+    await fill();
+    fireEvent.change(screen.getByLabelText("Получено наличными, TJS"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
+    expect(await screen.findByText("Сначала заполните рецепт.")).toBeInTheDocument();
+    expect(mixedApi.run).not.toHaveBeenCalled();
+    expect(blocked).toHaveBeenLastCalledWith(false);
+  });
+  it("rechecks checkout eligibility after the asynchronous prescription step", async () => {
+    const preparation = deferred<void>();
+    const beforeStart = vi.fn(() => preparation.promise);
+    const view = render(<PhysicalCashPanel {...props()} beforeStart={beforeStart} />);
+    await fill();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
+    await waitFor(() => expect(beforeStart).toHaveBeenCalledOnce());
+    view.rerender(<PhysicalCashPanel {...props()} canPay={false} beforeStart={beforeStart} />);
+    await act(async () => preparation.resolve());
+    expect(
+      await screen.findByText(
+        "Условия оплаты изменились. Проверьте смену и корзину перед оплатой.",
+      ),
+    ).toBeInTheDocument();
+    expect(api.run).not.toHaveBeenCalled();
+    expect(blocked).toHaveBeenLastCalledWith(false);
+  });
+  it("keeps editing blocked if another tab creates a pending payment during prescription checks", async () => {
+    const preparation = deferred<void>();
+    render(
+      <PhysicalCashPanel
+        {...props()}
+        beforeStart={() =>
+          preparation.promise.then(() => {
+            api.load.mockReturnValue(pending);
+            throw new Error("Проверка рецепта не завершена.");
+          })
+        }
+      />,
+    );
+    await fill();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
+    await act(async () => preparation.resolve());
+    expect(await screen.findByText("Проверка рецепта не завершена.")).toBeInTheDocument();
+    expect(api.run).not.toHaveBeenCalled();
+    expect(blocked).toHaveBeenLastCalledWith(true);
   });
 });

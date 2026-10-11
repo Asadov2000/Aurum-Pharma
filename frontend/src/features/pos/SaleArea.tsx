@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import { Button, ConfirmDialog } from "@/components/ui";
-import { findByBarcode } from "@/features/catalog/api";
+import { findByBarcode, getCatalogItem } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
@@ -46,8 +46,12 @@ import {
   markPendingCompletion,
 } from "./completionOperation";
 import { type DraftInit, loadDraft, scopedDraftStorage } from "./draftStorage";
-import { hasPhysicalCashRecovery } from "./physicalCashRecoveryPresence";
-import { type PhysicalCashCheckoutResult } from "./physicalCashCheckout";
+import {
+  hasCashRecovery,
+  hasMixedCashRecovery,
+  hasPhysicalCashRecovery,
+} from "./physicalCashRecoveryPresence";
+import { type CashCheckoutResult } from "./PhysicalCashPanel";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
   mergeCheckoutResult,
@@ -256,7 +260,7 @@ export function SaleArea({
   const recoveryDraft = storageScope ? loadDraft(registerId, draftTtlMin, storageScope) : null;
   const cashRecoveryRequired =
     storageScope && recoveryDraft?.saleId
-      ? hasPhysicalCashRecovery(recoveryDraft.saleId, storageScope)
+      ? hasCashRecovery(recoveryDraft.saleId, storageScope)
       : false;
   const completedReceiptRequired = canSell && recoveryDraft?.status === "completed";
 
@@ -421,7 +425,7 @@ function ActiveWorkspace({
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin, storageScope));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
   const [physicalCashBlocked, setPhysicalCashBlocked] = useState(
-    () => init.saleId !== null && hasPhysicalCashRecovery(init.saleId, storageScope),
+    () => init.saleId !== null && hasCashRecovery(init.saleId, storageScope),
   );
   const physicalCashBlockedRef = useRef(physicalCashBlocked);
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
@@ -555,6 +559,13 @@ function ActiveWorkspace({
   const isDraft = !sale || sale.status === "draft";
   const items = sale?.items ?? [];
   const preparedItems = sale?.prepared_cart_items ?? [];
+  const cashKind =
+    saleId && hasPhysicalCashRecovery(saleId, storageScope)
+      ? "physical"
+      : (saleId && hasMixedCashRecovery(saleId, storageScope)) ||
+          (items.length > 0 && preparedItems.length > 0)
+        ? "mixed"
+        : "physical";
   const physicalCartActive = isDraft && (physicalEditorOpen || preparedItems.length > 0);
   const receiptItemCount = items.length + preparedItems.length;
   const recordedPayments = sale?.payments ?? [];
@@ -757,8 +768,40 @@ function ActiveWorkspace({
     [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId, sessionIsActive],
   );
 
+  const prepareMixedCash = async (): Promise<void> => {
+    if (!sessionIsActive() || !saleId || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    const catalogIds = [...new Set([...items, ...preparedItems].map((item) => item.catalog_id))];
+    const catalogs = await Promise.all(catalogIds.map((id) => getCatalogItem(id)));
+    if (!sessionIsActive() || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    if (
+      catalogs.some(
+        (catalog, index) =>
+          catalog.id !== catalogIds[index] ||
+          catalog.tenant_id !== storageScope.tenantId ||
+          !catalog.is_active ||
+          catalog.deleted_at ||
+          !["otc", "prescription"].includes(catalog.dispensing_type),
+      )
+    )
+      throw new Error("В корзине есть недоступное лекарство. Проверьте позиции перед оплатой.");
+    if (catalogs.some((catalog) => catalog.dispensing_type === "prescription")) {
+      if (!prescription) {
+        setRequiresRx(true);
+        setPrescriptionOpen(true);
+        throw new Error("Сначала заполните рецепт. Оплата ещё не начата.");
+      }
+      // A global sale reference covers both legacy and physical Rx positions.
+      // Sensitive details remain only in memory until this authenticated request.
+      await addPrescription.mutateAsync({ saleId, payload: prescription });
+      if (!sessionIsActive() || saleIdRef.current !== saleId)
+        throw new Error("Сессия кассира завершена.");
+    }
+  };
+
   const acceptPhysicalCash = useCallback(
-    async (result: PhysicalCashCheckoutResult, openCashDrawer: boolean): Promise<boolean> => {
+    async (result: CashCheckoutResult, openCashDrawer: boolean): Promise<boolean> => {
       if (
         !sessionIsActive() ||
         saleIdRef.current !== result.sale_id ||
@@ -804,6 +847,8 @@ function ActiveWorkspace({
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
       setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
       return true;
     },
     [sessionIsActive, registerId, storageScope, refetchSale, persistCompletedReceipt, queryClient],
@@ -2173,9 +2218,13 @@ function ActiveWorkspace({
                 </p>
               </div>
               {requiresRx && !prescription ? (
-                <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
-                  требуется рецепт
-                </span>
+                <Button
+                  variant="secondary"
+                  disabled={saleEditingBlocked}
+                  onClick={() => setPrescriptionOpen(true)}
+                >
+                  Заполнить рецепт
+                </Button>
               ) : null}
             </header>
 
@@ -2207,7 +2256,7 @@ function ActiveWorkspace({
               <div className="min-h-0 overflow-y-auto p-3">
                 {items.length > 0 && (
                   <p className="mb-3 text-sm text-warning-foreground">
-                    В чеке есть обычные и поштучные позиции. Оплата пока недоступна.
+                    Обычные и поштучные позиции оплачиваются вместе наличными.
                   </p>
                 )}
                 <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
@@ -2230,7 +2279,6 @@ function ActiveWorkspace({
                     disabled={
                       saleEditingBlocked ||
                       !isDraft ||
-                      items.length > 0 ||
                       saleQuery.isError ||
                       saleQuery.isPlaceholderData
                     }
@@ -2245,7 +2293,7 @@ function ActiveWorkspace({
                 </Suspense>
               </div>
             )}
-            {isDraft && items.length === 0 && preparedItems.length === 0 && (
+            {isDraft && preparedItems.length === 0 && (
               <div className="p-3">
                 <Button
                   type="button"
@@ -2337,19 +2385,27 @@ function ActiveWorkspace({
               saleId &&
               (branchId || sale?.branch_id) ? (
                 <Suspense fallback={<p role="status">Загрузка оплаты…</p>}>
+                  {cashKind === "mixed" && sale?.is_test && (
+                    <p role="status" className="mb-3 text-sm text-foreground-muted">
+                      Смешанная корзина пока недоступна в тренировочной продаже.
+                    </p>
+                  )}
                   <PhysicalCashPanel
-                    key={saleId}
+                    key={`${saleId}:${cashKind}`}
+                    kind={cashKind}
                     saleId={saleId}
                     branchId={branchId ?? sale!.branch_id}
                     registerId={registerId}
                     scope={storageScope}
                     items={preparedItems}
+                    legacyItems={cashKind === "mixed" ? items : undefined}
                     online={online}
                     canPay={
                       hasOpenShift &&
                       isDraft &&
                       preparedItems.length > 0 &&
-                      items.length === 0 &&
+                      (cashKind !== "mixed" || sale?.is_test === false) &&
+                      (cashKind !== "mixed" || !requiresRx || prescription !== null) &&
                       recordedPayments.length === 0 &&
                       stagedPayments.length === 0 &&
                       !physicalCartBusy &&
@@ -2367,6 +2423,7 @@ function ActiveWorkspace({
                       paymentMethods.includes("cash")
                     }
                     sessionIsActive={sessionIsActive}
+                    beforeStart={cashKind === "mixed" ? prepareMixedCash : undefined}
                     onBlockedChange={updatePhysicalCashBlocked}
                     onCompleted={acceptPhysicalCash}
                   />
