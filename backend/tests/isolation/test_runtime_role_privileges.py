@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_mixed_cash_refund",
     "pos_mixed_checkout",
     "pos_mixed_return_command",
     "pos_mixed_return_line",
@@ -233,6 +234,9 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_mixed_cash_refund_guard",
+    "trg_mixed_cash_refund_complete",
+    "trg_mixed_cash_refund_components",
     "assert_mixed_checkout",
     "trg_mixed_return_guard",
     "trg_mixed_return_complete",
@@ -1191,6 +1195,9 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
     return_names = {
+        "trg_mixed_cash_refund_guard",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
         "trg_mixed_return_guard",
         "trg_mixed_return_complete",
         "trg_physical_return_guard",
@@ -1210,8 +1217,16 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
         "trg_mixed_return_complete",
         "trg_physical_return_complete",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
     }
-    for name in ("trg_mixed_return_guard", "trg_mixed_return_complete"):
+    for name in (
+        "trg_mixed_return_guard",
+        "trg_mixed_return_complete",
+        "trg_mixed_cash_refund_guard",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
+    ):
         assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     cash_names = {
         "assert_physical_checkout",
@@ -1377,6 +1392,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
+                      'pos_mixed_cash_refund',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
                       'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
@@ -1385,6 +1401,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "pos_mixed_cash_refund",
         "pos_mixed_return_command",
         "pos_mixed_return_line",
         "pos_mixed_return_slice",
