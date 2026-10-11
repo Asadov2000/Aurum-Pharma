@@ -22,23 +22,20 @@ from app.domains.pos.mixed_documents import MixedCheckoutResultV4, MixedReceiptD
 from app.domains.pos.models import Sale
 from app.domains.pos.physical_documents import PhysicalResultLineV3
 from app.domains.pos.unit_cash_confirmation import CashConfirmationRequestV2
+from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import (
     seed_receiving_actor,
     set_receiving_context,
 )
-from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.inventory.test_unit_ledger import seed_ledger_context
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import cart_line, dispense, remaining
+from tests.domains.pos.test_mixed_physical_checkout_preparation import facts as mixed_facts
 from tests.domains.pos.test_mixed_physical_checkout_preparation import (
     legacy_with_stock,
     second_legacy,
 )
-from tests.domains.pos.test_mixed_physical_checkout_preparation import facts as mixed_facts
 from tests.domains.pos.test_unit_physical_cart import physical_request, put_physical
-from tests.domains.pos.test_unit_physical_checkout_preparation import (
-    checkout_source,
-    saved_request,
-)
+from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
 
 db_session = receiving_session_fixture
@@ -99,9 +96,12 @@ async def test_mixed_cash_posts_fractional_pack_and_physical_format_once(
     assert result.total_amount == request.expected_total_amount
     assert result.payments[0].amount == result.total_amount
     assert await remaining(db_session, source.stock) == 60 - units
-    assert await db_session.scalar(
-        text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
-    ) == Decimal("0.000")
+    assert (
+        await db_session.scalar(
+            text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
+        )
+        == Decimal("0.000")
+    )
     movement = (
         await db_session.execute(
             text(
@@ -126,13 +126,19 @@ async def test_mixed_cash_posts_fractional_pack_and_physical_format_once(
     assert command.checkout_sale_id is None
     assert command.mixed_checkout_sale_id == source.sale.id
     for table in ("sale_payment", "pos_mixed_checkout"):
-        assert await db_session.scalar(
-            text(f"SELECT count(*) FROM {table} WHERE sale_id=:id"), {"id": source.sale.id}
-        ) == 1
-    assert await db_session.scalar(
-        text("SELECT count(*) FROM pos_physical_checkout WHERE sale_id=:id"),
-        {"id": source.sale.id},
-    ) == 0
+        assert (
+            await db_session.scalar(
+                text(f"SELECT count(*) FROM {table} WHERE sale_id=:id"), {"id": source.sale.id}
+            )
+            == 1
+        )
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM pos_physical_checkout WHERE sale_id=:id"),
+            {"id": source.sale.id},
+        )
+        == 0
+    )
     row = (
         await db_session.execute(
             text("SELECT status,total_amount,receipt_snapshot FROM sale WHERE id=:id"),
@@ -334,13 +340,19 @@ async def test_final_completion_failure_rolls_back_both_postings_and_cash(
         completed_at: datetime,
     ) -> None:
         assert await remaining(repository.session, source.stock) == 59
-        assert await repository.session.scalar(
-            text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
-        ) == Decimal("0.000")
+        assert (
+            await repository.session.scalar(
+                text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
+            )
+            == Decimal("0.000")
+        )
         for table in ("sale_payment", "pos_mixed_checkout"):
-            assert await repository.session.scalar(
-                text(f"SELECT count(*) FROM {table} WHERE sale_id=:id"), {"id": sale.id}
-            ) == 1
+            assert (
+                await repository.session.scalar(
+                    text(f"SELECT count(*) FROM {table} WHERE sale_id=:id"), {"id": sale.id}
+                )
+                == 1
+            )
         assert receipt.total_amount == request.expected_total_amount
         assert completed_at.tzinfo is not None
         raise BusinessRuleError("Simulated mixed final refusal")
@@ -456,12 +468,17 @@ async def test_real_foreign_tenant_cannot_read_or_replay_mixed_marker(
             foreign = await seed_ledger_context(support)
     foreign_actor = await seed_receiving_actor(db_engine, maintenance_engine, foreign)
     await set_receiving_context(db_session, foreign, foreign_actor)
-    assert await db_session.scalar(
-        text("SELECT count(*) FROM pos_mixed_checkout WHERE id=:id"), {"id": request.operation_id}
-    ) == 0
-    assert await MixedCashCheckoutRepository(db_session).get(
-        original.tenant_id, request.operation_id
-    ) is None
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM pos_mixed_checkout WHERE id=:id"),
+            {"id": request.operation_id},
+        )
+        == 0
+    )
+    assert (
+        await MixedCashCheckoutRepository(db_session).get(original.tenant_id, request.operation_id)
+        is None
+    )
     with pytest.raises(NotFoundError):
         await MixedCashCheckoutService(MixedCashCheckoutRepository(db_session)).complete(
             tenant_id=foreign.tenant_id,
@@ -546,12 +563,18 @@ async def test_pending_orm_state_is_rejected_before_implicit_flush(
         event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
         with db_session.no_autoflush:
             assert await facts(db_session) == before
-            assert await db_session.scalar(
-                text("SELECT is_test FROM sale WHERE id=:id"), {"id": source.sale.id}
-            ) == original
-            assert await db_session.scalar(
-                text("SELECT count(*) FROM sale_item WHERE id=:id"), {"id": legacy.id}
-            ) == 1
+            assert (
+                await db_session.scalar(
+                    text("SELECT is_test FROM sale WHERE id=:id"), {"id": source.sale.id}
+                )
+                == original
+            )
+            assert (
+                await db_session.scalar(
+                    text("SELECT count(*) FROM sale_item WHERE id=:id"), {"id": legacy.id}
+                )
+                == 1
+            )
     finally:
         if event.contains(engine.sync_engine, "before_cursor_execute", record_statement):
             event.remove(engine.sync_engine, "before_cursor_execute", record_statement)

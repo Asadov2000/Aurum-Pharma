@@ -46,9 +46,7 @@ def _require_mixed(quote: MixedCartQuoteV2) -> None:
 def _result_lines(
     quote: MixedCartQuoteV2, retail: UnitCartRetailResultV2, names: dict[UUID, str]
 ) -> tuple[LegacyResultLineV4 | PhysicalResultLineV3, ...]:
-    physical = tuple(
-        line for line in quote.lines if isinstance(line, PhysicalUnitDraftQuoteLineV2)
-    )
+    physical = tuple(line for line in quote.lines if isinstance(line, PhysicalUnitDraftQuoteLineV2))
     if tuple(line.id for line in retail.lines) != tuple(line.id for line in physical):
         raise ConflictError("Posted physical lines differ from cash confirmation")
     posted = {line.id: line for line in retail.lines}
@@ -174,9 +172,11 @@ class MixedCashCheckoutService:
                 physical_total = sum((line.net_amount for line in physical), Decimal("0.00"))
             if retail.command_id != request.operation_id or retail.total_amount != physical_total:
                 raise ConflictError("Posted physical subtotal differs from cash confirmation")
-            catalog_ids = {line.catalog_id for line in quote.lines}
-            names = await self.repository.names(tenant_id, catalog_ids)
-            lines = _result_lines(quote, retail, names)
+            lines = _result_lines(
+                quote,
+                retail,
+                await self.repository.names(tenant_id, {line.catalog_id for line in quote.lines}),
+            )
             allocation = await self.repository.allocate_receipt(sale.register_id)
             if allocation is None:
                 raise AurumError("Mixed checkout receipt allocation failed")
