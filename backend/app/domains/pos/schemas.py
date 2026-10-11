@@ -698,6 +698,7 @@ class SaleDetails(SaleRead):
     items: list[SaleItemRead]
     payments: list[PaymentRead]
     physical_items: list[ReceiptLine] = Field(default_factory=list)
+    mixed_items: list[ReceiptLine] = Field(default_factory=list)
     prepared_cart_items: list[UnitCartItemSnapshot] = Field(default_factory=list)
 
 

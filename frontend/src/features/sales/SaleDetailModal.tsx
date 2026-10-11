@@ -43,11 +43,12 @@ export function SaleDetailModal({
   }, [row.id]);
 
   const isRefund = data ? data.sale_type === "return" : row.is_refund;
+  const isMixed = (data?.mixed_items?.length ?? 0) > 0;
   const hasRefundableItems =
     data?.items.some((item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005) ??
     false;
   const hasRefundedItems =
-    data?.items.some((item) => Number(item.refunded_qty ?? "0") > 0.0005) ?? false;
+    !isMixed && (data?.items.some((item) => Number(item.refunded_qty ?? "0") > 0.0005) ?? false);
 
   return (
     <Modal
@@ -117,32 +118,37 @@ export function SaleDetailModal({
                 <TR>
                   <TH>Товар</TH>
                   <TH className="text-right">Кол-во</TH>
-                  {!isRefund && (!data.physical_items?.length || data.items.length > 0) && (
-                    <TH className="text-right">Возвращено</TH>
-                  )}
+                  {!isRefund &&
+                    !isMixed &&
+                    (!data.physical_items?.length || data.items.length > 0) && (
+                      <TH className="text-right">Возвращено</TH>
+                    )}
                   <TH className="text-right">Цена</TH>
                   <TH className="text-right">Сумма</TH>
                 </TR>
               </THead>
               <TBody>
-                {data.items.map((it) => (
-                  <TR key={it.id}>
-                    <TD>
-                      <p className="font-medium">{it.name ?? `Товар, строка ${it.position}`}</p>
-                      <p className="text-xs text-foreground-muted">
-                        Партия {it.batch_number ?? "без номера"}
-                      </p>
-                    </TD>
-                    <TD className="text-right font-mono">{formatQty(it.qty)}</TD>
-                    {!isRefund && (
-                      <TD className="text-right font-mono">{formatQty(it.refunded_qty ?? "0")}</TD>
-                    )}
-                    <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
-                    <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
-                  </TR>
-                ))}
-                {data.physical_items?.map((it) => (
-                  <TR key={`physical-${it.position}`}>
+                {!isMixed &&
+                  data.items.map((it) => (
+                    <TR key={it.id}>
+                      <TD>
+                        <p className="font-medium">{it.name ?? `Товар, строка ${it.position}`}</p>
+                        <p className="text-xs text-foreground-muted">
+                          Партия {it.batch_number ?? "без номера"}
+                        </p>
+                      </TD>
+                      <TD className="text-right font-mono">{formatQty(it.qty)}</TD>
+                      {!isRefund && (
+                        <TD className="text-right font-mono">
+                          {formatQty(it.refunded_qty ?? "0")}
+                        </TD>
+                      )}
+                      <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
+                      <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
+                    </TR>
+                  ))}
+                {(isMixed ? data.mixed_items : data.physical_items)?.map((it) => (
+                  <TR key={`${isMixed ? "mixed" : "physical"}-${it.position}`}>
                     <TD>
                       <p className="font-medium">{it.name}</p>
                       {it.quantity_description && (
@@ -153,7 +159,7 @@ export function SaleDetailModal({
                       {formatQty(it.qty)}
                       {it.unit_label ? ` ${it.unit_label}` : ""}
                     </TD>
-                    {!isRefund && data.items.length > 0 && <TD />}
+                    {!isRefund && !isMixed && data.items.length > 0 && <TD />}
                     <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
                     <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
                   </TR>
@@ -189,6 +195,7 @@ export function SaleDetailModal({
             </Button>
             {/* Partial refunds remain available until every line is returned. */}
             {canRefund &&
+              !isMixed &&
               data.sale_type === "sale" &&
               data.status === "completed" &&
               (hasRefundableItems || (data.physical_items?.length ?? 0) > 0) && (
@@ -202,6 +209,7 @@ export function SaleDetailModal({
       )}
 
       {canRefund &&
+        !isMixed &&
         refundOpen &&
         data &&
         ((data.physical_items?.length ?? 0) > 0 ? (

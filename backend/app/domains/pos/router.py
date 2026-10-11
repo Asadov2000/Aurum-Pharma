@@ -1292,7 +1292,8 @@ async def get_sale(
     refunded_quantities = (
         await service.get_refunded_quantities(sale.id) if sale.sale_type == "sale" else {}
     )
-    snapshot_names = service.get_receipt_item_names(sale)
+    mixed_items = service.get_mixed_receipt_items(sale)
+    snapshot_names = service.get_receipt_item_names(sale) if not mixed_items else {}
     return SaleDetails(
         **SaleRead.model_validate(sale).model_copy(update=lifecycle).model_dump(),
         items=[
@@ -1305,11 +1306,14 @@ async def get_sale(
                     "name": snapshot_names.get(si.position, current_name),
                 }
             )
-            for (si, batch_number, expires_at, days_to_expiry, current_name) in items
+            for (si, batch_number, expires_at, days_to_expiry, current_name) in (
+                items if not mixed_items else []
+            )
         ],
         payments=[PaymentRead.model_validate(p) for p in payments],
-        physical_items=service.get_physical_receipt_items(sale),
-        prepared_cart_items=await service.get_prepared_cart_items(sale),
+        physical_items=service.get_physical_receipt_items(sale) if not mixed_items else [],
+        mixed_items=mixed_items,
+        prepared_cart_items=await service.get_prepared_cart_items(sale) if not mixed_items else [],
     )
 
 

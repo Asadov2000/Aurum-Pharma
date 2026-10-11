@@ -47,6 +47,8 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
+from app.domains.pos.mixed_documents import MixedReceiptDocumentV4
+from app.domains.pos.mixed_receipt_read import mixed_receipt_lines, mixed_receipt_snapshot
 from app.domains.pos.models import (
     POSCommand,
     POSFavorite,
@@ -741,6 +743,8 @@ class POSService:
         Decimal,
         list[tuple[str, Decimal]],
     ]:
+        if mixed_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Mixed sale refunds are not supported yet")
         await self._assert_consumed_refund_history(parent)
         parent_items, already_refunded = await self._validate_refund_items(
             parent_sale_id=parent.id,
@@ -2394,6 +2398,9 @@ class POSService:
     @staticmethod
     def get_receipt_item_names(sale: Sale) -> dict[int, str]:
         """Return immutable line names for a completed receipt snapshot."""
+        if mixed_receipt_snapshot(sale) is not None:
+            # Mixed global positions cannot be joined to legacy SaleItem positions.
+            return {}
         refund = physical_cash_refund_snapshot(sale)
         if refund is not None:
             return {line.position: line.name for line in refund.lines}
@@ -2413,11 +2420,19 @@ class POSService:
     @staticmethod
     def get_physical_receipt_items(sale: Sale) -> list[ReceiptLine]:
         """Read physical lines after the caller has authorized access to the sale."""
+        if mixed_receipt_snapshot(sale) is not None:
+            return []
         refund = physical_cash_refund_snapshot(sale)
         if refund is not None:
             return physical_cash_refund_lines(refund)
         snapshot = physical_receipt_snapshot(sale)
         return physical_receipt_lines(snapshot) if snapshot is not None else []
+
+    @staticmethod
+    def get_mixed_receipt_items(sale: Sale) -> list[ReceiptLine]:
+        """Keep mixed global positions separate from legacy and physical-only reads."""
+        snapshot = mixed_receipt_snapshot(sale)
+        return mixed_receipt_lines(snapshot) if snapshot is not None else []
 
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
@@ -2626,9 +2641,11 @@ class POSService:
         )
 
     async def _compose_physical_receipt_data(
-        self, sale: Sale, snapshot: PhysicalReceiptDocumentV3 | PhysicalCashRefundReceiptV3
+        self,
+        sale: Sale,
+        snapshot: PhysicalReceiptDocumentV3 | PhysicalCashRefundReceiptV3 | MixedReceiptDocumentV4,
     ) -> ReceiptData:
-        # V3 stores retail facts, but not historical pharmacy/cashier display data.
+        # Versioned receipts store retail facts, not historical pharmacy/cashier headers.
         tenant = await self.repo.session.get(Tenant, sale.tenant_id)
         branch = await self.repo.session.get(Branch, sale.branch_id)
         cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
@@ -2637,6 +2654,12 @@ class POSService:
             local_datetime = snapshot.completed_at.astimezone(ZoneInfo(timezone_name))
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AurumError("Tenant report timezone is invalid") from exc
+        if isinstance(snapshot, PhysicalCashRefundReceiptV3):
+            lines = physical_cash_refund_lines(snapshot)
+        elif isinstance(snapshot, MixedReceiptDocumentV4):
+            lines = mixed_receipt_lines(snapshot)
+        else:
+            lines = physical_receipt_lines(snapshot)
         return ReceiptData(
             sale_id=sale.id,
             is_refund=isinstance(snapshot, PhysicalCashRefundReceiptV3),
@@ -2653,11 +2676,7 @@ class POSService:
             ),
             datetime=local_datetime,
             cashier_name=cashier_name,
-            items=(
-                physical_cash_refund_lines(snapshot)
-                if isinstance(snapshot, PhysicalCashRefundReceiptV3)
-                else physical_receipt_lines(snapshot)
-            ),
+            items=lines,
             discount_total=sum((line.discount_amount for line in snapshot.lines), Decimal("0")),
             total=snapshot.total_amount,
             currency=snapshot.currency,
@@ -2698,6 +2717,9 @@ class POSService:
         refund = physical_cash_refund_snapshot(sale)
         if refund is not None:
             return await self._compose_physical_receipt_data(sale, refund)
+        mixed = mixed_receipt_snapshot(sale)
+        if mixed is not None:
+            return await self._compose_physical_receipt_data(sale, mixed)
         physical = physical_receipt_snapshot(sale)
         if physical is not None:
             return await self._compose_physical_receipt_data(sale, physical)
