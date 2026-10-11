@@ -226,10 +226,10 @@ test("recovers one mixed cash sale after response loss and closing the shift", a
     await page.getByRole("button", { name: "Печать чека", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Печать чека", exact: true })).toBeVisible();
     await expect(
-      page.locator(".receipt-print").getByText(legacy.brand_name, { exact: true }),
+      page.locator(".receipt-print").getByText(`1. ${legacy.brand_name}`, { exact: true }),
     ).toBeVisible();
     await expect(
-      page.locator(".receipt-print").getByText(physical.brand_name, { exact: true }),
+      page.locator(".receipt-print").getByText(`2. ${physical.brand_name}`, { exact: true }),
     ).toBeVisible();
   } finally {
     await api.dispose();
