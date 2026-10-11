@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -19,6 +20,32 @@ def _nodeids(value: object) -> list[str]:
     if value != sorted(set(value)):
         raise ValueError("Manifest node IDs must be sorted and unique")
     return value
+
+
+def _collection_mismatch(expected: list[str], actual: list[str]) -> str:
+    """Summarize differing files without exposing test names or parameter values."""
+    differences: dict[str, list[int]] = {}
+    expected_set, actual_set = set(expected), set(actual)
+    for side, node_ids in enumerate((expected_set - actual_set, actual_set - expected_set)):
+        for node_id in node_ids:
+            file_name = node_id.partition("::")[0]
+            if len(file_name) > 240 or re.fullmatch(
+                r"tests/(?:[A-Za-z_][A-Za-z0-9_]*/)*test_[A-Za-z0-9_]+\.py", file_name
+            ) is None:
+                file_name = "<invalid test path>"
+            differences.setdefault(file_name, [0, 0])[side] += 1
+    paths = sorted(differences)
+    details = [
+        f"{path} (baseline-only={differences[path][0]}, shard-only={differences[path][1]})"
+        for path in paths[:20]
+    ]
+    if len(paths) > 20:
+        details.append(f"{len(paths) - 20} additional file groups omitted")
+    return (
+        "Shards did not collect the same complete test suite: "
+        f"baseline-count={len(expected)}, shard-count={len(actual)}; "
+        + "; ".join(details)
+    )
 
 
 def _verify_junit(path: Path, expected_tests: int) -> None:
@@ -79,7 +106,7 @@ def verify(directory: Path, expected_shards: int) -> tuple[int, int]:
         if all_collected is None:
             all_collected = collected
         elif collected != all_collected:
-            raise ValueError("Shards did not collect the same complete test suite")
+            raise ValueError(_collection_mismatch(all_collected, collected))
         if not set(selected).issubset(collected) or executed.intersection(selected):
             raise ValueError("Shard selections overlap or contain unknown tests")
         _verify_junit(path.with_name("pytest.xml"), len(selected))

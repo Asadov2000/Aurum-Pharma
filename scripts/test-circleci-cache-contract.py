@@ -58,7 +58,7 @@ class CircleCiCacheContract(unittest.TestCase):
             self.assertIn("poetry install --no-root --with dev --sync", content)
         self.assertIn("dependency-audit-05.sh", JOBS["dependency-audit"])
         self.assertIn("dependency-audit-09.sh", JOBS["dependency-audit"])
-        self.assertNotIn("save-python-downloads", JOBS["dependency-audit"])
+        self.assertNotIn("save-python-downloads", JOBS["backend"])
         self.assertNotIn("save-pnpm-downloads", JOBS["dependency-audit"])
         for name in ("backend", "frontend", "dependency-audit", "e2e"):
             self.assertNotIn("condition:", JOBS[name], "Cache hits must never skip validation")
@@ -78,7 +78,11 @@ class CircleCiCacheContract(unittest.TestCase):
             self.assertIn(f'- {command}:\n          executor: "docker"', frontend)
         self.assertIn('default: "machine"', COMMANDS["restore-pnpm-downloads"])
         self.assertIn('default: "machine"', COMMANDS["save-pnpm-downloads"])
-        self.assertIn('"save-python-downloads"', JOBS["backend"])
+        self.assertIn('"save-python-downloads"', JOBS["dependency-audit"])
+        self.assertEqual(CONFIG.count('      - "save-python-downloads"'), 1)
+        audit = JOBS["dependency-audit"]
+        self.assertLess(audit.index("dependency-audit-04.sh"), audit.index('"save-python-downloads"'))
+        self.assertLess(audit.index('"save-python-downloads"'), audit.index("dependency-audit-05.sh"))
         self.assertIn('"save-pnpm-downloads"', JOBS["e2e"])
 
     def test_full_gate_and_resource_limits_remain_required(self) -> None:
@@ -87,7 +91,12 @@ class CircleCiCacheContract(unittest.TestCase):
         gate = workflow.split("- ci-gate:\n", 1)[1]
         self.assertEqual(set(re.findall(r'^            - "([^"]+)"$', gate, re.M)), expected)
         self.assertEqual(set(JOBS), expected | {"ci-gate"})
-        self.assertNotIn("parallelism:", CONFIG)
+        self.assertEqual(re.findall(r"^    parallelism: (.+)$", CONFIG, re.M), ["2"])
+        self.assertIn("    parallelism: 2\n", JOBS["backend"])
+        for name in expected - {"backend"}:
+            self.assertNotIn("parallelism:", JOBS[name])
+        self.assertNotIn("parallelism:", JOBS["ci-gate"])
+        self.assertIn("python .circleci/scripts/verify-backend-evidence.py", JOBS["ci-gate"])
         for name in expected - {"tooling-windows"}:
             self.assertIn('resource_class: "medium"', JOBS[name])
         self.assertIn('--pull --load --no-cache-filter runtime', JOBS["production-containers"])
