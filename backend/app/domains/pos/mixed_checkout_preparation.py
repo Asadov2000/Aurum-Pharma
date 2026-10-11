@@ -96,7 +96,8 @@ class MixedPhysicalCheckoutPreparationService:
             raise BusinessRuleError("Mixed checkout requires legacy and physical positions only")
         legacy_rx: set[UUID] = set()
         # Write-compatible locks precede all quote/Rx SHARE locks, as in physical checkout.
-        for catalog_id in sorted({item.catalog_id for item in [*legacy, *units]}, key=str):
+        catalog_ids = {item.catalog_id for item in legacy} | {item.catalog_id for item in units}
+        for catalog_id in sorted(catalog_ids, key=str):
             catalog = await self.repository.lock_checkout_catalog(tenant_id, catalog_id)
             if catalog is None:
                 raise NotFoundError("Checkout catalog item not found")
