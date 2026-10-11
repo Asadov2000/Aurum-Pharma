@@ -96,12 +96,9 @@ async def test_mixed_cash_posts_fractional_pack_and_physical_format_once(
     assert result.total_amount == request.expected_total_amount
     assert result.payments[0].amount == result.total_amount
     assert await remaining(db_session, source.stock) == 60 - units
-    assert (
-        await db_session.scalar(
-            text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
-        )
-        == Decimal("0.000")
-    )
+    assert await db_session.scalar(
+        text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
+    ) == Decimal("0.000")
     movement = (
         await db_session.execute(
             text(
@@ -170,14 +167,18 @@ async def test_repeated_legacy_rows_create_one_aggregate_batch_movement(
     result = await complete(db_session, await saved_request(db_session, source.sale))
     assert tuple(line.id for line in result.lines) == (first.id, second.id, physical.id)
     movements = (
-        await db_session.execute(
-            text(
-                "SELECT qty_delta FROM batch_movement WHERE source_table='sale' "
-                "AND source_id=:id AND movement_type='sale'"
-            ),
-            {"id": source.sale.id},
+        (
+            await db_session.execute(
+                text(
+                    "SELECT qty_delta FROM batch_movement WHERE source_table='sale' "
+                    "AND source_id=:id AND movement_type='sale'"
+                ),
+                {"id": source.sale.id},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert movements == [Decimal("-0.002")]
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
@@ -340,12 +341,9 @@ async def test_final_completion_failure_rolls_back_both_postings_and_cash(
         completed_at: datetime,
     ) -> None:
         assert await remaining(repository.session, source.stock) == 59
-        assert (
-            await repository.session.scalar(
-                text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
-            )
-            == Decimal("0.000")
-        )
+        assert await repository.session.scalar(
+            text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
+        ) == Decimal("0.000")
         for table in ("sale_payment", "pos_mixed_checkout"):
             assert (
                 await repository.session.scalar(
@@ -492,9 +490,7 @@ async def test_real_foreign_tenant_cannot_read_or_replay_mixed_marker(
 
 
 @pytest.mark.parametrize("action", ["UPDATE", "DELETE"])
-async def test_completed_mixed_marker_is_immutable(
-    db_session: AsyncSession, action: str
-) -> None:
+async def test_completed_mixed_marker_is_immutable(db_session: AsyncSession, action: str) -> None:
     source = await checkout_source(db_session)
     await legacy_with_stock(db_session, source.sale)
     await put_physical(db_session, source.sale.id)
