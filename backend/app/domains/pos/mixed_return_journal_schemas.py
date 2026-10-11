@@ -115,13 +115,16 @@ class MixedReturnJournalResult(FrozenContract):
         with localcontext(EXACT_CONTEXT):
             if sum((line.net_amount for line in self.lines), Decimal("0.00")) != self.total_amount:
                 raise ValueError("Return total differs")
-            if sum(
-                (
-                    line.cost_amount
-                    for line in self.lines
-                    if isinstance(line, MixedPhysicalReturnJournalLine)
-                ),
-                Decimal("0.00"),
-            ) != self.physical_cost_amount:
+            if (
+                sum(
+                    (
+                        line.cost_amount
+                        for line in self.lines
+                        if isinstance(line, MixedPhysicalReturnJournalLine)
+                    ),
+                    Decimal("0.00"),
+                )
+                != self.physical_cost_amount
+            ):
                 raise ValueError("Physical return cost total differs")
         return self

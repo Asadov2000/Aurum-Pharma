@@ -191,7 +191,7 @@ async def test_direct_insert_cannot_overlap_an_existing_inventory_cursor(
                 text(
                     "INSERT INTO pos_mixed_return_line "
                     "SELECT tenant_id,:id,line_id,position,branch_id,catalog_id,inventory_kind,"
-                    "batch_id,legacy_quantity,legacy_offset,base_units,\"offset\",sale_format,"
+                    'batch_id,legacy_quantity,legacy_offset,base_units,"offset",sale_format,'
                     "quantity,cost_amount,net_amount,discount_amount,gross_amount,created_at,"
                     "updated_at,created_by,updated_by FROM pos_mixed_return_line "
                     "WHERE command_id=:first AND inventory_kind=:kind"

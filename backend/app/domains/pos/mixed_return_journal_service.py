@@ -117,9 +117,11 @@ class MixedReturnJournalService:
         ):
             raise BusinessRuleError("Typed mixed return selections are required")
         selections = tuple(
-            LegacyReturnSelection(UUID(str(s.line_id)), s.quantity)
-            if isinstance(s, LegacyReturnSelection)
-            else PhysicalReturnSelection(UUID(str(s.line_id)), s.sale_format, s.quantity)
+            (
+                LegacyReturnSelection(UUID(str(s.line_id)), s.quantity)
+                if isinstance(s, LegacyReturnSelection)
+                else PhysicalReturnSelection(UUID(str(s.line_id)), s.sale_format, s.quantity)
+            )
             for s in selections
         )
         fingerprint = mixed_return_fingerprint(tenant_id, actor_id, parent_sale_id, selections)
@@ -180,7 +182,12 @@ class MixedReturnJournalService:
                 checkout.register_id,
                 checkout.shift_id,
                 checkout.cashier_user_id,
-            ) != (sale.branch_id, sale.register_id, sale.shift_id, sale.cashier_user_id):
+            ) != (
+                sale.branch_id,
+                sale.register_id,
+                sale.shift_id,
+                sale.cashier_user_id,
+            ):
                 raise BusinessRuleError("Original mixed checkout scope differs")
             legacy_cursors, physical_cursors = await self.repo.cursors(tenant_id, parent_sale_id)
             try:
@@ -272,22 +279,27 @@ class MixedReturnJournalService:
                 legacy = await self.repo.legacy_source(
                     tenant_id, parent_sale_id, allocation.line_id
                 )
-                if legacy is None or legacy.parent_sale_item_id is not None or (
-                    legacy.catalog_id,
-                    legacy.batch_id,
-                    legacy.qty,
-                    legacy.unit_price,
-                    legacy.total_price,
-                    legacy.discount_amount,
-                    legacy.currency,
-                ) != (
-                    original_line.catalog_id,
-                    original_line.batch_id,
-                    original_line.quantity,
-                    original_line.original_retail_unit_price,
-                    original_line.net_amount,
-                    original_line.discount_amount,
-                    "TJS",
+                if (
+                    legacy is None
+                    or legacy.parent_sale_item_id is not None
+                    or (
+                        legacy.catalog_id,
+                        legacy.batch_id,
+                        legacy.qty,
+                        legacy.unit_price,
+                        legacy.total_price,
+                        legacy.discount_amount,
+                        legacy.currency,
+                    )
+                    != (
+                        original_line.catalog_id,
+                        original_line.batch_id,
+                        original_line.quantity,
+                        original_line.original_retail_unit_price,
+                        original_line.net_amount,
+                        original_line.discount_amount,
+                        "TJS",
+                    )
                 ):
                     raise BusinessRuleError("Original legacy source line differs")
                 result_lines.append(
@@ -330,9 +342,7 @@ class MixedReturnJournalService:
                 ):
                     raise BusinessRuleError("Original physical source line differs")
                 slices = PhysicalReturnJournalService._slices(
-                    await self.repo.movements(
-                        tenant_id, stock_command_id, allocation.line_id
-                    ),
+                    await self.repo.movements(tenant_id, stock_command_id, allocation.line_id),
                     tenant_id=tenant_id,
                     branch_id=branch_id,
                     catalog_id=source.catalog_id,

@@ -227,9 +227,9 @@ async def test_partial_both_kinds_conserve_original_cents_and_cost_with_zero_amo
     assert sum((row.total_amount for row in results), Decimal()) == source.original.total_amount
     for index in (0, 1):
         for field in ("net_amount", "discount_amount", "gross_amount"):
-            assert sum(
-                (getattr(row.lines[index], field) for row in results), Decimal()
-            ) == getattr(source.original.lines[index], field)
+            assert sum((getattr(row.lines[index], field) for row in results), Decimal()) == getattr(
+                source.original.lines[index], field
+            )
     historical_cost = await db_session.scalar(
         text(
             "SELECT sum(cost_amount) FROM unit_stock_movement_v2 "
