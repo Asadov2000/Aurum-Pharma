@@ -72,7 +72,7 @@ class ForgedRefundRepository(MixedCashRefundRepository):
         self.corruption = corruption
 
     # Keep each deliberately corrupted DB fact visible for the parametrized cases.
-    async def insert(self, marker: MixedCashRefund) -> None:  # noqa: PLR0912
+    async def insert(self, marker: MixedCashRefund) -> None:
         if self.corruption == "receipt":
             marker.receipt_payload = {**marker.receipt_payload, "total_amount": "999.00"}
         elif self.corruption == "receipt_lines":
