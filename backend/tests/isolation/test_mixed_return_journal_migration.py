@@ -36,6 +36,7 @@ from tests.domains.pos.test_mixed_physical_checkout_preparation import legacy_wi
 from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
+from tests.isolation.test_physical_cash_checkout_migration import mixed_cash_refund_migration
 
 db_session = receiving_session_fixture
 TABLES = ("pos_mixed_return_command", "pos_mixed_return_line", "pos_mixed_return_slice")
@@ -445,12 +446,14 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
                         module.downgrade()
                 assert connection.execute(guards).all() == original_guards
                 return
+            mixed_cash_refund_migration().downgrade()
             module.downgrade()
             for table in TABLES:
                 assert (
                     connection.scalar(text("SELECT to_regclass(:table)"), {"table": table}) is None
                 )
             module.upgrade()
+            mixed_cash_refund_migration().upgrade()
             assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (

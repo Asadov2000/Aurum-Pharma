@@ -80,6 +80,7 @@ def cash_refund_policy_migration() -> ModuleType:
 
 
 def downgrade_refund_for_roundtrip() -> None:
+    mixed_cash_refund_migration().downgrade()
     mixed_return_migration().downgrade()
     mixed_checkout_migration().downgrade()
     zero_return_migration().downgrade()
@@ -93,6 +94,16 @@ def upgrade_refund_after_roundtrip() -> None:
     zero_return_migration().upgrade()
     mixed_checkout_migration().upgrade()
     mixed_return_migration().upgrade()
+    mixed_cash_refund_migration().upgrade()
+
+
+def mixed_cash_refund_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0190_mixed_cash_refund.py"
+    spec = importlib.util.spec_from_file_location("mixed_cash_refund_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def mixed_return_migration() -> ModuleType:

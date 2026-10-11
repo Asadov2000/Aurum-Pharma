@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from tests.isolation.test_physical_cash_checkout_migration import mixed_return_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_cash_refund_migration,
+    mixed_return_migration,
+)
 
 FUNCTIONS = text(
     "SELECT proname,pg_get_functiondef(oid),proowner,proacl,prosecdef,proconfig FROM pg_proc "
@@ -197,6 +200,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                         migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                mixed_cash_refund_migration().downgrade()
                 mixed_return_migration().downgrade()
                 migration().downgrade()
                 assert connection.scalar(text("SELECT to_regclass('pos_mixed_checkout')")) is None
@@ -209,6 +213,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                 )
                 migration().upgrade()
                 mixed_return_migration().upgrade()
+                mixed_cash_refund_migration().upgrade()
             assert connection.execute(FUNCTIONS).all() == functions
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

@@ -232,6 +232,9 @@ test("receipt menus preserve completed sales and persist independent preferences
     .filter({ hasText: completed.receipt_number })
     .filter({ hasText: register.name });
   await expect(row).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: `Открыть чек № ${completed.receipt_number}`, exact: true }),
+  ).toBeEnabled();
   await row.click({ button: "right" });
   const menu = page.getByRole("menu");
   await expect(menu.getByText(new RegExp(register.name))).toBeVisible();
