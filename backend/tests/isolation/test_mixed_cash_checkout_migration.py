@@ -12,12 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from tests.isolation.test_physical_cash_checkout_migration import mixed_return_migration
 
 FUNCTIONS = text(
     "SELECT proname,pg_get_functiondef(oid),proowner,proacl,prosecdef,proconfig FROM pg_proc "
     "WHERE pronamespace='public'::regnamespace AND (proname LIKE '%mixed%checkout%' "
     "OR proname IN ('trg_unit_cart_payment_boundary','trg_guard_sale_immutability',"
-    "'assert_physical_checkout','trg_physical_checkout_guard','trg_unit_cart_v2_guard')) "
+    "'assert_physical_checkout','trg_physical_checkout_guard','trg_unit_cart_v2_guard',"
+    "'trg_mixed_return_guard','trg_mixed_return_complete','audit_redact_table_snapshot')) "
     "ORDER BY proname"
 )
 RELATION = text(
@@ -84,7 +86,12 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
 ) -> None:
     async with maintenance_engine.connect() as connection:
         policies = (await connection.execute(POLICIES)).all()
-    assert {row.policyname for row in policies} == {"schema_owner", "support", "tenant_actor"}
+    assert {row.policyname for row in policies} == {
+        "schema_owner",
+        "support",
+        "tenant_actor",
+        "mixed_return_read",
+    }
     app = next(row for row in policies if row.policyname == "tenant_actor")
     assert app.roles == ["aurum_app"]
     assert app.cmd == "ALL"
@@ -97,6 +104,12 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
     assert support.roles == ["aurum_support"]
     assert support.cmd == "SELECT" and support.qual == "true"
     assert support.with_check is None
+    refund = next(row for row in policies if row.policyname == "mixed_return_read")
+    assert refund.roles == ["aurum_app"] and refund.cmd == "SELECT"
+    assert refund.with_check is None
+    assert "tenant_id = current_tenant_id()" in refund.qual
+    assert "tenant_actor_has_scoped_permission" in refund.qual
+    assert "pos.refund" in refund.qual and "branch_id" in refund.qual
 
 
 async def test_mixed_guard_functions_keep_owner_safe_search_path_and_private_acl(
@@ -184,6 +197,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                         migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                mixed_return_migration().downgrade()
                 migration().downgrade()
                 assert connection.scalar(text("SELECT to_regclass('pos_mixed_checkout')")) is None
                 assert not connection.scalar(
@@ -194,6 +208,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                     )
                 )
                 migration().upgrade()
+                mixed_return_migration().upgrade()
             assert connection.execute(FUNCTIONS).all() == functions
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

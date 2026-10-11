@@ -229,7 +229,13 @@ async def test_migration_roundtrip_preserves_rls_acl_or_refuses_committed_histor
                 "'trg_physical_cash_refund_guard','trg_guard_sale_immutability') ORDER BY proname"
             )
             original_guards = connection.execute(guards).all()
-            if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_physical_return_command)")):
+            if connection.scalar(
+                text(
+                    "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_checkout)"
+                )
+            ):
                 with pytest.raises(DBAPIError):
                     with connection.begin_nested():
                         downgrade_refund_for_roundtrip()

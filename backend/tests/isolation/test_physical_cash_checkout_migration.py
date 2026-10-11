@@ -80,6 +80,7 @@ def cash_refund_policy_migration() -> ModuleType:
 
 
 def downgrade_refund_for_roundtrip() -> None:
+    mixed_return_migration().downgrade()
     mixed_checkout_migration().downgrade()
     zero_return_migration().downgrade()
     cash_refund_policy_migration().downgrade()
@@ -91,6 +92,16 @@ def upgrade_refund_after_roundtrip() -> None:
     cash_refund_policy_migration().upgrade()
     zero_return_migration().upgrade()
     mixed_checkout_migration().upgrade()
+    mixed_return_migration().upgrade()
+
+
+def mixed_return_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0189_mixed_return_journal.py"
+    spec = importlib.util.spec_from_file_location("mixed_return_journal_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def mixed_checkout_migration() -> ModuleType:
@@ -120,6 +131,8 @@ async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
             history = connection.scalar(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_checkout) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_checkout) OR EXISTS(SELECT 1 "
                     "FROM unit_stock_cart_command_v2 WHERE checkout_sale_id IS NOT NULL)"
                 )
@@ -176,7 +189,9 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
             history = connection.scalar(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
-                    "EXISTS(SELECT 1 FROM pos_physical_zero_return)"
+                    "EXISTS(SELECT 1 FROM pos_physical_zero_return) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_checkout)"
                 )
             )
             if history:
