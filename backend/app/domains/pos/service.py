@@ -112,6 +112,7 @@ from app.domains.pos.schemas import (
     ZReportPaymentBreakdown,
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
+from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
 from app.domains.sync.integrity import (
@@ -3850,7 +3851,9 @@ class POSService:
             catalog = await self.repo.session.get(TenantCatalog, item.catalog_id)
             if catalog is not None and catalog.dispensing_type == "prescription":
                 rx_item_ids.add(item.id)
-        if not rx_item_ids:
+        if not rx_item_ids and (
+            requested_item_id is not None or not await self._has_active_physical_rx_item(sale)
+        ):
             raise BusinessRuleError("Prescription log is not applicable to this sale")
         if requested_item_id is not None and requested_item_id not in rx_item_ids:
             raise BusinessRuleError("Prescription log must reference a prescription item")
@@ -3862,6 +3865,21 @@ class POSService:
             "created_by": actor_id,
         }
         return await self.repo.insert_prescription(**payload)
+
+    async def _has_active_physical_rx_item(self, sale: Sale) -> bool:
+        cart = UnitCartRepository(self.repo.session)
+        items = await cart.list_items(sale.tenant_id, sale.id)
+        catalog_ids = {item.catalog_id for item in items if item.physical_packaging is not None}
+        for catalog_id in sorted(catalog_ids, key=str):
+            catalog = await cart.lock_catalog(sale.tenant_id, catalog_id)
+            if (
+                catalog is not None
+                and catalog.is_active
+                and catalog.deleted_at is None
+                and catalog.dispensing_type == "prescription"
+            ):
+                return True
+        return False
 
     # =========================================================================
     # Complete — the critical path

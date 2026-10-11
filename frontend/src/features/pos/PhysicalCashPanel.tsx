@@ -8,6 +8,12 @@ import { describeApiError } from "@/lib/errorMessages";
 
 import { getPhysicalCartQuote, type PhysicalCartItem } from "./physicalCart";
 import {
+  getMixedCashOperation,
+  parseMixedCashQuote,
+  type MixedCashCheckoutResult,
+} from "./mixedCashCheckout";
+import { acknowledgeMixedCash, loadPendingMixedCash, runMixedCash } from "./mixedCashRecovery";
+import {
   getPhysicalCashOperation,
   parsePhysicalCashQuote,
   type PhysicalCashCheckoutResult,
@@ -19,6 +25,27 @@ import {
   type PendingPhysicalCash,
 } from "./physicalCashRecovery";
 import { type PosStorageScope } from "./posStorageScope";
+import { type SaleItem } from "./types";
+import { hasCashRecovery } from "./physicalCashRecoveryPresence";
+
+export type CashCheckoutResult = PhysicalCashCheckoutResult | MixedCashCheckoutResult;
+const strategies = {
+  physical: {
+    parse: parsePhysicalCashQuote,
+    load: loadPendingPhysicalCash,
+    get: getPhysicalCashOperation,
+    run: runPhysicalCash,
+    acknowledge: acknowledgePhysicalCash,
+  },
+  mixed: {
+    parse: parseMixedCashQuote,
+    load: loadPendingMixedCash,
+    get: getMixedCashOperation,
+    run: runMixedCash,
+    acknowledge: acknowledgeMixedCash,
+  },
+};
+const emptyLegacyItems: SaleItem[] = [];
 
 interface Props {
   saleId: string;
@@ -26,11 +53,14 @@ interface Props {
   registerId: string;
   scope: PosStorageScope;
   items: PhysicalCartItem[];
+  legacyItems?: SaleItem[];
+  kind?: keyof typeof strategies;
   online: boolean;
   canPay: boolean;
   sessionIsActive: () => boolean;
+  beforeStart?: () => Promise<void>;
   onBlockedChange: (blocked: boolean) => void;
-  onCompleted: (result: PhysicalCashCheckoutResult, openCashDrawer: boolean) => Promise<boolean>;
+  onCompleted: (result: CashCheckoutResult, openCashDrawer: boolean) => Promise<boolean>;
 }
 
 const receivedSchema = z
@@ -46,6 +76,18 @@ function normalizedMoney(value: string): string {
 function displayMoney(value: bigint): string {
   return `${value / 100n}.${(value % 100n).toString().padStart(2, "0")}`;
 }
+function decimal(value: string, places: number): string | null {
+  if (!/^\d+(\.\d+)?$/.test(value)) return null;
+  const [whole = "0", fraction = ""] = value.split(".");
+  if (fraction.length > places) return null;
+  return `${BigInt(whole).toString()}.${fraction.padEnd(places, "0")}`;
+}
+function byPosition(
+  a: { position: number; id: string },
+  b: { position: number; id: string },
+): number {
+  return a.position - b.position || a.id.localeCompare(b.id);
+}
 function message(error: unknown): string {
   const fallback = "Не удалось проверить оплату. Не принимайте деньги повторно.";
   if (isAxiosError(error)) return describeApiError(error, fallback);
@@ -56,6 +98,7 @@ function message(error: unknown): string {
 
 /** Financial recovery remains available even when the sale or shift has already closed. */
 export function PhysicalCashPanel(props: Props): JSX.Element {
+  const strategy = strategies[props.kind ?? "physical"];
   const latest = useRef(props);
   latest.current = props;
   const mounted = useRef(false);
@@ -64,7 +107,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
   const accepted = useRef(false);
   const [initial] = useState(() => {
     try {
-      return { pending: loadPendingPhysicalCash(props.saleId, props.scope), error: null };
+      return { pending: strategy.load(props.saleId, props.scope), error: null };
     } catch (error) {
       return { pending: null, error: message(error) };
     }
@@ -73,9 +116,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
   const [pending, setPending] = useState(initial.pending);
   const [error, setError] = useState<string | null>(initial.error);
   const [busy, setBusy] = useState(false);
-  const [quote, setQuote] = useState<Awaited<ReturnType<typeof parsePhysicalCashQuote>> | null>(
-    null,
-  );
+  const [quote, setQuote] = useState<Awaited<ReturnType<typeof strategy.parse>> | null>(null);
   const quoteItemsKey = useRef<string | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -85,16 +126,16 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
   const received = form.watch("received");
   const active = useCallback(() => mounted.current && latest.current.sessionIsActive(), []);
   const retain = useCallback((): PendingPhysicalCash | null => {
-    const stored = loadPendingPhysicalCash(latest.current.saleId, latest.current.scope);
+    const stored = strategy.load(latest.current.saleId, latest.current.scope);
     pendingRef.current = stored;
     setPending(stored);
     return stored;
-  }, []);
+  }, [strategy]);
   const accept = useCallback(
-    async (result: PhysicalCashCheckoutResult, openCashDrawer = false): Promise<void> => {
+    async (result: CashCheckoutResult, openCashDrawer = false): Promise<void> => {
       if (!active()) return;
       const owner = latest.current;
-      const stored = loadPendingPhysicalCash(owner.saleId, owner.scope);
+      const stored = strategy.load(owner.saleId, owner.scope);
       if (!stored || result.operation_id !== stored.request.operation_id)
         throw new Error("Сохранённая оплата изменилась. Проверьте её состояние.");
       if (result.branch_id !== owner.branchId || result.register_id !== owner.registerId)
@@ -107,7 +148,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
         accepted.current = true;
       }
       if (!active()) return;
-      const acknowledged = await acknowledgePhysicalCash(
+      const acknowledged = await strategy.acknowledge(
         owner.saleId,
         result.operation_id,
         owner.scope,
@@ -120,7 +161,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
       setError(null);
       owner.onBlockedChange(false);
     },
-    [active, retain],
+    [active, retain, strategy],
   );
 
   useEffect(() => {
@@ -140,7 +181,8 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     const ownsBusy = () => busyGeneration.current === generation;
     busyRef.current = true;
     setBusy(true);
-    void getPhysicalCashOperation(initial.pending.request, latest.current.scope, controller.signal)
+    void strategy
+      .get(initial.pending.request, latest.current.scope, controller.signal)
       .then(async (status) => {
         if (!cancelled && active() && status.state === "completed") {
           applying = true;
@@ -161,9 +203,17 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
       controller.abort();
       if (!applying && ownsBusy()) busyRef.current = false;
     };
-  }, [accept, active, initial.pending, props.online, props.scope.tenantId, props.scope.userId]);
+  }, [
+    accept,
+    active,
+    initial.pending,
+    props.online,
+    props.scope.tenantId,
+    props.scope.userId,
+    strategy,
+  ]);
 
-  const itemsKey = JSON.stringify(props.items);
+  const itemsKey = JSON.stringify([props.items, props.legacyItems ?? emptyLegacyItems]);
   useEffect(() => {
     setQuote(null);
     quoteItemsKey.current = null;
@@ -183,7 +233,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
       .then(async (data) => {
         if (cancelled || !active()) return;
         const owner = latest.current;
-        const checked = await parsePhysicalCashQuote(
+        const checked = await strategy.parse(
           data,
           owner.saleId,
           owner.branchId,
@@ -191,20 +241,38 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
           owner.scope,
         );
         if (cancelled || !active()) return;
+        const legacy = [...(owner.legacyItems ?? emptyLegacyItems)].sort(byPosition);
+        const physical = [...owner.items].sort(byPosition);
         if (
-          checked.quote.lines.length !== owner.items.length ||
-          checked.quote.lines.some((line) => {
-            const item = owner.items.find((value) => value.id === line.id);
+          checked.quote.lines.length !== physical.length + legacy.length ||
+          checked.quote.lines.some((line, index) => {
+            if (line.inventory_kind === "legacy_pack") {
+              const item = legacy[index];
+              return (
+                !item ||
+                item.id !== line.id ||
+                item.sale_id !== owner.saleId ||
+                item.catalog_id !== line.catalog_id ||
+                item.batch_id !== line.batch_id ||
+                decimal(item.qty, 3) !== line.quantity ||
+                decimal(item.unit_price, 2) !== line.original_retail_unit_price ||
+                decimal(item.discount_amount, 2) !== line.discount_amount ||
+                decimal(item.total_price, 2) !== line.net_amount ||
+                item.currency !== "TJS"
+              );
+            }
+            const item = physical[index - legacy.length];
             return (
               !item ||
+              item.id !== line.id ||
               item.tenant_id !== owner.scope.tenantId ||
               item.branch_id !== owner.branchId ||
               item.sale_id !== owner.saleId ||
               item.catalog_id !== line.catalog_id ||
               item.sale_format !== line.sale_format ||
               item.quantity !== line.quantity ||
-              item.position !== line.position ||
-              item.discount_amount !== line.discount_amount
+              line.position !== index + 1 ||
+              decimal(item.discount_amount, 2) !== line.discount_amount
             );
           })
         )
@@ -233,6 +301,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     props.online,
     props.saleId,
     refresh,
+    strategy,
   ]);
 
   async function submit(recovery: boolean): Promise<void> {
@@ -241,7 +310,10 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     let input;
     if (!recovery) {
       if (!owner.canPay || !quote || pendingRef.current || initial.error) return;
-      if (quoteItemsKey.current !== JSON.stringify(owner.items)) {
+      if (
+        quoteItemsKey.current !==
+        JSON.stringify([owner.items, owner.legacyItems ?? emptyLegacyItems])
+      ) {
         setError("Корзина изменилась. Обновите сумму перед оплатой.");
         return;
       }
@@ -269,17 +341,32 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     owner.onBlockedChange(true);
     setBusy(true);
     setError(null);
+    let financialRequestStarted = recovery;
     try {
-      const result = await runPhysicalCash(owner.saleId, owner.scope, input);
+      if (!recovery) {
+        await owner.beforeStart?.();
+        if (!active()) return;
+        if (!latest.current.online || !latest.current.canPay)
+          throw new Error("Условия оплаты изменились. Проверьте смену и корзину перед оплатой.");
+        if (
+          quoteItemsKey.current !==
+          JSON.stringify([latest.current.items, latest.current.legacyItems ?? emptyLegacyItems])
+        )
+          throw new Error("Корзина изменилась. Обновите сумму перед оплатой.");
+      }
+      financialRequestStarted = true;
+      const result = await strategy.run(owner.saleId, owner.scope, input);
       if (active()) await accept(result, !recovery);
     } catch (cause) {
       if (active()) {
+        let canRelease = false;
         try {
-          retain();
+          canRelease = retain() === null && !hasCashRecovery(owner.saleId, owner.scope);
         } catch (storageError) {
           setError(message(storageError));
         }
         setError(message(cause));
+        if (!financialRequestStarted && canRelease) owner.onBlockedChange(false);
       }
     } finally {
       if (busyGeneration.current === generation) {

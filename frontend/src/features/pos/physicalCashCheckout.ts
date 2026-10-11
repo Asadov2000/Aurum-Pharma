@@ -117,7 +117,10 @@ const quoteSchema = z
   })
   .strict()
   .refine((value) => linesBalance(value.lines, value.total_amount));
-function linesBalance(lines: RetailLine[], total: string): boolean {
+function linesBalance(
+  lines: { id: string; position: number; net_amount: string }[],
+  total: string,
+): boolean {
   return (
     new Set(lines.map((line) => line.id)).size === lines.length &&
     lines.every((line, index) => line.position === index + 1) &&
@@ -283,7 +286,7 @@ function canonicalJson(value: unknown): string {
       .join(",")}}`;
   return JSON.stringify(value);
 }
-async function quoteHash(quote: z.infer<typeof quoteSchema>): Promise<string> {
+async function quoteHash(quote: unknown): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(canonicalJson(quote)),
@@ -327,6 +330,24 @@ async function verifyQuoteHash(intent: SavedPhysicalCashIntent): Promise<void> {
 function assertSession(guard: () => boolean): void {
   if (!guard()) throw new Error("Authentication session changed");
 }
+// The mixed cash channel shares the exact physical retail and hashing rules.
+// Export primitives together to keep the existing physical API unchanged.
+export const cashCheckoutContracts = {
+  uuid,
+  operationId,
+  money,
+  cents,
+  positiveMoney,
+  timestamp,
+  printable,
+  quoteLine,
+  resultLine,
+  scopeShape,
+  linesBalance,
+  canonicalJson,
+  quoteHash,
+  assertSession,
+};
 function path(request: CashConfirmationRequest): string {
   return `/sales/${encodeURIComponent(request.sale_id)}/physical-cash`;
 }

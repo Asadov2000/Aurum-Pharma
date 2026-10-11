@@ -6,7 +6,10 @@ import { SaleArea } from "@/features/pos/SaleArea";
 import { draftKey } from "@/features/pos/draftStorage";
 import { type PhysicalCartItem } from "@/features/pos/physicalCart";
 import { type PhysicalCashCheckoutResult } from "@/features/pos/physicalCashCheckout";
-import { physicalCashRecoveryKey } from "@/features/pos/physicalCashRecoveryPresence";
+import {
+  physicalCashRecoveryKey,
+  mixedCashRecoveryKey,
+} from "@/features/pos/physicalCashRecoveryPresence";
 import {
   loadPhysicalCartRecovery,
   type PhysicalCartRecovery,
@@ -30,6 +33,8 @@ const calls = vi.hoisted(() => ({
   editor: vi.fn(),
   panel: vi.fn(),
   drawer: vi.fn(),
+  catalog: vi.fn(),
+  prescription: vi.fn(),
 }));
 vi.mock("@tanstack/react-router", async (original) => ({
   ...(await original<typeof import("@tanstack/react-router")>()),
@@ -56,7 +61,7 @@ vi.mock("@/features/pos/api", () => ({
   addSaleItem: calls.addItem,
   updateSaleItem: vi.fn(),
   deleteSaleItem: vi.fn(),
-  addPrescription: vi.fn(),
+  addPrescription: calls.prescription,
   getReceipt: vi.fn(),
   getReceiptPdf: vi.fn(),
   getPosFavorites: vi.fn(async () => []),
@@ -71,7 +76,17 @@ vi.mock("@/features/pos/api", () => ({
 vi.mock("@/features/catalog/pickerQueries", () => ({
   useCatalogPickerQuery: () => ({ data: undefined }),
 }));
-vi.mock("@/features/catalog/api", () => ({ findByBarcode: calls.barcode }));
+vi.mock("@/features/catalog/api", () => ({
+  findByBarcode: calls.barcode,
+  getCatalogItem: calls.catalog,
+}));
+vi.mock("@/features/pos/PrescriptionModal", () => ({
+  PrescriptionModal: (props: { onSaved: (payload: { prescription_number: string }) => void }) => (
+    <button onClick={() => props.onSaved({ prescription_number: "RX-test" })}>
+      Сохранить тестовый рецепт
+    </button>
+  ),
+}));
 vi.mock("@/lib/desktopBridge", () => ({
   DESKTOP_BARCODE_SCANNED_EVENT: "aurum-desktop-barcode-scanned",
   normalizeDesktopBarcode: (raw: string) => raw.trim() || null,
@@ -143,6 +158,18 @@ const physicalItem: PhysicalCartItem = {
     units_per_blister: 10,
     dispense_step: 1,
   },
+};
+const legacyItem: SaleDetails["items"][number] = {
+  id: "legacy-1",
+  sale_id: "sale-1",
+  catalog_id: "legacy-catalog",
+  batch_id: "batch-1",
+  qty: "1",
+  unit_price: "10.00",
+  total_price: "10.00",
+  currency: "TJS",
+  discount_amount: "0.00",
+  position: 1,
 };
 function sale(overrides: Partial<SaleDetails> = {}): SaleDetails {
   return {
@@ -572,7 +599,7 @@ describe("SaleArea physical cart integration", () => {
     expect(calls.drawer).not.toHaveBeenCalled();
   });
 
-  it("keeps a mixed legacy/physical draft read-only instead of enabling old payment", async () => {
+  it("enables the mixed cash panel while keeping old payment blocked", async () => {
     calls.sale.mockResolvedValue(
       sale({
         items: [
@@ -594,9 +621,16 @@ describe("SaleArea physical cart integration", () => {
     mount();
     await screen.findByRole("region", { name: "Физическая корзина" });
     expect(
-      screen.getByText("В чеке есть обычные и поштучные позиции. Оплата пока недоступна."),
+      screen.getByText("Обычные и поштучные позиции оплачиваются вместе наличными."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
+    expect(calls.panel).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "mixed",
+        canPay: true,
+        legacyItems: [expect.objectContaining({ id: "item-1" })],
+      }),
+    );
     expect(screen.queryByRole("button", { name: "Увеличить количество" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "F4" });
     expect(calls.checkout).not.toHaveBeenCalled();
@@ -613,6 +647,62 @@ describe("SaleArea physical cart integration", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Обновить физическую корзину" }));
     expect(await screen.findByText("2 физических строк")).toBeInTheDocument();
+  });
+  it("restores the saved channel before considering the changed live cart", async () => {
+    localStorage.setItem(physicalCashRecoveryKey("sale-1", POS_SCOPE), "uncertain-physical");
+    calls.sale.mockResolvedValue(sale({ items: [legacyItem] }));
+    mount();
+    await cashPanelCallbacks();
+    expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "physical" }));
+    expect(localStorage.getItem(physicalCashRecoveryKey("sale-1", POS_SCOPE))).toBe(
+      "uncertain-physical",
+    );
+  });
+  it("restores the mixed channel when the completed sale no longer has draft rows", async () => {
+    localStorage.setItem(mixedCashRecoveryKey("sale-1", POS_SCOPE), "uncertain-mixed");
+    calls.sale.mockResolvedValue(completedSale({ prepared_cart_items: [] }));
+    calls.shift.mockResolvedValue(null);
+    mount();
+    await cashPanelCallbacks();
+    expect(calls.panel).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "mixed", canPay: false }),
+    );
+    expect(localStorage.getItem(mixedCashRecoveryKey("sale-1", POS_SCOPE))).toBe("uncertain-mixed");
+  });
+  it("opens the physical editor after legacy lines without making a second sale", async () => {
+    calls.sale.mockResolvedValue(sale({ prepared_cart_items: [], items: [legacyItem] }));
+    mount();
+    const button = await screen.findByRole("button", {
+      name: "Выбрать упаковку, блистер или штуки",
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await screen.findByRole("region", { name: "Физическая корзина" });
+    expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
+    expect(calls.create).not.toHaveBeenCalled();
+  });
+  it("checks Rx and persists the global prescription before starting mixed cash", async () => {
+    calls.sale.mockResolvedValue(sale({ items: [legacyItem] }));
+    calls.catalog.mockImplementation(async (id: string) => ({
+      id,
+      tenant_id: POS_SCOPE.tenantId,
+      is_active: true,
+      dispensing_type: id === physicalItem.catalog_id ? "prescription" : "otc",
+    }));
+    calls.prescription.mockResolvedValue({ id: "rx-1" });
+    mount();
+    await cashPanelCallbacks();
+    let panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
+    await act(async () => {
+      await expect(panel.beforeStart()).rejects.toThrow("Сначала заполните рецепт");
+    });
+    expect(calls.prescription).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Сохранить тестовый рецепт" }));
+    await act(async () => {
+      panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
+      await panel.beforeStart();
+    });
+    expect(calls.prescription).toHaveBeenCalledWith("sale-1", { prescription_number: "RX-test" });
   });
 
   it("opens an empty restored draft editor and returns without creating another sale", async () => {

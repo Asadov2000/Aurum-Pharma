@@ -11,7 +11,7 @@ import { loadPendingPaymentOperation } from "./paymentOperation";
 import { hasPaymentAttemptOperation } from "./paymentAttemptOperation";
 import { currentPosStorageScope, posStorageKey, type PosStorageScope } from "./posStorageScope";
 import { loadPhysicalCartRecovery } from "./physicalCartRecovery";
-import { hasPhysicalCashRecovery } from "./physicalCashRecoveryPresence";
+import { hasCashRecovery } from "./physicalCashRecoveryPresence";
 
 export const legacyDraftKey = (registerId: string): string => `pos:currentSale:${registerId}`;
 export const draftKey = (registerId: string, scope: PosStorageScope): string =>
@@ -91,7 +91,7 @@ export function loadDraft(
           !hasPendingCompletion(parsed.saleId) &&
           !loadPendingCheckoutOperation(parsed.saleId) &&
           (!scope || !loadPhysicalCartRecovery(parsed.saleId, scope)) &&
-          (!scope || !hasPhysicalCashRecovery(parsed.saleId, scope))
+          (!scope || !hasCashRecovery(parsed.saleId, scope))
         ) {
           // Stale: clear it and flag the cashier instead of reopening blind.
           if (scope) window.localStorage.removeItem(draftKey(registerId, scope));
