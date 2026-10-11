@@ -168,8 +168,9 @@ async def test_database_rejects_forged_mixed_history_and_rolls_back_every_row(
     assert result.lines[1].offset == 0
 
 
-async def test_direct_insert_cannot_overlap_an_existing_physical_cursor(
-    db_session: AsyncSession,
+@pytest.mark.parametrize("inventory_kind", ["legacy_pack", "physical_unit"])
+async def test_direct_insert_cannot_overlap_an_existing_inventory_cursor(
+    db_session: AsyncSession, inventory_kind: str
 ) -> None:
     source = await _source(db_session)
     first = await _receive(db_session, source)
@@ -193,9 +194,9 @@ async def test_direct_insert_cannot_overlap_an_existing_physical_cursor(
                     "batch_id,legacy_quantity,legacy_offset,base_units,\"offset\",sale_format,"
                     "quantity,cost_amount,net_amount,discount_amount,gross_amount,created_at,"
                     "updated_at,created_by,updated_by FROM pos_mixed_return_line "
-                    "WHERE command_id=:first AND inventory_kind='physical_unit'"
+                    "WHERE command_id=:first AND inventory_kind=:kind"
                 ),
-                {"id": operation_id, "first": first.operation_id},
+                {"id": operation_id, "first": first.operation_id, "kind": inventory_kind},
             )
     assert await _journal_counts(db_session) == (1, 2, 1)
     second = await _receive(
