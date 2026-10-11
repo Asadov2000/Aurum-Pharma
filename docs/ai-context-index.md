@@ -16,9 +16,11 @@
    - критичные инварианты;
    - критерии приемки;
    - проверки.
-5. Во время разработки использовать `scripts/verify-change.ps1 -Mode Quick`.
+5. Сначала использовать `scripts/verify-change.ps1 -Mode Preflight` для стиля
+   и типов, затем `-Mode Quick` для короткого цикла с тестами.
 6. Перед commit использовать `scripts/verify-change.ps1 -Mode Auto`.
-7. `Quick` не заменяет `Auto`, а локальные проверки не заменяют GitHub `CI gate`.
+7. `Preflight` пропускает тесты и сборки; он и `Quick` не заменяют `Auto`.
+   Локальные проверки не заменяют GitHub `CI gate`.
 
 Результат последнего локального запуска: `.codex/verification/latest.json`
 и `latest.md` ([формат и запуск в один клик](testing.md)). Сначала читайте

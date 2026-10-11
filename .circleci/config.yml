@@ -6,6 +6,46 @@ commands:
       - run:
           name: "CI runtime tools"
           command: "bash .circleci/scripts/setup-linux-tools.sh"
+  restore-python-downloads:
+    steps:
+      - run:
+          name: "Identify Python download cache runtime"
+          command: "bash .circleci/scripts/download-cache-runtime.sh python"
+      - restore_cache:
+          keys:
+            - 'v1-python-downloads-machine-poetry2.3.4-{{ arch }}-{{ checksum ".circleci-tmp/python-runtime" }}-{{ checksum "backend/poetry.lock" }}'
+  save-python-downloads:
+    steps:
+      - save_cache:
+          key: 'v1-python-downloads-machine-poetry2.3.4-{{ arch }}-{{ checksum ".circleci-tmp/python-runtime" }}-{{ checksum "backend/poetry.lock" }}'
+          paths:
+            - "~/.cache/pip"
+            - "~/.cache/pypoetry/artifacts"
+            - "~/.cache/pypoetry/cache"
+  restore-pnpm-downloads:
+    parameters:
+      executor:
+        type: enum
+        enum: ["machine", "docker"]
+        default: "machine"
+    steps:
+      - run:
+          name: "Identify pnpm download cache runtime"
+          command: "bash .circleci/scripts/download-cache-runtime.sh pnpm"
+      - restore_cache:
+          keys:
+            - 'v1-pnpm-downloads-<< parameters.executor >>-{{ arch }}-{{ checksum ".circleci-tmp/pnpm-runtime" }}-{{ checksum "frontend/pnpm-lock.yaml" }}'
+  save-pnpm-downloads:
+    parameters:
+      executor:
+        type: enum
+        enum: ["machine", "docker"]
+        default: "machine"
+    steps:
+      - save_cache:
+          key: 'v1-pnpm-downloads-<< parameters.executor >>-{{ arch }}-{{ checksum ".circleci-tmp/pnpm-runtime" }}-{{ checksum "frontend/pnpm-lock.yaml" }}'
+          paths:
+            - ".circleci-tmp/pnpm-store"
 jobs:
   backend:
     machine:
@@ -14,9 +54,7 @@ jobs:
     steps:
       - "checkout"
       - "setup-linux-tools"
-      - run:
-          name: "Disposable PostgreSQL and Redis services"
-          command: "bash .circleci/scripts/backend-services.sh"
+      - "restore-python-downloads"
       - run:
           name: "Pinned Poetry"
           command: "python -m pip install poetry==2.3.4"
@@ -28,6 +66,22 @@ jobs:
           name: "Install locked dependencies"
           command: "bash ../.circleci/scripts/backend-05.sh"
           working_directory: "~/project/backend"
+      - "save-python-downloads"
+      - run:
+          name: "Ruff"
+          command: "bash ../.circleci/scripts/backend-12.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Black"
+          command: "bash ../.circleci/scripts/backend-13.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Mypy"
+          command: "bash ../.circleci/scripts/backend-14.sh"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Disposable PostgreSQL and Redis services"
+          command: "bash .circleci/scripts/backend-services.sh"
       - run:
           name: "Start MinIO"
           command: "bash ../.circleci/scripts/backend-07.sh"
@@ -47,18 +101,6 @@ jobs:
       - run:
           name: "Verify revision bootstrap fails closed"
           command: "bash ../.circleci/scripts/backend-11.sh"
-          working_directory: "~/project/backend"
-      - run:
-          name: "Ruff"
-          command: "bash ../.circleci/scripts/backend-12.sh"
-          working_directory: "~/project/backend"
-      - run:
-          name: "Black"
-          command: "bash ../.circleci/scripts/backend-13.sh"
-          working_directory: "~/project/backend"
-      - run:
-          name: "Mypy"
-          command: "bash ../.circleci/scripts/backend-14.sh"
           working_directory: "~/project/backend"
       - run:
           name: "Pytest"
@@ -126,10 +168,14 @@ jobs:
       - run:
           name: "Pinned pnpm"
           command: "sudo npm install --global pnpm@9.12.0"
+      - restore-pnpm-downloads:
+          executor: "docker"
       - run:
           name: "Install locked dependencies"
           command: "bash ../.circleci/scripts/frontend-03.sh"
           working_directory: "~/project/frontend"
+      - save-pnpm-downloads:
+          executor: "docker"
       - run:
           name: "Typecheck"
           command: "bash ../.circleci/scripts/frontend-04.sh"
@@ -170,6 +216,8 @@ jobs:
     steps:
       - "checkout"
       - "setup-linux-tools"
+      # Backend is the only writer of the machine Python cache.
+      - "restore-python-downloads"
       - run:
           name: "Pinned Poetry"
           command: "python -m pip install poetry==2.3.4"
@@ -181,6 +229,8 @@ jobs:
           name: "Audit Python dependencies"
           command: "bash ../.circleci/scripts/dependency-audit-05.sh"
           working_directory: "~/project/backend"
+      # E2E is the only writer of the machine pnpm cache.
+      - "restore-pnpm-downloads"
       - run:
           name: "Install locked JavaScript dependencies"
           command: "bash ../.circleci/scripts/dependency-audit-08.sh"
@@ -198,10 +248,12 @@ jobs:
     steps:
       - "checkout"
       - "setup-linux-tools"
+      - "restore-pnpm-downloads"
       - run:
           name: "Install locked frontend dependencies"
           command: "bash ../.circleci/scripts/e2e-03.sh"
           working_directory: "~/project/frontend"
+      - "save-pnpm-downloads"
       - run:
           name: "Install Chromium"
           command: "bash ../.circleci/scripts/e2e-06.sh"
@@ -347,6 +399,9 @@ jobs:
       - run:
           name: "Disposable database safety guards"
           command: "python scripts/test-disposable-ci-guards.py"
+      - run:
+          name: "CI download cache and gate safety contract"
+          command: "python scripts/test-circleci-cache-contract.py"
   tooling-windows:
     machine:
       image: "windows-server-2022-gui:current"
@@ -434,6 +489,11 @@ jobs:
           name: "Disposable database safety guards"
           command: |
             python scripts/test-disposable-ci-guards.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "CI download cache and gate safety contract"
+          command: |
+            python scripts/test-circleci-cache-contract.py
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
           name: "Restore desktop tests"

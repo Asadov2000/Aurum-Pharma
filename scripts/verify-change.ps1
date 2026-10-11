@@ -1,6 +1,6 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
-    [ValidateSet("Auto", "Quick", "Full")]
+    [ValidateSet("Preflight", "Auto", "Quick", "Full")]
     [string]$Mode = "Auto",
     [string]$BaseRef = "origin/main",
     [ValidateSet("Docker", "Poetry")]
@@ -194,6 +194,9 @@ function Save-VerificationSummary {
     # values stay in the individual, ignored logs.
     $json = $Summary | ConvertTo-Json -Depth 6
     $lines = @("# Aurum verification", "", "Status: $($Summary.status) | Mode: $($Summary.mode) | Risk: $($Summary.risk)", "")
+    if ($Summary.mode -eq "preflight") {
+        $lines += @("Preflight omits application tests and builds; Auto/Full and the GitHub CI gate remain mandatory.", "")
+    }
     foreach ($item in $Summary.steps) {
         $lines += "- $($item.id): $($item.status); seconds=$($item.seconds); exit=$($item.exitCode); reason=$($item.reason)"
     }
@@ -227,6 +230,7 @@ function Invoke-VerificationSteps {
     $summary = [pscustomobject][ordered]@{
         version = 1
         mode = $Mode.ToLowerInvariant()
+        applicationTestsOmitted = ($Mode -eq "Preflight")
         risk = $Risk
         revision = $Revision
         changedPathCount = $ChangedPathCount
@@ -300,7 +304,18 @@ $websiteTests = [bool]$scope.verification.websiteTests
 $websiteBuild = [bool]$scope.verification.websiteBuild
 $websiteBrowser = [bool]$scope.verification.websiteBrowser
 
-if ($Mode -eq "Quick" -and -not [bool]$scope.flags.critical) {
+if ($Mode -eq "Preflight") {
+    # Deliberately incomplete development feedback, never a merge/release gate.
+    # Keep quality/tooling checks selected by the real change scope.
+    $backendTests = "none"
+    $frontendTests = "none"
+    $e2eMode = "none"
+    $frontendBuild = $false
+    $websiteTests = $false
+    $websiteBuild = $false
+    $websiteBrowser = $false
+}
+elseif ($Mode -eq "Quick" -and -not [bool]$scope.flags.critical) {
     $e2eMode = "none"
     if ($scope.risk -ne "full") {
         $frontendBuild = $false
@@ -339,17 +354,27 @@ if ($toolingSelfTest) {
     Add-Step -Steps $steps -Step (New-Step -Id "verification-self-test" -Name "Verification tooling self-test" -WorkingDirectory $repoRoot -Command $powershellExecutable -Arguments $selfTestArguments)
 }
 
+if ($backendQuality) {
+    if ($BackendRuntime -eq "Docker") {
+        Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-static" -Name "Backend Ruff, Black and Mypy" -Check "Static")
+    }
+    else {
+        Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-ruff" -Name "Backend Ruff" -Check "Ruff")
+        Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-black" -Name "Backend Black" -Check "Black")
+        Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-mypy" -Name "Backend Mypy" -Check "Mypy")
+    }
+}
+if ($frontendQuality) {
+    Add-Step -Steps $steps -Step (New-Step -Id "frontend-typecheck" -Name "Frontend typecheck" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("typecheck"))
+    Add-Step -Steps $steps -Step (New-Step -Id "frontend-lint" -Name "Frontend lint" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("lint"))
+}
+
 if ($backendTests -ne "none") {
     $pytestTargets = @("tests")
     if ($backendTests -eq "targeted" -and @($scope.targets.backend).Count -gt 0) {
         $pytestTargets = @($scope.targets.backend | ForEach-Object { "$_" })
     }
     Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-tests" -Name "Backend tests ($backendTests)" -Check "Tests" -Arguments ($pytestTargets + @("-q", "--tb=short")))
-}
-if ($backendQuality) {
-    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-ruff" -Name "Backend Ruff" -Check "Ruff")
-    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-black" -Name "Backend Black" -Check "Black")
-    Add-Step -Steps $steps -Step (New-BackendStep -Id "backend-mypy" -Name "Backend Mypy" -Check "Mypy")
 }
 
 if ($frontendTests -ne "none") {
@@ -358,10 +383,6 @@ if ($frontendTests -ne "none") {
         $vitestTargets = @($scope.targets.frontend | ForEach-Object { "$_" })
     }
     Add-Step -Steps $steps -Step (New-Step -Id "frontend-tests" -Name "Frontend tests ($frontendTests)" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments (@("exec", "vitest", "run") + $vitestTargets + @("--reporter=dot")))
-}
-if ($frontendQuality) {
-    Add-Step -Steps $steps -Step (New-Step -Id "frontend-typecheck" -Name "Frontend typecheck" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("typecheck"))
-    Add-Step -Steps $steps -Step (New-Step -Id "frontend-lint" -Name "Frontend lint" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("lint"))
 }
 if ($frontendBuild) {
     Add-Step -Steps $steps -Step (New-Step -Id "frontend-build" -Name "Frontend production build" -WorkingDirectory (Join-Path $repoRoot "frontend") -Command "pnpm" -Arguments @("build"))
@@ -396,7 +417,7 @@ $plan = [ordered]@{
     mode = $Mode.ToLowerInvariant()
     backendRuntime = $BackendRuntime.ToLowerInvariant()
     baseRef = $BaseRef
-    warning = if ($Mode -eq "Quick") { "Quick is for development feedback only; the GitHub CI gate remains mandatory." } else { $null }
+    warning = if ($Mode -eq "Preflight") { "Preflight omits application tests and builds; Auto/Full and the GitHub CI gate remain mandatory." } elseif ($Mode -eq "Quick") { "Quick is for development feedback only; the GitHub CI gate remains mandatory." } else { $null }
     scope = $scope
     steps = @($steps)
 }
@@ -411,8 +432,8 @@ if ($PlanOnly) {
     Write-Host "  Mode:  $($Mode.ToLowerInvariant())"
     Write-Host "  Risk:  $($scope.risk)"
     Write-Host "  Paths: $(@($scope.paths).Count)"
-    if ($Mode -eq "Quick") {
-        Write-Host "  Note:  Quick does not replace the required GitHub CI gate." -ForegroundColor Yellow
+    if ($plan.warning) {
+        Write-Host "  Note:  $($plan.warning)" -ForegroundColor Yellow
     }
     for ($index = 0; $index -lt $steps.Count; $index++) {
         $step = $steps[$index]
@@ -425,8 +446,8 @@ if ($PlanOnly) {
 
 Write-Host "Aurum verification"
 Write-Host "  Mode: $($Mode.ToLowerInvariant()) | Risk: $($scope.risk) | Changed paths: $(@($scope.paths).Count)"
-if ($Mode -eq "Quick") {
-    Write-Host "  Quick is not a merge/release gate; GitHub CI is still required." -ForegroundColor Yellow
+if ($plan.warning) {
+    Write-Host "  $($plan.warning)" -ForegroundColor Yellow
 }
 
 $logRoot = Join-Path (Join-Path $repoRoot ".codex") "verification"

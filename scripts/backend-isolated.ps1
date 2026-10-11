@@ -7,10 +7,12 @@ public verification credentials belong only to this invocation's containers.
 PlanOnly is read-only. Dot-sourcing declares functions without executing checks.
 .EXAMPLE
 pwsh -File scripts/backend-isolated.ps1 -Check Tests tests/domains/auth -q --tb=short
+.EXAMPLE
+pwsh -File scripts/backend-isolated.ps1 -Check Static
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Tests', 'Ruff', 'Black', 'Mypy', 'All')]
+    [ValidateSet('Tests', 'Ruff', 'Black', 'Mypy', 'Static', 'All')]
     [string]$Check = 'All',
     [switch]$PlanOnly,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -24,10 +26,10 @@ function Get-BackendVerifyPlan {
     $workspace = Split-Path $PSScriptRoot -Parent
     $project = 'aurum-verify-' + [Guid]::NewGuid().ToString('N')
     $commands = @()
+    if ($SelectedCheck -in @('All', 'Static', 'Ruff')) { $commands += ,@('-m', 'ruff', 'check', 'app', 'tests') }
+    if ($SelectedCheck -in @('All', 'Static', 'Black')) { $commands += ,@('-m', 'black', '--check', 'app', 'tests') }
+    if ($SelectedCheck -in @('All', 'Static', 'Mypy')) { $commands += ,@('-m', 'mypy', 'app') }
     if ($SelectedCheck -in @('All', 'Tests')) { $commands += ,(@('-m', 'pytest') + $TestArguments) }
-    if ($SelectedCheck -in @('All', 'Ruff')) { $commands += ,@('-m', 'ruff', 'check', 'app', 'tests') }
-    if ($SelectedCheck -in @('All', 'Black')) { $commands += ,@('-m', 'black', '--check', 'app', 'tests') }
-    if ($SelectedCheck -in @('All', 'Mypy')) { $commands += ,@('-m', 'mypy', 'app') }
     return [pscustomobject][ordered]@{
         check = $SelectedCheck
         project = $project
@@ -134,6 +136,13 @@ function Invoke-BackendIsolated {
         Invoke-BackendVerifyDocker -Arguments @('build', '--file', (Join-Path $backendDirectory 'Dockerfile'),
             '--tag', $plan.image, '--label', "tj.aurum.verify.project=$($plan.project)",
             '--label', 'tj.aurum.verify.service=tools', $backendDirectory)
+        # Fail on inexpensive static checks before starting disposable services.
+        # Static and All reuse this invocation's one tools image and cleanup.
+        foreach ($command in $plan.commands) {
+            if ($command[1] -ne 'pytest') {
+                Invoke-BackendVerifyDocker -Arguments ($compose + @('run', '--rm', '--no-deps', 'tools') + $command)
+            }
+        }
         if ($plan.services.Count -gt 0) {
             Invoke-BackendVerifyDocker -Arguments ($compose + @('up', '-d', '--wait', '--wait-timeout', '180') + $plan.services)
             # init.sh provisions extensions and initial roles. The maintained
@@ -166,7 +175,9 @@ for attempt in range(30):
             Invoke-BackendVerifyDocker -Arguments ($compose + @('run', '--rm', '--no-deps', 'tools', '-c', $storageReady))
         }
         foreach ($command in $plan.commands) {
-            Invoke-BackendVerifyDocker -Arguments ($compose + @('run', '--rm', '--no-deps', 'tools') + $command)
+            if ($command[1] -eq 'pytest') {
+                Invoke-BackendVerifyDocker -Arguments ($compose + @('run', '--rm', '--no-deps', 'tools') + $command)
+            }
         }
     }
     catch { $failure = $_ }
