@@ -182,10 +182,12 @@ class MixedCashRefundService:
         ):
             raise BusinessRuleError("Typed mixed return selections are required")
         selections = tuple(
-            LegacyReturnSelection(UUID(str(selection.line_id)), selection.quantity)
-            if isinstance(selection, LegacyReturnSelection)
-            else PhysicalReturnSelection(
-                UUID(str(selection.line_id)), selection.sale_format, selection.quantity
+            (
+                LegacyReturnSelection(UUID(str(selection.line_id)), selection.quantity)
+                if isinstance(selection, LegacyReturnSelection)
+                else PhysicalReturnSelection(
+                    UUID(str(selection.line_id)), selection.sale_format, selection.quantity
+                )
             )
             for selection in selections
         )

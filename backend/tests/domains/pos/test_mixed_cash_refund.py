@@ -442,12 +442,10 @@ async def test_late_failure_rolls_back_receipt_sequence_payment_and_both_quarant
         )
         assert await repository.session.scalar(text("SELECT count(*) FROM sale_payment")) == 2
         assert (
-            await repository.session.scalar(text("SELECT count(*) FROM pos_mixed_cash_refund"))
-            == 1
+            await repository.session.scalar(text("SELECT count(*) FROM pos_mixed_cash_refund")) == 1
         )
         assert (
-            await repository.session.scalar(text("SELECT count(*) FROM pos_mixed_return_line"))
-            == 2
+            await repository.session.scalar(text("SELECT count(*) FROM pos_mixed_return_line")) == 2
         )
         raise BusinessRuleError("Injected final mixed refund persistence failure")
 
