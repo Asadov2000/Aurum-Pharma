@@ -51,6 +51,7 @@ jobs:
     machine:
       image: "ubuntu-2404:current"
     resource_class: "medium"
+    parallelism: 2
     steps:
       - "checkout"
       - "setup-linux-tools"
@@ -66,7 +67,6 @@ jobs:
           name: "Install locked dependencies"
           command: "bash ../.circleci/scripts/backend-05.sh"
           working_directory: "~/project/backend"
-      - "save-python-downloads"
       - run:
           name: "Ruff"
           command: "bash ../.circleci/scripts/backend-12.sh"
@@ -120,11 +120,8 @@ jobs:
           working_directory: "~/project/backend"
           when: "always"
       - run:
-          name: "Verify complete backend evidence"
-          command: |
-            python scripts/verify-backend-shards.py backend/test-results --expected-shards 1
-            mkdir -p ci-evidence/backend
-            cp backend/test-results/pytest.xml backend/test-results/shard.json ci-evidence/backend/
+          name: "Publish backend shard evidence"
+          command: "bash .circleci/scripts/backend-evidence.sh"
       - store_test_results:
           path: "backend/test-results"
       - persist_to_workspace:
@@ -216,7 +213,7 @@ jobs:
     steps:
       - "checkout"
       - "setup-linux-tools"
-      # Backend is the only writer of the machine Python cache.
+      # This non-parallel job is the only writer of the machine Python cache.
       - "restore-python-downloads"
       - run:
           name: "Pinned Poetry"
@@ -225,6 +222,7 @@ jobs:
           name: "Install locked Python dependencies"
           command: "bash ../.circleci/scripts/dependency-audit-04.sh"
           working_directory: "~/project/backend"
+      - "save-python-downloads"
       - run:
           name: "Audit Python dependencies"
           command: "bash ../.circleci/scripts/dependency-audit-05.sh"
@@ -402,6 +400,9 @@ jobs:
       - run:
           name: "CI download cache and gate safety contract"
           command: "python scripts/test-circleci-cache-contract.py"
+      - run:
+          name: "Parallel backend runner and evidence safety"
+          command: "python scripts/test-circleci-backend-parallel.py"
   tooling-windows:
     machine:
       image: "windows-server-2022-gui:current"
@@ -496,6 +497,11 @@ jobs:
             python scripts/test-circleci-cache-contract.py
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
+          name: "Parallel backend runner and evidence safety"
+          command: |
+            python scripts/test-circleci-backend-parallel.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
           name: "Restore desktop tests"
           command: |
             $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
@@ -541,7 +547,7 @@ jobs:
           at: "."
       - run:
           name: "Validate complete backend test evidence"
-          command: "python scripts/verify-backend-shards.py ci-evidence/backend --expected-shards 1"
+          command: "python .circleci/scripts/verify-backend-evidence.py"
 workflows:
   full-ci:
     jobs:
