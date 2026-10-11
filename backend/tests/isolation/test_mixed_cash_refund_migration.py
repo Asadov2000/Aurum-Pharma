@@ -441,9 +441,12 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
             assert connection.execute(policies).all() == original_policies
             assert connection.scalar(
                 text(
-                    "SELECT bool_and(condeferrable AND condeferred) FROM pg_constraint "
-                    "WHERE conrelid='pos_mixed_cash_refund'::regclass AND contype='f' "
-                    "AND confrelid='sale'::regclass AND conkey=ARRAY[4]::smallint[]"
+                    "SELECT bool_and(c.condeferrable AND c.condeferred) FROM pg_constraint c "
+                    "JOIN pg_attribute tenant ON tenant.attrelid=c.conrelid "
+                    "AND tenant.attname='tenant_id' "
+                    "JOIN pg_attribute sale ON sale.attrelid=c.conrelid AND sale.attname='sale_id' "
+                    "WHERE c.conrelid='pos_mixed_cash_refund'::regclass AND c.contype='f' "
+                    "AND c.confrelid='sale'::regclass AND c.conkey=ARRAY[tenant.attnum,sale.attnum]"
                 )
             )
 
