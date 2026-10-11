@@ -271,6 +271,9 @@ async def test_refund_only_actor_can_read_source_but_cannot_access_other_scope(
     await set_receiving_context(db_session, context.stock, actor)
     result = await _receive(db_session, source, actor_id=actor)
     assert await _journal_counts(db_session) == (1, 2, 1)
+    # Journal writes retain a shared tenant-access lock. Branch creation needs
+    # its exclusive counterpart on another connection; finish this write first.
+    await db_session.commit()
     async with db_engine.begin() as support:
         await support.execute(text("SELECT set_config('app.support_session','true',true)"))
         branch_id = await support.scalar(
