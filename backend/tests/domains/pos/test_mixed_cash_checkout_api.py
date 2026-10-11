@@ -136,12 +136,9 @@ async def test_mixed_cash_http_formats_intent_complete_replay_and_status(
         assert status.json()["saved_intent"] == intent.json()
         assert status.headers["cache-control"] == "private, no-store"
         assert await facts(db_session) == posted
-        assert (
-            await db_session.scalar(
-                text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
-            )
-            == Decimal("0.000")
-        )
+        assert await db_session.scalar(
+            text("SELECT qty_remaining FROM batch WHERE id=:id"), {"id": legacy.batch_id}
+        ) == Decimal("0.000")
         receipt = await db_session.scalar(
             text("SELECT receipt_snapshot FROM sale WHERE id=:sale"),
             {"sale": source.sale.id},
