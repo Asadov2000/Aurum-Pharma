@@ -403,6 +403,9 @@ jobs:
       - run:
           name: "Parallel backend runner and evidence safety"
           command: "python scripts/test-circleci-backend-parallel.py"
+      - run:
+          name: "Production build reuse safety"
+          command: "python scripts/test-ci-build-reuse.py"
   tooling-windows:
     machine:
       image: "windows-server-2022-gui:current"
@@ -500,6 +503,11 @@ jobs:
           name: "Parallel backend runner and evidence safety"
           command: |
             python scripts/test-circleci-backend-parallel.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Production build reuse safety"
+          command: |
+            python scripts/test-ci-build-reuse.py
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
           name: "Restore desktop tests"

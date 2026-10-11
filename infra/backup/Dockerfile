@@ -4,10 +4,14 @@ ARG GO_IMAGE=golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83f
 
 FROM ${GO_IMAGE} AS tools-builder
 
+ARG TARGETARCH
+
 RUN apk add --no-cache git
 
 WORKDIR /src/restic
-RUN go mod init aurum.local/restic \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    go mod init aurum.local/restic \
     && go get github.com/restic/restic/cmd/restic@v0.19.1 \
     && go get golang.org/x/net@v0.60.0 \
         golang.org/x/text@v0.42.0 \
@@ -18,7 +22,9 @@ RUN go mod init aurum.local/restic \
         -o /out/restic github.com/restic/restic/cmd/restic
 
 WORKDIR /src/minio-client
-RUN go mod init aurum.local/minio-client \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    go mod init aurum.local/minio-client \
     && go get github.com/minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096 \
     && go get github.com/prometheus/prometheus@v0.311.3 \
     && go get github.com/prometheus/common/model@v0.67.5 \
