@@ -32,7 +32,8 @@ FUNCTIONS = text(
     "WHERE pronamespace='public'::regnamespace AND proname IN "
     "('trg_physical_zero_return_guard','audit_redact_table_snapshot',"
     "'trg_physical_return_guard','trg_physical_return_complete',"
-    "'trg_physical_cash_refund_guard','trg_guard_sale_immutability') ORDER BY proname"
+    "'trg_physical_cash_refund_guard','trg_guard_sale_immutability',"
+    "'trg_mixed_return_guard','trg_mixed_return_complete') ORDER BY proname"
 )
 RELATION = text(
     "SELECT relowner,relacl,relrowsecurity,relforcerowsecurity FROM pg_class "

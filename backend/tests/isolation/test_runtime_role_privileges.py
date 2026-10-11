@@ -64,6 +64,9 @@ NO_DELETE_TABLES = {
 
 APPEND_ONLY_TABLES = {
     "pos_mixed_checkout",
+    "pos_mixed_return_command",
+    "pos_mixed_return_line",
+    "pos_mixed_return_slice",
     "pos_physical_zero_return",
     "pos_physical_cash_refund",
     "pos_physical_checkout",
@@ -231,6 +234,8 @@ RUNTIME_VIEWS = {
 
 CUSTOM_FUNCTIONS = {
     "assert_mixed_checkout",
+    "trg_mixed_return_guard",
+    "trg_mixed_return_complete",
     "trg_mixed_stock_checkout_binding",
     "trg_mixed_checkout_guard",
     "trg_mixed_checkout_complete",
@@ -847,6 +852,7 @@ ORDER BY relations.relname
 CUSTOM_FUNCTION_PRIVILEGES_SQL = """
 SELECT
   routines.proname,
+  routines.proconfig,
   routines.prosecdef AS is_security_definer,
   pg_catalog.has_function_privilege(
     'aurum_app', routines.oid, 'EXECUTE'
@@ -1185,6 +1191,8 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
     return_names = {
+        "trg_mixed_return_guard",
+        "trg_mixed_return_complete",
         "trg_physical_return_guard",
         "trg_physical_return_complete",
         "trg_physical_cash_refund_guard",
@@ -1200,8 +1208,11 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in return_functions.values()
     )
     assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
+        "trg_mixed_return_complete",
         "trg_physical_return_complete",
     }
+    for name in ("trg_mixed_return_guard", "trg_mixed_return_complete"):
+        assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     cash_names = {
         "assert_physical_checkout",
         "trg_physical_stock_checkout_binding",
@@ -1355,6 +1366,8 @@ async def app_engine_privileges() -> AsyncIterator[AsyncEngine]:
 async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection) -> None:
     journal_privileges = list((await conn.execute(text("""
                     SELECT roles.rolname,relations.relname,checks.privilege,
+                      pg_get_userbyid(relations.relowner) AS owner,
+                      relations.relrowsecurity,relations.relforcerowsecurity,
                       has_table_privilege(roles.oid,relations.oid,checks.privilege) AS granted,
                       has_table_privilege(roles.oid,relations.oid,
                         checks.privilege||' WITH GRANT OPTION') AS grantable
@@ -1364,6 +1377,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
+                      'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
                       'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
                     AND roles.rolname IN ('aurum_app','aurum_support','aurum_worker',
@@ -1371,12 +1385,22 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "pos_mixed_return_command",
+        "pos_mixed_return_line",
+        "pos_mixed_return_slice",
         "pos_physical_zero_return",
         "pos_physical_cash_refund",
         "pos_physical_return_command",
         "pos_physical_return_line",
         "pos_physical_return_slice",
     }
+    assert {row["relname"] for row in journal_privileges} == journal_tables
+    assert all(
+        row["owner"] == "aurum_schema_owner"
+        and row["relrowsecurity"] is True
+        and row["relforcerowsecurity"] is True
+        for row in journal_privileges
+    )
     journal_roles = {row["rolname"] for row in journal_privileges}
     assert {"aurum_app", "aurum_support", "aurum_worker"} <= journal_roles
     journal_actual: dict[tuple[str, str], set[str]] = {
