@@ -236,7 +236,7 @@ jobs:
       - store_test_results:
           path: "frontend/test-results"
       - store_artifacts:
-          path: "frontend/playwright-report"
+          path: "frontend/test-results"
     environment:
       CI: "true"
       COMPOSE_FILE: "docker-compose.e2e.yml"
