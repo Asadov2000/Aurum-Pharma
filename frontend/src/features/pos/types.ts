@@ -170,6 +170,7 @@ export interface Sale {
 export interface SaleDetails extends Sale {
   items: SaleItem[];
   physical_items?: ReceiptLine[];
+  mixed_items?: ReceiptLine[];
   prepared_cart_items?: PhysicalCartItem[];
   payments: Payment[];
 }
