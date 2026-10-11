@@ -2654,6 +2654,12 @@ class POSService:
             local_datetime = snapshot.completed_at.astimezone(ZoneInfo(timezone_name))
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AurumError("Tenant report timezone is invalid") from exc
+        if isinstance(snapshot, PhysicalCashRefundReceiptV3):
+            lines = physical_cash_refund_lines(snapshot)
+        elif isinstance(snapshot, MixedReceiptDocumentV4):
+            lines = mixed_receipt_lines(snapshot)
+        else:
+            lines = physical_receipt_lines(snapshot)
         return ReceiptData(
             sale_id=sale.id,
             is_refund=isinstance(snapshot, PhysicalCashRefundReceiptV3),
@@ -2670,13 +2676,7 @@ class POSService:
             ),
             datetime=local_datetime,
             cashier_name=cashier_name,
-            items=(
-                physical_cash_refund_lines(snapshot)
-                if isinstance(snapshot, PhysicalCashRefundReceiptV3)
-                else mixed_receipt_lines(snapshot)
-                if isinstance(snapshot, MixedReceiptDocumentV4)
-                else physical_receipt_lines(snapshot)
-            ),
+            items=lines,
             discount_total=sum((line.discount_amount for line in snapshot.lines), Decimal("0")),
             total=snapshot.total_amount,
             currency=snapshot.currency,
