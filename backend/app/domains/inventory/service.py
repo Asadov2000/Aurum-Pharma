@@ -156,16 +156,16 @@ class InventoryService:
     ) -> WriteOff:
         existing = await self.repo.get_write_off(operation_id, tenant_id=tenant_id)
         if existing is not None:
+            self._assert_branch_allowed(
+                existing.branch_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             self._assert_write_off_retry_matches(
                 existing,
                 batch_id=batch_id,
                 qty=qty,
                 reason=reason,
                 comment=comment,
-            )
-            self._assert_branch_allowed(
-                existing.branch_id,
-                allowed_branch_ids=allowed_branch_ids,
             )
             return existing
 
@@ -196,6 +196,10 @@ class InventoryService:
             existing = await self.repo.get_write_off(operation_id, tenant_id=tenant_id)
             if existing is None:
                 raise
+            self._assert_branch_allowed(
+                existing.branch_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             self._assert_write_off_retry_matches(
                 existing,
                 batch_id=batch_id,

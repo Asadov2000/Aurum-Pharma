@@ -849,7 +849,41 @@ describe("UsersPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Приглашение для");
   });
 
-  it("assigns only an active, manageable tenant role", async () => {
+  it("requires selected branches before reviewing an existing employee's role", async () => {
+    mockUser = {
+      id: "current-owner",
+      home_tenant_id: "tenant-1",
+      is_tenant_owner: true,
+      permissions: ["users.view", "roles.assign"],
+    };
+    listBranches.mockResolvedValue([
+      { id: "branch-1", name: "Аптека Рудаки", is_active: true },
+    ]);
+    listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
+    renderPage();
+
+    await openUserActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настроить доступ" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Назначить роль" }, LAZY_PANEL_WAIT));
+    expect(screen.getByRole("button", { name: "В выбранных точках" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Аптека Рудаки")).not.toBeChecked();
+    fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
+      target: { value: MANAGED_ROLE.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
+
+    expect(await screen.findByText("Выберите хотя бы одну торговую точку")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Проверьте доступ сотрудника" }),
+    ).not.toBeInTheDocument();
+    expect(replaceAssignments).not.toHaveBeenCalled();
+    expect(createAssignment).not.toHaveBeenCalled();
+  });
+
+  it("assigns an active, manageable tenant-wide role only after choosing all branches", async () => {
     mockUser = {
       id: "current-owner",
       home_tenant_id: "tenant-1",
@@ -866,6 +900,10 @@ describe("UsersPage", () => {
     fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Во всей аптеке" }));
+    expect(
+      screen.getByText("Роль будет действовать во всех текущих и новых торговых точках этой аптеки."),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     const confirmation = await screen.findByRole("dialog", {
@@ -932,7 +970,6 @@ describe("UsersPage", () => {
     fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
-    fireEvent.click(screen.getByRole("button", { name: "В выбранных точках" }));
     fireEvent.click(screen.getByLabelText("Аптека Рудаки"));
     fireEvent.click(screen.getByLabelText("Аптека Сино"));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
@@ -1183,6 +1220,7 @@ describe("UsersPage", () => {
       target: { value: MANAGED_ROLE.id },
     });
     fireEvent.click(screen.getByLabelText("Запрашивать пароль при входе с этой ролью"));
+    fireEvent.click(screen.getByRole("button", { name: "Во всей аптеке" }));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
     const confirmation = await screen.findByRole("dialog", {
       name: "Проверьте доступ сотрудника",
@@ -1214,6 +1252,7 @@ describe("UsersPage", () => {
     fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: MANAGED_ROLE.id },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Во всей аптеке" }));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     expect(
@@ -1246,6 +1285,7 @@ describe("UsersPage", () => {
     fireEvent.change(within(screen.getByRole("dialog")).getByLabelText("Роль"), {
       target: { value: replacementRole.id },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Во всей аптеке" }));
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 
     const confirmation = await screen.findByRole("dialog", {

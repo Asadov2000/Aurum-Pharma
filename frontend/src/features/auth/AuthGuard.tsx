@@ -1,10 +1,10 @@
-import { useEffect, type ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 
-import { useMeQuery } from "./queries";
+import { useMeQuery } from "./meQueries";
 import { isConfirmedAuthFailure } from "./failures";
 import { clearClientSession } from "./session";
-import { useAuthStore } from "@/stores/auth";
+import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -42,5 +42,6 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
     );
   }
   if (user === null) return null;
-  return <>{children}</>;
+  // Query observers and page-local data must not survive a change of authority.
+  return <Fragment key={getAuthSessionGeneration()}>{children}</Fragment>;
 }

@@ -123,6 +123,14 @@ describe("HTTP session isolation", () => {
     ["another user", () => authenticate("cashier-2")],
     ["another tenant", () => authenticate("cashier-1", "tenant-2")],
     [
+      "changed branch permissions",
+      () => {
+        const state = useAuthStore.getState();
+        if (state.user)
+          state.setUser({ ...state.user, permission_scopes: { "pos.sell": ["branch-A"] } });
+      },
+    ],
+    [
       "logout and login by the same user",
       () => {
         useAuthStore.getState().clear();
@@ -233,23 +241,37 @@ describe("HTTP session isolation", () => {
     expect(onAuthFailure).not.toHaveBeenCalled();
   });
 
-  it("rejects a late successful response before it can repopulate current caches", async () => {
-    authenticate("cashier-1");
-    const started = deferred<void>();
-    const release = deferred<void>();
-    api.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
-      started.resolve();
-      await release.promise;
-      return { data: { sale_id: "old-sale" }, status: 200, statusText: "OK", headers: {}, config };
-    };
-    const rejection = expect(api.get("/sales/old-sale")).rejects.toMatchObject({
-      code: "ERR_CANCELED",
-    });
-    await started.promise;
-    authenticate("cashier-2");
-    release.resolve();
-    await rejection;
-  });
+  it.each(["identity", "branch permissions"])(
+    "rejects a late successful response after %s changes",
+    async (change) => {
+      authenticate("cashier-1");
+      const started = deferred<void>();
+      const release = deferred<void>();
+      api.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+        started.resolve();
+        await release.promise;
+        return {
+          data: { sale_id: "old-sale" },
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config,
+        };
+      };
+      const rejection = expect(api.get("/sales/old-sale")).rejects.toMatchObject({
+        code: "ERR_CANCELED",
+      });
+      await started.promise;
+      if (change === "identity") authenticate("cashier-2");
+      else {
+        const state = useAuthStore.getState();
+        if (state.user)
+          state.setUser({ ...state.user, permission_scopes: { "pos.sell": ["branch-A"] } });
+      }
+      release.resolve();
+      await rejection;
+    },
+  );
 });
 
 describe("resolveApiBaseUrl", () => {
