@@ -64,6 +64,7 @@ NO_DELETE_TABLES = {
 
 APPEND_ONLY_TABLES = {
     "pos_mixed_cash_refund",
+    "pos_mixed_zero_return",
     "pos_mixed_checkout",
     "pos_mixed_return_command",
     "pos_mixed_return_line",
@@ -235,6 +236,7 @@ RUNTIME_VIEWS = {
 
 CUSTOM_FUNCTIONS = {
     "trg_mixed_cash_refund_guard",
+    "trg_mixed_zero_return_guard",
     "trg_mixed_cash_refund_complete",
     "trg_mixed_cash_refund_components",
     "assert_mixed_checkout",
@@ -1196,6 +1198,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_incoming_packaging_function_privileges(rows)
     return_names = {
         "trg_mixed_cash_refund_guard",
+        "trg_mixed_zero_return_guard",
         "trg_mixed_cash_refund_complete",
         "trg_mixed_cash_refund_components",
         "trg_mixed_return_guard",
@@ -1224,6 +1227,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "trg_mixed_return_guard",
         "trg_mixed_return_complete",
         "trg_mixed_cash_refund_guard",
+        "trg_mixed_zero_return_guard",
         "trg_mixed_cash_refund_complete",
         "trg_mixed_cash_refund_components",
     ):
@@ -1392,7 +1396,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
-                      'pos_mixed_cash_refund',
+                      'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
                       'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
@@ -1402,6 +1406,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                 """))).mappings())
     journal_tables = {
         "pos_mixed_cash_refund",
+        "pos_mixed_zero_return",
         "pos_mixed_return_command",
         "pos_mixed_return_line",
         "pos_mixed_return_slice",

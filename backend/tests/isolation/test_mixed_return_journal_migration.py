@@ -36,7 +36,10 @@ from tests.domains.pos.test_mixed_physical_checkout_preparation import legacy_wi
 from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
-from tests.isolation.test_physical_cash_checkout_migration import mixed_cash_refund_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_cash_refund_migration,
+    mixed_zero_return_migration,
+)
 
 db_session = receiving_session_fixture
 TABLES = ("pos_mixed_return_command", "pos_mixed_return_line", "pos_mixed_return_slice")
@@ -441,11 +444,13 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
             original_guards = connection.execute(guards).all()
             module = migration()
             if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_mixed_return_command)")):
-                with pytest.raises(DBAPIError, match="mixed_return_history_exists"):
+                with pytest.raises(DBAPIError, match="mixed_return_history_exists") as error:
                     with connection.begin_nested():
                         module.downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 assert connection.execute(guards).all() == original_guards
                 return
+            mixed_zero_return_migration().downgrade()
             mixed_cash_refund_migration().downgrade()
             module.downgrade()
             for table in TABLES:
@@ -454,6 +459,7 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
                 )
             module.upgrade()
             mixed_cash_refund_migration().upgrade()
+            mixed_zero_return_migration().upgrade()
             assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (
