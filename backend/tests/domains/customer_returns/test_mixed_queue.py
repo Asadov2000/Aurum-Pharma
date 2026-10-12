@@ -39,7 +39,9 @@ PATH = "/api/v1/customer-returns/mixed"
 async def cash_source(
     session: AsyncSession, *, returned: int = 31
 ) -> tuple[MixedCheckoutResultV4, MixedCashRefundResultV4]:
-    original = await mixed_source(session, fractional_legacy=True)
+    original = await mixed_source(
+        session, sale_format="unit", physical_quantity=31, fractional_legacy=True
+    )
     result = await refund(session, original, original.selections("0.001", returned))
     return original.original, result
 
@@ -54,6 +56,13 @@ async def test_cash_queue_preserves_decimal_packs_and_groups_physical_slices_per
             {"id": result.operation_id},
         )
         == 2
+    )
+    assert (
+        await db_session.scalar(
+            text("SELECT count(DISTINCT lot_id) FROM pos_mixed_return_slice WHERE command_id=:id"),
+            {"id": result.operation_id},
+        )
+        == 1
     )
     before = await facts(db_session)
     async with queue_actor(db_session):
