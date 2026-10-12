@@ -285,8 +285,6 @@ async def test_real_foreign_tenant_cannot_read_original_or_recover_refund(
         assert (
             await client.post(f"{endpoint}/quote", json={"items": items(original)})
         ).status_code == 404
-        assert (
-            await client.get(f"{endpoint}/operations/{result.operation_id}")
-        ).status_code == 404
+        assert (await client.get(f"{endpoint}/operations/{result.operation_id}")).status_code == 404
     await set_receiving_context(db_session, context.stock, context.actor_id)
     assert await facts(db_session) == before

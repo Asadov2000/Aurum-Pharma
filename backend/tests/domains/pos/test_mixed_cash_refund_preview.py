@@ -96,9 +96,7 @@ def setup_preview(
     payload = checkout(step=step).model_dump(mode="python")
     operation = payload["operation_id"]
     payload.update(event_id=operation, stock_command_id=operation, is_test=False)
-    payload["payments"] = [
-        {"id": operation, "method": "cash", "amount": payload["total_amount"]}
-    ]
+    payload["payments"] = [{"id": operation, "method": "cash", "amount": payload["total_amount"]}]
     repo = PreviewRepository(MixedCheckoutResultV4.model_validate(payload))
     authority = Authority()
     monkeypatch.setattr(preview_module, "MixedReturnJournalRepository", lambda session: authority)

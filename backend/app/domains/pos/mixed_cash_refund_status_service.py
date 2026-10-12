@@ -152,9 +152,11 @@ class MixedCashRefundStatusService:
         except ValidationError as error:
             raise AurumError("Stored mixed refund is inconsistent") from error
         selections: tuple[MixedReturnSelection, ...] = tuple(
-            LegacyReturnSelection(line.line_id, line.quantity)
-            if line.inventory_kind == "legacy_pack"
-            else PhysicalReturnSelection(line.line_id, line.sale_format, line.quantity)
+            (
+                LegacyReturnSelection(line.line_id, line.quantity)
+                if line.inventory_kind == "legacy_pack"
+                else PhysicalReturnSelection(line.line_id, line.sale_format, line.quantity)
+            )
             for line in received.lines
         )
         try:

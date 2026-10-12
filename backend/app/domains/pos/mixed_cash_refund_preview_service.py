@@ -221,24 +221,26 @@ class MixedCashRefundPreviewService:
             revision_hash=mixed_refund_revision(original, legacy, physical, selections),
             total_amount=plan.total_amount,
             lines=tuple(
-                MixedLegacyRefundQuoteLine(
-                    line_id=line.line_id,
-                    quantity=line.quantity,
-                    offset=line.offset,
-                    gross_amount=line.gross_amount,
-                    discount_amount=line.discount_amount,
-                    net_amount=line.net_amount,
-                )
-                if isinstance(line, LegacyReturnAllocation)
-                else MixedPhysicalRefundQuoteLine(
-                    line_id=line.line_id,
-                    sale_format=line.sale_format,
-                    quantity=line.quantity,
-                    base_units=line.base_units,
-                    offset=line.offset,
-                    gross_amount=line.gross_amount,
-                    discount_amount=line.discount_amount,
-                    net_amount=line.net_amount,
+                (
+                    MixedLegacyRefundQuoteLine(
+                        line_id=line.line_id,
+                        quantity=line.quantity,
+                        offset=line.offset,
+                        gross_amount=line.gross_amount,
+                        discount_amount=line.discount_amount,
+                        net_amount=line.net_amount,
+                    )
+                    if isinstance(line, LegacyReturnAllocation)
+                    else MixedPhysicalRefundQuoteLine(
+                        line_id=line.line_id,
+                        sale_format=line.sale_format,
+                        quantity=line.quantity,
+                        base_units=line.base_units,
+                        offset=line.offset,
+                        gross_amount=line.gross_amount,
+                        discount_amount=line.discount_amount,
+                        net_amount=line.net_amount,
+                    )
                 )
                 for line in plan.lines
             ),

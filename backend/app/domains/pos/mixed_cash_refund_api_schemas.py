@@ -44,9 +44,11 @@ class MixedRefundQuoteRequest(FrozenContract):
 
     def selections(self) -> tuple[MixedReturnSelection, ...]:
         return tuple(
-            LegacyReturnSelection(item.line_id, item.quantity)
-            if isinstance(item, MixedLegacyRefundSelection)
-            else PhysicalReturnSelection(item.line_id, item.sale_format, item.quantity)
+            (
+                LegacyReturnSelection(item.line_id, item.quantity)
+                if isinstance(item, MixedLegacyRefundSelection)
+                else PhysicalReturnSelection(item.line_id, item.sale_format, item.quantity)
+            )
             for item in self.items
         )
 
