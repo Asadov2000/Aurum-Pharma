@@ -23,7 +23,10 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.domains.pos.test_mixed_cash_refund import policy
 from tests.domains.pos.test_mixed_return_journal import receive
 from tests.domains.pos.test_mixed_zero_return import source
-from tests.isolation.test_physical_cash_checkout_migration import mixed_quarantine_read_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_quarantine_disposition_migration,
+    mixed_quarantine_read_migration,
+)
 
 db_session = receiving_session_fixture
 
@@ -228,14 +231,28 @@ async def test_zero_migration_roundtrip_preserves_guard_owners_acl_and_rls(
             before = connection.execute(FUNCTIONS).all()
             relation = connection.execute(RELATION).one()
             policies = connection.execute(POLICIES).all()
-            mixed_quarantine_read_migration().downgrade()
-            migration().downgrade()
-            assert (
-                connection.scalar(text("SELECT to_regclass('public.pos_mixed_zero_return')"))
-                is None
+            dispositions = text(
+                "SELECT to_jsonb(row) FROM mixed_customer_return_disposition row "
+                "ORDER BY tenant_id,id"
             )
-            migration().upgrade()
-            mixed_quarantine_read_migration().upgrade()
+            disposition_history = connection.execute(dispositions).scalars().all()
+            if disposition_history:
+                with pytest.raises(DBAPIError, match="mixed_disposition_history_exists") as error:
+                    with connection.begin_nested():
+                        mixed_quarantine_disposition_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+                assert connection.execute(dispositions).scalars().all() == disposition_history
+            else:
+                mixed_quarantine_disposition_migration().downgrade()
+                mixed_quarantine_read_migration().downgrade()
+                migration().downgrade()
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.pos_mixed_zero_return')"))
+                    is None
+                )
+                migration().upgrade()
+                mixed_quarantine_read_migration().upgrade()
+                mixed_quarantine_disposition_migration().upgrade()
             assert connection.execute(FUNCTIONS).all() == before
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

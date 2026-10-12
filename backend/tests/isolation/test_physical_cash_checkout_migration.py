@@ -80,6 +80,7 @@ def cash_refund_policy_migration() -> ModuleType:
 
 
 def downgrade_refund_for_roundtrip() -> None:
+    mixed_quarantine_disposition_migration().downgrade()
     mixed_quarantine_read_migration().downgrade()
     mixed_zero_return_migration().downgrade()
     mixed_cash_refund_migration().downgrade()
@@ -99,6 +100,17 @@ def upgrade_refund_after_roundtrip() -> None:
     mixed_cash_refund_migration().upgrade()
     mixed_zero_return_migration().upgrade()
     mixed_quarantine_read_migration().upgrade()
+    mixed_quarantine_disposition_migration().upgrade()
+
+
+def mixed_quarantine_disposition_migration() -> ModuleType:
+    directory = Path(__file__).resolve().parents[2] / "alembic/versions"
+    path = directory / "0193_mixed_quarantine_disposition.py"
+    spec = importlib.util.spec_from_file_location("mixed_quarantine_disposition_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def mixed_quarantine_read_migration() -> ModuleType:

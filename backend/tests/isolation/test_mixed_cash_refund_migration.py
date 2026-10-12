@@ -31,6 +31,7 @@ from tests.domains.pos.test_mixed_return_journal import MixedSource, mixed_sourc
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_cash_refund_migration,
+    mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
 )
@@ -435,6 +436,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                         mixed_cash_refund_migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                mixed_quarantine_disposition_migration().downgrade()
                 mixed_quarantine_read_migration().downgrade()
                 mixed_zero_return_migration().downgrade()
                 mixed_cash_refund_migration().downgrade()
@@ -451,6 +453,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                 mixed_cash_refund_migration().upgrade()
                 mixed_zero_return_migration().upgrade()
                 mixed_quarantine_read_migration().upgrade()
+                mixed_quarantine_disposition_migration().upgrade()
             assert connection.execute(functions).all() == before
             assert connection.execute(relation).one() == original_relation
             assert connection.execute(policies).all() == original_policies

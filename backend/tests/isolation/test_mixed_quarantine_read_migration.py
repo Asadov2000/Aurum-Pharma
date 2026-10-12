@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_quarantine_disposition_migration,
+)
 from tests.isolation.test_runtime_role_privileges import (
     support_engine_privileges as support_engine_fixture,
 )
@@ -20,6 +23,7 @@ support_engine = support_engine_fixture
 
 SIGNATURE = "public.mixed_customer_return_queue(uuid,uuid,text)"
 HISTORY_TABLES = (
+    "mixed_customer_return_disposition",
     "pos_mixed_return_command",
     "pos_mixed_return_line",
     "pos_mixed_return_slice",
@@ -88,13 +92,15 @@ async def test_queue_read_migration_roundtrip_keeps_every_history_and_policy(
         }
         policies = text("""
             SELECT policyname,tablename,roles,cmd,qual,with_check FROM pg_policies
-            WHERE schemaname='public' AND tablename LIKE 'pos_mixed_%'
+            WHERE schemaname='public' AND (tablename LIKE 'pos_mixed_%'
+              OR tablename='mixed_customer_return_disposition')
             ORDER BY tablename,policyname
         """)
         before_policies = connection.execute(policies).all()
         grants = text("""
             SELECT relname,relacl FROM pg_class
-            WHERE relnamespace='public'::regnamespace AND relname LIKE 'pos_mixed_%'
+            WHERE relnamespace='public'::regnamespace AND (relname LIKE 'pos_mixed_%'
+              OR relname='mixed_customer_return_disposition')
             ORDER BY relname
         """)
         before_grants = connection.execute(grants).all()
@@ -102,9 +108,19 @@ async def test_queue_read_migration_roundtrip_keeps_every_history_and_policy(
             text("SELECT pg_get_functiondef(to_regprocedure(:s))"), {"s": SIGNATURE}
         )
         with Operations.context(MigrationContext.configure(connection)):
-            migration().downgrade()
-            assert connection.scalar(text("SELECT to_regprocedure(:s)"), {"s": SIGNATURE}) is None
-            migration().upgrade()
+            if snapshots["mixed_customer_return_disposition"]:
+                with pytest.raises(DBAPIError, match="mixed_disposition_history_exists") as error:
+                    with connection.begin_nested():
+                        mixed_quarantine_disposition_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+            else:
+                mixed_quarantine_disposition_migration().downgrade()
+                migration().downgrade()
+                assert (
+                    connection.scalar(text("SELECT to_regprocedure(:s)"), {"s": SIGNATURE}) is None
+                )
+                migration().upgrade()
+                mixed_quarantine_disposition_migration().upgrade()
         assert (
             connection.scalar(
                 text("SELECT pg_get_functiondef(to_regprocedure(:s))"), {"s": SIGNATURE}

@@ -38,6 +38,7 @@ from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_s
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_cash_refund_migration,
+    mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
 )
@@ -451,6 +452,7 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 assert connection.execute(guards).all() == original_guards
                 return
+            mixed_quarantine_disposition_migration().downgrade()
             mixed_quarantine_read_migration().downgrade()
             mixed_zero_return_migration().downgrade()
             mixed_cash_refund_migration().downgrade()
@@ -463,6 +465,7 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
             mixed_cash_refund_migration().upgrade()
             mixed_zero_return_migration().upgrade()
             mixed_quarantine_read_migration().upgrade()
+            mixed_quarantine_disposition_migration().upgrade()
             assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (
