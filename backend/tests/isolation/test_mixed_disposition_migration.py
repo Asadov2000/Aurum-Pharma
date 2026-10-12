@@ -42,12 +42,10 @@ from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_s
 from tests.domains.pos.test_unit_return import runtime
 
 db_session = receiving_session_fixture
-WRITER = text(
-    """
+WRITER = text("""
  SELECT public.record_mixed_customer_return_disposition(
    :tenant,:decision,:intake,:line,:kind,:batch,:lot,:disposition,:reason,:comment)
-"""
-)
+""")
 
 
 def migration() -> ModuleType:
@@ -153,11 +151,15 @@ async def test_writer_derives_whole_confirmed_target_and_removes_only_it_from_pe
     remaining = await queue(db_session, tenant_id)
     assert len(remaining) == 1 and remaining[0].line_id != row.line_id
     history = (
-        await db_session.execute(
-            text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
-            {"tenant": tenant_id},
+        (
+            await db_session.execute(
+                text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
+                {"tenant": tenant_id},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert history == [await record(db_session, payload)]
     assert (await service.resolve(tenant_id=tenant_id, request=decision)) == saved
 
@@ -252,11 +254,15 @@ async def test_real_database_scope_is_checked_before_saved_replay(
             await record(db_session, payload)
     assert getattr(error.value.orig, "sqlstate", None) == "42501"
     history = (
-        await db_session.execute(
-            text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
-            {"tenant": context.stock.tenant_id},
+        (
+            await db_session.execute(
+                text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
+                {"tenant": context.stock.tenant_id},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert history == ([original] if scope == "view_only" else [])
 
 
@@ -272,25 +278,37 @@ async def test_view_only_history_reads_saved_decision_without_raw_journal_access
     )
     await set_receiving_context(db_session, context.stock, viewer)
     history = (
-        await db_session.execute(
-            text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
-            {"tenant": context.stock.tenant_id},
+        (
+            await db_session.execute(
+                text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
+                {"tenant": context.stock.tenant_id},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert history == [result]
     absent = (
-        await db_session.execute(
-            text("SELECT public.mixed_customer_return_disposition_history(:tenant,:branch)"),
-            {"tenant": context.stock.tenant_id, "branch": uuid4()},
+        (
+            await db_session.execute(
+                text("SELECT public.mixed_customer_return_disposition_history(:tenant,:branch)"),
+                {"tenant": context.stock.tenant_id, "branch": uuid4()},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert absent == []
     foreign = (
-        await db_session.execute(
-            text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
-            {"tenant": uuid4()},
+        (
+            await db_session.execute(
+                text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
+                {"tenant": uuid4()},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert foreign == []
     with pytest.raises(DBAPIError) as error:
         async with db_session.begin_nested():
@@ -376,11 +394,15 @@ async def test_current_tenant_policy_denies_replay_but_history_remains_readable(
                 await record(db_session, payload)
         assert getattr(error.value.orig, "sqlstate", None) == "42501"
         history = (
-            await db_session.execute(
-                text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
-                {"tenant": context.stock.tenant_id},
+            (
+                await db_session.execute(
+                    text("SELECT public.mixed_customer_return_disposition_history(:tenant)"),
+                    {"tenant": context.stock.tenant_id},
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert history == [result]
     finally:
         await db_session.rollback()
@@ -459,12 +481,10 @@ async def test_owner_fingerprint_matches_fixed_python_utf8_golden_and_unicode_st
 ) -> None:
     row = contract_source(kind=kind)
     trim = "".join(chr(value) for value in range(0x3100) if chr(value).isspace())
-    sql = text(
-        """
+    sql = text("""
       SELECT public.mixed_disposition_fingerprint(
         :tenant,:intake,:line,:kind,:batch,:lot,:disposition,:reason,:comment)
-    """
-    )
+    """)
     async with maintenance_engine.connect() as connection:
         for comment in ("Претензия", trim + "Претензия" + trim, None, trim, 'Юникод "\\\nвнутри'):
             payload = parameters(row, UUID(int=1), comment=comment)
@@ -487,16 +507,10 @@ async def test_journal_acl_rls_private_helpers_and_safe_audit_immutability(
     await db_session.commit()
     module = migration()
     async with maintenance_engine.connect() as connection:
-        relation = (
-            await connection.execute(
-                text(
-                    """
+        relation = (await connection.execute(text("""
           SELECT relrowsecurity,relforcerowsecurity,pg_get_userbyid(relowner) AS owner
           FROM pg_class WHERE oid='public.mixed_customer_return_disposition'::regclass
-        """
-                )
-            )
-        ).mappings().one()
+        """))).mappings().one()
         assert relation["relrowsecurity"] and relation["relforcerowsecurity"]
         assert relation["owner"] == "aurum_schema_owner"
         for privilege in (
@@ -567,14 +581,12 @@ async def test_migration_roundtrip_or_history_refusal_keeps_prior_guards_and_que
 ) -> None:
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
-        definition = text(
-            """
+        definition = text("""
           SELECT proname,pg_get_functiondef(oid),proacl,proowner FROM pg_proc
           WHERE pronamespace='public'::regnamespace AND proname IN (
             'mixed_customer_return_queue','audit_redact_table_snapshot','trg_mixed_return_guard',
             'trg_mixed_zero_return_guard','trg_mixed_cash_refund_guard') ORDER BY proname
-        """
-        )
+        """)
         before = connection.execute(definition).all()
         exists = connection.scalar(
             text("SELECT EXISTS(SELECT 1 FROM mixed_customer_return_disposition)")

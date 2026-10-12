@@ -117,8 +117,7 @@ async def test_queue_read_migration_roundtrip_keeps_every_history_and_policy(
                 mixed_quarantine_disposition_migration().downgrade()
                 migration().downgrade()
                 assert (
-                    connection.scalar(text("SELECT to_regprocedure(:s)"), {"s": SIGNATURE})
-                    is None
+                    connection.scalar(text("SELECT to_regprocedure(:s)"), {"s": SIGNATURE}) is None
                 )
                 migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
