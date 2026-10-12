@@ -18,9 +18,7 @@ class MixedZeroReturnRepository:
     async def get(self, tenant_id: UUID, operation_id: UUID) -> MixedZeroReturn | None:
         result: MixedZeroReturn | None = await self.session.scalar(
             select(MixedZeroReturn)
-            .where(
-                MixedZeroReturn.tenant_id == tenant_id, MixedZeroReturn.id == operation_id
-            )
+            .where(MixedZeroReturn.tenant_id == tenant_id, MixedZeroReturn.id == operation_id)
             .execution_options(populate_existing=True)
         )
         return result

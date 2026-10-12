@@ -344,9 +344,7 @@ async def test_recovery_fails_closed_on_inconsistent_marker_without_cost_exposur
     assert marker is not None
     before = await facts(db_session)
     with pytest.raises(AurumError, match="Stored mixed zero-value return is inconsistent"):
-        await MixedZeroReturnService(
-            CorruptReadRepository(db_session, marker, corruption)
-        ).read(
+        await MixedZeroReturnService(CorruptReadRepository(db_session, marker, corruption)).read(
             tenant_id=result.tenant_id,
             actor_id=result.actor_id,
             parent_sale_id=result.parent_sale_id,
