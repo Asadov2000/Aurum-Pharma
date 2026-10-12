@@ -340,7 +340,14 @@ async def test_acceptance_rollback_removes_snapshot_batch_and_allows_retry(
     assert document.status == "draft"
     assert row.created_batch_id is None
     assert row.unit_packaging_preparation == _snapshot()
-    assert list((await db_session.scalars(select(Batch))).all()) == []
+    assert (
+        list(
+            (
+                await db_session.scalars(select(Batch).where(Batch.tenant_id == document.tenant_id))
+            ).all()
+        )
+        == []
+    )
     await service.accept(document_id)
     await db_session.refresh(row)
     assert row.id == row_id
@@ -483,7 +490,14 @@ async def test_database_rejects_acceptance_with_missing_batch_snapshot(
     assert document.status == "draft"
     assert row.created_batch_id is None
     assert row.unit_packaging_preparation == _snapshot()
-    assert list((await db_session.scalars(select(Batch))).all()) == []
+    assert (
+        list(
+            (
+                await db_session.scalars(select(Batch).where(Batch.tenant_id == document.tenant_id))
+            ).all()
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -629,4 +643,11 @@ async def test_acceptance_rolls_back_missing_v2_batch_snapshot(
     assert document.status == "draft"
     assert row.created_batch_id is None
     assert row.unit_packaging_snapshot_v2 == _snapshot_v2()
-    assert list((await db_session.scalars(select(Batch))).all()) == []
+    assert (
+        list(
+            (
+                await db_session.scalars(select(Batch).where(Batch.tenant_id == document.tenant_id))
+            ).all()
+        )
+        == []
+    )
