@@ -458,7 +458,14 @@ async def concurrent_intake(
     try:
         async with context.factory.begin() as session:
             await set_receiving_context(session, context.stock, context.actor_id)
-            return await intake(session, original, operation_id=operation_id, revision=revision)
+            return await MixedZeroReturnService(MixedZeroReturnRepository(session)).receive(
+                tenant_id=context.stock.tenant_id,
+                actor_id=context.actor_id,
+                operation_id=operation_id,
+                parent_sale_id=original.original.sale_id,
+                selections=original.selections(),
+                expected_revision_hash=revision,
+            )
     except ConflictError as error:
         return error
 
