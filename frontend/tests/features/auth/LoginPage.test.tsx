@@ -103,6 +103,32 @@ describe("LoginPage", () => {
     vi.unstubAllEnvs();
   });
 
+  it("waits for session restoration before accepting new credentials", async () => {
+    useAuthStore.setState({ hydrated: false });
+    loginWithPassword.mockResolvedValueOnce({
+      status: "mfa_required",
+      challenge_token: "after-bootstrap",
+      expires_in: 300,
+    });
+    renderPage(false);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Проверяем сессию");
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Войти$/ })).not.toBeInTheDocument();
+    expect(loginWithPassword).not.toHaveBeenCalled();
+
+    // An anonymous bootstrap refresh ends by clearing the old session generation.
+    act(() => useAuthStore.getState().clear());
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@aurum.tj" } });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "password" } });
+    fireEvent.submit(screen.getByRole("button", { name: /^Войти$/ }).closest("form")!);
+
+    expect(await screen.findByLabelText("Код подтверждения")).toBeInTheDocument();
+    expect(loginWithPassword).toHaveBeenCalledTimes(1);
+    expect(fetchMe).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("opens the configured public website separately without submitting the login form", () => {
     vi.stubEnv("VITE_PUBLIC_WEBSITE_URL", "https://aurum.example.test/");
     renderPage();
