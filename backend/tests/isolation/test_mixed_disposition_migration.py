@@ -417,11 +417,8 @@ async def test_current_tenant_policy_denies_replay_but_history_remains_readable(
         assert history == [result]
     finally:
         await db_session.rollback()
-        async with maintenance_engine.begin() as connection:
-            await connection.execute(
-                text("UPDATE tenant SET status='active' WHERE id=:tenant"),
-                {"tenant": context.stock.tenant_id},
-            )
+        # This fresh synthetic tenant lives only in the disposable test database.
+        # Reactivation requires checked owner launch; preserve the tested status.
 
 
 @pytest.mark.parametrize("same_key", [True, False])
