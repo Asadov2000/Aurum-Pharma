@@ -115,7 +115,7 @@ async def test_options_quote_complete_and_recovery_preserve_both_kinds_and_exact
 async def test_stale_review_is_rejected_without_second_payout(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    original = await source(db_session)
+    original = await source(db_session, fractional=True)
     async with refund_actor(db_session):
         stale = await request(client, original)
         await refund(db_session, original)

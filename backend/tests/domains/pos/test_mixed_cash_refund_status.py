@@ -200,9 +200,10 @@ async def test_actual_other_tenant_cannot_recover_saved_refund(
     context = runtime(db_session)
     before = await facts(db_session)
     await db_session.commit()
-    async with db_engine.begin() as support:
-        await support.execute(text("SELECT set_config('app.support_session','true',true)"))
-        foreign = await seed_ledger_context(support)
+    async with AsyncSession(db_engine) as support:
+        async with support.begin():
+            await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+            foreign = await seed_ledger_context(support)
     actor_id = await seed_receiving_actor(
         db_engine, maintenance_engine, foreign, permissions=("pos.refund",)
     )
