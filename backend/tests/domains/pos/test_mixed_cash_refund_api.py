@@ -189,7 +189,7 @@ async def test_required_reason_and_wrong_reviewed_amount_do_not_claim_stock_or_m
 async def test_closed_shift_allows_exact_replay_and_read_but_denies_new_cash_payout(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    original = await source(db_session)
+    original = await source(db_session, fractional=True)
     endpoint = path(original.original.sale_id)
     async with refund_actor(db_session):
         body = await request(client, original)
@@ -202,14 +202,18 @@ async def test_closed_shift_allows_exact_replay_and_read_but_denies_new_cash_pay
             await client.get(f"{endpoint}/operations/{body['operation_id']}")
         ).json() == response.json()
         fresh = await request(client, original)
-        assert (await client.post(f"{endpoint}/complete", json=fresh)).status_code == 422
+        denied = await client.post(f"{endpoint}/complete", json=fresh)
+        assert denied.status_code == 422
+        assert denied.json()["error"]["message"] == (
+            "Refund requires your open shift on the original register"
+        )
         assert await facts(db_session) == before
 
 
 async def test_readonly_tenant_can_preview_and_recover_but_cannot_issue_cash(
     client: AsyncClient, db_session: AsyncSession, db_engine: AsyncEngine
 ) -> None:
-    original = await source(db_session)
+    original = await source(db_session, fractional=True)
     result = await refund(db_session, original)
     await db_session.commit()
     async with db_engine.begin() as support:
@@ -225,7 +229,9 @@ async def test_readonly_tenant_can_preview_and_recover_but_cannot_issue_cash(
     async with refund_actor(db_session):
         assert (await client.get(f"{endpoint}/options")).status_code == 200
         body = await request(client, original)
-        assert (await client.post(f"{endpoint}/complete", json=body)).status_code == 422
+        denied = await client.post(f"{endpoint}/complete", json=body)
+        assert denied.status_code == 422
+        assert denied.json()["error"]["details"] == {"status": "readonly"}
         recovered = await client.get(f"{endpoint}/operations/{result.operation_id}")
         assert recovered.status_code == 200
         assert recovered.json()["receipt"] == result.receipt.model_dump(mode="json")
