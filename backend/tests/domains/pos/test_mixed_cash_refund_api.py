@@ -8,11 +8,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.domains.foundation.repository import FoundationRepository
-from tests.domains.incoming.test_unit_acceptance import (
-    seed_receiving_actor,
-    set_receiving_context,
-)
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
+from tests.domains.incoming.test_unit_acceptance import seed_receiving_actor, set_receiving_context
 from tests.domains.inventory.test_unit_ledger import seed_ledger_context
 from tests.domains.pos.test_mixed_cash_refund import facts, refund
 from tests.domains.pos.test_mixed_return_journal import MixedSource, mixed_source
