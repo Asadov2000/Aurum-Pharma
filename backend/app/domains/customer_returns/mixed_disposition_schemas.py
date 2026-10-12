@@ -65,3 +65,10 @@ class ResolvedMixedDisposition(FrozenDispositionContract):
         if _disposition_hash(self.request(), tenant_id=self.tenant_id) != self.request_hash:
             raise ValueError("Persisted decision hash does not match its canonical content")
         return self
+
+
+class MixedDispositionHistory(FrozenDispositionContract):
+    items: list[ResolvedMixedDisposition]
+    total: int = Field(strict=True, ge=0)
+    page: int = Field(strict=True, ge=1)
+    page_size: int = Field(strict=True, ge=1, le=200)

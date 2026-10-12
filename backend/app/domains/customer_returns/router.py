@@ -15,6 +15,7 @@ from app.core.deps import (
     require_writable_tenant,
 )
 from app.core.errors import PermissionDeniedError
+from app.domains.customer_returns.mixed_disposition_router import router as mixed_disposition_router
 from app.domains.customer_returns.mixed_router import router as mixed_router
 from app.domains.customer_returns.physical_router import router as physical_router
 from app.domains.customer_returns.repository import CustomerReturnsRepository
@@ -28,6 +29,7 @@ from app.domains.customer_returns.service import CustomerReturnsService
 
 router = APIRouter(prefix="/api/v1/customer-returns", tags=["customer-returns"])
 router.include_router(physical_router)
+router.include_router(mixed_disposition_router)
 router.include_router(mixed_router)
 
 

@@ -1,4 +1,4 @@
-"""Use only the resolve-authorized DB writer; the caller owns the transaction."""
+"""Use scoped DB functions for mixed decisions; the caller owns the transaction."""
 
 from uuid import UUID
 
@@ -18,6 +18,50 @@ from app.domains.customer_returns.mixed_disposition_schemas import ResolvedMixed
 class MixedDispositionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def list_history(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID | None,
+        allowed_branch_ids: set[UUID] | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[ResolvedMixedDisposition], int]:
+        if allowed_branch_ids is not None and (
+            not allowed_branch_ids
+            or (branch_id is not None and branch_id not in allowed_branch_ids)
+        ):
+            return [], 0
+        source = (
+            "FROM public.mixed_customer_return_disposition_history(:tenant,:branch) "
+            "AS history(payload)"
+        )
+        parameters: dict[str, object] = {"tenant": tenant_id, "branch": branch_id}
+        if allowed_branch_ids is not None:
+            source += " WHERE CAST(payload->>'branch_id' AS UUID)=ANY(CAST(:allowed AS UUID[]))"
+            parameters["allowed"] = sorted(allowed_branch_ids, key=str)
+        try:
+            total = int(
+                await self.session.scalar(text(f"SELECT count(*) {source}"), parameters) or 0
+            )
+            result = await self.session.execute(
+                text(
+                    f"SELECT payload {source} "
+                    "ORDER BY CAST(payload->>'resolved_at' AS TIMESTAMPTZ) DESC,"
+                    "CAST(payload->>'decision_operation_id' AS UUID) LIMIT :limit OFFSET :offset"
+                ),
+                {**parameters, "limit": page_size, "offset": (page - 1) * page_size},
+            )
+        except DBAPIError as error:
+            sqlstate = getattr(error.orig, "sqlstate", None)
+            if sqlstate == "42501":
+                raise PermissionDeniedError("Mixed quarantine history permission denied") from None
+            if sqlstate in {"22P02", "22007", "22008"}:
+                raise BusinessRuleError("Saved mixed quarantine history is invalid") from None
+            raise
+        items = [ResolvedMixedDisposition.model_validate(payload) for payload in result.scalars()]
+        return items, total
 
     async def record(
         self, *, tenant_id: UUID, request: MixedDispositionRequest
