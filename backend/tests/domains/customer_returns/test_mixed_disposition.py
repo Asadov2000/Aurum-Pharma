@@ -110,9 +110,9 @@ def test_preparation_preserves_full_historical_quantity_without_recording_action
     for forbidden in ("actor_id", "resolved_at", "resolved_by", "cost", "payment", "receipt"):
         assert forbidden not in payload
     with pytest.raises(ValidationError, match="frozen"):
-        setattr(prepared, "state", "resolved")
+        prepared.state = "resolved"
     with pytest.raises(ValidationError, match="frozen"):
-        setattr(prepared.target, "line_id", uuid4())
+        prepared.target.line_id = uuid4()
 
 
 @pytest.mark.parametrize("kind", ["legacy_pack", "physical_unit"])
