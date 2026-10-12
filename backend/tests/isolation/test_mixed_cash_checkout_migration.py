@@ -14,8 +14,8 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_cash_refund_migration,
-    mixed_return_migration,
     mixed_quarantine_read_migration,
+    mixed_return_migration,
     mixed_zero_return_migration,
 )
 
