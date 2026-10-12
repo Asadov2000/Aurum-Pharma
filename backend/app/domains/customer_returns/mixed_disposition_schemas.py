@@ -1,6 +1,6 @@
 """Cost-free acknowledgment of a persisted, immutable mixed quarantine decision."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import AwareDatetime, Field, field_validator, model_validator
@@ -72,3 +72,15 @@ class MixedDispositionHistory(FrozenDispositionContract):
     total: int = Field(strict=True, ge=0)
     page: int = Field(strict=True, ge=1)
     page_size: int = Field(strict=True, ge=1, le=200)
+    report_timezone: str | None = Field(default=None, strict=True, min_length=1, max_length=100)
+
+
+class NotFoundMixedDisposition(FrozenDispositionContract):
+    state: Literal["not_found"]
+    decision_operation_id: UUID
+    branch_id: UUID
+
+
+MixedDispositionStatus = Annotated[
+    ResolvedMixedDisposition | NotFoundMixedDisposition, Field(discriminator="state")
+]

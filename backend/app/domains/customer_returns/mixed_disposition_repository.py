@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from pydantic import TypeAdapter
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,12 +13,42 @@ from app.domains.customer_returns.mixed_disposition import (
     MixedLegacyDispositionTarget,
     MixedPhysicalDispositionTarget,
 )
-from app.domains.customer_returns.mixed_disposition_schemas import ResolvedMixedDisposition
+from app.domains.customer_returns.mixed_disposition_schemas import (
+    MixedDispositionStatus,
+    ResolvedMixedDisposition,
+)
 
 
 class MixedDispositionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def history_timezone(self, tenant_id: UUID) -> str | None:
+        value = await self.session.scalar(
+            text("SELECT report_timezone FROM public.tenant_settings WHERE tenant_id=:tenant"),
+            {"tenant": tenant_id},
+        )
+        if value is not None and not isinstance(value, str):
+            raise BusinessRuleError("Saved mixed quarantine history is invalid")
+        return value
+
+    async def read_status(
+        self, *, tenant_id: UUID, branch_id: UUID, decision_operation_id: UUID
+    ) -> MixedDispositionStatus:
+        try:
+            payload = await self.session.scalar(
+                text(
+                    "SELECT public.mixed_customer_return_disposition_status("
+                    ":tenant,:branch,:decision)"
+                ),
+                {"tenant": tenant_id, "branch": branch_id, "decision": decision_operation_id},
+            )
+        except DBAPIError as error:
+            if getattr(error.orig, "sqlstate", None) == "42501":
+                raise PermissionDeniedError("Mixed quarantine recovery permission denied") from None
+            raise
+        adapter: TypeAdapter[MixedDispositionStatus] = TypeAdapter(MixedDispositionStatus)
+        return adapter.validate_python(payload)
 
     async def list_history(
         self,

@@ -34,6 +34,7 @@ import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useCustomerReturnsQuery, useResolveCustomerReturn } from "./queries";
 import { PhysicalCustomerReturnsPanel } from "./PhysicalCustomerReturnsPanel";
+import { MixedDispositionWorkspace } from "./MixedDispositionWorkspace";
 import {
   type CustomerReturnDispositionType,
   type CustomerReturnItem,
@@ -69,7 +70,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
 });
 
 export function CustomerReturnsPanel(): JSX.Element {
+  const { user } = useAuth();
   const [queue, setQueue] = useState<"packages" | "physical" | "mixed">("packages");
+  if (!hasPermission(user, "customer_returns.view")) {
+    return <MixedDispositionWorkspace key={`${user?.id}:${user?.active_tenant_id}`} />;
+  }
   return (
     <div className="space-y-4">
       <div role="group" aria-label="Вид возвратов" className="flex flex-wrap gap-2">

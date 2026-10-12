@@ -20,6 +20,7 @@ from app.domains.customer_returns.mixed_disposition_service import MixedDisposit
 from tests.domains.customer_returns.test_mixed_disposition import TENANT, IntakeKind, InventoryKind
 from tests.domains.customer_returns.test_mixed_disposition_service import (
     DatabaseFailure,
+    WriterSession,
     acknowledgment,
 )
 
@@ -31,6 +32,12 @@ class HistoryRepository(MixedDispositionRepository):
         self.items = items
         self.total = total
         self.calls: list[dict[str, object]] = []
+        self.timezone_calls: list[UUID] = []
+
+    async def history_timezone(self, tenant_id: UUID) -> str | None:
+        assert tenant_id == TENANT
+        self.timezone_calls.append(tenant_id)
+        return "Asia/Dushanbe"
 
     async def list_history(
         self,
@@ -93,8 +100,11 @@ async def test_history_service_preserves_whole_saved_snapshot_and_original_autho
     result = await MixedDispositionService(repo).list_history(
         tenant_id=TENANT, branch_id=BRANCH, allowed_branch_ids={BRANCH}, page=2, page_size=1
     )
-    assert result == MixedDispositionHistory(items=[saved], total=7, page=2, page_size=1)
+    assert result == MixedDispositionHistory(
+        items=[saved], total=7, page=2, page_size=1, report_timezone="Asia/Dushanbe"
+    )
     assert MixedDispositionHistory.model_validate_json(result.model_dump_json()) == result
+    assert repo.timezone_calls == [TENANT]
     assert repo.calls == [
         {"tenant": TENANT, "branch": BRANCH, "allowed": {BRANCH}, "page": 2, "page_size": 1}
     ]
@@ -111,6 +121,7 @@ async def test_service_and_repository_skip_queries_outside_explicit_branch_scope
     )
     assert result.items == [] and result.total == 0 and result.page == 3
     assert repo.calls == []
+    assert repo.timezone_calls == []
     session = HistorySession([])
     rows, total = await MixedDispositionRepository(cast(AsyncSession, session)).list_history(
         tenant_id=TENANT, branch_id=BRANCH, allowed_branch_ids=allowed, page=3, page_size=20
@@ -254,3 +265,20 @@ def test_history_contract_rejects_extra_fields_and_negative_totals() -> None:
             MixedDispositionHistory.model_validate(
                 {"items": [], "total": 0, "page": 1, "page_size": 200, **patch}
             )
+
+
+@pytest.mark.parametrize("timezone", [None, "Europe/Moscow", 7])
+async def test_history_timezone_is_tenant_bound_nullable_metadata(timezone: object) -> None:
+    session = WriterSession(timezone)
+    repo = MixedDispositionRepository(cast(AsyncSession, session))
+    if timezone == 7:
+        with pytest.raises(BusinessRuleError, match="history is invalid"):
+            await repo.history_timezone(TENANT)
+    else:
+        assert await repo.history_timezone(TENANT) == timezone
+    assert session.calls == [
+        (
+            "SELECT report_timezone FROM public.tenant_settings WHERE tenant_id=:tenant",
+            {"tenant": TENANT},
+        )
+    ]

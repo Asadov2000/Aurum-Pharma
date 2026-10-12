@@ -83,7 +83,8 @@ export function BatchesPage(): JSX.Element {
 function CloudBatchesPage(): JSX.Element {
   const { user } = useAuth();
   const quickActions = useQuickActionPreferences("batches");
-  const canViewCustomerReturns = hasPermission(user, "customer_returns.view");
+  const canAccessCustomerReturns =
+    hasPermission(user, "customer_returns.view") || hasPermission(user, "customer_returns.resolve");
   const [section, setSection] = useState<InventorySection>("saleable");
   const filterPreferenceKey = useFilterPreferenceKey("batches");
   const [batchNumberInput, setBatchNumberInput] = useState("");
@@ -104,8 +105,8 @@ function CloudBatchesPage(): JSX.Element {
   const branchFilterName = branches.data?.find((branch) => branch.id === branchId)?.name;
 
   useEffect(() => {
-    if (!canViewCustomerReturns && section !== "saleable") setSection("saleable");
-  }, [canViewCustomerReturns, section]);
+    if (!canAccessCustomerReturns && section !== "saleable") setSection("saleable");
+  }, [canAccessCustomerReturns, section]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -170,7 +171,9 @@ function CloudBatchesPage(): JSX.Element {
       <ContextHelpPortal
         pathname="/batches"
         inventorySection={
-          section === "customer_returns" && canViewCustomerReturns ? "customer_returns" : "saleable"
+          section === "customer_returns" && canAccessCustomerReturns
+            ? "customer_returns"
+            : "saleable"
         }
       />
       <PageHeader
@@ -186,7 +189,7 @@ function CloudBatchesPage(): JSX.Element {
         }
       />
 
-      {canViewCustomerReturns ? (
+      {canAccessCustomerReturns ? (
         <SegmentedControl
           value={section}
           options={inventorySections}
@@ -196,7 +199,7 @@ function CloudBatchesPage(): JSX.Element {
         />
       ) : null}
 
-      {section === "customer_returns" && canViewCustomerReturns ? (
+      {section === "customer_returns" && canAccessCustomerReturns ? (
         <Suspense fallback={<SkeletonRows rows={6} />}>
           <CustomerReturnsPanel />
         </Suspense>

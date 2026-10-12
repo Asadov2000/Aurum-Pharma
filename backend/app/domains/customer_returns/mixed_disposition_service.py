@@ -2,13 +2,14 @@
 
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from app.core.errors import BusinessRuleError
+from app.core.errors import BusinessRuleError, PermissionDeniedError
 from app.domains.customer_returns.mixed_disposition import MixedDispositionRequest
 from app.domains.customer_returns.mixed_disposition_repository import MixedDispositionRepository
 from app.domains.customer_returns.mixed_disposition_schemas import (
     MixedDispositionHistory,
+    MixedDispositionStatus,
     ResolvedMixedDisposition,
 )
 
@@ -16,6 +17,34 @@ from app.domains.customer_returns.mixed_disposition_schemas import (
 class MixedDispositionService:
     def __init__(self, repository: MixedDispositionRepository) -> None:
         self.repository = repository
+
+    async def read_status(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        decision_operation_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> MixedDispositionStatus:
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("Mixed quarantine recovery permission denied")
+        try:
+            result = await self.repository.read_status(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                decision_operation_id=decision_operation_id,
+            )
+            adapter: TypeAdapter[MixedDispositionStatus] = TypeAdapter(MixedDispositionStatus)
+            result = adapter.validate_python(result.model_dump())
+        except ValidationError:
+            raise BusinessRuleError("Saved mixed quarantine recovery result is invalid") from None
+        if (
+            result.branch_id != branch_id
+            or result.decision_operation_id != decision_operation_id
+            or (isinstance(result, ResolvedMixedDisposition) and result.tenant_id != tenant_id)
+        ):
+            raise BusinessRuleError("Saved mixed quarantine recovery result is invalid")
+        return result
 
     async def list_history(
         self,
@@ -55,6 +84,16 @@ class MixedDispositionService:
             for item in result.items
         ):
             raise BusinessRuleError("Saved mixed quarantine history is invalid")
+        if result.items:
+            try:
+                result = MixedDispositionHistory.model_validate(
+                    {
+                        **result.model_dump(),
+                        "report_timezone": await self.repository.history_timezone(tenant_id),
+                    }
+                )
+            except ValidationError:
+                raise BusinessRuleError("Saved mixed quarantine history is invalid") from None
         return result
 
     async def resolve(
