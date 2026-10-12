@@ -81,7 +81,22 @@ test.describe("Auth", () => {
 
   test("owner completes MFA in the UI and keeps tenant access", async ({ page }) => {
     clearLoginRateLimit(OWNER.email);
+    let releaseRefresh!: () => void;
+    const refreshReady = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    await page.route("**/auth/refresh", async (route) => {
+      await refreshReady;
+      await route.continue();
+    });
     await page.goto("/login", { waitUntil: "domcontentloaded" });
+    try {
+      await expect(page.getByRole("status")).toHaveText("Проверяем сессию…");
+      await expect(page.getByLabel("Email")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Войти$/ })).toHaveCount(0);
+    } finally {
+      releaseRefresh();
+    }
     await page.getByLabel("Email").fill(OWNER.email);
     await page.getByLabel(/Пароль/).fill(OWNER.password);
     await page.getByRole("button", { name: /^Войти$/ }).click();
