@@ -80,6 +80,7 @@ def cash_refund_policy_migration() -> ModuleType:
 
 
 def downgrade_refund_for_roundtrip() -> None:
+    mixed_zero_return_migration().downgrade()
     mixed_cash_refund_migration().downgrade()
     mixed_return_migration().downgrade()
     mixed_checkout_migration().downgrade()
@@ -95,6 +96,16 @@ def upgrade_refund_after_roundtrip() -> None:
     mixed_checkout_migration().upgrade()
     mixed_return_migration().upgrade()
     mixed_cash_refund_migration().upgrade()
+    mixed_zero_return_migration().upgrade()
+
+
+def mixed_zero_return_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0191_mixed_zero_return.py"
+    spec = importlib.util.spec_from_file_location("mixed_zero_return_dependency", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def mixed_cash_refund_migration() -> ModuleType:
@@ -142,6 +153,7 @@ async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
             history = connection.scalar(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_checkout) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_checkout) OR EXISTS(SELECT 1 "
@@ -201,6 +213,7 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_zero_return) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_checkout)"
                 )

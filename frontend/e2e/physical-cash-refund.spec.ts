@@ -1,6 +1,9 @@
 import { request, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { type MixedRefundCompleted } from "../src/features/sales/mixedRefund";
+import {
+  type MixedRefundCompleted,
+  type MixedZeroReturnPrepared,
+} from "../src/features/sales/mixedRefund";
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 import {
@@ -1043,6 +1046,241 @@ test("receives a zero-amount unit without a shift or second operation after resp
     expect(submitted).toEqual([result.operation_id]);
     expect(recoveryWrites).toEqual([]);
     await verifyQuarantineQueue(page, api, medicine.brand_name, result.operation_id, [1], true);
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});
+
+function mixedZeroFacts(parentId: string, physicalId: string): unknown {
+  for (const value of [parentId, physicalId])
+    expect(value).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+  // Only the launcher's disposable database is queried; runtime data is never used.
+  const sql = `SELECT json_build_object(
+    'markers', (SELECT count(*) FROM pos_mixed_zero_return WHERE parent_sale_id='${parentId}'),
+    'journal', (SELECT count(*) FROM pos_mixed_return_command WHERE parent_sale_id='${parentId}'),
+    'sales', (SELECT count(*) FROM sale WHERE id='${parentId}' OR parent_sale_id='${parentId}'),
+    'payments', (SELECT count(*) FROM sale_payment p JOIN sale s ON s.id=p.sale_id WHERE s.id='${parentId}' OR s.parent_sale_id='${parentId}'),
+    'physical_remaining', (SELECT sum(l.closed_packs*20+COALESCE((SELECT sum(p.remaining_units) FROM unit_stock_opened_pack_v2 p WHERE p.lot_id=l.id),0)) FROM unit_stock_lot_v2 l WHERE l.catalog_id='${physicalId}')
+  );`;
+  return JSON.parse(
+    dockerExec(E2E_POSTGRES_CONTAINER, [
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      E2E_POSTGRES_DB,
+      "-At",
+      "-c",
+      sql,
+    ]).trim(),
+  ) as unknown;
+}
+
+test("receives zero-value mixed goods once without a shift or payment after a lost response", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Mixed zero branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("Mixed zero register"));
+    const supplier = await seedSupplier(api, uniqueName("Mixed zero supplier"));
+    const legacy = await seedCatalogItem(api, uniqueName("Mixed zero packs"), "0.01");
+    const physical = await seedCatalogItem(api, uniqueName("Mixed zero tablets"), "10.00");
+    const expiry = new Date();
+    expiry.setUTCDate(expiry.getUTCDate() + 180);
+    const batch = await seedAcceptedBatch(api, {
+      branchId: branch.id,
+      supplierId: supplier.id,
+      catalogId: legacy.id,
+      qty: "4",
+      purchasePrice: "0.01",
+      salePrice: "0.01",
+      expiresAt: expiry.toISOString().slice(0, 10),
+    });
+    expect(
+      (
+        await api.patch(`catalog/${physical.id}`, {
+          data: {
+            unit_sale_preparation: {
+              version: 1,
+              state: "prepared",
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+              unit_price: "0.50",
+            },
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await receivePhysicalStock(api, branch.id, physical.id);
+    expect(
+      (
+        await api.post("shifts/open", {
+          data: { register_id: register.id, opening_cash: "0.00" },
+        })
+      ).ok(),
+    ).toBe(true);
+    const draftResponse = await api.post("sales", {
+      data: { operation_id: crypto.randomUUID(), register_id: register.id },
+    });
+    expect(draftResponse.ok()).toBe(true);
+    const draft = (await draftResponse.json()) as { id: string };
+    expect(
+      (
+        await api.post(`sales/${draft.id}/items`, {
+          data: { operation_id: crypto.randomUUID(), catalog_id: legacy.id, qty: "1.000" },
+        })
+      ).ok(),
+    ).toBe(true);
+    expect(
+      (
+        await api.put(`sales/${draft.id}/physical-cart/items/${crypto.randomUUID()}`, {
+          data: {
+            catalog_id: physical.id,
+            position: 2,
+            sale_format: "pack",
+            quantity: 1,
+            discount_amount: "9.99",
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    const quoted = await api.get(`sales/${draft.id}/physical-cart/quote`);
+    expect(quoted.ok()).toBe(true);
+    const quote = (await quoted.json()) as {
+      revision_hash: string;
+      quote: { total_amount: string };
+    };
+    expect(quote.quote.total_amount).toBe("0.02");
+    const confirmation = {
+      operation_id: crypto.randomUUID(),
+      sale_id: draft.id,
+      expected_revision_hash: quote.revision_hash,
+      expected_total_amount: "0.02",
+      cash_tendered: "0.02",
+    };
+    expect(
+      (await api.post(`sales/${draft.id}/mixed-cash/intent`, { data: confirmation })).ok(),
+    ).toBe(true);
+    const paid = await api.post(`sales/${draft.id}/mixed-cash/complete`, { data: confirmation });
+    expect(paid.ok()).toBe(true);
+    const sale = (await paid.json()) as MixedCashResult;
+    expect(
+      (
+        await api.post(`shifts/${sale.shift_id}/close`, {
+          data: { closing_cash_actual: "0.02" },
+        })
+      ).ok(),
+    ).toBe(true);
+    const before = mixedZeroFacts(sale.sale_id, physical.id);
+    expect(before).toEqual({
+      markers: 0,
+      journal: 0,
+      sales: 1,
+      payments: 1,
+      physical_remaining: 60,
+    });
+
+    await loginInBrowser(page, OWNER);
+    await page.goto("/sales");
+    await openRefund(page, sale);
+    const dialog = page.getByRole("dialog", { name: "Возврат смешанной продажи", exact: true });
+    await dialog.getByRole("checkbox", { name: legacy.brand_name, exact: true }).check();
+    await dialog.getByLabel(`Количество ${legacy.brand_name}`, { exact: true }).fill("0.001");
+    await dialog.getByRole("checkbox", { name: physical.brand_name, exact: true }).check();
+    await dialog.getByLabel(`Количество ${physical.brand_name}`, { exact: true }).fill("1");
+    if (await dialog.getByLabel(/^Причина возврата/).count()) {
+      await dialog.getByLabel(/^Причина возврата/).selectOption("customer_cancelled");
+      await dialog
+        .getByLabel(/^Пояснение/)
+        .fill("Изолированная проверка смешанного приёма без выплаты");
+    }
+    await dialog.getByRole("button", { name: "Рассчитать возврат", exact: true }).click();
+    await expect(dialog.getByText("0.00 TJS", { exact: true })).toBeVisible();
+    const receive = dialog.getByRole("button", {
+      name: "Принять в карантин без выплаты",
+      exact: true,
+    });
+    await expect(receive).toBeEnabled();
+    let completed: MixedZeroReturnPrepared | null = null;
+    let blockStatus = false;
+    const submissions: string[] = [];
+    const prefix = `**/api/v1/sales/${sale.sale_id}/mixed-zero-returns`;
+    await page.route(`${prefix}/operations/*`, async (route) => {
+      if (blockStatus) await route.abort("failed");
+      else await route.continue();
+    });
+    await page.route(`${prefix}/complete`, async (route) => {
+      submissions.push((route.request().postDataJSON() as { operation_id: string }).operation_id);
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      completed = (await response.json()) as MixedZeroReturnPrepared;
+      blockStatus = true;
+      await route.abort("failed");
+    });
+    await receive.click();
+    await expect.poll(() => completed !== null).toBe(true);
+    const result = completed as MixedZeroReturnPrepared | null;
+    if (!result) throw new Error("Mixed zero intake response was not observed");
+    expect(result).toMatchObject({
+      kind: "mixed_zero_return",
+      state: "prepared_quarantine",
+      total_amount: "0.00",
+    });
+    expect(result.lines).toMatchObject([
+      { inventory_kind: "legacy_pack", quantity: "0.001", offset: "0.000" },
+      { inventory_kind: "physical_unit", quantity: 1, base_units: 1, offset: 0 },
+    ]);
+    for (const field of ["sale_id", "receipt", "payment_id", "physical_cost_amount"])
+      expect(result).not.toHaveProperty(field);
+    await expect(
+      dialog.getByRole("heading", { name: "Проверяем ранее отправленный возврат" }),
+    ).toBeVisible();
+    const recoveryWrites: string[] = [];
+    page.on("request", (req) => {
+      const path = new URL(req.url()).pathname;
+      if (req.method() !== "GET" && path.startsWith(`/api/v1/sales/${sale.sale_id}/mixed-`))
+        recoveryWrites.push(`${req.method()} ${path}`);
+    });
+    await page.reload();
+    await openRefund(page, sale);
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    const check = dialog.getByRole("button", { name: "Проверить результат", exact: true });
+    await expect(check).toBeEnabled();
+    blockStatus = false;
+    await check.click();
+    await expect(
+      dialog.getByRole("heading", { name: "Товар принят в карантин", exact: true }),
+    ).toBeVisible();
+    expect(mixedZeroFacts(sale.sale_id, physical.id)).toEqual({
+      markers: 1,
+      journal: 1,
+      sales: 1,
+      payments: 1,
+      physical_remaining: 60,
+    });
+    expect(await (await api.get(`batches/${batch.id}`)).json()).toMatchObject({
+      qty_remaining: "3.000",
+    });
+    expect(submissions).toEqual([result.operation_id]);
+    await expect(
+      dialog.getByRole("button", { name: "Открыть чек возврата", exact: true }),
+    ).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Готово", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(recoveryWrites).toEqual([]);
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).filter((key) => key.startsWith("sales:mixedRefund:v1:")),
+      ),
+    ).toEqual([]);
   } finally {
     await api.dispose();
     await anonymous.dispose();

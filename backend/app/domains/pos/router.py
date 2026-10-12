@@ -31,6 +31,7 @@ from app.domains.audit.service import AuditService
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.pos.mixed_cash_checkout_router import router as mixed_cash_checkout_router
 from app.domains.pos.mixed_cash_refund_router import router as mixed_cash_refund_router
+from app.domains.pos.mixed_zero_return_router import router as mixed_zero_return_router
 from app.domains.pos.physical_cart_router import router as physical_cart_router
 from app.domains.pos.physical_cash_checkout_router import router as physical_cash_checkout_router
 from app.domains.pos.physical_cash_refund_router import router as physical_cash_refund_router
@@ -93,6 +94,7 @@ from app.domains.pos.service import POSService
 router = APIRouter(prefix="/api/v1", tags=["pos"])
 router.include_router(mixed_cash_checkout_router)
 router.include_router(mixed_cash_refund_router)
+router.include_router(mixed_zero_return_router)
 router.include_router(physical_cart_router)
 router.include_router(physical_cash_checkout_router)
 router.include_router(physical_cash_refund_router)

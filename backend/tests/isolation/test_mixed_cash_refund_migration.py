@@ -29,7 +29,10 @@ from tests.domains.incoming.test_unit_acceptance import seed_receiving_actor, se
 from tests.domains.inventory.test_unit_ledger import LedgerContext
 from tests.domains.pos.test_mixed_return_journal import MixedSource, mixed_source
 from tests.domains.pos.test_unit_return import runtime
-from tests.isolation.test_physical_cash_checkout_migration import mixed_cash_refund_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_cash_refund_migration,
+    mixed_zero_return_migration,
+)
 
 db_session = receiving_session_fixture
 TABLES = (
@@ -403,6 +406,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
             "SELECT proname,pg_get_functiondef(oid),proowner,proacl,prosecdef,proconfig "
             "FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN "
             "('trg_mixed_cash_refund_guard','trg_mixed_cash_refund_complete',"
+            "'trg_mixed_zero_return_guard',"
             "'trg_mixed_cash_refund_components','trg_mixed_return_guard',"
             "'trg_mixed_checkout_return_boundary','trg_guard_sale_immutability',"
             "'audit_redact_table_snapshot') ORDER BY proname"
@@ -419,11 +423,18 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
             before = connection.execute(functions).all()
             original_relation = connection.execute(relation).one()
             original_policies = connection.execute(policies).all()
-            if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_mixed_cash_refund)")):
-                with pytest.raises(DBAPIError, match="mixed_cash_refund_history_exists"):
+            if connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_mixed_zero_return)")):
+                with pytest.raises(DBAPIError, match="mixed_zero_return_history_exists") as error:
+                    with connection.begin_nested():
+                        mixed_zero_return_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+            elif connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pos_mixed_cash_refund)")):
+                with pytest.raises(DBAPIError, match="mixed_cash_refund_history_exists") as error:
                     with connection.begin_nested():
                         mixed_cash_refund_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                mixed_zero_return_migration().downgrade()
                 mixed_cash_refund_migration().downgrade()
                 assert (
                     connection.scalar(text("SELECT to_regclass('pos_mixed_cash_refund')")) is None
@@ -436,6 +447,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                     )
                 )
                 mixed_cash_refund_migration().upgrade()
+                mixed_zero_return_migration().upgrade()
             assert connection.execute(functions).all() == before
             assert connection.execute(relation).one() == original_relation
             assert connection.execute(policies).all() == original_policies

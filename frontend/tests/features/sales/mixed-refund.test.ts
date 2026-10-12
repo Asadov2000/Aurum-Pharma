@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getMixedRefundOptions,
+  getMixedZeroReturnStatus,
+  completeMixedZeroReturn,
+  mixedZeroReturnRequestSchema,
+  parseMixedZeroReturnStatus,
   quoteMixedRefund,
   parseMixedRefundStatus,
   mixedRefundRequestSchema,
@@ -311,4 +315,172 @@ describe("strict mixed refund client", () => {
       ).toThrow();
     },
   );
+});
+
+describe("mixed zero-return API contract", () => {
+  const zeroRequest = {
+    operation_id: request.operation_id,
+    items: request.items,
+    expected_revision_hash: request.expected_revision_hash,
+    reason_code: request.reason_code,
+    comment: request.comment,
+  };
+  function prepared() {
+    return {
+      version: 1,
+      kind: "mixed_zero_return",
+      operation_id: zeroRequest.operation_id,
+      parent_sale_id: parentId,
+      tenant_id: scope.tenantId,
+      branch_id: scope.branchId,
+      actor_id: scope.userId,
+      state: "prepared_quarantine",
+      currency: "TJS",
+      total_amount: "0.00",
+      lines: [
+        { inventory_kind: "legacy_pack", line_id: uuid(6), quantity: "0.500", offset: "0.000" },
+        {
+          inventory_kind: "physical_unit",
+          line_id: uuid(7),
+          sale_format: "unit",
+          quantity: 2,
+          base_units: 2,
+          offset: 0,
+        },
+      ],
+    };
+  }
+  const zeroQuote: MixedRefundQuote = {
+    ...quote,
+    total_amount: "0.00",
+    lines: quote.lines.map((line) => ({
+      ...line,
+      gross_amount: "0.00",
+      discount_amount: "0.00",
+      net_amount: "0.00",
+    })),
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.generation = 0;
+    mocks.get.mockResolvedValue({ data: returnedOptions() });
+    mocks.post.mockResolvedValue({ data: prepared() });
+  });
+  it("accepts shiftless zero intake and uses only the zero endpoint", async () => {
+    expect(mixedZeroReturnRequestSchema.parse(zeroRequest)).toEqual(zeroRequest);
+    expect(await completeMixedZeroReturn(parentId, zeroRequest, scope, zeroQuote)).toEqual(
+      prepared(),
+    );
+    expect(mocks.post).toHaveBeenCalledWith(
+      `/sales/${parentId}/mixed-zero-returns/complete`,
+      zeroRequest,
+      { timeout: 15_000 },
+    );
+    expect(mocks.post.mock.calls[0]![1]).not.toHaveProperty("shift_id");
+    expect(mocks.post.mock.calls[0]![1]).not.toHaveProperty("expected_total_amount");
+  });
+  it("recovery GET verifies the saved result against live original cursors", async () => {
+    mocks.get
+      .mockResolvedValueOnce({ data: prepared() })
+      .mockResolvedValueOnce({ data: returnedOptions() });
+    expect(await getMixedZeroReturnStatus(parentId, zeroRequest, scope)).toEqual(prepared());
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(() =>
+      parseMixedZeroReturnStatus(prepared(), parentId, zeroRequest, scope, options),
+    ).toThrow();
+  });
+  it("not_found performs no original-history fetch or POST", async () => {
+    const status = {
+      state: "not_found",
+      operation_id: zeroRequest.operation_id,
+      parent_sale_id: parentId,
+    };
+    mocks.get.mockResolvedValueOnce({ data: status });
+    expect(await getMixedZeroReturnStatus(parentId, zeroRequest, scope)).toEqual(status);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it.each([
+    "operation",
+    "parent",
+    "tenant",
+    "actor",
+    "branch",
+    "amount",
+    "version",
+    "kind",
+    "duplicate",
+    "quantity",
+    "format",
+    "base_units",
+    "offset",
+    "order",
+    "private",
+  ])("rejects corrupt zero result %s", (field) => {
+    const value = prepared();
+    if (field === "operation") value.operation_id = uuid(99);
+    if (field === "parent") value.parent_sale_id = uuid(99);
+    if (field === "tenant") value.tenant_id = uuid(99);
+    if (field === "actor") value.actor_id = uuid(99);
+    if (field === "branch") value.branch_id = uuid(99);
+    if (field === "amount") value.total_amount = "0.01";
+    if (field === "version") value.version = 2;
+    if (field === "kind") value.kind = "physical_zero_return";
+    if (field === "duplicate") value.lines[1]!.line_id = uuid(6);
+    if (field === "quantity") value.lines[0]!.quantity = "0.501";
+    if (field === "format") value.lines[1]!.sale_format = "blister";
+    if (field === "base_units") value.lines[1]!.base_units = 3;
+    if (field === "offset") value.lines[0]!.offset = "0.001";
+    if (field === "order") value.lines.reverse();
+    expect(() =>
+      parseMixedZeroReturnStatus(
+        field === "private" ? { ...value, physical_cost_amount: "0.00" } : value,
+        parentId,
+        zeroRequest,
+        scope,
+        returnedOptions(),
+        zeroQuote,
+      ),
+    ).toThrow();
+  });
+  it.each(["amount", "revision", "items", "parent"])(
+    "rejects a wrong reviewed %s before submitting zero intake",
+    async (field) => {
+      const value = structuredClone(zeroQuote);
+      if (field === "amount") {
+        value.total_amount = "0.01";
+        value.lines[0]!.net_amount = "0.01";
+        value.lines[0]!.gross_amount = "0.01";
+      }
+      if (field === "revision") value.revision_hash = "b".repeat(64);
+      if (field === "parent") value.parent_sale_id = uuid(99);
+      if (field === "items") value.lines[0]!.line_id = uuid(99);
+      await expect(completeMixedZeroReturn(parentId, zeroRequest, scope, value)).rejects.toThrow();
+      expect(mocks.post).not.toHaveBeenCalled();
+    },
+  );
+  it("refuses cash fields or malformed kinds in a zero request", () => {
+    expect(() =>
+      mixedZeroReturnRequestSchema.parse({ ...zeroRequest, shift_id: request.shift_id }),
+    ).toThrow();
+    expect(() =>
+      mixedZeroReturnRequestSchema.parse({ ...zeroRequest, expected_total_amount: "0.00" }),
+    ).toThrow();
+    expect(() =>
+      mixedZeroReturnRequestSchema.parse({
+        ...zeroRequest,
+        items: [{ ...zeroRequest.items[0], inventory_kind: "prepared_unit" }],
+      }),
+    ).toThrow();
+  });
+  it("checks active session after acknowledgment history loading", async () => {
+    mocks.get.mockImplementationOnce(() => {
+      mocks.generation++;
+      return Promise.resolve({ data: returnedOptions() });
+    });
+    await expect(completeMixedZeroReturn(parentId, zeroRequest, scope, zeroQuote)).rejects.toThrow(
+      "Аккаунт изменился",
+    );
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
 });

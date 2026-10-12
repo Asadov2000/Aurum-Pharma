@@ -7,11 +7,19 @@ import { capturePosSessionGuard, type PosStorageScope } from "@/features/pos/pos
 
 import {
   completeMixedRefund,
+  completeMixedZeroReturn,
   getMixedRefundStatus,
+  getMixedZeroReturnStatus,
   mixedRefundRequestSchema,
+  mixedZeroReturnRequestSchema,
+  validateMixedZeroReturnQuote,
   type MixedRefundCompleted,
   type MixedRefundInput,
-  type MixedRefundStatus,
+  type MixedRefundQuote,
+  type MixedReturnResult,
+  type MixedReturnStatus,
+  type MixedZeroReturnInput,
+  type MixedZeroReturnPrepared,
 } from "./mixedRefund";
 
 export interface MixedRefundScope extends PosStorageScope {
@@ -19,19 +27,41 @@ export interface MixedRefundScope extends PosStorageScope {
   branchId: string;
   registerId: string;
 }
-const pendingSchema = z
+const pendingScopeShape = {
+  tenantId: z.string().uuid(),
+  userId: z.string().uuid(),
+  parentSaleId: z.string().uuid(),
+  branchId: z.string().uuid(),
+  registerId: z.string().uuid(),
+  definiteRejected: z.boolean().default(false),
+};
+// Existing cash v1 records retain their shape and key across this upgrade.
+const cashPendingSchema = z
+  .object({ version: z.literal(1), ...pendingScopeShape, request: mixedRefundRequestSchema })
+  .strict();
+const zeroPendingSchema = z
   .object({
-    version: z.literal(1),
-    tenantId: z.string().uuid(),
-    userId: z.string().uuid(),
-    parentSaleId: z.string().uuid(),
-    branchId: z.string().uuid(),
-    registerId: z.string().uuid(),
-    definiteRejected: z.boolean().default(false),
-    request: mixedRefundRequestSchema,
+    version: z.literal(2),
+    kind: z.literal("mixed_zero_return"),
+    ...pendingScopeShape,
+    request: mixedZeroReturnRequestSchema,
   })
   .strict();
+const pendingSchema = z.union([cashPendingSchema, zeroPendingSchema]);
 export type PendingMixedRefund = z.infer<typeof pendingSchema>;
+export function isZeroMixedReturn(
+  pending: PendingMixedRefund,
+): pending is z.infer<typeof zeroPendingSchema> {
+  return pending.version === 2 && "kind" in pending && pending.kind === "mixed_zero_return";
+}
+async function inspectPending(
+  pending: PendingMixedRefund,
+  scope: MixedRefundScope,
+): Promise<MixedReturnStatus> {
+  return isZeroMixedReturn(pending)
+    ? getMixedZeroReturnStatus(scope.parentSaleId, pending.request, scope)
+    : getMixedRefundStatus(scope.parentSaleId, pending.request, scope);
+}
 const rejectionSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
 function definitiveRejection(error: unknown): boolean {
   if (!isAxiosError(error)) return false;
@@ -98,44 +128,84 @@ async function exclusively<T>(
 /** Reloading and opening the dialog only inspect an operation; they never issue a payout. */
 export async function inspectMixedRefund(
   scope: MixedRefundScope,
-): Promise<MixedRefundStatus | null> {
+): Promise<MixedReturnStatus | null> {
   return exclusively(scope, async (active) => {
     const pending = loadMixedRefund(scope);
     if (!pending) return null;
     assertCurrent(pending, scope, active);
-    const status = await getMixedRefundStatus(scope.parentSaleId, pending.request, scope);
+    const status = await inspectPending(pending, scope);
     assertCurrent(pending, scope, active);
     return status;
   });
 }
-/** Explicit confirmation only. Every retry keeps the original UUID and exact reviewed request. */
+/** Explicit confirmation only. Retries retain the same reviewed request and inventory kind. */
 export async function runMixedRefund(
   scope: MixedRefundScope,
   input?: MixedRefundInput,
 ): Promise<MixedRefundCompleted> {
+  const result = await runPending(scope, "cash", input ? { kind: "cash", input } : undefined);
+  if (result.state !== "completed") throw new Error("Ожидался денежный возврат.");
+  return result;
+}
+export async function runMixedZeroReturn(
+  scope: MixedRefundScope,
+  input?: MixedZeroReturnInput,
+  reviewedQuote?: MixedRefundQuote,
+): Promise<MixedZeroReturnPrepared> {
+  if (input && reviewedQuote)
+    validateMixedZeroReturnQuote(scope.parentSaleId, input, reviewedQuote);
+  const result = await runPending(
+    scope,
+    "mixed_zero_return",
+    input ? { kind: "mixed_zero_return", input } : undefined,
+    reviewedQuote,
+  );
+  if (result.state !== "prepared_quarantine") throw new Error("Ожидался возврат без выплаты.");
+  return result;
+}
+type NewMixedReturn =
+  | { kind: "cash"; input: MixedRefundInput }
+  | { kind: "mixed_zero_return"; input: MixedZeroReturnInput };
+async function runPending(
+  scope: MixedRefundScope,
+  expectedKind: "cash" | "mixed_zero_return",
+  candidateInput?: NewMixedReturn,
+  reviewedQuote?: MixedRefundQuote,
+): Promise<MixedReturnResult> {
   return exclusively(scope, async (active) => {
     let pending = loadMixedRefund(scope);
     if (!pending) {
-      if (!input) throw new Error("Сохранённого возврата нет.");
-      pending = pendingSchema.parse({
-        version: 1,
-        ...scope,
-        request: mixedRefundRequestSchema.parse({ ...input, operation_id: generateUuidV4() }),
-      });
+      if (!candidateInput) throw new Error("Сохранённого возврата нет.");
+      const request = { ...candidateInput.input, operation_id: generateUuidV4() };
+      pending = pendingSchema.parse(
+        candidateInput.kind === "cash"
+          ? { version: 1, ...scope, request: mixedRefundRequestSchema.parse(request) }
+          : {
+              version: 2,
+              kind: "mixed_zero_return",
+              ...scope,
+              request: mixedZeroReturnRequestSchema.parse(request),
+            },
+      );
       if (!writeStoredJson(mixedRefundKey(scope), pending))
         throw new Error("Не удалось сохранить возврат. Операция не отправлена.");
-    } else if (input) {
-      const candidate = mixedRefundRequestSchema.parse({
-        ...input,
-        operation_id: pending.request.operation_id,
-      });
+    } else if (candidateInput) {
+      if ((isZeroMixedReturn(pending) ? "mixed_zero_return" : "cash") !== candidateInput.kind)
+        throw new Error("Есть незавершённый возврат. Сначала проверьте его результат.");
+      const request = { ...candidateInput.input, operation_id: pending.request.operation_id };
+      const candidate =
+        candidateInput.kind === "cash"
+          ? mixedRefundRequestSchema.parse(request)
+          : mixedZeroReturnRequestSchema.parse(request);
       if (JSON.stringify(candidate) !== JSON.stringify(pending.request))
         throw new Error("Есть незавершённый возврат. Сначала проверьте его результат.");
     }
+    if (expectedKind !== (isZeroMixedReturn(pending) ? "mixed_zero_return" : "cash"))
+      throw new Error("Есть незавершённый возврат. Сначала проверьте его результат.");
     assertCurrent(pending, scope, active);
-    const status = await getMixedRefundStatus(scope.parentSaleId, pending.request, scope);
+    const status = await inspectPending(pending, scope);
     assertCurrent(pending, scope, active);
-    if (status.state === "completed") return status;
+    if (status.state !== "not_found") return status;
     if (pending.definiteRejected) {
       pending = { ...pending, definiteRejected: false };
       if (!writeStoredJson(mixedRefundKey(scope), pending))
@@ -143,7 +213,9 @@ export async function runMixedRefund(
       assertCurrent(pending, scope, active);
     }
     try {
-      const completed = await completeMixedRefund(scope.parentSaleId, pending.request, scope);
+      const completed = isZeroMixedReturn(pending)
+        ? await completeMixedZeroReturn(scope.parentSaleId, pending.request, scope, reviewedQuote)
+        : await completeMixedRefund(scope.parentSaleId, pending.request, scope);
       assertCurrent(pending, scope, active);
       return completed;
     } catch (error) {
@@ -161,15 +233,15 @@ export async function runMixedRefund(
 /** A lost response is never abandoned. Recalculation follows an explicit rejection plus a fresh GET. */
 export async function abandonMixedRefund(
   scope: MixedRefundScope,
-): Promise<MixedRefundCompleted | { state: "cleared" }> {
+): Promise<MixedReturnResult | { state: "cleared" }> {
   return exclusively(scope, async (active) => {
     const pending = loadMixedRefund(scope);
     if (!pending?.definiteRejected)
       throw new Error("Результат возврата неизвестен. Сначала проверьте эту же операцию.");
     assertCurrent(pending, scope, active);
-    const status = await getMixedRefundStatus(scope.parentSaleId, pending.request, scope);
+    const status = await inspectPending(pending, scope);
     assertCurrent(pending, scope, active);
-    if (status.state === "completed") return status;
+    if (status.state !== "not_found") return status;
     if (!removeStoredValue(mixedRefundKey(scope)))
       throw new Error("Не удалось закрыть отклонённый запрос. Новую операцию не отправляйте.");
     return { state: "cleared" };
@@ -184,8 +256,8 @@ export async function acknowledgeMixedRefund(
     const pending = loadMixedRefund(scope);
     if (!pending || pending.request.operation_id !== operationId) return false;
     assertCurrent(pending, scope, active);
-    const status = await getMixedRefundStatus(scope.parentSaleId, pending.request, scope);
+    const status = await inspectPending(pending, scope);
     assertCurrent(pending, scope, active);
-    return status.state === "completed" && removeStoredValue(mixedRefundKey(scope));
+    return status.state !== "not_found" && removeStoredValue(mixedRefundKey(scope));
   });
 }
