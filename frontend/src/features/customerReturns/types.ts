@@ -89,3 +89,33 @@ export interface PhysicalCustomerReturnList {
 }
 
 export type PhysicalCustomerReturnSearchParams = Omit<CustomerReturnSearchParams, "status">;
+
+export type MixedCustomerReturnItem = Omit<
+  PhysicalCustomerReturnItem,
+  "lot_id" | "base_units" | "unit_label"
+> &
+  (
+    | {
+        inventory_kind: "legacy_pack";
+        batch_id: string;
+        lot_id: null;
+        legacy_quantity: string;
+        base_units: null;
+        unit_label: "уп.";
+      }
+    | {
+        inventory_kind: "physical_unit";
+        batch_id: null;
+        lot_id: string;
+        legacy_quantity: null;
+        base_units: number;
+        unit_label: string;
+      }
+  );
+export interface MixedCustomerReturnList {
+  items: MixedCustomerReturnItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+export type MixedCustomerReturnSearchParams = PhysicalCustomerReturnSearchParams;

@@ -1,5 +1,5 @@
 import { isAxiosError } from "axios";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -41,6 +41,10 @@ import {
   type CustomerReturnStatus,
 } from "./types";
 
+const MixedCustomerReturnsPanel = lazy(async () => {
+  const module = await import("./MixedCustomerReturnsPanel");
+  return { default: module.MixedCustomerReturnsPanel };
+});
 const PAGE_SIZE = 25;
 const dispositionLabels: Record<CustomerReturnDispositionType, string> = {
   disposed: "Утилизировано",
@@ -65,7 +69,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
 });
 
 export function CustomerReturnsPanel(): JSX.Element {
-  const [queue, setQueue] = useState<"packages" | "physical">("packages");
+  const [queue, setQueue] = useState<"packages" | "physical" | "mixed">("packages");
   return (
     <div className="space-y-4">
       <div role="group" aria-label="Вид возвратов" className="flex flex-wrap gap-2">
@@ -83,8 +87,23 @@ export function CustomerReturnsPanel(): JSX.Element {
         >
           Физические возвраты
         </Button>
+        <Button
+          variant={queue === "mixed" ? "primary" : "secondary"}
+          aria-pressed={queue === "mixed"}
+          onClick={() => setQueue("mixed")}
+        >
+          Смешанные возвраты
+        </Button>
       </div>
-      {queue === "packages" ? <PackageCustomerReturnsPanel /> : <PhysicalCustomerReturnsPanel />}
+      {queue === "packages" ? (
+        <PackageCustomerReturnsPanel />
+      ) : queue === "physical" ? (
+        <PhysicalCustomerReturnsPanel />
+      ) : (
+        <Suspense fallback={<p role="status">Загружаем смешанные возвраты…</p>}>
+          <MixedCustomerReturnsPanel />
+        </Suspense>
+      )}
     </div>
   );
 }
