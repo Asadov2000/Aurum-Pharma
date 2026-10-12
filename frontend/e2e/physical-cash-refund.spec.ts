@@ -384,6 +384,16 @@ async function verifyMixedRefund(
       Object.keys(localStorage).filter((key) => key.startsWith("sales:mixedRefund:v1:")),
     ),
   ).toEqual([]);
+  await verifyMixedQuarantineQueue(
+    page,
+    api,
+    sale,
+    refund.operation_id,
+    legacyName,
+    physicalName,
+    "0.125",
+    false,
+  );
 }
 
 interface CheckoutResult {
@@ -455,6 +465,114 @@ async function verifyQuarantineQueue(
   });
   await expect(cards).toHaveCount(expectedUnits.length);
   await expect(cards.first()).toBeVisible();
+}
+
+async function verifyMixedQuarantineQueue(
+  page: Page,
+  api: APIRequestContext,
+  sale: Pick<MixedCashResult, "sale_id" | "receipt_number">,
+  operationId: string,
+  legacyName: string,
+  physicalName: string,
+  legacyQuantity: string,
+  withoutPayout: boolean,
+): Promise<void> {
+  const response = await api.get("customer-returns/mixed", {
+    params: { search: sale.receipt_number },
+  });
+  expect(response.ok()).toBe(true);
+  const queue = (await response.json()) as {
+    total: number;
+    items: {
+      operation_id: string;
+      parent_sale_id: string;
+      inventory_kind: string;
+      legacy_quantity: string | null;
+      base_units: number | null;
+      unit_label: string;
+      intake_kind: string;
+      return_sale_id: string | null;
+      return_receipt_number: string | null;
+    }[];
+  };
+  expect(queue.total).toBe(2);
+  expect(
+    queue.items.every(
+      (item) => item.operation_id === operationId && item.parent_sale_id === sale.sale_id,
+    ),
+  ).toBe(true);
+  expect(queue.items.find((item) => item.inventory_kind === "legacy_pack")).toMatchObject({
+    legacy_quantity: legacyQuantity,
+    base_units: null,
+    unit_label: "уп.",
+  });
+  expect(queue.items.find((item) => item.inventory_kind === "physical_unit")).toMatchObject({
+    legacy_quantity: null,
+    base_units: 1,
+    unit_label: "табл.",
+  });
+  expect(
+    queue.items.every(
+      (item) => item.intake_kind === (withoutPayout ? "zero_return" : "cash_refund"),
+    ),
+  ).toBe(true);
+  if (withoutPayout)
+    expect(
+      queue.items.every(
+        (item) => item.return_sale_id === null && item.return_receipt_number === null,
+      ),
+    ).toBe(true);
+  expect(JSON.stringify(queue)).not.toMatch(
+    /cost_amount|total_cost|purchase_cost|result_payload|receipt_payload/,
+  );
+
+  const writes: string[] = [];
+  const observe = (req: import("@playwright/test").Request): void => {
+    if (
+      req.method() !== "GET" &&
+      new URL(req.url()).pathname.startsWith("/api/v1/customer-returns")
+    )
+      writes.push(req.method());
+  };
+  page.on("request", observe);
+  try {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/batches");
+    await page.getByRole("button", { name: "Возвраты покупателей", exact: true }).click();
+    await page.getByRole("button", { name: "Смешанные возвраты", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Смешанные возвраты в карантине", exact: true });
+    const filtered = page.waitForResponse((result) => {
+      const url = new URL(result.url());
+      return (
+        url.pathname === "/api/v1/customer-returns/mixed" &&
+        url.searchParams.get("search") === sale.receipt_number
+      );
+    });
+    await panel.getByLabel("Поиск", { exact: true }).fill(sale.receipt_number);
+    expect((await filtered).ok()).toBe(true);
+    const table = panel.getByRole("table", { name: "Очередь смешанных возвратов", exact: true });
+    await expect(table.getByRole("row")).toHaveCount(3);
+    await expect(
+      table.getByRole("cell", {
+        name: `${Number(legacyQuantity).toLocaleString("ru-RU", { maximumFractionDigits: 3 })} уп.`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(table.getByRole("cell", { name: "1 табл.", exact: true })).toBeVisible();
+    if (withoutPayout)
+      await expect(table.getByText("Принят без выплаты", { exact: true })).toHaveCount(2);
+    await expect(panel.getByRole("button", { name: "Принять решение", exact: true })).toHaveCount(
+      0,
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const name of [legacyName, physicalName])
+      await expect(
+        panel.getByRole("article", { name: `${name}, смешанный возврат`, exact: true }),
+      ).toBeVisible();
+    expect(writes).toEqual([]);
+  } finally {
+    page.off("request", observe);
+  }
 }
 
 async function receivePhysicalStock(api: APIRequestContext, branchId: string, catalogId: string) {
@@ -1281,6 +1399,23 @@ test("receives zero-value mixed goods once without a shift or payment after a lo
         Object.keys(localStorage).filter((key) => key.startsWith("sales:mixedRefund:v1:")),
       ),
     ).toEqual([]);
+    await verifyMixedQuarantineQueue(
+      page,
+      api,
+      sale,
+      result.operation_id,
+      legacy.brand_name,
+      physical.brand_name,
+      "0.001",
+      true,
+    );
+    expect(mixedZeroFacts(sale.sale_id, physical.id)).toEqual({
+      markers: 1,
+      journal: 1,
+      sales: 1,
+      payments: 1,
+      physical_remaining: 60,
+    });
   } finally {
     await api.dispose();
     await anonymous.dispose();
