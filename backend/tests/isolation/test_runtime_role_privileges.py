@@ -1204,14 +1204,38 @@ def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> No
     }
 
 
-def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
-    _assert_unit_stock_function_privileges(rows)
-    _assert_incoming_packaging_function_privileges(rows)
-    return_names = {
+def _assert_mixed_disposition_function_privileges(rows: list[RowMapping]) -> None:
+    private_names = {
         "mixed_disposition_source",
         "mixed_disposition_fingerprint",
         "mixed_disposition_prepare",
         "trg_mixed_disposition_guard",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in private_names}
+    assert set(functions) == private_names
+    for name, function in functions.items():
+        assert not function["app_can_execute"]
+        assert not function["support_can_execute"]
+        assert not function["public_can_execute"]
+        assert function["is_security_definer"] == (
+            name in {"mixed_disposition_source", "mixed_disposition_prepare"}
+        )
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "record_mixed_customer_return_disposition",
+        "mixed_customer_return_disposition_history",
+    ):
+        function = next(row for row in rows if row["proname"] == name)
+        assert function["is_security_definer"] is True
+        assert function["support_can_execute"] is False
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
+    _assert_unit_stock_function_privileges(rows)
+    _assert_incoming_packaging_function_privileges(rows)
+    _assert_mixed_disposition_function_privileges(rows)
+    return_names = {
         "trg_mixed_cash_refund_guard",
         "trg_mixed_zero_return_guard",
         "trg_mixed_cash_refund_complete",
@@ -1233,18 +1257,12 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in return_functions.values()
     )
     assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
-        "mixed_disposition_source",
-        "mixed_disposition_prepare",
         "trg_mixed_return_complete",
         "trg_physical_return_complete",
         "trg_mixed_cash_refund_complete",
         "trg_mixed_cash_refund_components",
     }
     for name in (
-        "mixed_disposition_source",
-        "mixed_disposition_fingerprint",
-        "mixed_disposition_prepare",
-        "trg_mixed_disposition_guard",
         "trg_mixed_return_guard",
         "trg_mixed_return_complete",
         "trg_mixed_cash_refund_guard",
@@ -1253,14 +1271,6 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "trg_mixed_cash_refund_components",
     ):
         assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
-    for name in (
-        "record_mixed_customer_return_disposition",
-        "mixed_customer_return_disposition_history",
-    ):
-        function = next(row for row in rows if row["proname"] == name)
-        assert function["is_security_definer"] is True
-        assert function["support_can_execute"] is False
-        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     cash_names = {
         "assert_physical_checkout",
         "trg_physical_stock_checkout_binding",

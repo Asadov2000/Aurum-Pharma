@@ -104,7 +104,8 @@ def upgrade_refund_after_roundtrip() -> None:
 
 
 def mixed_quarantine_disposition_migration() -> ModuleType:
-    path = Path(__file__).resolve().parents[2] / "alembic/versions/0193_mixed_quarantine_disposition.py"
+    directory = Path(__file__).resolve().parents[2] / "alembic/versions"
+    path = directory / "0193_mixed_quarantine_disposition.py"
     spec = importlib.util.spec_from_file_location("mixed_quarantine_disposition_dependency", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
