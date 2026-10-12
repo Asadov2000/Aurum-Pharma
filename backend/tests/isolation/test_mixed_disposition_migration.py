@@ -186,10 +186,14 @@ async def test_real_resolve_only_reader_can_write_and_second_actor_replays_origi
     await set_receiving_context(db_session, context.stock, second_actor)
     assert await record(db_session, payload) == result
     await db_session.commit()
-    async with maintenance_engine.begin() as connection:
-        await connection.execute(
-            text("UPDATE user_assignment SET is_active=false WHERE user_id=:actor"),
-            {"actor": second_actor},
+    async with db_engine.begin() as support:
+        await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+        await support.execute(
+            text(
+                "UPDATE user_assignment SET is_active=false "
+                "WHERE user_id=:actor AND tenant_id=:tenant"
+            ),
+            {"actor": second_actor, "tenant": context.stock.tenant_id},
         )
     await set_receiving_context(db_session, context.stock, second_actor)
     with pytest.raises(DBAPIError) as error:
