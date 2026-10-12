@@ -1,5 +1,7 @@
 import { request, test, type APIRequestContext, type Page } from "@playwright/test";
 
+import { type MixedRefundCompleted } from "../src/features/sales/mixedRefund";
+
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 import {
   addPosItemToCart,
@@ -30,8 +32,10 @@ interface MixedCashResult {
   payments: { id: string; amount: string; method: string }[];
 }
 
-test("recovers one mixed cash sale after response loss and closing the shift", async ({ page }) => {
-  test.setTimeout(150_000);
+test("recovers mixed cash sale and refund after response loss and closing their shifts", async ({
+  page,
+}) => {
+  test.setTimeout(210_000);
   clearLoginRateLimit(OWNER.email);
   const anonymous = await request.newContext();
   const tokens = await apiLogin(anonymous, OWNER);
@@ -231,11 +235,153 @@ test("recovers one mixed cash sale after response loss and closing the shift", a
     await expect(
       page.locator(".receipt-print").getByText(`2. ${physical.brand_name}`, { exact: true }),
     ).toBeVisible();
+    await verifyMixedRefund(
+      page,
+      api,
+      result,
+      register.id,
+      legacy.brand_name,
+      physical.brand_name,
+      physical.id,
+    );
+    expect(await (await api.get(`batches/${batch.id}`)).json()).toMatchObject({
+      qty_remaining: "3.000",
+    });
   } finally {
     await api.dispose();
     await anonymous.dispose();
   }
 });
+
+async function verifyMixedRefund(
+  page: Page,
+  api: APIRequestContext,
+  sale: MixedCashResult,
+  registerId: string,
+  legacyName: string,
+  physicalName: string,
+  physicalId: string,
+): Promise<void> {
+  const opened = await api.post("shifts/open", {
+    data: { register_id: registerId, opening_cash: "111.00" },
+  });
+  expect(opened.ok()).toBe(true);
+  const shift = (await opened.json()) as { id: string };
+  await page.goto("/sales");
+  await openRefund(page, sale);
+  const dialog = page.getByRole("dialog", { name: "Возврат смешанной продажи", exact: true });
+  await dialog.getByRole("checkbox", { name: legacyName, exact: true }).check();
+  await dialog.getByLabel(`Количество ${legacyName}`, { exact: true }).fill("0.125");
+  await dialog.getByRole("checkbox", { name: physicalName, exact: true }).check();
+  await dialog.getByLabel(`Количество ${physicalName}`, { exact: true }).fill("1");
+  const reason = dialog.getByLabel(/^Причина возврата/);
+  if (await reason.count()) {
+    await reason.selectOption("customer_cancelled");
+    await dialog.getByLabel(/^Пояснение/).fill("Проверка смешанного возврата в изолированном E2E");
+  }
+  const confirm = dialog.getByRole("button", { name: "Оформить возврат наличными", exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("button", { name: "Рассчитать возврат", exact: true }).click();
+  await expect(dialog.getByText("1.75 TJS", { exact: true })).toBeVisible();
+  await expect(confirm).toBeEnabled();
+  let result: MixedRefundCompleted | null = null;
+  let blockStatus = false;
+  const requests: string[] = [];
+  const path = `**/api/v1/sales/${sale.sale_id}/mixed-cash-refunds`;
+  await page.route(`${path}/operations/*`, async (route) => {
+    if (blockStatus) await route.abort("failed");
+    else await route.continue();
+  });
+  await page.route(`${path}/complete`, async (route) => {
+    requests.push((route.request().postDataJSON() as { operation_id: string }).operation_id);
+    const response = await route.fetch();
+    expect(response.ok()).toBe(true);
+    result = (await response.json()) as MixedRefundCompleted;
+    blockStatus = true;
+    await route.abort("failed");
+  });
+  await confirm.click();
+  await expect.poll(() => result !== null).toBe(true);
+  const refund = result as MixedRefundCompleted | null;
+  if (!refund) throw new Error("Mixed refund completion response was not observed");
+  expect(refund).toMatchObject({
+    parent_sale_id: sale.sale_id,
+    total_amount: "1.75",
+    receipt: {
+      schema_version: 4,
+      document_kind: "mixed_cash_refund_receipt",
+      lines: [
+        { inventory_kind: "legacy_pack", quantity: "0.125", net_amount: "1.25" },
+        { inventory_kind: "physical_unit", quantity: 1, base_units: 1, net_amount: "0.50" },
+      ],
+    },
+  });
+  await expect(
+    dialog.getByRole("heading", { name: "Проверяем ранее отправленный возврат" }),
+  ).toBeVisible();
+  expect(
+    (
+      await api.post(`shifts/${shift.id}/close`, {
+        data: { closing_cash_actual: "109.25" },
+      })
+    ).ok(),
+  ).toBe(true);
+  await page.reload();
+  await openRefund(page, sale);
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  const inspect = dialog.getByRole("button", { name: "Проверить результат", exact: true });
+  await expect(inspect).toBeEnabled();
+  expect(requests).toEqual([refund.operation_id]);
+  blockStatus = false;
+  await inspect.click();
+  await expect(
+    dialog.getByRole("heading", { name: "Возврат оформлен", exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Открыть чек возврата", exact: true }).click();
+  const receipt = page.getByRole("dialog", {
+    name: `Чек № ${refund.receipt.receipt_number}`,
+    exact: true,
+  });
+  await expect(receipt.getByText("Чек возврата", { exact: true })).toBeVisible();
+  await expect(receipt.getByText(/Возвращено: 0.125 уп/)).toBeVisible();
+  await expect(receipt.getByText(/Возвращено: 1 табл/)).toBeVisible();
+  await receipt.getByRole("button", { name: "Печать возврата", exact: true }).click();
+  await expect(
+    page.locator(".receipt-print").getByText(`1. ${legacyName}`, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".receipt-print").getByText(`2. ${physicalName}`, { exact: true }),
+  ).toBeVisible();
+  expect(requests).toEqual([refund.operation_id]);
+  for (const value of [sale.sale_id, refund.sale_id, physicalId])
+    expect(value).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+  // SELECT only in the launcher's disposable E2E database; both goods stay in quarantine.
+  const sql = `SELECT json_build_object(
+    'refunds', (SELECT count(*) FROM pos_mixed_cash_refund WHERE parent_sale_id='${sale.sale_id}'),
+    'payments', (SELECT count(*) FROM sale_payment WHERE sale_id='${refund.sale_id}'),
+    'cash', (SELECT sum(amount)::text FROM sale_payment WHERE sale_id='${refund.sale_id}' AND payment_method='cash'),
+    'remaining', (SELECT sum(l.closed_packs*20+COALESCE((SELECT sum(p.remaining_units) FROM unit_stock_opened_pack_v2 p WHERE p.lot_id=l.id),0)) FROM unit_stock_lot_v2 l WHERE l.catalog_id='${physicalId}')
+  );`;
+  expect(
+    JSON.parse(
+      dockerExec(E2E_POSTGRES_CONTAINER, [
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        E2E_POSTGRES_DB,
+        "-At",
+        "-c",
+        sql,
+      ]).trim(),
+    ) as unknown,
+  ).toEqual({ refunds: 1, payments: 1, cash: "1.75", remaining: 78 });
+  expect(
+    await page.evaluate(() =>
+      Object.keys(localStorage).filter((key) => key.startsWith("sales:mixedRefund:v1:")),
+    ),
+  ).toEqual([]);
+}
 
 interface CheckoutResult {
   schema_version: number;
@@ -394,7 +540,10 @@ interface RefundResult {
   };
 }
 
-async function openRefund(page: Page, sale: CheckoutResult): Promise<void> {
+async function openRefund(
+  page: Page,
+  sale: Pick<CheckoutResult, "sale_id" | "receipt_number">,
+): Promise<void> {
   const filtered = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (

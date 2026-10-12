@@ -20,6 +20,13 @@ vi.mock("@/features/sales/RefundModal", () => ({
 vi.mock("@/features/sales/PhysicalRefundModal", () => ({
   PhysicalRefundModal: () => <div role="dialog" aria-label="Возврат поштучной продажи" />,
 }));
+vi.mock("@/features/sales/MixedRefundModal", () => ({
+  MixedRefundModal: ({ onRefunded }: { onRefunded: (id: string) => void }) => (
+    <div role="dialog" aria-label="Возврат смешанной продажи">
+      <button onClick={() => onRefunded("mixed-return-1")}>Открыть сохранённый возврат</button>
+    </div>
+  ),
+}));
 vi.mock("@/features/pos/ReceiptPrintModal", () => ({
   ReceiptPrintModal: ({ saleId, registerId }: { saleId: string; registerId: string }) => (
     <div role="dialog" aria-label="Печать">
@@ -232,20 +239,37 @@ describe("SaleDetailModal mixed receipt", () => {
     expect(screen.queryByRole("columnheader", { name: "Возвращено" })).not.toBeInTheDocument();
   });
 
-  it.each([{ permissions: ["pos.refund"] }, { permissions: [] }])(
-    "does not offer a mixed refund with permissions $permissions",
-    ({ permissions }) => {
-      auth.permissions = permissions;
+  it.each(["sale", "return", "no-permission", "draft"])(
+    "offers the dedicated mixed refund only for permitted completed sales: %s",
+    async (kind) => {
+      auth.permissions = kind === "no-permission" ? [] : ["pos.refund"];
       details.data = {
         ...sale,
+        sale_type: kind === "return" ? "return" : "sale",
+        status: kind === "draft" ? "draft" : "completed",
         mixed_items: mixedItems,
         items: [legacyItem],
         physical_items: [physicalItem],
       };
       render(<SaleDetailModal row={row} onClose={vi.fn()} />);
 
-      expect(screen.queryByRole("button", { name: "Оформить возврат" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("dialog", { name: /Возврат .* продажи/ })).not.toBeInTheDocument();
+      if (kind === "sale") {
+        fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+        expect(
+          await screen.findByRole("dialog", { name: "Возврат смешанной продажи" }),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("dialog", { name: "Возврат обычной продажи" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("dialog", { name: "Возврат поштучной продажи" }),
+        ).not.toBeInTheDocument();
+      } else {
+        expect(screen.queryByRole("button", { name: "Оформить возврат" })).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("dialog", { name: /Возврат .* продажи/ }),
+        ).not.toBeInTheDocument();
+      }
     },
   );
 
@@ -278,7 +302,7 @@ describe("SaleDetailModal mixed receipt", () => {
       rerender(<SaleDetailModal row={row} onClose={vi.fn()} />);
 
       expect(screen.queryByRole("dialog", { name: /Возврат .* продажи/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Оформить возврат" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Оформить возврат" })).toBeInTheDocument();
       expect(screen.getByText(mixedItems[0].name)).toBeInTheDocument();
     },
   );
@@ -288,5 +312,18 @@ describe("SaleDetailModal mixed receipt", () => {
     fireEvent.click(screen.getByRole("button", { name: "Печать чека" }));
 
     expect(screen.getByRole("dialog", { name: "Печать" })).toHaveTextContent("sale-1 / register-1");
+  });
+
+  it("navigates to the verified return and uses its existing print flow", async () => {
+    render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть сохранённый возврат" }));
+    fireEvent.click(screen.getByRole("button", { name: "Печать чека" }));
+    expect(screen.getByRole("dialog", { name: "Печать" })).toHaveTextContent(
+      "mixed-return-1 / register-1",
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Возврат смешанной продажи" }),
+    ).not.toBeInTheDocument();
   });
 });

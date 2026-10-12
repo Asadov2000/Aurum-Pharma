@@ -16,6 +16,10 @@ const PhysicalRefundModal = lazy(async () => {
   const module = await import("./PhysicalRefundModal");
   return { default: module.PhysicalRefundModal };
 });
+const MixedRefundModal = lazy(async () => {
+  const module = await import("./MixedRefundModal");
+  return { default: module.MixedRefundModal };
+});
 
 export function SaleDetailModal({
   row,
@@ -29,7 +33,7 @@ export function SaleDetailModal({
   // currentId can swap to a freshly-created return sale (after refund) or to
   // the parent sale (when viewing a return), so navigation stays in-modal.
   const [currentId, setCurrentId] = useState(row.id);
-  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundOpen, setRefundOpen] = useState<"legacy" | "physical" | "mixed" | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const details = useSaleDetailsQuery(currentId);
   const { data, isLoading, error } = details;
@@ -40,10 +44,16 @@ export function SaleDetailModal({
 
   useEffect(() => {
     setCurrentId(row.id);
+    setRefundOpen(null);
   }, [row.id]);
 
   const isRefund = data ? data.sale_type === "return" : row.is_refund;
   const isMixed = (data?.mixed_items?.length ?? 0) > 0;
+  const refundKind = isMixed
+    ? "mixed"
+    : (data?.physical_items?.length ?? 0) > 0
+      ? "physical"
+      : "legacy";
   const hasRefundableItems =
     data?.items.some((item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005) ??
     false;
@@ -195,11 +205,10 @@ export function SaleDetailModal({
             </Button>
             {/* Partial refunds remain available until every line is returned. */}
             {canRefund &&
-              !isMixed &&
               data.sale_type === "sale" &&
               data.status === "completed" &&
-              (hasRefundableItems || (data.physical_items?.length ?? 0) > 0) && (
-                <Button onClick={() => setRefundOpen(true)}>Оформить возврат</Button>
+              (isMixed || hasRefundableItems || (data.physical_items?.length ?? 0) > 0) && (
+                <Button onClick={() => setRefundOpen(refundKind)}>Оформить возврат</Button>
               )}
             <Button variant="ghost" onClick={onClose}>
               Закрыть
@@ -209,17 +218,30 @@ export function SaleDetailModal({
       )}
 
       {canRefund &&
-        !isMixed &&
-        refundOpen &&
+        refundOpen === refundKind &&
         data &&
-        ((data.physical_items?.length ?? 0) > 0 ? (
+        data.sale_type === "sale" &&
+        data.status === "completed" &&
+        (isMixed ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <MixedRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(returnSaleId) => {
+                setRefundOpen(null);
+                setCurrentId(returnSaleId);
+              }}
+            />
+          </Suspense>
+        ) : (data.physical_items?.length ?? 0) > 0 ? (
           <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
             <PhysicalRefundModal
               key={data.id}
               sale={data}
-              onClose={() => setRefundOpen(false)}
+              onClose={() => setRefundOpen(null)}
               onRefunded={(returnSaleId) => {
-                setRefundOpen(false);
+                setRefundOpen(null);
                 setCurrentId(returnSaleId);
               }}
             />
@@ -227,9 +249,9 @@ export function SaleDetailModal({
         ) : (
           <RefundModal
             sale={data}
-            onClose={() => setRefundOpen(false)}
+            onClose={() => setRefundOpen(null)}
             onRefunded={(returnSaleId) => {
-              setRefundOpen(false);
+              setRefundOpen(null);
               setCurrentId(returnSaleId); // show the fresh return receipt
             }}
           />
