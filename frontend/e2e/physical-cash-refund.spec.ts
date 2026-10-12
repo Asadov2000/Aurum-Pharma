@@ -26,6 +26,7 @@ import {
 interface MixedCashResult {
   schema_version: 4;
   document_kind: "mixed_checkout";
+  branch_id: string;
   sale_id: string;
   operation_id: string;
   shift_id: string;
@@ -470,7 +471,7 @@ async function verifyQuarantineQueue(
 async function verifyMixedQuarantineQueue(
   page: Page,
   api: APIRequestContext,
-  sale: Pick<MixedCashResult, "sale_id" | "receipt_number">,
+  sale: Pick<MixedCashResult, "sale_id" | "receipt_number" | "branch_id">,
   operationId: string,
   legacyName: string,
   physicalName: string,
@@ -478,7 +479,7 @@ async function verifyMixedQuarantineQueue(
   withoutPayout: boolean,
 ): Promise<void> {
   const response = await api.get("customer-returns/mixed", {
-    params: { search: sale.receipt_number },
+    params: { search: sale.receipt_number, branch_id: sale.branch_id },
   });
   expect(response.ok()).toBe(true);
   const queue = (await response.json()) as {
@@ -541,10 +542,12 @@ async function verifyMixedQuarantineQueue(
     await page.getByRole("button", { name: "Возвраты покупателей", exact: true }).click();
     await page.getByRole("button", { name: "Смешанные возвраты", exact: true }).click();
     const panel = page.getByRole("region", { name: "Смешанные возвраты в карантине", exact: true });
+    await panel.getByLabel("Точка", { exact: true }).selectOption(sale.branch_id);
     const filtered = page.waitForResponse((result) => {
       const url = new URL(result.url());
       return (
         url.pathname === "/api/v1/customer-returns/mixed" &&
+        url.searchParams.get("branch_id") === sale.branch_id &&
         url.searchParams.get("search") === sale.receipt_number
       );
     });
