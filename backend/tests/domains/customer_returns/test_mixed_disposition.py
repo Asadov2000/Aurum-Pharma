@@ -189,6 +189,12 @@ def test_comment_is_strict_text(invalid: object) -> None:
         request(source(), comment=invalid)
 
 
+@pytest.mark.parametrize("invalid", ["\x00", "text\x00text", "\ud800", "\udfff"])
+def test_comment_rejects_text_unrepresentable_in_postgresql_utf8(invalid: str) -> None:
+    with pytest.raises(ValidationError):
+        request(source(), comment=invalid)
+
+
 def test_comment_normalization_limits_and_unicode_are_explicit() -> None:
     original = source()
     assert request(original, comment="\t \n\u2003").comment is None

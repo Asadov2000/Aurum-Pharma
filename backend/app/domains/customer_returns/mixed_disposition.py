@@ -59,7 +59,15 @@ class MixedDispositionRequest(FrozenDispositionContract):
     @field_validator("comment", mode="before")
     @classmethod
     def normalize_comment(cls, value: object) -> object:
-        return value.strip() or None if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        if "\x00" in value:
+            raise ValueError("Comment must not contain NUL")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("Comment must be valid UTF-8 text") from None
+        return value.strip() or None
 
     @model_validator(mode="after")
     def separate_decision_operation(self) -> Self:

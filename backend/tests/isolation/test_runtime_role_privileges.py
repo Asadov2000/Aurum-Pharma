@@ -157,6 +157,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "mixed_customer_return_disposition",
     "billing_cash_document",
     "auth_identity_code",
     "alembic_version",
@@ -235,6 +236,12 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "record_mixed_customer_return_disposition",
+    "mixed_customer_return_disposition_history",
+    "mixed_disposition_source",
+    "mixed_disposition_fingerprint",
+    "mixed_disposition_prepare",
+    "trg_mixed_disposition_guard",
     "trg_mixed_cash_refund_guard",
     "trg_mixed_zero_return_guard",
     "trg_mixed_cash_refund_complete",
@@ -636,6 +643,8 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "record_mixed_customer_return_disposition",
+    "mixed_customer_return_disposition_history",
     "physical_customer_return_queue",
     "mixed_customer_return_queue",
     "unit_lot_is_received_for_report",
@@ -1199,6 +1208,10 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
     return_names = {
+        "mixed_disposition_source",
+        "mixed_disposition_fingerprint",
+        "mixed_disposition_prepare",
+        "trg_mixed_disposition_guard",
         "trg_mixed_cash_refund_guard",
         "trg_mixed_zero_return_guard",
         "trg_mixed_cash_refund_complete",
@@ -1220,12 +1233,18 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in return_functions.values()
     )
     assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
+        "mixed_disposition_source",
+        "mixed_disposition_prepare",
         "trg_mixed_return_complete",
         "trg_physical_return_complete",
         "trg_mixed_cash_refund_complete",
         "trg_mixed_cash_refund_components",
     }
     for name in (
+        "mixed_disposition_source",
+        "mixed_disposition_fingerprint",
+        "mixed_disposition_prepare",
+        "trg_mixed_disposition_guard",
         "trg_mixed_return_guard",
         "trg_mixed_return_complete",
         "trg_mixed_cash_refund_guard",
@@ -1234,6 +1253,14 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         "trg_mixed_cash_refund_components",
     ):
         assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "record_mixed_customer_return_disposition",
+        "mixed_customer_return_disposition_history",
+    ):
+        function = next(row for row in rows if row["proname"] == name)
+        assert function["is_security_definer"] is True
+        assert function["support_can_execute"] is False
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     cash_names = {
         "assert_physical_checkout",
         "trg_physical_stock_checkout_binding",
@@ -1398,6 +1425,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
+                      'mixed_customer_return_disposition',
                       'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
@@ -1407,6 +1435,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "mixed_customer_return_disposition",
         "pos_mixed_cash_refund",
         "pos_mixed_zero_return",
         "pos_mixed_return_command",
@@ -1436,9 +1465,13 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
             journal_actual[(row["rolname"], row["relname"])].add(row["privilege"])
     assert journal_actual == {
         (role, table): (
-            {"SELECT", "INSERT"}
-            if role == "aurum_app"
-            else {"SELECT"} if role == "aurum_support" else set()
+            {"SELECT"}
+            if role == "aurum_support"
+            else (
+                {"SELECT", "INSERT"}
+                if role == "aurum_app" and table != "mixed_customer_return_disposition"
+                else set()
+            )
         )
         for role in journal_roles
         for table in journal_tables
