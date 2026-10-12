@@ -134,7 +134,5 @@ async def test_queue_rejects_untrusted_support_login(
 ) -> None:
     async with support_engine.connect() as connection:
         with pytest.raises(DBAPIError) as error:
-            await connection.execute(
-                text("SELECT * FROM public.mixed_customer_return_queue(NULL)")
-            )
+            await connection.execute(text("SELECT * FROM public.mixed_customer_return_queue(NULL)"))
         assert getattr(error.value.orig, "sqlstate", None) == "42501"
