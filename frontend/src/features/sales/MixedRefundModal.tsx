@@ -17,7 +17,7 @@ import {
   refundCents,
   refundReasonSchema,
   validateMixedRefundQuote,
-  type MixedRefundCompleted,
+  type MixedReturnResult,
   type MixedRefundItem,
   type MixedRefundOptions,
   type MixedRefundQuote,
@@ -26,9 +26,11 @@ import {
   abandonMixedRefund,
   acknowledgeMixedRefund,
   inspectMixedRefund,
+  isZeroMixedReturn,
   loadMixedRefund,
   mixedRefundKey,
   runMixedRefund,
+  runMixedZeroReturn,
   type MixedRefundScope,
   type PendingMixedRefund,
 } from "./mixedRefundRecovery";
@@ -122,7 +124,7 @@ export function MixedRefundModal({
   const reload = useRef(0);
   const [options, setOptions] = useState<MixedRefundOptions | null>(null);
   const [pending, setPending] = useState<PendingMixedRefund | null>(null);
-  const [completed, setCompleted] = useState<MixedRefundCompleted | null>(null);
+  const [completed, setCompleted] = useState<MixedReturnResult | null>(null);
   const [calculation, setCalculation] = useState<{ key: string; quote: MixedRefundQuote } | null>(
     null,
   );
@@ -165,7 +167,7 @@ export function MixedRefundModal({
       setPending(stored);
       if (stored) {
         const status = await inspectMixedRefund(scope);
-        if (active() && version === reload.current && status?.state === "completed")
+        if (active() && version === reload.current && status && status.state !== "not_found")
           setCompleted(status);
       } else {
         const available = await getMixedRefundOptions(
@@ -286,15 +288,9 @@ export function MixedRefundModal({
     });
   });
   const submit = form.handleSubmit(async (values) => {
-    if (
-      locked ||
-      !scope ||
-      !options ||
-      !quote ||
-      !ownShift ||
-      refundCents(quote.total_amount) === 0n
-    )
-      return;
+    if (locked || !scope || !options || !quote) return;
+    const withoutPayout = refundCents(quote.total_amount) === 0n;
+    if (!withoutPayout && !ownShift) return;
     if (options.reason_mode.startsWith("required") && !values.reason_code) {
       form.setError("reason_code", { message: "Выберите причину возврата" });
       return;
@@ -304,28 +300,39 @@ export function MixedRefundModal({
       return;
     }
     await execute(async (current) => {
-      const result = await runMixedRefund(scope, {
+      const common = {
         items: selectedItems(values),
-        shift_id: ownShift.id,
-        expected_total_amount: quote.total_amount,
         expected_revision_hash: quote.revision_hash,
         reason_code: options.reason_mode === "off" ? null : values.reason_code || null,
         comment: options.reason_mode === "off" ? null : values.comment.trim() || null,
-      });
+      };
+      const result = withoutPayout
+        ? await runMixedZeroReturn(scope, common, quote)
+        : await runMixedRefund(scope, {
+            ...common,
+            shift_id: ownShift!.id,
+            expected_total_amount: quote.total_amount,
+          });
       if (current()) setCompleted(result);
     }, true);
   });
   async function recover(retry: boolean): Promise<void> {
     if (!scope) return;
     await execute(async (current) => {
-      const result = retry ? await runMixedRefund(scope) : await inspectMixedRefund(scope);
+      const result = retry
+        ? pending && isZeroMixedReturn(pending)
+          ? await runMixedZeroReturn(scope)
+          : await runMixedRefund(scope)
+        : await inspectMixedRefund(scope);
       if (!current()) return;
       setBlocked(false);
-      if (result?.state === "completed") {
+      if (result && result.state !== "not_found") {
         setCompleted(result);
       } else
         setError(
-          "Сервер пока не подтвердил возврат. Деньги повторно не выдавайте. Проверьте результат или повторите эту же операцию.",
+          pending && isZeroMixedReturn(pending)
+            ? "Сервер пока не подтвердил приём. Проверьте результат или повторите эту же операцию."
+            : "Сервер пока не подтвердил возврат. Деньги повторно не выдавайте. Проверьте результат или повторите эту же операцию.",
         );
     }, true);
   }
@@ -334,7 +341,7 @@ export function MixedRefundModal({
     await execute(async (current) => {
       const result = await abandonMixedRefund(scope);
       if (!current()) return;
-      if (result.state === "completed") {
+      if (result.state !== "cleared") {
         setCompleted(result);
         return;
       }
@@ -360,8 +367,13 @@ export function MixedRefundModal({
       if (!current()) return;
       void queryClient.invalidateQueries({ queryKey: ["sales", "list"] });
       void queryClient.invalidateQueries({ queryKey: salesKeys.detail(scope.parentSaleId) });
-      void queryClient.invalidateQueries({ queryKey: salesKeys.detail(completed.sale_id) });
-      onRefunded(completed.sale_id);
+      if (completed.state === "prepared_quarantine") {
+        onRefunded(completed.parent_sale_id);
+        onClose();
+      } else {
+        void queryClient.invalidateQueries({ queryKey: salesKeys.detail(completed.sale_id) });
+        onRefunded(completed.sale_id);
+      }
     });
   }
 
@@ -385,24 +397,36 @@ export function MixedRefundModal({
         )}
         {completed ? (
           <div className="space-y-3 rounded-lg border p-4">
-            <h3 className="font-semibold">Возврат оформлен</h3>
-            <p>
-              К выдаче наличными: <strong>{completed.total_amount} TJS</strong>.
-            </p>
-            <p>
-              Чек возврата № {completed.receipt.receipt_number}. Повторно выдавать деньги по этой
-              операции не нужно.
-            </p>
+            <h3 className="font-semibold">
+              {completed.state === "prepared_quarantine"
+                ? "Товар принят в карантин"
+                : "Возврат оформлен"}
+            </h3>
+            {completed.state === "prepared_quarantine" ? (
+              <p>Товар помещён в карантин без выплаты денег. Он не доступен для продажи.</p>
+            ) : (
+              <>
+                <p>
+                  К выдаче наличными: <strong>{completed.total_amount} TJS</strong>.
+                </p>
+                <p>
+                  Чек возврата № {completed.receipt.receipt_number}. Повторно выдавать деньги по
+                  этой операции не нужно.
+                </p>
+              </>
+            )}
             <Button disabled={busy || !guard()} onClick={() => void openReceipt()}>
-              Открыть чек возврата
+              {completed.state === "prepared_quarantine" ? "Готово" : "Открыть чек возврата"}
             </Button>
           </div>
         ) : pending ? (
           <div className="space-y-3 rounded-lg border p-4">
             <h3 className="font-semibold">Проверяем ранее отправленный возврат</h3>
             <p>
-              Сумма: {pending.request.expected_total_amount} TJS. Товары и причина сохранены. Новый
-              возврат пока недоступен.
+              {isZeroMixedReturn(pending)
+                ? "Карантин без выплаты денег."
+                : `Сумма: ${pending.request.expected_total_amount} TJS.`}{" "}
+              Товары и причина сохранены. Новый возврат пока недоступен.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button disabled={busy || !guard()} onClick={() => void recover(false)}>
@@ -545,13 +569,13 @@ export function MixedRefundModal({
                 </p>
                 {refundCents(quote.total_amount) === 0n && (
                   <p>
-                    Сумма по исходному чеку — 0,00 TJS. Приём смешанного возврата без выплаты пока
-                    недоступен.
+                    Сумма по исходному чеку — 0,00 TJS. Товар будет принят в карантин без выплаты
+                    денег. Открытая смена не требуется.
                   </p>
                 )}
               </div>
             )}
-            {!ownShift && (
+            {!ownShift && (!quote || refundCents(quote.total_amount) > 0n) && (
               <p className="text-sm text-foreground-muted">
                 Для выдачи денег откройте свою смену на кассе исходной продажи.
               </p>
@@ -562,10 +586,12 @@ export function MixedRefundModal({
               </Button>
               <Button
                 type="button"
-                disabled={locked || !ownShift || !quote || refundCents(quote.total_amount) === 0n}
+                disabled={locked || !quote || (refundCents(quote.total_amount) > 0n && !ownShift)}
                 onClick={() => void submit()}
               >
-                Оформить возврат наличными
+                {quote && refundCents(quote.total_amount) === 0n
+                  ? "Принять в карантин без выплаты"
+                  : "Оформить возврат наличными"}
               </Button>
             </div>
           </form>

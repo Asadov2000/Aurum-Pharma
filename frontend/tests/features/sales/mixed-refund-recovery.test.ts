@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseMixedRefundStatus, type MixedRefundInput } from "@/features/sales/mixedRefund";
 import {
   acknowledgeMixedRefund,
+  isZeroMixedReturn,
+  runMixedZeroReturn,
   inspectMixedRefund,
   loadMixedRefund,
   mixedRefundKey,
@@ -10,7 +12,13 @@ import {
   abandonMixedRefund,
 } from "@/features/sales/mixedRefundRecovery";
 
-const mocks = vi.hoisted(() => ({ generation: 0, status: vi.fn(), complete: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  generation: 0,
+  status: vi.fn(),
+  complete: vi.fn(),
+  zeroStatus: vi.fn(),
+  zeroComplete: vi.fn(),
+}));
 vi.mock("@/features/pos/posStorageScope", async (original) => ({
   ...(await original<typeof import("@/features/pos/posStorageScope")>()),
   capturePosSessionGuard: () => {
@@ -22,6 +30,8 @@ vi.mock("@/features/sales/mixedRefund", async (original) => ({
   ...(await original<typeof import("@/features/sales/mixedRefund")>()),
   getMixedRefundStatus: mocks.status,
   completeMixedRefund: mocks.complete,
+  getMixedZeroReturnStatus: mocks.zeroStatus,
+  completeMixedZeroReturn: mocks.zeroComplete,
 }));
 const uuid = (value: number): string =>
   `10000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
@@ -358,4 +368,224 @@ describe("strict refund completion identity", () => {
       ).toThrow();
     },
   );
+});
+
+describe("durable mixed zero intake shares the cash barrier", () => {
+  const zeroInput = {
+    items: input.items,
+    expected_revision_hash: input.expected_revision_hash,
+    reason_code: input.reason_code,
+    comment: input.comment,
+  };
+  function zeroPending() {
+    const value = loadMixedRefund(scope);
+    if (!value || !isZeroMixedReturn(value)) throw new Error("Expected zero intent");
+    return value;
+  }
+  function prepared() {
+    return {
+      version: 1,
+      kind: "mixed_zero_return",
+      operation_id: zeroPending().request.operation_id,
+      parent_sale_id: scope.parentSaleId,
+      tenant_id: scope.tenantId,
+      branch_id: scope.branchId,
+      actor_id: scope.userId,
+      state: "prepared_quarantine",
+      currency: "TJS",
+      total_amount: "0.00",
+      lines: [
+        {
+          inventory_kind: "physical_unit",
+          line_id: uuid(7),
+          sale_format: "unit",
+          quantity: 2,
+          base_units: 2,
+          offset: 0,
+        },
+        { inventory_kind: "legacy_pack", line_id: uuid(9), quantity: "0.500", offset: "0.000" },
+      ],
+    };
+  }
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    localStorage.clear();
+    mocks.generation = 0;
+    serialLocks();
+    mocks.status.mockImplementation(() =>
+      Promise.resolve({
+        state: "not_found",
+        operation_id: pending().request.operation_id,
+        parent_sale_id: scope.parentSaleId,
+      }),
+    );
+    mocks.complete.mockImplementation(() => {
+      const result = completed();
+      mocks.status.mockResolvedValue(result);
+      return Promise.resolve(result);
+    });
+    mocks.zeroStatus.mockImplementation(() =>
+      Promise.resolve({
+        state: "not_found",
+        operation_id: zeroPending().request.operation_id,
+        parent_sale_id: scope.parentSaleId,
+      }),
+    );
+    mocks.zeroComplete.mockImplementation(() => {
+      const result = prepared();
+      mocks.zeroStatus.mockResolvedValue(result);
+      return Promise.resolve(result);
+    });
+  });
+  it("persists explicit zero v2 intent without payout or shift fields before any request", async () => {
+    mocks.zeroStatus.mockImplementationOnce(() => {
+      expect(zeroPending()).toMatchObject({
+        version: 2,
+        kind: "mixed_zero_return",
+        ...scope,
+        request: zeroInput,
+      });
+      expect(zeroPending().request).not.toHaveProperty("shift_id");
+      expect(zeroPending().request).not.toHaveProperty("expected_total_amount");
+      return Promise.resolve({ state: "not_found" });
+    });
+    expect((await runMixedZeroReturn(scope, zeroInput)).state).toBe("prepared_quarantine");
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.status).not.toHaveBeenCalled();
+    expect(loadMixedRefund(scope)).not.toBeNull();
+  });
+  it("GET recovery after a lost zero response never sends another intake or any cash payout", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(new Error("Response lost"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Response lost");
+    const operationId = zeroPending().request.operation_id;
+    mocks.zeroStatus.mockResolvedValue(prepared());
+    expect((await inspectMixedRefund(scope))?.state).toBe("prepared_quarantine");
+    expect(zeroPending().request.operation_id).toBe(operationId);
+    expect(mocks.zeroComplete).toHaveBeenCalledTimes(1);
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+  it("retries a not_found zero intent with the same UUID, quantities and reason", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(new Error("Offline"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Offline");
+    const original = zeroPending().request;
+    expect((await inspectMixedRefund(scope))?.state).toBe("not_found");
+    await runMixedZeroReturn(scope);
+    expect(mocks.zeroComplete).toHaveBeenLastCalledWith(
+      scope.parentSaleId,
+      original,
+      scope,
+      undefined,
+    );
+  });
+  it("blocks cash while zero is unresolved and zero while an old cash v1 intent exists", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(new Error("Offline"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Offline");
+    await expect(runMixedRefund(scope, input)).rejects.toThrow("незавершённый");
+    await expect(runMixedRefund(scope)).rejects.toThrow("незавершённый");
+    expect(mocks.complete).not.toHaveBeenCalled();
+    localStorage.clear();
+    mocks.complete.mockRejectedValueOnce(new Error("Offline"));
+    await expect(runMixedRefund(scope, input)).rejects.toThrow("Offline");
+    expect(loadMixedRefund(scope)?.version).toBe(1);
+    const zeroCalls = mocks.zeroComplete.mock.calls.length;
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("незавершённый");
+    await expect(runMixedZeroReturn(scope)).rejects.toThrow("незавершённый");
+    expect(mocks.zeroComplete).toHaveBeenCalledTimes(zeroCalls);
+  });
+  it("serializes two simultaneous zero confirmations into one POST", async () => {
+    const results = await Promise.all([
+      runMixedZeroReturn(scope, zeroInput),
+      runMixedZeroReturn(scope, zeroInput),
+    ]);
+    expect(results[0]).toEqual(results[1]);
+    expect(mocks.zeroComplete).toHaveBeenCalledTimes(1);
+  });
+  it("cannot edit a saved zero revision, reason or inventory quantity", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(new Error("Offline"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Offline");
+    for (const edited of [
+      { ...zeroInput, expected_revision_hash: "b".repeat(64) },
+      { ...zeroInput, comment: "Edited" },
+      { ...zeroInput, items: zeroInput.items.slice(1) },
+    ]) {
+      await expect(runMixedZeroReturn(scope, edited)).rejects.toThrow("незавершённый");
+    }
+    expect(mocks.zeroComplete).toHaveBeenCalledTimes(1);
+  });
+  it("never abandons an ambiguous zero outcome even after not_found", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(new Error("Offline"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Offline");
+    await expect(abandonMixedRefund(scope)).rejects.toThrow("неизвестен");
+    expect(loadMixedRefund(scope)).not.toBeNull();
+  });
+  it("rechecks a rejected zero request before clearing and returns an actual prepared result", async () => {
+    mocks.zeroComplete.mockRejectedValueOnce(rejectedResponse(409, "conflict"));
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Rejected");
+    mocks.zeroStatus.mockResolvedValue(prepared());
+    expect((await abandonMixedRefund(scope)).state).toBe("prepared_quarantine");
+    expect(loadMixedRefund(scope)).not.toBeNull();
+    mocks.zeroStatus.mockResolvedValue({ state: "not_found" });
+    expect(await abandonMixedRefund(scope)).toEqual({ state: "cleared" });
+  });
+  it("acknowledges only a freshly verified prepared zero operation", async () => {
+    const result = await runMixedZeroReturn(scope, zeroInput);
+    expect(await acknowledgeMixedRefund(scope, uuid(99))).toBe(false);
+    mocks.zeroStatus.mockResolvedValueOnce({ state: "not_found" });
+    expect(await acknowledgeMixedRefund(scope, result.operation_id)).toBe(false);
+    expect(loadMixedRefund(scope)).not.toBeNull();
+    expect(await acknowledgeMixedRefund(scope, result.operation_id)).toBe(true);
+    expect(loadMixedRefund(scope)).toBeNull();
+  });
+  it("blocks mutated storage, unsupported versions and session changes without sending intake", async () => {
+    mocks.zeroStatus.mockImplementationOnce(() => {
+      mocks.generation++;
+      return Promise.resolve({ state: "not_found" });
+    });
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("Аккаунт изменился");
+    expect(mocks.zeroComplete).not.toHaveBeenCalled();
+    mocks.generation = 0;
+    const record = zeroPending();
+    for (const damaged of [
+      { ...record, version: 1 },
+      { ...record, kind: "cash" },
+      { ...record, state: "prepared_quarantine" },
+    ]) {
+      localStorage.setItem(mixedRefundKey(scope), JSON.stringify(damaged));
+      await expect(inspectMixedRefund(scope)).rejects.toThrow("повреждён");
+    }
+    expect(mocks.zeroComplete).not.toHaveBeenCalled();
+  });
+  it("does not poison the pending queue with an invalid reviewed calculation", async () => {
+    await expect(
+      runMixedZeroReturn(scope, zeroInput, {
+        parent_sale_id: scope.parentSaleId,
+        revision_hash: zeroInput.expected_revision_hash,
+        total_amount: "0.01",
+        currency: "TJS",
+        lines: [
+          {
+            inventory_kind: "legacy_pack",
+            line_id: uuid(9),
+            quantity: "0.500",
+            offset: "0.000",
+            gross_amount: "0.01",
+            discount_amount: "0.00",
+            net_amount: "0.01",
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(loadMixedRefund(scope)).toBeNull();
+    expect(mocks.zeroStatus).not.toHaveBeenCalled();
+    expect(mocks.zeroComplete).not.toHaveBeenCalled();
+  });
+  it("refuses zero intake when storage cannot persist the original intent", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Full");
+    });
+    await expect(runMixedZeroReturn(scope, zeroInput)).rejects.toThrow("не отправлена");
+    expect(mocks.zeroStatus).not.toHaveBeenCalled();
+    expect(mocks.zeroComplete).not.toHaveBeenCalled();
+  });
 });

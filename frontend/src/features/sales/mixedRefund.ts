@@ -75,6 +75,12 @@ export const mixedRefundRequestSchema = z
   .strict();
 export type MixedRefundRequest = z.infer<typeof mixedRefundRequestSchema>;
 export type MixedRefundInput = Omit<MixedRefundRequest, "operation_id">;
+export const mixedZeroReturnRequestSchema = mixedRefundRequestSchema
+  .omit({ shift_id: true, expected_total_amount: true })
+  .strict();
+export type MixedZeroReturnRequest = z.infer<typeof mixedZeroReturnRequestSchema>;
+export type MixedZeroReturnInput = Omit<MixedZeroReturnRequest, "operation_id">;
+
 const optionBase = {
   line_id: uuid,
   name: z.string().min(1).max(500),
@@ -236,6 +242,33 @@ const statusSchema = z.union([
 ]);
 export type MixedRefundCompleted = z.infer<typeof completedSchema>;
 export type MixedRefundStatus = z.infer<typeof statusSchema>;
+const zeroLegacyLine = legacyItem.extend({ offset: legacyOffset }).strict();
+const zeroPhysicalLine = physicalItem.extend({ base_units: whole, offset }).strict();
+const zeroPreparedSchema = z
+  .object({
+    version: z.literal(1),
+    kind: z.literal("mixed_zero_return"),
+    operation_id: operationId,
+    parent_sale_id: uuid,
+    tenant_id: uuid,
+    branch_id: uuid,
+    actor_id: uuid,
+    state: z.literal("prepared_quarantine"),
+    currency: z.literal("TJS"),
+    total_amount: z.literal("0.00"),
+    lines: z
+      .array(z.union([zeroLegacyLine, zeroPhysicalLine]))
+      .min(1)
+      .max(200),
+  })
+  .strict()
+  .refine((value) => new Set(value.lines.map((line) => line.line_id)).size === value.lines.length);
+const zeroStatusSchema = z.union([statusSchema.options[0], zeroPreparedSchema]);
+export type MixedZeroReturnPrepared = z.infer<typeof zeroPreparedSchema>;
+export type MixedZeroReturnStatus = z.infer<typeof zeroStatusSchema>;
+export type MixedReturnResult = MixedRefundCompleted | MixedZeroReturnPrepared;
+export type MixedReturnStatus = MixedRefundStatus | MixedZeroReturnStatus;
+
 export interface MixedRefundApiScope extends PosStorageScope {
   branchId: string;
   registerId: string;
@@ -458,5 +491,159 @@ export async function completeMixedRefund(
   const result = await validateCompleted(data, parentId, validated, scope);
   requireActive(active);
   if (result.state !== "completed") throw new Error("Возврат ещё не подтверждён.");
+  return result;
+}
+
+/** A saved quarantine result is verified against current server history, never local success data. */
+export function parseMixedZeroReturnStatus(
+  data: unknown,
+  parentId: string,
+  request: MixedZeroReturnRequest,
+  scope: MixedRefundApiScope,
+  options?: MixedRefundOptions,
+  reviewedQuote?: MixedRefundQuote,
+): MixedZeroReturnStatus {
+  const status = zeroStatusSchema.parse(data);
+  if (status.operation_id !== request.operation_id || status.parent_sale_id !== parentId)
+    throw new Error("Ответ относится к другой операции возврата.");
+  if (status.state === "not_found") return status;
+  if (
+    status.tenant_id !== scope.tenantId ||
+    status.actor_id !== scope.userId ||
+    status.branch_id !== scope.branchId ||
+    !options ||
+    options.parent_sale_id !== parentId ||
+    options.branch_id !== scope.branchId ||
+    options.register_id !== scope.registerId ||
+    status.lines.length !== request.items.length
+  )
+    throw new Error("Подтверждение карантина относится к другому аккаунту или набору товаров.");
+  const source = optionsSchema.parse(options);
+  let previous = -1;
+  for (const line of status.lines) {
+    const item = request.items.find((candidate) => candidate.line_id === line.line_id);
+    const index = source.lines.findIndex((candidate) => candidate.line_id === line.line_id);
+    const original = source.lines[index];
+    if (
+      !item ||
+      !original ||
+      index <= previous ||
+      item.inventory_kind !== line.inventory_kind ||
+      original.inventory_kind !== line.inventory_kind ||
+      item.quantity !== line.quantity
+    )
+      throw new Error("Подтверждение карантина не соответствует выбранным товарам.");
+    previous = index;
+    if (line.inventory_kind === "legacy_pack" && original.inventory_kind === "legacy_pack") {
+      if (
+        mixedQuantity(line.offset) + mixedQuantity(line.quantity) >
+        mixedQuantity(original.returned_quantity)
+      )
+        throw new Error("Подтверждение карантина не соответствует исходной продаже.");
+    } else if (
+      line.inventory_kind === "physical_unit" &&
+      item.inventory_kind === "physical_unit" &&
+      original.inventory_kind === "physical_unit"
+    ) {
+      if (
+        line.sale_format !== item.sale_format ||
+        physicalUnits({ ...line, packaging: original.packaging }) !== BigInt(line.base_units) ||
+        BigInt(line.offset) + BigInt(line.base_units) > BigInt(original.returned_base_units)
+      )
+        throw new Error("Подтверждение карантина не соответствует выбранным товарам.");
+    }
+  }
+  if (reviewedQuote) {
+    const quote = quoteSchema.parse(reviewedQuote);
+    if (
+      quote.parent_sale_id !== parentId ||
+      quote.revision_hash !== request.expected_revision_hash ||
+      quote.total_amount !== "0.00" ||
+      quote.lines.length !== status.lines.length ||
+      !quote.lines.every((line, index) => {
+        const confirmed = status.lines[index];
+        return (
+          confirmed &&
+          line.line_id === confirmed.line_id &&
+          line.inventory_kind === confirmed.inventory_kind &&
+          line.quantity === confirmed.quantity &&
+          line.offset === confirmed.offset &&
+          (line.inventory_kind === "legacy_pack" ||
+            (confirmed.inventory_kind === "physical_unit" &&
+              line.sale_format === confirmed.sale_format &&
+              line.base_units === confirmed.base_units))
+        );
+      })
+    )
+      throw new Error("Подтверждение карантина не соответствует проверенному расчёту.");
+  }
+  return status;
+}
+const zeroPath = (parentId: string): string =>
+  `/sales/${encodeURIComponent(parentId)}/mixed-zero-returns`;
+async function validateZeroCompleted(
+  data: unknown,
+  parentId: string,
+  request: MixedZeroReturnRequest,
+  scope: MixedRefundApiScope,
+  reviewedQuote?: MixedRefundQuote,
+): Promise<MixedZeroReturnStatus> {
+  const status = zeroStatusSchema.parse(data);
+  const options =
+    status.state === "prepared_quarantine"
+      ? await getMixedRefundOptions(parentId, scope.branchId, scope.registerId, scope)
+      : undefined;
+  return parseMixedZeroReturnStatus(status, parentId, request, scope, options, reviewedQuote);
+}
+export async function getMixedZeroReturnStatus(
+  parentId: string,
+  request: MixedZeroReturnRequest,
+  scope: MixedRefundApiScope,
+): Promise<MixedZeroReturnStatus> {
+  const active = capturePosSessionGuard(scope);
+  requireActive(active);
+  const validated = mixedZeroReturnRequestSchema.parse(request);
+  const { data } = await api.get<unknown>(
+    `${zeroPath(parentId)}/operations/${validated.operation_id}`,
+    { timeout: 8_000 },
+  );
+  requireActive(active);
+  const result = await validateZeroCompleted(data, parentId, validated, scope);
+  requireActive(active);
+  return result;
+}
+export function validateMixedZeroReturnQuote(
+  parentId: string,
+  input: MixedZeroReturnInput,
+  reviewedQuote: MixedRefundQuote,
+): void {
+  const quote = quoteSchema.parse(reviewedQuote);
+  const items = itemsSchema.parse(input.items);
+  if (
+    quote.parent_sale_id !== parentId ||
+    quote.revision_hash !== input.expected_revision_hash ||
+    quote.total_amount !== "0.00" ||
+    quote.lines.length !== items.length ||
+    !items.every((item) => quote.lines.some((line) => matches(item, line)))
+  )
+    throw new Error("Расчёт не подтверждает возврат без выплаты.");
+}
+export async function completeMixedZeroReturn(
+  parentId: string,
+  request: MixedZeroReturnRequest,
+  scope: MixedRefundApiScope,
+  reviewedQuote?: MixedRefundQuote,
+): Promise<MixedZeroReturnPrepared> {
+  const active = capturePosSessionGuard(scope);
+  requireActive(active);
+  const validated = mixedZeroReturnRequestSchema.parse(request);
+  if (reviewedQuote) validateMixedZeroReturnQuote(parentId, validated, reviewedQuote);
+  const { data } = await api.post<unknown>(`${zeroPath(parentId)}/complete`, validated, {
+    timeout: 15_000,
+  });
+  requireActive(active);
+  const result = await validateZeroCompleted(data, parentId, validated, scope, reviewedQuote);
+  requireActive(active);
+  if (result.state !== "prepared_quarantine") throw new Error("Карантин ещё не подтверждён.");
   return result;
 }

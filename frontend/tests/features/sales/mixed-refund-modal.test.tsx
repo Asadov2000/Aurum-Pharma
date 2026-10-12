@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   inspect: vi.fn(),
   run: vi.fn(),
+  runZero: vi.fn(),
   ack: vi.fn(),
   abandon: vi.fn(),
   shift: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/features/sales/mixedRefundRecovery", async (original) => ({
   loadMixedRefund: mocks.load,
   inspectMixedRefund: mocks.inspect,
   runMixedRefund: mocks.run,
+  runMixedZeroReturn: mocks.runZero,
   acknowledgeMixedRefund: mocks.ack,
   abandonMixedRefund: mocks.abandon,
 }));
@@ -156,6 +158,55 @@ const pending = {
     reason_code: null,
     comment: null,
   },
+};
+const zeroQuote = {
+  ...quote,
+  total_amount: "0.00",
+  lines: quote.lines.map((line) => ({
+    ...line,
+    discount_amount: line.gross_amount,
+    net_amount: "0.00",
+  })),
+};
+const zeroPending = {
+  ...pending,
+  version: 2,
+  kind: "mixed_zero_return",
+  request: {
+    operation_id: pending.request.operation_id,
+    items: pending.request.items,
+    expected_revision_hash: pending.request.expected_revision_hash,
+    reason_code: null,
+    comment: null,
+  },
+};
+const zeroCompleted = {
+  version: 1,
+  kind: "mixed_zero_return",
+  state: "prepared_quarantine",
+  operation_id: pending.request.operation_id,
+  parent_sale_id: sale.id,
+  tenant_id: sale.tenant_id,
+  branch_id: sale.branch_id,
+  actor_id: uuid(2),
+  currency: "TJS",
+  total_amount: "0.00",
+  lines: [
+    {
+      inventory_kind: "legacy_pack",
+      line_id: uuid(7),
+      quantity: "0.001",
+      offset: "0.000",
+    },
+    {
+      inventory_kind: "physical_unit",
+      line_id: uuid(8),
+      sale_format: "unit",
+      quantity: 1,
+      base_units: 1,
+      offset: 0,
+    },
+  ],
 };
 function ownShift(): void {
   mocks.shift.mockReturnValue({
@@ -298,24 +349,96 @@ describe("mixed refund dialog", () => {
     expect(mocks.options).not.toHaveBeenCalled();
     expect(mocks.run).not.toHaveBeenCalled();
   });
-  it("reviews a zero amount without offering an unsupported payout", async () => {
-    ownShift();
-    mocks.quote.mockResolvedValue({
-      ...quote,
-      total_amount: "0.00",
-      lines: quote.lines.map((line) => ({
-        ...line,
-        discount_amount: line.gross_amount,
-        net_amount: "0.00",
-      })),
-    });
+  it("receives a reviewed zero amount without an open shift or cash payout", async () => {
+    mocks.quote.mockResolvedValue(zeroQuote);
+    mocks.runZero.mockResolvedValue(zeroCompleted);
     render(<MixedRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
     await selectBoth();
     fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
-    await screen.findByText(/Приём смешанного возврата без выплаты пока недоступен/);
-    expect(screen.getByRole("button", { name: "Оформить возврат наличными" })).toBeDisabled();
+    await screen.findByText(/Открытая смена не требуется/);
+    const receive = screen.getByRole("button", { name: "Принять в карантин без выплаты" });
+    expect(receive).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Оформить возврат наличными" })).toBeNull();
+    fireEvent.click(receive);
+    await screen.findByText("Товар принят в карантин");
+    expect(mocks.runZero).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        items: pending.request.items,
+        expected_revision_hash: quote.revision_hash,
+        reason_code: null,
+        comment: null,
+      },
+      zeroQuote,
+    );
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Открыть чек возврата" })).toBeNull();
+  });
+  it("enforces the current reason policy for a zero-value intake", async () => {
+    mocks.options.mockResolvedValue({ ...options, reason_mode: "required_with_text" });
+    mocks.quote.mockResolvedValue(zeroQuote);
+    mocks.runZero.mockResolvedValue(zeroCompleted);
+    render(<MixedRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
+    await selectBoth();
+    fireEvent.click(screen.getByRole("button", { name: "Рассчитать возврат" }));
+    const receive = await screen.findByRole("button", { name: "Принять в карантин без выплаты" });
+    fireEvent.click(receive);
+    await screen.findByText("Выберите причину возврата");
+    expect(mocks.runZero).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Причина возврата/), { target: { value: "other" } });
+    fireEvent.click(receive);
+    await screen.findByText("Кратко поясните причину возврата");
+    expect(mocks.runZero).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Пояснение/), { target: { value: "  Приём  " } });
+    fireEvent.click(receive);
+    await screen.findByText("Товар принят в карантин");
+    expect(mocks.runZero).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reason_code: "other", comment: "Приём" }),
+      zeroQuote,
+    );
+  });
+  it("only inspects a pending zero intake and explicitly retries the same kind", async () => {
+    mocks.load.mockReturnValue(zeroPending);
+    mocks.runZero.mockResolvedValue(zeroCompleted);
+    render(<MixedRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
+    await screen.findByText(/Карантин без выплаты денег\./);
+    const retry = screen.getByRole("button", { name: "Повторить эту операцию" });
+    await waitFor(() => expect(retry).toBeEnabled());
+    expect(mocks.runZero).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(retry);
+    await screen.findByText("Товар принят в карантин");
+    expect(mocks.runZero).toHaveBeenCalledWith(expect.anything());
     expect(mocks.run).not.toHaveBeenCalled();
   });
+  it.each([true, false])(
+    "acknowledges quarantine without opening a payment receipt: %s",
+    async (ack) => {
+      mocks.load.mockReturnValue(zeroPending);
+      mocks.inspect.mockResolvedValue(zeroCompleted);
+      mocks.ack.mockResolvedValue(ack);
+      const onRefunded = vi.fn();
+      const onClose = vi.fn();
+      render(<MixedRefundModal sale={sale} onClose={onClose} onRefunded={onRefunded} />);
+      const done = await screen.findByRole("button", { name: "Готово" });
+      await waitFor(() => expect(done).toBeEnabled());
+      expect(onRefunded).not.toHaveBeenCalled();
+      fireEvent.click(done);
+      await waitFor(() => expect(mocks.ack).toHaveBeenCalledTimes(1));
+      if (ack) {
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+        expect(onRefunded).toHaveBeenCalledWith(sale.id);
+      } else {
+        await screen.findByText(/Не удалось подтвердить сохранённый результат/);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onRefunded).not.toHaveBeenCalled();
+      }
+      expect(mocks.run).not.toHaveBeenCalled();
+      expect(mocks.runZero).not.toHaveBeenCalled();
+    },
+  );
   it.each(["closed", "actor", "branch", "register"])(
     "does not pay with a mismatched shift: %s",
     async (kind) => {
