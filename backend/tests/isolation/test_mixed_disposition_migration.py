@@ -253,6 +253,12 @@ async def test_real_database_scope_is_checked_before_saved_replay(
         await db_session.execute(text("SELECT set_config('app.user_id','',true)"))
     elif scope == "spoofed_support":
         await db_session.execute(text("SELECT set_config('app.support_session','true',true)"))
+        assert await db_session.scalar(
+            text(
+                "SELECT session_user='aurum_app' AND NOT public.is_support_session() "
+                "AND NOT public.is_tenant_support_session()"
+            )
+        )
     with pytest.raises(DBAPIError) as error:
         async with db_session.begin_nested():
             await record(db_session, payload)
@@ -267,7 +273,8 @@ async def test_real_database_scope_is_checked_before_saved_replay(
         .scalars()
         .all()
     )
-    assert history == ([original] if scope == "view_only" else [])
+    # A forged support flag changes neither legitimate view access nor resolve authority.
+    assert history == ([original] if scope in {"view_only", "spoofed_support"} else [])
 
 
 async def test_view_only_history_reads_saved_decision_without_raw_journal_access(
