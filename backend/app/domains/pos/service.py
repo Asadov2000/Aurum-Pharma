@@ -2678,7 +2678,7 @@ class POSService:
             lines = physical_receipt_lines(snapshot)
         return ReceiptData(
             sale_id=sale.id,
-            is_refund=isinstance(snapshot, (PhysicalCashRefundReceiptV3, MixedCashRefundReceiptV4)),
+            is_refund=isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4),
             status=sale.status,
             pharmacy_name=tenant.name if tenant is not None else "",
             branch_name=branch.name if branch is not None else "",
@@ -2687,7 +2687,7 @@ class POSService:
             receipt_number=snapshot.receipt_number,
             original_receipt_number=(
                 snapshot.parent_receipt_number
-                if isinstance(snapshot, (PhysicalCashRefundReceiptV3, MixedCashRefundReceiptV4))
+                if isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4)
                 else None
             ),
             datetime=local_datetime,
@@ -2698,7 +2698,7 @@ class POSService:
             currency=snapshot.currency,
             payments=(
                 [ReceiptPayment(method="cash", amount=snapshot.total_amount)]
-                if isinstance(snapshot, (PhysicalCashRefundReceiptV3, MixedCashRefundReceiptV4))
+                if isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4)
                 else [
                     ReceiptPayment(method=payment.method, amount=payment.amount)
                     for payment in snapshot.payments
