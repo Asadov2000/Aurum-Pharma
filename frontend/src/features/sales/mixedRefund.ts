@@ -44,7 +44,9 @@ const physicalItem = z
     quantity: whole,
   })
   .strict();
-const itemSchema = z.discriminatedUnion("inventory_kind", [legacyItem, physicalItem]);
+// Strict literal tags keep the contract discriminated without adding another
+// Zod parser implementation to the shared forms chunk loaded during login.
+const itemSchema = z.union([legacyItem, physicalItem]);
 const itemsSchema = z
   .array(itemSchema)
   .min(1)
@@ -108,7 +110,7 @@ const optionsSchema = z
     original_receipt_number: z.string().min(1).max(100),
     reason_mode: z.enum(["off", "optional", "required", "required_with_text"]),
     lines: z
-      .array(z.discriminatedUnion("inventory_kind", [legacyOption, physicalOption]))
+      .array(z.union([legacyOption, physicalOption]))
       .min(1)
       .max(200),
   })
@@ -142,7 +144,7 @@ const quoteSchema = z
     total_amount: money,
     currency: z.literal("TJS"),
     lines: z
-      .array(z.discriminatedUnion("inventory_kind", [legacyQuoteLine, physicalQuoteLine]))
+      .array(z.union([legacyQuoteLine, physicalQuoteLine]))
       .min(1)
       .max(200),
   })
@@ -194,7 +196,7 @@ const receiptSchema = z
     completed_at: z.string().datetime({ offset: true }),
     is_test: z.literal(false),
     lines: z
-      .array(z.discriminatedUnion("inventory_kind", [legacyReceiptLine, physicalReceiptLine]))
+      .array(z.union([legacyReceiptLine, physicalReceiptLine]))
       .min(1)
       .max(200),
     payment_method: z.literal("cash"),
@@ -226,7 +228,7 @@ const completedSchema = z
     receipt: receiptSchema,
   })
   .strict();
-const statusSchema = z.discriminatedUnion("state", [
+const statusSchema = z.union([
   z
     .object({ state: z.literal("not_found"), operation_id: operationId, parent_sale_id: uuid })
     .strict(),
