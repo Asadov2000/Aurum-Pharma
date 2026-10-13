@@ -18,6 +18,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_read_migration,
     mixed_return_migration,
     mixed_zero_return_migration,
+    physical_disposition_migration,
 )
 
 FUNCTIONS = text(
@@ -203,6 +204,9 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                         migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                # Keep physical history; suspend only the later audit insertion.
+                physical = physical_disposition_migration()
+                physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
                 mixed_quarantine_disposition_migration().downgrade()
                 mixed_quarantine_read_migration().downgrade()
                 mixed_zero_return_migration().downgrade()
@@ -223,6 +227,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                 mixed_zero_return_migration().upgrade()
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
+                physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
             assert connection.execute(FUNCTIONS).all() == functions
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

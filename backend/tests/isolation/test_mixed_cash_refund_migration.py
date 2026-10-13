@@ -34,6 +34,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
+    physical_disposition_migration,
 )
 
 db_session = receiving_session_fixture
@@ -436,6 +437,9 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                         mixed_cash_refund_migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                # Keep physical history; suspend only the later audit insertion.
+                physical = physical_disposition_migration()
+                physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
                 mixed_quarantine_disposition_migration().downgrade()
                 mixed_quarantine_read_migration().downgrade()
                 mixed_zero_return_migration().downgrade()
@@ -454,6 +458,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                 mixed_zero_return_migration().upgrade()
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
+                physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
             assert connection.execute(functions).all() == before
             assert connection.execute(relation).one() == original_relation
             assert connection.execute(policies).all() == original_policies
