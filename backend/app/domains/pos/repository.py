@@ -82,6 +82,20 @@ class RefundReconciliationRow:
     requested_by_name: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class TopProductTotalsRow:
+    catalog_id: UUID
+    name: str | None
+    form: str | None
+    dosage: str | None
+    pack_size: str | None
+    quantity: Decimal
+    physical_quantities: object
+    revenue: Decimal
+    receipts_count: int
+    currency: str
+
+
 _FULL_REFUND_SQL = """
   s.sale_type = 'sale'
   AND EXISTS (
@@ -1989,67 +2003,56 @@ class POSRepository:
         self,
         *,
         tenant_id: UUID,
-        date_from: Any,
-        date_to: Any,
+        date_from: date,
+        date_to: date,
         branch_id: UUID | None,
         sort_by: str,
         limit: int,
+        quantity_basis: str = "legacy_pack",
         tz: str = "Asia/Dushanbe",
-    ) -> list[dict[str, Any]]:
-        """Net product ranking over a tenant-local period.
-
-        Completed return documents subtract their quantity and value from the
-        original product. Test sales are excluded, matching the sales summary.
-        """
+    ) -> list[TopProductTotalsRow]:
+        """Rank scoped retail totals without combining incompatible quantities."""
         start, _ = local_day_range(date_from, tz)
         _, end = local_day_range(date_to, tz)
-        clauses = [
-            "s.tenant_id = :tid",
-            "s.completed_at >= :dfrom_ts",
-            "s.completed_at < :dto_ts",
-            "s.is_test = false",
-        ]
-        params: dict[str, Any] = {
-            "tid": str(tenant_id),
+        params: dict[str, object] = {
+            "tid": tenant_id,
             "dfrom_ts": start,
             "dto_ts": end,
+            "branch": branch_id,
+            "basis": quantity_basis,
             "limit": limit,
         }
-        if branch_id is not None:
-            clauses.append("s.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        where = " AND ".join(clauses)
-        order_expression = "revenue" if sort_by == "revenue" else "quantity"
+        order_expression = "revenue" if sort_by == "revenue" else "rank_quantity"
+        quantity_filter = "rank_quantity <> 0" if sort_by == "quantity" else "true"
         sql = text(f"""
-            SELECT
-              si.catalog_id,
-              tc.brand_name AS name,
-              tc.form,
-              tc.dosage,
-              tc.pack_size,
-              COALESCE(SUM(
-                CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END
-              ), 0) AS quantity,
-              COALESCE(SUM(
-                CASE WHEN s.sale_type = 'return'
-                  THEN -si.total_price
-                  ELSE si.total_price
-                END
-              ), 0) AS revenue,
-              COUNT(DISTINCT s.id) FILTER (WHERE s.sale_type = 'sale') AS receipts_count,
-              COALESCE(MAX(si.currency), 'TJS') AS currency
-            FROM sale_item si
-            JOIN sale s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            JOIN tenant_catalog tc
-              ON tc.id = si.catalog_id AND tc.tenant_id = si.tenant_id
-            WHERE {where}
-            GROUP BY si.catalog_id, tc.brand_name, tc.form, tc.dosage, tc.pack_size
-            HAVING
-              SUM(CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END) <> 0
-              OR SUM(CASE WHEN s.sale_type = 'return'
-                    THEN -si.total_price
-                    ELSE si.total_price END) <> 0
-            ORDER BY {order_expression} DESC, tc.brand_name ASC, si.catalog_id ASC
+            WITH ranked AS (
+              SELECT t.*,tc.brand_name AS name,tc.form,tc.dosage,tc.pack_size,
+                CASE WHEN :basis = 'legacy_pack' THEN t.quantity ELSE coalesce((
+                  SELECT (q->>'quantity')::numeric
+                  FROM jsonb_array_elements(t.physical_quantities) q
+                  WHERE q->>'unit' = :basis
+                ),0) END AS rank_quantity
+              FROM public.pos_product_totals_for_report(
+                :tid,:dfrom_ts,:dto_ts,:branch) t
+              JOIN tenant_catalog tc ON tc.id=t.catalog_id AND tc.tenant_id=:tid
+            )
+            SELECT * FROM ranked WHERE {quantity_filter}
+            ORDER BY {order_expression} DESC,name ASC,catalog_id ASC
             LIMIT :limit
         """)
-        return [dict(row) for row in (await self.session.execute(sql, params)).mappings().all()]
+        rows = (await self.session.execute(sql, params)).mappings().all()
+        return [
+            TopProductTotalsRow(
+                catalog_id=row["catalog_id"],
+                name=row["name"],
+                form=row["form"],
+                dosage=row["dosage"],
+                pack_size=row["pack_size"],
+                quantity=Decimal(str(row["quantity"])),
+                physical_quantities=row["physical_quantities"],
+                revenue=Decimal(str(row["revenue"])),
+                receipts_count=int(row["receipts_count"]),
+                currency=str(row["currency"]),
+            )
+            for row in rows
+        ]

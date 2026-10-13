@@ -1,7 +1,7 @@
 import { request, test, type APIRequestContext, type Page, type Response } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
-import { type SalesSummaryOverview } from "../src/features/reports/types";
+import { type SalesSummaryOverview, type TopProductsOverview } from "../src/features/reports/types";
 
 import {
   apiContext,
@@ -15,6 +15,7 @@ import {
   seedRegister,
   seedSupplier,
   uniqueName,
+  type SeededCatalogItem,
 } from "./helpers";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -123,9 +124,10 @@ async function seedSale(api: APIRequestContext, scenario: Scenario) {
   });
   expect(created.ok()).toBe(true);
   const draft = (await created.json()) as { id: string };
+  let legacy: SeededCatalogItem | undefined;
   if (scenario.kind === "mixed") {
     const supplier = await seedSupplier(api, uniqueName("Report pack supplier"));
-    const legacy = await seedCatalogItem(api, uniqueName("Report ordinary pack"), "10.00");
+    legacy = await seedCatalogItem(api, uniqueName("Report ordinary pack"), "10.00");
     await seedAcceptedBatch(api, {
       branchId: branch.id,
       supplierId: supplier.id,
@@ -182,7 +184,111 @@ async function seedSale(api: APIRequestContext, scenario: Scenario) {
     discount_amount: "1.23",
     net_amount: "8.77",
   });
-  return { branch, register, sale };
+  return { branch, register, sale, physical, legacy };
+}
+
+type ReportFixture = Awaited<ReturnType<typeof seedSale>>;
+
+function assertTopProducts(
+  report: TopProductsOverview,
+  fixture: ReportFixture,
+  quantityOnly: boolean,
+): void {
+  expect(report.rows).toHaveLength(quantityOnly || !fixture.legacy ? 1 : 2);
+  expect(report).toMatchObject({
+    sort_by: quantityOnly ? "quantity" : "revenue",
+    quantity_basis: quantityOnly ? "tablet" : "legacy_pack",
+  });
+  const physical = report.rows.find((row) => row.catalog_id === fixture.physical.id);
+  expect(physical).toMatchObject({
+    name: fixture.physical.brand_name,
+    physical_quantities: [{ unit: "tablet", quantity: "19" }],
+    revenue: "8.34",
+    receipts_count: 1,
+  });
+  expect(physical?.quantity).toMatch(/^0(?:\.0+)?$/);
+  if (!quantityOnly && fixture.legacy) {
+    const legacy = report.rows.find((row) => row.catalog_id === fixture.legacy?.id);
+    expect(legacy).toMatchObject({
+      name: fixture.legacy.brand_name,
+      physical_quantities: [],
+      revenue: "10.00",
+      receipts_count: 1,
+    });
+    expect(legacy?.quantity).toMatch(/^1(?:\.0+)?$/);
+  }
+}
+
+async function verifyTopProducts(
+  page: Page,
+  api: APIRequestContext,
+  fixture: ReportFixture,
+  from: string,
+  to: string,
+): Promise<void> {
+  const params = { from, to, branch_id: fixture.branch.id, limit: 20 };
+  // Revenue includes every unit kind; there is deliberately no quantity_basis filter.
+  const revenueResponse = await api.get("reports/top-products", {
+    params: { ...params, sort_by: "revenue" },
+  });
+  expect(revenueResponse.status()).toBe(200);
+  assertTopProducts((await revenueResponse.json()) as TopProductsOverview, fixture, false);
+  const unitsResponse = await api.get("reports/top-products", {
+    params: { ...params, sort_by: "quantity", quantity_basis: "tablet" },
+  });
+  expect(unitsResponse.status()).toBe(200);
+  assertTopProducts((await unitsResponse.json()) as TopProductsOverview, fixture, true);
+
+  await page.getByRole("tab", { name: /^Товары/ }).click();
+  const products = page.getByRole("region", { name: "Товары-лидеры" });
+  await products.getByLabel("С", { exact: true }).fill(from);
+  await products.getByLabel("По", { exact: true }).fill(to);
+  await products.getByLabel("Аптечная точка", { exact: true }).selectOption(fixture.branch.id);
+  await products.getByLabel("Рейтинг по", { exact: true }).selectOption("revenue");
+  await expect(products.getByLabel("Единица рейтинга", { exact: true })).toHaveCount(0);
+
+  const waitForRanking = (quantityOnly: boolean) =>
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === "/api/v1/reports/top-products" &&
+        url.searchParams.get("from") === from &&
+        url.searchParams.get("to") === to &&
+        url.searchParams.get("branch_id") === fixture.branch.id &&
+        url.searchParams.get("sort_by") === (quantityOnly ? "quantity" : "revenue") &&
+        (!quantityOnly || url.searchParams.get("quantity_basis") === "tablet")
+      );
+    });
+  const revenuePromise = waitForRanking(false);
+  await products.getByRole("button", { name: "Показать", exact: true }).click();
+  const browserRevenue = await revenuePromise;
+  expect(browserRevenue.status()).toBe(200);
+  assertTopProducts((await browserRevenue.json()) as TopProductsOverview, fixture, false);
+  const table = products.getByRole("table", { name: "Товары-лидеры за выбранный период" });
+  const physicalRow = table.getByRole("row").filter({ hasText: fixture.physical.brand_name });
+  await expect(physicalRow).toContainText("19 табл.");
+  await expect(physicalRow).toContainText("8,34 TJS");
+  await expect(physicalRow).not.toContainText("уп.");
+  if (fixture.legacy) {
+    const legacyRow = table.getByRole("row").filter({ hasText: fixture.legacy.brand_name });
+    await expect(legacyRow).toContainText("1 уп.");
+    await expect(legacyRow).toContainText("10,00 TJS");
+    await expect(legacyRow).not.toContainText("табл.");
+  }
+
+  await products.getByLabel("Рейтинг по", { exact: true }).selectOption("quantity");
+  await products.getByLabel("Единица рейтинга", { exact: true }).selectOption("tablet");
+  await expect(products.getByText(/Условия изменены/)).toBeVisible();
+  const unitsPromise = waitForRanking(true);
+  await products.getByRole("button", { name: "Показать", exact: true }).click();
+  const browserUnits = await unitsPromise;
+  expect(browserUnits.status()).toBe(200);
+  assertTopProducts((await browserUnits.json()) as TopProductsOverview, fixture, true);
+  await expect(table.locator("tbody tr")).toHaveCount(1);
+  await expect(physicalRow).toContainText("19 табл.");
+  await expect(physicalRow).toContainText("8,34 TJS");
+  await expect(physicalRow).not.toContainText("уп.");
 }
 
 async function refundOneUnit(api: APIRequestContext, scenario: Scenario, sale: CompletedSale) {
@@ -305,7 +411,8 @@ for (const scenario of cases) {
     try {
       const tokens = await apiLogin(anonymous, OWNER);
       api = await apiContext(tokens.access_token);
-      const { branch, register, sale } = await seedSale(api, scenario);
+      const fixture = await seedSale(api, scenario);
+      const { branch, register, sale } = fixture;
       const settingsResponse = await api.get("tenant/operational-settings");
       expect(settingsResponse.ok()).toBe(true);
       const settings = (await settingsResponse.json()) as { report_timezone: string };
@@ -380,6 +487,8 @@ for (const scenario of cases) {
       expect(summaryUrl.searchParams.get("branch_id")).toBe(branch.id);
       expect(summaryUrl.searchParams.get("from")).toBe(from);
       expect(summaryUrl.searchParams.get("to")).toBe(to);
+
+      await verifyTopProducts(page, api, fixture, from, to);
 
       await page.getByRole("tab", { name: /^Смены/ }).click();
       const history = page.getByRole("region", { name: "Закрытые смены и итоги" });

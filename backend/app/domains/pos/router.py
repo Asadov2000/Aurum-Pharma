@@ -63,6 +63,7 @@ from app.domains.pos.schemas import (
     POSRefundReconciliationSummary,
     PrescriptionLogCreate,
     PrescriptionLogRead,
+    ProductQuantityBasis,
     ReceiptData,
     RefundCreate,
     SaleCheckoutRequest,
@@ -992,6 +993,7 @@ async def top_products_overview(
     branch_id: Annotated[UUID | None, Query()] = None,
     sort_by: Annotated[Literal["revenue", "quantity"], Query()] = "revenue",
     limit: Annotated[int, Query(ge=5, le=100)] = 20,
+    quantity_basis: Annotated[ProductQuantityBasis, Query()] = "legacy_pack",
 ) -> TopProductsOverview:
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     return await service.get_top_products_overview(
@@ -1001,6 +1003,7 @@ async def top_products_overview(
         branch_id=effective_branch_id,
         sort_by=sort_by,
         limit=limit,
+        quantity_basis=quantity_basis,
     )
 
 

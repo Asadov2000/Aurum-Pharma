@@ -78,6 +78,9 @@ export interface SalesSummaryParams {
   branch_id?: string;
 }
 
+export type DispenseUnit = "tablet" | "capsule" | "ampoule" | "sachet" | "suppository";
+export type TopProductsQuantityBasis = "legacy_pack" | DispenseUnit;
+
 export interface TopProductRow {
   catalog_id: string;
   name: string;
@@ -85,6 +88,7 @@ export interface TopProductRow {
   dosage: string | null;
   pack_size: string | null;
   quantity: string;
+  physical_quantities?: { unit: DispenseUnit; quantity: string }[];
   revenue: string;
   receipts_count: number;
 }
@@ -95,11 +99,13 @@ export interface TopProductsOverview {
   branch_name: string | null;
   currency: string;
   sort_by: "revenue" | "quantity";
+  quantity_basis?: TopProductsQuantityBasis;
   rows: TopProductRow[];
 }
 
 export interface TopProductsParams extends SalesSummaryParams {
   sort_by: "revenue" | "quantity";
+  quantity_basis?: TopProductsQuantityBasis;
   limit: number;
 }
 

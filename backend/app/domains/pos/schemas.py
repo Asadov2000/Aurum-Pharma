@@ -13,12 +13,14 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    field_serializer,
     field_validator,
     model_serializer,
     model_validator,
 )
 
 from app.domains.catalog.schemas import CatalogItemRead
+from app.domains.catalog.unit_sales import DispenseUnit
 from app.domains.customer_returns.reasons import RefundReasonCode
 from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 
@@ -1091,8 +1093,20 @@ class SalesSummaryOverview(BaseModel):
     daily: list[SalesSummaryDay]
 
 
+ProductQuantityBasis = Literal["legacy_pack"] | DispenseUnit
+
+
+class TopProductPhysicalQuantity(BaseModel):
+    unit: DispenseUnit
+    quantity: Annotated[Decimal, Field(decimal_places=0, allow_inf_nan=False)]
+
+    @field_serializer("quantity")
+    def serialize_quantity(self, value: Decimal) -> str:
+        return str(int(value))
+
+
 class TopProductRow(BaseModel):
-    """Net product performance for a period; completed returns reduce totals."""
+    """Retail totals; confirmed cash and zero-payout returns reduce quantities."""
 
     catalog_id: UUID
     name: str
@@ -1100,6 +1114,7 @@ class TopProductRow(BaseModel):
     dosage: str | None
     pack_size: str | None
     quantity: Decimal
+    physical_quantities: list[TopProductPhysicalQuantity] = Field(default_factory=list)
     revenue: Decimal
     receipts_count: int
 
@@ -1110,6 +1125,7 @@ class TopProductsOverview(BaseModel):
     branch_name: str | None
     currency: str
     sort_by: Literal["revenue", "quantity"]
+    quantity_basis: ProductQuantityBasis = "legacy_pack"
     rows: list[TopProductRow]
 
 
