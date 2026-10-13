@@ -247,6 +247,8 @@ async def legacy_sale(
         movement_type="incoming",
         qty_delta=Decimal("5"),
     )
+    await session.refresh(batch)
+    assert batch.qty_remaining == Decimal("5")
     pos = POSService(POSRepository(session))
     sale = await pos.create_sale(
         tenant_id=context.stock.tenant_id,
