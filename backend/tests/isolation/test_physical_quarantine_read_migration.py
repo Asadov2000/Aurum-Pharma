@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from tests.isolation.test_physical_cash_checkout_migration import physical_disposition_migration
 from tests.isolation.test_runtime_role_privileges import (
     support_engine_privileges as support_engine_fixture,
 )
@@ -99,6 +100,8 @@ async def test_queue_read_migration_roundtrip_keeps_every_history_and_policy(
             migration().downgrade()
             assert connection.scalar(text("SELECT to_regprocedure(:s)"), {"s": SIGNATURE}) is None
             migration().upgrade()
+            disposition = physical_disposition_migration()
+            disposition._queue(disposition.QUEUE_OLD, disposition.QUEUE_NEW)
         assert (
             connection.scalar(
                 text("SELECT pg_get_functiondef(to_regprocedure(:s))"), {"s": SIGNATURE}

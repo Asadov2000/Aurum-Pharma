@@ -34,6 +34,7 @@ import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useCustomerReturnsQuery, useResolveCustomerReturn } from "./queries";
 import { PhysicalCustomerReturnsPanel } from "./PhysicalCustomerReturnsPanel";
+import { PhysicalDispositionWorkspace } from "./PhysicalDispositionWorkspace";
 import { MixedDispositionWorkspace } from "./MixedDispositionWorkspace";
 import {
   type CustomerReturnDispositionType,
@@ -73,7 +74,12 @@ export function CustomerReturnsPanel(): JSX.Element {
   const { user } = useAuth();
   const [queue, setQueue] = useState<"packages" | "physical" | "mixed">("packages");
   if (!hasPermission(user, "customer_returns.view")) {
-    return <MixedDispositionWorkspace key={`${user?.id}:${user?.active_tenant_id}`} />;
+    return (
+      <div className="space-y-4">
+        <MixedDispositionWorkspace key={`mixed:${user?.id}:${user?.active_tenant_id}`} />
+        <PhysicalDispositionWorkspace key={`physical:${user?.id}:${user?.active_tenant_id}`} />
+      </div>
+    );
   }
   return (
     <div className="space-y-4">
