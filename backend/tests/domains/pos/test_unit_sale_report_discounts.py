@@ -179,7 +179,7 @@ async def test_unit_sale_and_partial_then_full_refund_reconcile_every_report(
     )
     assert summary.net == Decimal("0.00")
     assert summary.sales_count == 1 and summary.returns_count == 2
-    assert sum((row.discount for row in summary.rows if row.kind == "return")) == discount
+    assert sum(row.discount for row in summary.rows if row.kind == "return") == discount
     workbook = load_workbook(BytesIO(render_sales_summary_xlsx(summary)))
     detail = list(workbook["Детализация"].iter_rows(min_row=2, values_only=True))
     assert len(detail) == 3
