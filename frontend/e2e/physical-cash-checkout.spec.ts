@@ -127,11 +127,17 @@ function persistedFacts(result: CheckoutResult, catalogId: string): string {
   ]).trim();
 }
 
-for (const loseResponse of [false, true]) {
+for (const { loseResponse, requiresPrescription } of [
+  { loseResponse: false, requiresPrescription: false },
+  { loseResponse: true, requiresPrescription: false },
+  { loseResponse: false, requiresPrescription: true },
+]) {
   test(
     loseResponse
       ? "recovers physical cash after a lost completion response, reload and closed shift"
-      : "completes unit, blister and full-pack cash sale once",
+      : requiresPrescription
+        ? "requires a prescription before completing a physical cash sale"
+        : "completes unit, blister and full-pack cash sale once",
     async ({ page }) => {
       test.setTimeout(120_000);
       clearLoginRateLimit(OWNER.email);
@@ -146,6 +152,7 @@ for (const loseResponse of [false, true]) {
           (
             await api.patch(`catalog/${medicine.id}`, {
               data: {
+                dispensing_type: requiresPrescription ? "prescription" : "otc",
                 unit_sale_preparation: {
                   version: 1,
                   state: "prepared",
@@ -172,6 +179,25 @@ for (const loseResponse of [false, true]) {
         await expect(panel.getByText("16.00 TJS", { exact: true })).toBeVisible();
         await panel.getByLabel("Получено наличными, TJS").fill("20");
         await expect(panel.getByText("4.00 TJS", { exact: true })).toBeVisible();
+        if (requiresPrescription) {
+          const paymentRequests: string[] = [];
+          page.on("request", (outgoing) => {
+            const pathname = new URL(outgoing.url()).pathname;
+            if (outgoing.method() === "POST" && pathname.includes("/physical-cash/")) {
+              paymentRequests.push(pathname);
+            }
+          });
+          await panel.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+          const prescription = page.getByRole("dialog", { name: "Данные рецепта" });
+          await expect(prescription).toBeVisible();
+          await expect(
+            panel.getByText("Сначала заполните рецепт. Оплата ещё не начата."),
+          ).toBeVisible();
+          expect(paymentRequests).toEqual([]);
+          await prescription.getByLabel("Номер рецепта").fill("E2E-SYNTHETIC-RX");
+          await prescription.getByRole("button", { name: "Сохранить", exact: true }).click();
+          await expect(prescription).toBeHidden();
+        }
         let completed: CheckoutResult | null = null;
         const submitted: string[] = [];
         let blockStatus = false;

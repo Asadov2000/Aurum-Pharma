@@ -768,7 +768,7 @@ function ActiveWorkspace({
     [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId, sessionIsActive],
   );
 
-  const prepareMixedCash = async (): Promise<void> => {
+  const preparePhysicalCash = async (): Promise<void> => {
     if (!sessionIsActive() || !saleId || saleIdRef.current !== saleId)
       throw new Error("Сессия кассира завершена.");
     const catalogIds = [...new Set([...items, ...preparedItems].map((item) => item.catalog_id))];
@@ -2407,7 +2407,7 @@ function ActiveWorkspace({
                       isDraft &&
                       preparedItems.length > 0 &&
                       sale?.is_test === false &&
-                      (cashKind !== "mixed" || !requiresRx || prescription !== null) &&
+                      (!requiresRx || prescription !== null) &&
                       recordedPayments.length === 0 &&
                       stagedPayments.length === 0 &&
                       !physicalCartBusy &&
@@ -2425,7 +2425,7 @@ function ActiveWorkspace({
                       paymentMethods.includes("cash")
                     }
                     sessionIsActive={sessionIsActive}
-                    beforeStart={cashKind === "mixed" ? prepareMixedCash : undefined}
+                    beforeStart={preparePhysicalCash}
                     onBlockedChange={updatePhysicalCashBlocked}
                     onCompleted={acceptPhysicalCash}
                   />
