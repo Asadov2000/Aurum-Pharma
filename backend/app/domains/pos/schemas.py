@@ -1170,7 +1170,9 @@ class StockRow(BaseModel):
             raise ValueError("stock kind and physical quantities must agree")
         if self.physical_stock is not None and self.qty != 0:
             raise ValueError("physical units must not be added to ordinary packs")
-        if self.cost_status == "hidden" and (self.purchase_price is not None or self.value is not None):
+        if self.cost_status == "hidden" and (
+            self.purchase_price is not None or self.value is not None
+        ):
             raise ValueError("hidden stock costs must not expose monetary values")
         if (self.cost_status == "known") != (self.value is not None):
             raise ValueError("stock valuation and cost knowledge must agree")
