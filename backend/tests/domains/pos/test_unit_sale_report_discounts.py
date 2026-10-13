@@ -188,9 +188,12 @@ async def test_unit_sale_and_partial_then_full_refund_reconcile_every_report(
         assert Decimal(str(exported[4])) == row.gross
         assert Decimal(str(exported[5])) == row.discount
         assert Decimal(str(exported[6])) == row.net
-    assert await db_session.scalar(
-        text("SELECT to_jsonb(sale) FROM sale WHERE id=:id"), {"id": original_id}
-    ) == original_row
+    assert (
+        await db_session.scalar(
+            text("SELECT to_jsonb(sale) FROM sale WHERE id=:id"), {"id": original_id}
+        )
+        == original_row
+    )
     after = await (mixed_facts(db_session) if kind == "mixed" else physical_facts(db_session))
     assert after == before
 
@@ -212,10 +215,13 @@ async def test_report_only_actor_reads_mixed_discounts_without_private_journal_a
     params = {"from": str(day), "to": str(day), "branch_id": str(context.stock.branch_id)}
     async with report_actor(db_session, reader_id) as actor:
         for table in ("pos_mixed_checkout", "unit_stock_cart_command_v2"):
-            assert await db_session.scalar(
-                text(f"SELECT count(*) FROM {table} WHERE tenant_id=:tenant"),
-                {"tenant": context.stock.tenant_id},
-            ) == 0
+            assert (
+                await db_session.scalar(
+                    text(f"SELECT count(*) FROM {table} WHERE tenant_id=:tenant"),
+                    {"tenant": context.stock.tenant_id},
+                )
+                == 0
+            )
         summary = await client.get("/api/v1/reports/sales-summary", params=params)
         assert summary.status_code == 200
         assert Decimal(summary.json()["total_discounts"]) == Decimal("0.08")
@@ -225,9 +231,7 @@ async def test_report_only_actor_reads_mixed_discounts_without_private_journal_a
         assert Decimal(z.json()["totals"]["discounts_total"]) == Decimal("0.08")
         export = await client.get("/api/v1/reports/sales-summary.xlsx", params=params)
         assert export.status_code == 200 and export.content[:2] == b"PK"
-        actor.permission_scopes = {
-            code: frozenset({uuid4()}) for code in actor.permissions
-        }
+        actor.permission_scopes = {code: frozenset({uuid4()}) for code in actor.permissions}
         assert (await client.get("/api/v1/reports/sales-summary", params=params)).status_code == 403
         assert (
             await client.get(f"/api/v1/shifts/{source.original.shift_id}/z-report")
@@ -477,8 +481,10 @@ async def test_next_day_refund_keeps_original_day_and_shift_discounts(
         assert summary.gross_sales == overview.gross_sales == expected_gross
         assert summary.total_discounts == overview.total_discounts == expected_discount
         assert summary.total_refunds == overview.total_refunds == expected_refunds
-        assert summary.net == overview.daily[0].net == (
-            expected_gross - expected_discount - expected_refunds
+        assert (
+            summary.net
+            == overview.daily[0].net
+            == (expected_gross - expected_discount - expected_refunds)
         )
     original_z = await service.build_z_report(original.shift_id)
     refund_z = await service.build_z_report(new_shift.id)
