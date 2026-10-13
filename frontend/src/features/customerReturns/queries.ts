@@ -1,4 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { permissionBranchScope } from "@/features/auth/branchPermissions";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
 
 import {
   listCustomerReturns,
@@ -39,10 +42,16 @@ export function usePhysicalCustomerReturnsQuery(params: PhysicalCustomerReturnSe
 }
 
 export function useMixedCustomerReturnsQuery(params: MixedCustomerReturnSearchParams) {
+  const { user } = useAuth();
   return useQuery({
-    queryKey: customerReturnsKeys.mixed(params),
+    queryKey: [
+      ...customerReturnsKeys.mixed(params),
+      user?.active_tenant_id,
+      user?.id,
+      permissionBranchScope(user, "customer_returns.view"),
+    ],
     queryFn: () => listMixedCustomerReturns(params),
-    placeholderData: keepPreviousData,
+    enabled: hasPermission(user, "customer_returns.view"),
   });
 }
 

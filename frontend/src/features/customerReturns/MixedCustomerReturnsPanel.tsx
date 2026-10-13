@@ -32,6 +32,10 @@ import { describeApiError } from "@/lib/errorMessages";
 import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useMixedCustomerReturnsQuery } from "./queries";
+import {
+  MixedDispositionWorkspace,
+  type MixedDispositionActions,
+} from "./MixedDispositionWorkspace";
 import { type MixedCustomerReturnItem } from "./types";
 
 const PAGE_SIZE = 25;
@@ -42,6 +46,15 @@ const filterSchema = z.object({
 type Filters = z.infer<typeof filterSchema>;
 
 export function MixedCustomerReturnsPanel(): JSX.Element {
+  const { user } = useAuth();
+  return (
+    <MixedDispositionWorkspace key={`${user?.id}:${user?.active_tenant_id}`}>
+      {(actions) => <MixedCustomerReturnsQueue {...actions} />}
+    </MixedDispositionWorkspace>
+  );
+}
+
+function MixedCustomerReturnsQueue(actions: MixedDispositionActions): JSX.Element {
   const { user } = useAuth();
   const canFilterBranches = hasPermission(user, "branches.view");
   const branches = useBranchesQuery(canFilterBranches);
@@ -80,10 +93,10 @@ export function MixedCustomerReturnsPanel(): JSX.Element {
   };
 
   return (
-    <section aria-label="Смешанные возвраты в карантине" className="space-y-4">
+    <div className="space-y-4">
       <p className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-foreground-secondary">
         Товар из смешанных продаж изолирован от продажи. Количество в пачках и физических единицах
-        учитывается отдельно. Окончательное действие с ним здесь пока не оформляется.
+        учитывается отдельно. Решение фиксирует уже выполненное действие для всего принятого объёма.
       </p>
       <ConfigurableFilterBar
         preferenceKey={preferenceKey}
@@ -166,12 +179,12 @@ export function MixedCustomerReturnsPanel(): JSX.Element {
         </TableEmpty>
       ) : (
         <>
-          <MixedReturnTable items={query.data.items} />
-          <MixedReturnCards items={query.data.items} />
+          <MixedReturnTable items={query.data.items} actions={actions} />
+          <MixedReturnCards items={query.data.items} actions={actions} />
           <Pagination page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -206,7 +219,13 @@ function Reason({ item }: { item: MixedCustomerReturnItem }): JSX.Element {
     </div>
   );
 }
-function MixedReturnTable({ items }: { items: MixedCustomerReturnItem[] }): JSX.Element {
+function MixedReturnTable({
+  items,
+  actions,
+}: {
+  items: MixedCustomerReturnItem[];
+  actions: MixedDispositionActions;
+}): JSX.Element {
   return (
     <div className="hidden md:block">
       <Table aria-label="Очередь смешанных возвратов">
@@ -219,6 +238,7 @@ function MixedReturnTable({ items }: { items: MixedCustomerReturnItem[] }): JSX.
             <TH>Причина</TH>
             <TH className="text-right">Количество</TH>
             <TH>Статус</TH>
+            <TH>Действие</TH>
           </TR>
         </THead>
         <TBody>
@@ -255,6 +275,18 @@ function MixedReturnTable({ items }: { items: MixedCustomerReturnItem[] }): JSX.
               <TD>
                 <Badge tone="warning">В карантине</Badge>
               </TD>
+              <TD>
+                {actions.canResolve(item) ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={actions.blocked}
+                    onClick={() => actions.onResolve(item)}
+                  >
+                    Принять решение
+                  </Button>
+                ) : null}
+              </TD>
             </TR>
           ))}
         </TBody>
@@ -262,7 +294,13 @@ function MixedReturnTable({ items }: { items: MixedCustomerReturnItem[] }): JSX.
     </div>
   );
 }
-function MixedReturnCards({ items }: { items: MixedCustomerReturnItem[] }): JSX.Element {
+function MixedReturnCards({
+  items,
+  actions,
+}: {
+  items: MixedCustomerReturnItem[];
+  actions: MixedDispositionActions;
+}): JSX.Element {
   return (
     <div className="space-y-3 md:hidden">
       {items.map((item) => (
@@ -297,6 +335,16 @@ function MixedReturnCards({ items }: { items: MixedCustomerReturnItem[] }): JSX.
             <span className="text-foreground-muted">Причина: </span>
             <Reason item={item} />
           </div>
+          {actions.canResolve(item) ? (
+            <Button
+              className="mt-3"
+              variant="secondary"
+              disabled={actions.blocked}
+              onClick={() => actions.onResolve(item)}
+            >
+              Принять решение
+            </Button>
+          ) : null}
         </article>
       ))}
     </div>

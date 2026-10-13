@@ -236,6 +236,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "mixed_customer_return_disposition_status",
     "record_mixed_customer_return_disposition",
     "mixed_customer_return_disposition_history",
     "mixed_disposition_source",
@@ -643,6 +644,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "mixed_customer_return_disposition_status",
     "record_mixed_customer_return_disposition",
     "mixed_customer_return_disposition_history",
     "physical_customer_return_queue",
@@ -1224,6 +1226,7 @@ def _assert_mixed_disposition_function_privileges(rows: list[RowMapping]) -> Non
     for name in (
         "record_mixed_customer_return_disposition",
         "mixed_customer_return_disposition_history",
+        "mixed_customer_return_disposition_status",
     ):
         function = next(row for row in rows if row["proname"] == name)
         assert function["is_security_definer"] is True

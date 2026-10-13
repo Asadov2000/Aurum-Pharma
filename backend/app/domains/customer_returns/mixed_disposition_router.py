@@ -12,6 +12,7 @@ from app.domains.customer_returns.mixed_disposition import MixedDispositionReque
 from app.domains.customer_returns.mixed_disposition_repository import MixedDispositionRepository
 from app.domains.customer_returns.mixed_disposition_schemas import (
     MixedDispositionHistory,
+    MixedDispositionStatus,
     ResolvedMixedDisposition,
 )
 from app.domains.customer_returns.mixed_disposition_service import MixedDispositionService
@@ -29,6 +30,26 @@ def _tenant_id(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise PermissionDeniedError("Tenant context is required")
     return user.tenant_id
+
+
+@router.get("/operations/{decision_operation_id}", response_model=MixedDispositionStatus)
+async def read_mixed_disposition_status(
+    decision_operation_id: UUID,
+    branch_id: Annotated[UUID, Query()],
+    response: Response,
+    user: Annotated[
+        CurrentUser,
+        Depends(require_branch_permission("customer_returns.resolve", policy="resource")),
+    ],
+    service: Annotated[MixedDispositionService, Depends(_service)],
+) -> MixedDispositionStatus:
+    response.headers["Cache-Control"] = "private, no-store"
+    return await service.read_status(
+        tenant_id=_tenant_id(user),
+        branch_id=branch_id,
+        decision_operation_id=decision_operation_id,
+        allowed_branch_ids=user.branch_scope_for("customer_returns.resolve"),
+    )
 
 
 @router.post(

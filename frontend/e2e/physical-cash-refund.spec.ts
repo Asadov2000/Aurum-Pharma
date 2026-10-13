@@ -564,9 +564,13 @@ async function verifyMixedQuarantineQueue(
     await expect(table.getByRole("cell", { name: "1 табл.", exact: true })).toBeVisible();
     if (withoutPayout)
       await expect(table.getByText("Принят без выплаты", { exact: true })).toHaveCount(2);
-    await expect(panel.getByRole("button", { name: "Принять решение", exact: true })).toHaveCount(
-      0,
+    await expect(table.getByRole("button", { name: "Принять решение", exact: true })).toHaveCount(
+      2,
     );
+    for (const button of await table
+      .getByRole("button", { name: "Принять решение", exact: true })
+      .all())
+      await expect(button).toBeEnabled();
     await page.setViewportSize({ width: 390, height: 844 });
     for (const name of [legacyName, physicalName])
       await expect(
