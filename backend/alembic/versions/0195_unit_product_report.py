@@ -175,13 +175,10 @@ def upgrade() -> None:
         FROM totals t LEFT JOIN physical_totals p ON p.catalog_id=t.catalog_id
         WHERE t.quantity<>0 OR t.revenue<>0 OR p.quantities IS NOT NULL
       $$;
-      ALTER FUNCTION public.pos_product_totals_for_report(UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID)
-        OWNER TO aurum_schema_owner;
-      REVOKE ALL ON FUNCTION public.pos_product_totals_for_report(
-        UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID) FROM PUBLIC,aurum_app,aurum_support;
-      GRANT EXECUTE ON FUNCTION public.pos_product_totals_for_report(
-        UUID,TIMESTAMPTZ,TIMESTAMPTZ,UUID) TO aurum_app,aurum_support;
     """)
+    op.execute(f"ALTER FUNCTION {SIGNATURE} OWNER TO aurum_schema_owner")
+    op.execute(f"REVOKE ALL ON FUNCTION {SIGNATURE} FROM PUBLIC,aurum_app,aurum_support")
+    op.execute(f"GRANT EXECUTE ON FUNCTION {SIGNATURE} TO aurum_app,aurum_support")
 
 
 def downgrade() -> None:
