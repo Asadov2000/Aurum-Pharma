@@ -11,6 +11,7 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.inventory.unit_dispensing_v2_retail import UnitPricedCartLineV2
+from app.domains.pos.models import Sale
 from app.domains.pos.physical_cash_checkout_models import PhysicalCashCheckout
 from app.domains.pos.physical_cash_checkout_repository import PhysicalCashCheckoutRepository
 from app.domains.pos.physical_documents import (
@@ -36,6 +37,24 @@ class PhysicalCashCheckoutService:
     def __init__(self, repository: PhysicalCashCheckoutRepository) -> None:
         self.repository = repository
 
+    async def _lock_real_sale(
+        self,
+        tenant_id: UUID,
+        sale_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID],
+    ) -> Sale:
+        cart = UnitCartRepository(self.repository.session)
+        sale = await cart.lock_sale(tenant_id, sale_id)
+        if sale is None:
+            raise NotFoundError("Physical checkout sale not found")
+        if sale.branch_id not in allowed_branch_ids or sale.cashier_user_id != actor_id:
+            raise PermissionDeniedError("Physical checkout branch or cashier access denied")
+        await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+        if sale.is_test:
+            raise BusinessRuleError("Physical test sales are not supported yet")
+        return sale
+
     async def save_intent(
         self,
         *,
@@ -49,14 +68,7 @@ class PhysicalCashCheckoutService:
         cart = UnitCartRepository(self.repository.session)
         await cart.assert_actor(tenant_id, actor_id)
         async with self.repository.session.begin_nested():
-            sale = await cart.lock_sale(tenant_id, request.sale_id)
-            if sale is None:
-                raise NotFoundError("Physical checkout sale not found")
-            if sale.branch_id not in allowed_branch_ids or sale.cashier_user_id != actor_id:
-                raise PermissionDeniedError("Physical checkout branch or cashier access denied")
-            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
-            if sale.is_test:
-                raise BusinessRuleError("Physical test sales are not supported yet")
+            await self._lock_real_sale(tenant_id, request.sale_id, actor_id, allowed_branch_ids)
             saved = await UnitCashIntentService(
                 UnitCashIntentRepository(self.repository.session)
             ).save(
@@ -85,14 +97,12 @@ class PhysicalCashCheckoutService:
         cart = UnitCartRepository(self.repository.session)
         await cart.assert_actor(tenant_id, actor_id)
         async with self.repository.session.begin_nested():
-            sale = await cart.lock_sale(tenant_id, request.sale_id)
-            if sale is None:
-                raise NotFoundError("Physical checkout sale not found")
-            if sale.branch_id not in allowed_branch_ids or sale.cashier_user_id != actor_id:
-                raise PermissionDeniedError("Physical checkout branch or cashier access denied")
-            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
-            if sale.is_test:
-                raise BusinessRuleError("Physical test sales are not supported yet")
+            sale = await self._lock_real_sale(
+                tenant_id,
+                request.sale_id,
+                actor_id,
+                allowed_branch_ids,
+            )
             saved = await UnitCashIntentService(
                 UnitCashIntentRepository(self.repository.session)
             ).read_saved(
