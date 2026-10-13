@@ -379,7 +379,8 @@ async def test_cost_permission_is_evaluated_separately_for_each_visible_branch(
             branch = await FoundationService(FoundationRepository(support)).create_branch(
                 tenant_id=context.stock.tenant_id, fields={"name": "Other stock branch"}
             )
-    other_stock = replace(context.stock, branch_id=branch.id)
+            branch_id = branch.id
+    other_stock = replace(context.stock, branch_id=branch_id)
     reader = await seed_receiving_actor(
         db_engine,
         maintenance_engine,
@@ -405,7 +406,7 @@ async def test_cost_permission_is_evaluated_separately_for_each_visible_branch(
                 {
                     "reader": reader,
                     "tenant": context.stock.tenant_id,
-                    "branch": branch.id,
+                    "branch": branch_id,
                     "main": context.stock.branch_id,
                     "other": other_reader,
                 },
