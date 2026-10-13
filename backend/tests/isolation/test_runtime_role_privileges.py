@@ -157,6 +157,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "physical_customer_return_disposition",
     "mixed_customer_return_disposition",
     "billing_cash_document",
     "auth_identity_code",
@@ -236,6 +237,13 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "physical_customer_return_disposition_status",
+    "record_physical_customer_return_disposition",
+    "physical_customer_return_disposition_history",
+    "physical_disposition_source",
+    "physical_disposition_fingerprint",
+    "physical_disposition_prepare",
+    "trg_physical_disposition_guard",
     "pos_stock_on_date_for_report",
     "pos_product_totals_for_report",
     "mixed_customer_return_disposition_status",
@@ -646,6 +654,9 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "physical_customer_return_disposition_status",
+    "record_physical_customer_return_disposition",
+    "physical_customer_return_disposition_history",
     "pos_stock_on_date_for_report",
     "pos_product_totals_for_report",
     "mixed_customer_return_disposition_status",
@@ -1238,10 +1249,39 @@ def _assert_mixed_disposition_function_privileges(rows: list[RowMapping]) -> Non
         assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
 
 
+def _assert_physical_disposition_function_privileges(rows: list[RowMapping]) -> None:
+    private_names = {
+        "physical_disposition_source",
+        "physical_disposition_fingerprint",
+        "physical_disposition_prepare",
+        "trg_physical_disposition_guard",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in private_names}
+    assert set(functions) == private_names
+    for name, function in functions.items():
+        assert not function["app_can_execute"]
+        assert not function["support_can_execute"]
+        assert not function["public_can_execute"]
+        assert function["is_security_definer"] == (
+            name in {"physical_disposition_source", "physical_disposition_prepare"}
+        )
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "record_physical_customer_return_disposition",
+        "physical_customer_return_disposition_history",
+        "physical_customer_return_disposition_status",
+    ):
+        function = next(row for row in rows if row["proname"] == name)
+        assert function["is_security_definer"] is True
+        assert function["support_can_execute"] is False
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
 def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     _assert_unit_stock_function_privileges(rows)
     _assert_incoming_packaging_function_privileges(rows)
     _assert_mixed_disposition_function_privileges(rows)
+    _assert_physical_disposition_function_privileges(rows)
     return_names = {
         "trg_mixed_cash_refund_guard",
         "trg_mixed_zero_return_guard",
@@ -1442,7 +1482,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
-                      'mixed_customer_return_disposition',
+                      'mixed_customer_return_disposition','physical_customer_return_disposition',
                       'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
@@ -1452,6 +1492,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "physical_customer_return_disposition",
         "mixed_customer_return_disposition",
         "pos_mixed_cash_refund",
         "pos_mixed_zero_return",
@@ -1480,13 +1521,17 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
         assert row["grantable"] is False
         if row["granted"]:
             journal_actual[(row["rolname"], row["relname"])].add(row["privilege"])
+    wrapper_only_tables = {
+        "mixed_customer_return_disposition",
+        "physical_customer_return_disposition",
+    }
     assert journal_actual == {
         (role, table): (
             {"SELECT"}
             if role == "aurum_support"
             else (
                 {"SELECT", "INSERT"}
-                if role == "aurum_app" and table != "mixed_customer_return_disposition"
+                if role == "aurum_app" and table not in wrapper_only_tables
                 else set()
             )
         )

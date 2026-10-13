@@ -69,9 +69,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "pos_mixed_cash_refund",
             "pos_mixed_zero_return",
             "mixed_customer_return_disposition",
+            "physical_customer_return_disposition",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188/0189/0190/0191/0193.
+        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188/0189/0190/0191/0193/0198.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -90,7 +91,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.pos_physical_zero_return, public.pos_mixed_checkout,
               public.pos_mixed_return_command, public.pos_mixed_return_line,
               public.pos_mixed_return_slice, public.pos_mixed_cash_refund,
-              public.pos_mixed_zero_return, public.mixed_customer_return_disposition
+              public.pos_mixed_zero_return, public.mixed_customer_return_disposition,
+              public.physical_customer_return_disposition
               IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
@@ -123,7 +125,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_return_slice'::regclass,
               'public.pos_mixed_cash_refund'::regclass,
               'public.pos_mixed_zero_return'::regclass,
-              'public.mixed_customer_return_disposition'::regclass)
+              'public.mixed_customer_return_disposition'::regclass,
+              'public.physical_customer_return_disposition'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -154,7 +157,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_return_slice'::regclass,
               'public.pos_mixed_cash_refund'::regclass,
               'public.pos_mixed_zero_return'::regclass,
-              'public.mixed_customer_return_disposition'::regclass)
+              'public.mixed_customer_return_disposition'::regclass,
+              'public.physical_customer_return_disposition'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -185,7 +189,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_return_slice'::regclass,
               'public.pos_mixed_cash_refund'::regclass,
               'public.pos_mixed_zero_return'::regclass,
-              'public.mixed_customer_return_disposition'::regclass)
+              'public.mixed_customer_return_disposition'::regclass,
+              'public.physical_customer_return_disposition'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()
