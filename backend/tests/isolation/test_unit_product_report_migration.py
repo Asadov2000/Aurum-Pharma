@@ -142,8 +142,16 @@ async def test_projection_fails_closed_under_real_app_identity(
     maintenance_engine: AsyncEngine,
     denial: str,
 ) -> None:
-    source = await mixed_source(db_session, fractional_legacy=True)
     context = runtime(db_session)
+    # Seed access before checkout holds the tenant's transaction lock.
+    limited_actor = (
+        await seed_receiving_actor(
+            db_engine, maintenance_engine, context.stock, permissions=("pos.sell",)
+        )
+        if denial == "permission"
+        else None
+    )
+    source = await mixed_source(db_session, fractional_legacy=True)
     now = datetime.now(UTC)
     params = {
         "tenant": source.original.tenant_id,
@@ -168,10 +176,8 @@ async def test_projection_fails_closed_under_real_app_identity(
     elif denial == "missing_actor":
         await db_session.execute(text("SELECT set_config('app.user_id','',true)"))
     elif denial == "permission":
-        actor = await seed_receiving_actor(
-            db_engine, maintenance_engine, context.stock, permissions=("pos.sell",)
-        )
-        await set_receiving_context(db_session, context.stock, actor)
+        assert limited_actor is not None
+        await set_receiving_context(db_session, context.stock, limited_actor)
     elif denial == "empty_range":
         params["end"] = params["start"]
     else:
