@@ -55,6 +55,12 @@ async def report_day(session: AsyncSession) -> date:
     return result
 
 
+def checkout_gross(result: MixedCheckoutResultV4 | PhysicalCheckoutResultV3) -> Decimal:
+    # Fixtures use different pack prices. Reconcile against the posted retail
+    # amounts, independently of the report's net-plus-discount calculation.
+    return sum((line.gross_amount for line in result.lines), Decimal("0.00"))
+
+
 async def reconciled_reports(
     session: AsyncSession,
     shift_id: UUID,
@@ -117,10 +123,11 @@ async def test_unit_sale_and_partial_then_full_refund_reconcile_every_report(
 ) -> None:
     first: MixedCashRefundResultV4 | PhysicalCashRefundResultV3
     second: MixedCashRefundResultV4 | PhysicalCashRefundResultV3
+    original: MixedCheckoutResultV4 | PhysicalCheckoutResultV3
     if kind == "mixed":
         source = await mixed_source(db_session, fractional_legacy=True)
         original = source.original
-        gross, discount = Decimal("50.08"), Decimal("0.08")
+        discount = Decimal("0.08")
         first = await refund_mixed(
             db_session,
             source,
@@ -142,12 +149,13 @@ async def test_unit_sale_and_partial_then_full_refund_reconcile_every_report(
             quantity=2,
             discount=Decimal("3.01"),
         )
-        posted = await complete(db_session, await saved_request(db_session, physical.sale))
-        gross, discount = Decimal("50.00"), Decimal("3.01")
-        original_id, shift_id = posted.sale_id, posted.shift_id
+        original = await complete(db_session, await saved_request(db_session, physical.sale))
+        discount = Decimal("3.01")
+        original_id, shift_id = original.sale_id, original.shift_id
         first = await refund_physical(db_session, original_id, item.id, shift_id)
         partial_discount = first.receipt.lines[0].discount_amount
 
+    gross = checkout_gross(original)
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     original_row = await db_session.scalar(
         text("SELECT to_jsonb(sale) FROM sale WHERE id=:id"), {"id": original_id}
@@ -225,7 +233,7 @@ async def test_report_only_actor_reads_mixed_discounts_without_private_journal_a
         summary = await client.get("/api/v1/reports/sales-summary", params=params)
         assert summary.status_code == 200
         assert Decimal(summary.json()["total_discounts"]) == Decimal("0.08")
-        assert Decimal(summary.json()["gross_sales"]) == Decimal("50.08")
+        assert Decimal(summary.json()["gross_sales"]) == checkout_gross(source.original)
         z = await client.get(f"/api/v1/shifts/{source.original.shift_id}/z-report")
         assert z.status_code == 200
         assert Decimal(z.json()["totals"]["discounts_total"]) == Decimal("0.08")
@@ -448,12 +456,13 @@ async def test_next_day_refund_keeps_original_day_and_shift_discounts(
         refund = await refund_mixed(
             db_session, mixed, mixed.selections("0.001", 60), shift_id=new_shift.id
         )
-        gross, discount = Decimal("50.02"), Decimal("3.02")
+        discount = Decimal("3.02")
     else:
         refund = await refund_physical(
             db_session, original.sale_id, item.id, new_shift.id, quantity=60
         )
-        gross, discount = Decimal("50.00"), Decimal("3.01")
+        discount = Decimal("3.01")
+    gross = checkout_gross(original)
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     before = await (mixed_facts(db_session) if kind == "mixed" else physical_facts(db_session))
     # Reports use the pharmacy's day; derive it with PostgreSQL, as the report does.
