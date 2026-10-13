@@ -41,6 +41,7 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.stock_on_date_repository import StockQuerySnapshot, read_stock_snapshot
 from app.domains.pos.unit_cart_models import UnitCartItem
 
 
@@ -1857,146 +1858,44 @@ class POSRepository:
         self,
         *,
         tenant_id: UUID,
-        on_date: Any,
+        on_date: date,
         branch_id: UUID | None,
         tz: str = "Asia/Dushanbe",
         query: str | None = None,
         expires_before: date | None = None,
-    ) -> list[dict[str, Any]]:
-        """Per-batch stock as of `on_date`, summed from the batch_movement
-        ledger (Σ qty_delta for movements dated ≤ on_date). The ledger is the
-        source of truth (the trigger keeps batch.qty_remaining == Σ qty_delta),
-        so this is a faithful historical reconstruction, not just 'today'. Only
-        batches with a positive balance on the date are returned. The movement
-        date is taken in the tenant timezone `tz`."""
-        # "as of end of on_date" = movements strictly before the start of the
-        # next local day → sargable on batch_movement(created_at).
-        _, on_end = local_day_range(on_date, tz)
-        clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {"tid": str(tenant_id), "on_end": on_end}
-        if branch_id is not None:
-            clauses.append("b.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        if query:
-            clauses.append(
-                "(tc.brand_name ILIKE :search OR tc.inn ILIKE :search "
-                "OR b.batch_number ILIKE :search)"
-            )
-            params["search"] = f"%{query.strip()}%"
-        if expires_before is not None:
-            clauses.append("b.expires_at <= :expires_before")
-            params["expires_before"] = expires_before
-        where = " AND ".join(clauses)
-
-        sql = text(f"""
-            SELECT
-              tc.brand_name AS name,
-              tc.inn AS inn,
-              br.name AS branch_name,
-              b.batch_number, b.expires_at, b.purchase_price, b.currency,
-              SUM(bm.qty_delta) AS qty
-            FROM batch b
-            JOIN batch_movement bm
-              ON bm.batch_id = b.id AND bm.created_at < :on_end
-            LEFT JOIN tenant_catalog tc
-              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
-            LEFT JOIN branch br
-              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
-            WHERE {where}
-            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
-                     b.batch_number, b.expires_at, b.purchase_price, b.currency
-            HAVING SUM(bm.qty_delta) > 0
-            ORDER BY tc.brand_name NULLS LAST, b.expires_at
-            """)
-        return [dict(r) for r in (await self.session.execute(sql, params)).mappings().all()]
+    ) -> StockQuerySnapshot:
+        return await read_stock_snapshot(
+            self.session,
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            tz=tz,
+            query=query,
+            expires_before=expires_before,
+        )
 
     async def stock_on_date_overview(
         self,
         *,
         tenant_id: UUID,
-        on_date: Any,
+        on_date: date,
         branch_id: UUID | None,
         query: str | None,
-        expires_before: Any | None,
+        expires_before: date | None,
         page: int,
         page_size: int,
         tz: str = "Asia/Dushanbe",
-    ) -> tuple[list[dict[str, Any]], int, Decimal, Decimal]:
-        """Filtered page and totals for the screen stock report."""
-        _, on_end = local_day_range(on_date, tz)
-        clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {
-            "tid": str(tenant_id),
-            "on_end": on_end,
-            "limit": page_size,
-            "offset": (page - 1) * page_size,
-        }
-        if branch_id is not None:
-            clauses.append("b.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        where = " AND ".join(clauses)
-
-        filtered_clauses = ["qty > 0"]
-        if query:
-            filtered_clauses.append(
-                "(name ILIKE :search OR inn ILIKE :search OR batch_number ILIKE :search)"
-            )
-            params["search"] = f"%{query.strip()}%"
-        if expires_before is not None:
-            filtered_clauses.append("expires_at <= :expires_before")
-            params["expires_before"] = expires_before
-        filtered_where = " AND ".join(filtered_clauses)
-
-        balances_sql = f"""
-            SELECT
-              b.id,
-              tc.brand_name AS name,
-              tc.inn AS inn,
-              br.name AS branch_name,
-              b.batch_number,
-              b.expires_at,
-              b.purchase_price,
-              b.currency,
-              SUM(bm.qty_delta) AS qty
-            FROM batch b
-            JOIN batch_movement bm
-              ON bm.batch_id = b.id AND bm.created_at < :on_end
-            LEFT JOIN tenant_catalog tc
-              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
-            LEFT JOIN branch br
-              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
-            WHERE {where}
-            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
-                     b.batch_number, b.expires_at, b.purchase_price, b.currency
-        """
-        summary_sql = text(f"""
-            WITH balances AS ({balances_sql})
-            SELECT
-              COUNT(*) AS total,
-              COALESCE(SUM(qty), 0) AS total_qty,
-              COALESCE(SUM(ROUND(qty * purchase_price, 2)), 0) AS total_value
-            FROM balances
-            WHERE {filtered_where}
-        """)
-        summary = (await self.session.execute(summary_sql, params)).mappings().one()
-
-        page_sql = text(f"""
-            WITH balances AS ({balances_sql})
-            SELECT name, inn, branch_name, batch_number, expires_at,
-                   purchase_price, currency, qty
-            FROM balances
-            WHERE {filtered_where}
-            ORDER BY name NULLS LAST, expires_at, id
-            LIMIT :limit OFFSET :offset
-        """)
-        rows = [
-            dict(row) for row in (await self.session.execute(page_sql, params)).mappings().all()
-        ]
-        return (
-            rows,
-            int(summary["total"]),
-            Decimal(str(summary["total_qty"])),
-            Decimal(str(summary["total_value"])),
+    ) -> StockQuerySnapshot:
+        return await read_stock_snapshot(
+            self.session,
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            tz=tz,
+            query=query,
+            expires_before=expires_before,
+            page=page,
+            page_size=page_size,
         )
 
     async def top_products(

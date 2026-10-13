@@ -18,9 +18,10 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -3154,7 +3155,7 @@ class POSService:
         query: str | None = None,
         expires_within_days: int | None = None,
     ) -> StockOnDateData:
-        raw = await self.repo.stock_on_date(
+        snapshot = await self.repo.stock_on_date(
             tenant_id=tenant_id,
             on_date=on_date,
             branch_id=branch_id,
@@ -3166,48 +3167,25 @@ class POSService:
                 else None
             ),
         )
-        foundation = FoundationRepository(self.repo.session)
-
+        branch_name: str | None = None
         if branch_id is not None:
-            branch = await foundation.get_branch(branch_id)
+            branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
-            show_branch_column = False
-        else:
-            branch_name = None
-            show_branch_column = True
-
-        rows: list[StockRow] = []
-        total_qty = Decimal("0")
-        total_value = Decimal("0")
-        currency = "TJS"
-        for r in raw:
-            currency = r["currency"] or currency
-            qty = Decimal(str(r["qty"]))
-            purchase_price = Decimal(str(r["purchase_price"]))
-            value = (qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            total_qty += qty
-            total_value += value
-            rows.append(
-                StockRow(
-                    name=r["name"] or "—",
-                    inn=r["inn"],
-                    branch_name=r["branch_name"],
-                    batch_number=r["batch_number"],
-                    expires_at=r["expires_at"],
-                    qty=qty,
-                    purchase_price=purchase_price,
-                    value=value,
-                )
-            )
-
         return StockOnDateData(
             on_date=on_date,
             branch_name=branch_name,
-            show_branch_column=show_branch_column,
-            currency=currency,
-            rows=rows,
-            total_qty=total_qty,
-            total_value=total_value,
+            show_branch_column=branch_id is None,
+            currency=snapshot.rows[0].currency if snapshot.rows else "TJS",
+            rows=[StockRow.model_validate(asdict(row)) for row in snapshot.rows],
+            total_qty=snapshot.total_qty,
+            total_value=snapshot.total_value,
+            known_total_value=snapshot.known_total_value,
+            cost_status=TypeAdapter[Literal["known", "partial", "hidden"]](
+                Literal["known", "partial", "hidden"]
+            ).validate_python(snapshot.cost_status),
+            physical_quantities=TypeAdapter[list[TopProductPhysicalQuantity]](
+                list[TopProductPhysicalQuantity]
+            ).validate_python(snapshot.physical_quantities),
         )
 
     async def get_stock_on_date_xlsx(
@@ -3246,7 +3224,7 @@ class POSService:
             if expires_within_days is not None
             else None
         )
-        raw, total, total_qty, total_value = await self.repo.stock_on_date_overview(
+        snapshot = await self.repo.stock_on_date_overview(
             tenant_id=tenant_id,
             on_date=on_date,
             branch_id=branch_id,
@@ -3260,33 +3238,23 @@ class POSService:
         if branch_id is not None:
             branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
-        currency = str(raw[0]["currency"]) if raw else "TJS"
-        rows: list[StockRow] = []
-        for row in raw:
-            qty = Decimal(str(row["qty"]))
-            purchase_price = Decimal(str(row["purchase_price"]))
-            rows.append(
-                StockRow(
-                    name=row["name"] or "—",
-                    inn=row["inn"],
-                    branch_name=row["branch_name"],
-                    batch_number=row["batch_number"],
-                    expires_at=row["expires_at"],
-                    qty=qty,
-                    purchase_price=purchase_price,
-                    value=(qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-                )
-            )
         return StockOnDateOverview(
             on_date=on_date,
             branch_name=branch_name,
-            currency=currency,
-            rows=rows,
-            total=total,
+            currency=snapshot.rows[0].currency if snapshot.rows else "TJS",
+            rows=[StockRow.model_validate(asdict(row)) for row in snapshot.rows],
+            total=snapshot.total,
             page=page,
             page_size=page_size,
-            total_qty=total_qty,
-            total_value=total_value.quantize(Decimal("0.01")),
+            total_qty=snapshot.total_qty,
+            total_value=snapshot.total_value,
+            known_total_value=snapshot.known_total_value,
+            cost_status=TypeAdapter[Literal["known", "partial", "hidden"]](
+                Literal["known", "partial", "hidden"]
+            ).validate_python(snapshot.cost_status),
+            physical_quantities=TypeAdapter[list[TopProductPhysicalQuantity]](
+                list[TopProductPhysicalQuantity]
+            ).validate_python(snapshot.physical_quantities),
         )
 
     @staticmethod

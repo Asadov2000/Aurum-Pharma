@@ -80,6 +80,14 @@ async def test_top_products_uses_net_quantity_and_revenue(
 
 async def test_stock_overview_filters_and_paginates(db_session: AsyncSession, pos_scaffold) -> None:
     scaffold = await pos_scaffold(batch_qty=Decimal("12"))
+    reader = await create_test_platform_user(db_session, access_kind="developer")
+    await db_session.execute(
+        text(
+            "SELECT set_config('app.user_id',:actor,true),"
+            "set_config('app.tenant_id',:tenant,true)"
+        ),
+        {"actor": str(reader.id), "tenant": str(scaffold["tenant"].id)},
+    )
     scaffold["item"].brand_name = "Парацетамол тестовый"
     today = await _local_today(db_session)
     scaffold["batch"].expires_at = today

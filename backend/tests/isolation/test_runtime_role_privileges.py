@@ -236,6 +236,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "pos_stock_on_date_for_report",
     "pos_product_totals_for_report",
     "mixed_customer_return_disposition_status",
     "record_mixed_customer_return_disposition",
@@ -645,6 +646,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "pos_stock_on_date_for_report",
     "pos_product_totals_for_report",
     "mixed_customer_return_disposition_status",
     "record_mixed_customer_return_disposition",

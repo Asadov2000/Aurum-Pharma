@@ -230,3 +230,22 @@ async def test_legacy_cost_remains_unknown_without_backfill_or_replay_recalculat
     await set_receiving_context(db_session, source.incoming.stock, source.incoming.actor_id)
     with pytest.raises(BusinessRuleError, match="unknown"):
         await costs(db_session, source, result.command_id)
+    # The public stock report must retain this genuine pre-0177 unknown cost
+    # rather than replacing it with zero or today's catalog/purchase price.
+    reported = (
+        await db_session.execute(
+            text("""
+                SELECT cost_status,value,physical_stock
+                FROM public.pos_stock_on_date_for_report(
+                  :tenant,clock_timestamp()+interval '1 second',:branch)
+                WHERE stock_id=:lot
+            """),
+            {
+                "tenant": source.incoming.stock.tenant_id,
+                "branch": source.incoming.stock.branch_id,
+                "lot": source.lot_id,
+            },
+        )
+    ).one()
+    assert reported.cost_status == "unknown" and reported.value is None
+    assert reported.physical_stock["base_units"] == "23"

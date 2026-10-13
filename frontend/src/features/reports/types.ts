@@ -110,14 +110,29 @@ export interface TopProductsParams extends SalesSummaryParams {
 }
 
 export interface StockOnDateRow {
+  stock_id?: string | null;
+  inventory_kind?: "legacy" | "physical";
   name: string;
   inn: string | null;
   branch_name: string | null;
   batch_number: string | null;
   expires_at: string | null;
   qty: string;
-  purchase_price: string;
-  value: string;
+  physical_stock?: {
+    packaging: {
+      version: 2;
+      unit: DispenseUnit;
+      units_per_pack: number;
+      units_per_blister: number | null;
+      dispense_step: number;
+    };
+    closed_packs: string;
+    opened_units: string;
+    base_units: string;
+  } | null;
+  cost_status?: "known" | "unknown" | "hidden";
+  purchase_price: string | null;
+  value: string | null;
 }
 
 export interface StockOnDateOverview {
@@ -129,7 +144,10 @@ export interface StockOnDateOverview {
   page: number;
   page_size: number;
   total_qty: string;
-  total_value: string;
+  physical_quantities?: { unit: DispenseUnit; quantity: string }[];
+  cost_status?: "known" | "partial" | "hidden";
+  known_total_value?: string | null;
+  total_value: string | null;
 }
 
 export interface StockOnDateParams {

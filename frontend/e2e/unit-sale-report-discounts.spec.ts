@@ -1,7 +1,13 @@
 import { request, test, type APIRequestContext, type Page, type Response } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { inflateRawSync } from "node:zlib";
 
-import { type SalesSummaryOverview, type TopProductsOverview } from "../src/features/reports/types";
+import { type MeResponse } from "../src/features/auth/types";
+import {
+  type SalesSummaryOverview,
+  type StockOnDateOverview,
+  type TopProductsOverview,
+} from "../src/features/reports/types";
 
 import {
   apiContext,
@@ -291,6 +297,234 @@ async function verifyTopProducts(
   await expect(physicalRow).not.toContainText("уп.");
 }
 
+function assertStockOnDate(
+  report: StockOnDateOverview,
+  fixture: ReportFixture,
+  canViewCosts: boolean,
+  physicalOnly: boolean,
+): void {
+  const hasLegacy = Boolean(fixture.legacy) && !physicalOnly;
+  expect(report.rows).toHaveLength(hasLegacy ? 2 : 1);
+  expect(report.total).toBe(hasLegacy ? 2 : 1);
+  expect(report.total_qty).toMatch(hasLegacy ? /^3(?:\.0+)?$/ : /^0(?:\.0+)?$/);
+  expect(report.physical_quantities).toEqual([{ unit: "tablet", quantity: "60" }]);
+  expect(report.cost_status).toBe(canViewCosts ? "known" : "hidden");
+  expect(report.total_value).toBe(canViewCosts ? (hasLegacy ? "30.00" : "15.00") : null);
+  expect(report.known_total_value).toBe(canViewCosts ? (hasLegacy ? "30.00" : "15.00") : null);
+  const physical = report.rows.find((row) => row.inventory_kind === "physical");
+  expect(physical).toMatchObject({
+    name: fixture.physical.brand_name,
+    physical_stock: {
+      packaging: { version: 2, unit: "tablet", units_per_pack: 20 },
+      closed_packs: "3",
+      opened_units: "0",
+      base_units: "60",
+    },
+    cost_status: canViewCosts ? "known" : "hidden",
+    value: canViewCosts ? "15.00" : null,
+    purchase_price: canViewCosts ? "5.00" : null,
+  });
+  expect(physical?.stock_id).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(physical?.qty).toMatch(/^0(?:\.0+)?$/);
+  if (hasLegacy) {
+    const legacy = report.rows.find((row) => row.inventory_kind === "legacy");
+    expect(legacy).toMatchObject({
+      name: fixture.legacy?.brand_name,
+      physical_stock: null,
+      cost_status: canViewCosts ? "known" : "hidden",
+      value: canViewCosts ? "15.00" : null,
+    });
+    expect(legacy?.qty).toMatch(/^3(?:\.0+)?$/);
+  }
+}
+
+// Read the real ZIP32 workbook using Node's built-in decompressor; no XLSX dependency.
+function workbookXml(bytes: Buffer): { sheet: string; strings?: string } {
+  const files = new Map<string, string>();
+  let end = bytes.length - 22;
+  while (end >= Math.max(0, bytes.length - 65_557) && bytes.readUInt32LE(end) !== 0x06054b50) end--;
+  if (end < 0 || bytes.readUInt32LE(end) !== 0x06054b50) throw new Error("XLSX ZIP footer missing");
+  let offset = bytes.readUInt32LE(end + 16);
+  const count = bytes.readUInt16LE(end + 10);
+  for (let index = 0; index < count; index++) {
+    expect(bytes.readUInt32LE(offset)).toBe(0x02014b50);
+    const method = bytes.readUInt16LE(offset + 10);
+    const size = bytes.readUInt32LE(offset + 20);
+    const nameLength = bytes.readUInt16LE(offset + 28);
+    const extraLength = bytes.readUInt16LE(offset + 30);
+    const commentLength = bytes.readUInt16LE(offset + 32);
+    const local = bytes.readUInt32LE(offset + 42);
+    const name = bytes.subarray(offset + 46, offset + 46 + nameLength).toString();
+    if (name === "xl/worksheets/sheet1.xml" || name === "xl/sharedStrings.xml") {
+      expect(bytes.readUInt32LE(local)).toBe(0x04034b50);
+      const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28);
+      const compressed = bytes.subarray(start, start + size);
+      if (method !== 0 && method !== 8) throw new Error("Unsupported XLSX ZIP compression");
+      files.set(name, (method === 8 ? inflateRawSync(compressed) : compressed).toString());
+    }
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  const sheet = files.get("xl/worksheets/sheet1.xml");
+  if (!sheet) throw new Error("XLSX worksheet missing");
+  return { sheet, strings: files.get("xl/sharedStrings.xml") };
+}
+
+async function assertStockWorkbook(
+  page: Page,
+  bytes: Buffer,
+  fixture: ReportFixture,
+  canViewCosts: boolean,
+  physicalOnly: boolean,
+): Promise<void> {
+  const rows = await page.evaluate(({ sheet, strings }) => {
+    const parser = new DOMParser();
+    const shared = strings
+      ? Array.from(
+          parser.parseFromString(strings, "application/xml").getElementsByTagName("si"),
+        ).map((item) => item.textContent ?? "")
+      : [];
+    return Array.from(
+      parser.parseFromString(sheet, "application/xml").getElementsByTagName("row"),
+    ).map((row) => {
+      const values: string[] = [];
+      for (const cell of row.getElementsByTagName("c")) {
+        const letters = cell.getAttribute("r")?.match(/^[A-Z]+/)?.[0] ?? "A";
+        const column =
+          Array.from(letters).reduce((sum, letter) => sum * 26 + letter.charCodeAt(0) - 64, 0) - 1;
+        const value = cell.getElementsByTagName("v")[0]?.textContent ?? "";
+        values[column] =
+          cell.getAttribute("t") === "inlineStr"
+            ? (cell.getElementsByTagName("is")[0]?.textContent ?? "")
+            : cell.getAttribute("t") === "s"
+              ? (shared[Number(value)] ?? "")
+              : value;
+      }
+      return values;
+    });
+  }, workbookXml(bytes));
+  const headerIndex = rows.findIndex((row) => row.includes("Наименование"));
+  const headers = rows[headerIndex];
+  if (!headers) throw new Error("Stock workbook headers missing");
+  const totalIndex = rows.findIndex((row) => row[0] === "ИТОГО");
+  expect(totalIndex).toBeGreaterThan(headerIndex);
+  const dataRows = rows.slice(headerIndex + 1, totalIndex);
+  expect(dataRows).toHaveLength(fixture.legacy && !physicalOnly ? 2 : 1);
+  const physical = dataRows.find((row) => row[0] === fixture.physical.brand_name);
+  if (!physical) throw new Error("Physical workbook row missing");
+  for (const [column, value] of [
+    ["Учёт", "Физический"],
+    ["Единица", "табл."],
+    ["Закрытых пачек", "3"],
+    ["Единиц во вскрытых пачках", "0"],
+    ["Базовых единиц", "60"],
+    ["Статус стоимости", canViewCosts ? "Известна" : "Скрыто"],
+    ["Стоимость", canViewCosts ? "15" : "Скрыто"],
+    ["Кол-во", "—"],
+  ] as const)
+    expect(physical[headers.indexOf(column)]).toBe(value);
+  if (fixture.legacy && !physicalOnly) {
+    const legacy = dataRows.find((row) => row[0] === fixture.legacy?.brand_name);
+    expect(legacy?.[headers.indexOf("Учёт")]).toBe("Обычные упаковки");
+    expect(legacy?.[headers.indexOf("Кол-во")]).toBe("3");
+    expect(legacy?.[headers.indexOf("Стоимость")]).toBe(canViewCosts ? "15" : "Скрыто");
+  }
+  const hasLegacy = Boolean(fixture.legacy) && !physicalOnly;
+  expect(rows[totalIndex]?.[headers.indexOf("Кол-во")]).toBe(hasLegacy ? "3" : "0");
+  expect(rows[totalIndex]?.[headers.indexOf("Стоимость")]).toBe(
+    canViewCosts ? (hasLegacy ? "30" : "15") : "Скрыто",
+  );
+  const unitsTotal = rows.find((row) => row[0] === "ФИЗИЧЕСКИЕ ОСТАТКИ: табл.");
+  expect(unitsTotal?.[headers.indexOf("Кол-во")]).toBe("60");
+}
+
+async function verifyStockOnDate(
+  page: Page,
+  api: APIRequestContext,
+  fixture: ReportFixture,
+  date: string,
+): Promise<void> {
+  const meResponse = await api.get("auth/me");
+  expect(meResponse.ok()).toBe(true);
+  const me = (await meResponse.json()) as MeResponse;
+  const costScope = me.permission_scopes?.["batches.view_costs"];
+  const canViewCosts =
+    me.permissions.includes("batches.view_costs") &&
+    (costScope === null || costScope?.includes(fixture.branch.id) === true);
+  const params = { date, branch_id: fixture.branch.id, page: 1, page_size: 25 };
+  for (const physicalOnly of [false, true]) {
+    const response = await api.get("reports/stock-on-date", {
+      params: { ...params, ...(physicalOnly ? { query: fixture.physical.brand_name } : {}) },
+    });
+    expect(response.status()).toBe(200);
+    assertStockOnDate(
+      (await response.json()) as StockOnDateOverview,
+      fixture,
+      canViewCosts,
+      physicalOnly,
+    );
+  }
+  await page.getByRole("tab", { name: /^Остатки/ }).click();
+  const stock = page.getByRole("region", { name: "Остатки и сроки годности" });
+  await stock.getByLabel("Дата остатка", { exact: true }).fill(date);
+  await stock.getByLabel("Аптечная точка", { exact: true }).selectOption(fixture.branch.id);
+  const table = stock.getByRole("table", { name: "Остатки лекарств на выбранную дату" });
+  for (const physicalOnly of [false, true]) {
+    const search = physicalOnly ? fixture.physical.brand_name : "";
+    await stock.getByLabel("Товар, МНН или партия", { exact: true }).fill(search);
+    const reportPromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/v1/reports/stock-on-date" &&
+        url.searchParams.get("date") === date &&
+        url.searchParams.get("branch_id") === fixture.branch.id &&
+        (url.searchParams.get("query") ?? "") === search
+      );
+    });
+    await stock.getByRole("button", { name: "Показать", exact: true }).click();
+    const response = await reportPromise;
+    expect(response.status()).toBe(200);
+    assertStockOnDate(
+      (await response.json()) as StockOnDateOverview,
+      fixture,
+      canViewCosts,
+      physicalOnly,
+    );
+    await expect(table.locator("tbody tr")).toHaveCount(fixture.legacy && !physicalOnly ? 2 : 1);
+    const physical = table.getByRole("row").filter({ hasText: fixture.physical.brand_name });
+    await expect(physical).toContainText("60 табл.");
+    await expect(physical).toContainText("Закрытых упаковок: 3");
+    await expect(physical).toContainText("В открытых упаковках: 0 табл.");
+    await expect(physical).not.toContainText("0 уп.");
+    await expect(physical).toContainText(canViewCosts ? "15,00 TJS" : "Скрыто");
+    const hasLegacy = Boolean(fixture.legacy) && !physicalOnly;
+    const totals = stock.getByRole("region", { name: "Итоги остатков" });
+    await expect(totals.getByText("Обычные упаковки", { exact: true }).locator("..")).toContainText(
+      hasLegacy ? "3 уп." : "0 уп.",
+    );
+    await expect(
+      totals.getByText("Физические единицы", { exact: true }).locator(".."),
+    ).toContainText("60 табл.");
+    await expect(
+      totals.getByText("Закупочная стоимость", { exact: true }).locator(".."),
+    ).toContainText(canViewCosts ? (hasLegacy ? "30,00 TJS" : "15,00 TJS") : "Скрыто");
+    if (fixture.legacy && !physicalOnly) {
+      const legacy = table.getByRole("row").filter({ hasText: fixture.legacy.brand_name });
+      await expect(legacy).toContainText("3 уп.");
+      await expect(legacy).not.toContainText("табл.");
+    }
+    const downloadUrl = await downloadXlsx(
+      page,
+      "/api/v1/reports/stock-on-date.xlsx",
+      `stock-${date}.xlsx`,
+      () => stock.getByRole("button", { name: "Скачать в Excel", exact: true }).click(),
+      async (bytes) => assertStockWorkbook(page, bytes, fixture, canViewCosts, physicalOnly),
+    );
+    expect(downloadUrl.searchParams.get("date")).toBe(date);
+    expect(downloadUrl.searchParams.get("branch_id")).toBe(fixture.branch.id);
+    expect(downloadUrl.searchParams.get("query") ?? "").toBe(search);
+  }
+}
+
 async function refundOneUnit(api: APIRequestContext, scenario: Scenario, sale: CompletedSale) {
   const prefix = `sales/${sale.sale_id}/${scenario.kind}-cash-refunds`;
   const optionsResponse = await api.get(`${prefix}/options`);
@@ -378,6 +612,7 @@ async function downloadXlsx(
   path: string,
   filename: string,
   click: () => Promise<void>,
+  inspect?: (bytes: Buffer) => Promise<void>,
 ) {
   const responsePromise = page.waitForResponse(
     (response) =>
@@ -398,6 +633,7 @@ async function downloadXlsx(
   expect(file).not.toBeNull();
   if (!file) throw new Error("XLSX download file is missing");
   expect(await readFile(file)).toEqual(bytes);
+  await inspect?.(bytes);
   return new URL(response.url());
 }
 
@@ -489,6 +725,12 @@ for (const scenario of cases) {
       expect(summaryUrl.searchParams.get("to")).toBe(to);
 
       await verifyTopProducts(page, api, fixture, from, to);
+      await verifyStockOnDate(
+        page,
+        api,
+        fixture,
+        calendarDay(new Date().toISOString(), settings.report_timezone),
+      );
 
       await page.getByRole("tab", { name: /^Смены/ }).click();
       const history = page.getByRole("region", { name: "Закрытые смены и итоги" });
