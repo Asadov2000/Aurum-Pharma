@@ -1,5 +1,5 @@
 import { hashKey } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -27,7 +27,12 @@ import { useReportBranches } from "./branchScope";
 import { getStockOnDateXlsx } from "./api";
 import { calendarDateInTimeZone, DEFAULT_REPORT_TIME_ZONE } from "./calendar";
 import { useStockOnDateQuery } from "./queries";
-import { type StockOnDateParams } from "./types";
+import {
+  type DispenseUnit,
+  type StockOnDateOverview,
+  type StockOnDateParams,
+  type StockOnDateRow,
+} from "./types";
 
 const filterSchema = z.object({
   date: z.string().min(1, "Укажите дату"),
@@ -38,6 +43,13 @@ const filterSchema = z.object({
 
 type FilterValues = z.infer<typeof filterSchema>;
 const PAGE_SIZE = 25;
+const UNIT_LABELS: Record<DispenseUnit, string> = {
+  tablet: "табл.",
+  capsule: "капс.",
+  ampoule: "амп.",
+  sachet: "саше",
+  suppository: "супп.",
+};
 
 export function StockOnDatePanel({
   reportTimezone = DEFAULT_REPORT_TIME_ZONE,
@@ -284,13 +296,27 @@ export function StockOnDatePanel({
         </div>
       ) : query.data ? (
         <>
-          <div className="grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-3">
+          <div
+            className="grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 lg:grid-flow-col lg:auto-cols-fr"
+            role="region"
+            aria-label="Итоги остатков"
+          >
             <Summary label="Позиций" value={String(query.data.total)} />
-            <Summary label="Упаковок" value={formatQuantity(query.data.total_qty)} />
             <Summary
-              label="Закупочная стоимость"
-              value={formatMoney(query.data.total_value, query.data.currency)}
+              label="Обычные упаковки"
+              value={`${formatQuantity(query.data.total_qty)} уп.`}
             />
+            {Boolean(query.data.physical_quantities?.length) && (
+              <Summary
+                label="Физические единицы"
+                value={query.data.physical_quantities?.map(({ unit, quantity }) => (
+                  <span key={unit} className="block">
+                    {formatWholeQuantity(quantity)} {UNIT_LABELS[unit]}
+                  </span>
+                ))}
+              />
+            )}
+            <StockValueSummary data={query.data} />
           </div>
           {query.data.rows.length === 0 ? (
             <TableEmpty title="Остатков по этим условиям нет">
@@ -311,7 +337,7 @@ export function StockOnDatePanel({
                 <TBody>
                   {query.data.rows.map((row, index) => (
                     <TR
-                      key={`${row.branch_name ?? "all"}-${row.batch_number ?? index}-${row.name}`}
+                      key={`${row.inventory_kind ?? "legacy"}-${row.stock_id ?? `${row.branch_name ?? "all"}-${row.batch_number ?? index}-${row.name}`}`}
                     >
                       <TD>
                         <p className="font-medium text-foreground">{row.name}</p>
@@ -322,9 +348,11 @@ export function StockOnDatePanel({
                       </TD>
                       <TD className="font-mono">{row.batch_number || "Не указан"}</TD>
                       <TD>{row.expires_at ? formatDate(row.expires_at) : "Не указан"}</TD>
-                      <TD className="text-right font-mono">{formatQuantity(row.qty)}</TD>
                       <TD className="text-right font-mono">
-                        {formatMoney(row.value, query.data.currency)}
+                        <StockQuantity row={row} />
+                      </TD>
+                      <TD className="text-right font-mono">
+                        {formatStockValue(row.value, row.cost_status, query.data.currency)}
                       </TD>
                     </TR>
                   ))}
@@ -344,13 +372,67 @@ export function StockOnDatePanel({
   );
 }
 
-function Summary({ label, value }: { label: string; value: string }): JSX.Element {
+function Summary({ label, value }: { label: string; value: ReactNode }): JSX.Element {
   return (
     <div className="border-b border-border px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
       <p className="text-xs text-foreground-muted">{label}</p>
-      <p className="mt-1 font-mono text-lg font-semibold text-foreground">{value}</p>
+      <div className="mt-1 font-mono text-lg font-semibold text-foreground">{value}</div>
     </div>
   );
+}
+
+function StockValueSummary({ data }: { data: StockOnDateOverview }): JSX.Element {
+  if (data.cost_status === "partial") {
+    return (
+      <Summary
+        label="Известная закупочная стоимость"
+        value={
+          <>
+            {formatStockValue(data.known_total_value ?? null, "known", data.currency)}
+            <span className="mt-1 block font-sans text-xs font-normal text-foreground-muted">
+              Стоимость части остатков недоступна или неизвестна
+            </span>
+          </>
+        }
+      />
+    );
+  }
+  return (
+    <Summary
+      label="Закупочная стоимость"
+      value={formatStockValue(data.total_value, data.cost_status, data.currency)}
+    />
+  );
+}
+
+function StockQuantity({ row }: { row: StockOnDateRow }): JSX.Element {
+  if (row.inventory_kind !== "physical") return <>{formatQuantity(row.qty)} уп.</>;
+  const stock = row.physical_stock;
+  if (!stock) return <>Физический остаток не указан</>;
+  const unit = UNIT_LABELS[stock.packaging.unit];
+  return (
+    <div className="space-y-1">
+      <p>
+        {formatWholeQuantity(stock.base_units)} {unit}
+      </p>
+      <p className="text-xs text-foreground-muted">
+        Закрытых упаковок: {formatWholeQuantity(stock.closed_packs)}
+      </p>
+      <p className="text-xs text-foreground-muted">
+        В открытых упаковках: {formatWholeQuantity(stock.opened_units)} {unit}
+      </p>
+    </div>
+  );
+}
+
+function formatStockValue(
+  value: string | null,
+  status: StockOnDateRow["cost_status"],
+  currency: string,
+): string {
+  if (status === "hidden") return "Скрыто";
+  if (status === "unknown" || value === null) return "Нет данных о стоимости";
+  return formatMoney(value, currency);
 }
 
 function toParams(values: FilterValues, page: number): StockOnDateParams {
@@ -371,6 +453,10 @@ function formatDate(value: string): string {
 
 function formatQuantity(value: string): string {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(Number(value));
+}
+
+function formatWholeQuantity(value: string): string {
+  return BigInt(value).toLocaleString("ru-RU");
 }
 
 function formatMoney(value: string, currency: string): string {
