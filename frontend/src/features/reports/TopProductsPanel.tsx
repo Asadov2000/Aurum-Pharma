@@ -24,7 +24,24 @@ import { describeApiError } from "@/features/foundation/errors";
 import { useReportBranches } from "./branchScope";
 import { currentReportMonthRange } from "./calendar";
 import { useTopProductsQuery } from "./queries";
-import { type TopProductsParams } from "./types";
+import { type DispenseUnit, type TopProductRow, type TopProductsParams } from "./types";
+
+const QUANTITY_BASES = [
+  { value: "legacy_pack", label: "Обычные упаковки" },
+  { value: "tablet", label: "Таблетки" },
+  { value: "capsule", label: "Капсулы" },
+  { value: "ampoule", label: "Ампулы" },
+  { value: "sachet", label: "Саше" },
+  { value: "suppository", label: "Суппозитории" },
+] as const;
+
+const UNIT_LABELS: Record<DispenseUnit, string> = {
+  tablet: "табл.",
+  capsule: "капс.",
+  ampoule: "амп.",
+  sachet: "саше",
+  suppository: "супп.",
+};
 
 const filterSchema = z
   .object({
@@ -32,6 +49,14 @@ const filterSchema = z
     to: z.string().min(1, "Укажите конец периода"),
     branch_id: z.string(),
     sort_by: z.enum(["revenue", "quantity"]),
+    quantity_basis: z.enum([
+      "legacy_pack",
+      "tablet",
+      "capsule",
+      "ampoule",
+      "sachet",
+      "suppository",
+    ]),
     limit: z.coerce.number().int().min(5).max(100),
   })
   .refine(({ from, to }) => from <= to, {
@@ -52,6 +77,7 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
       to: range.dateTo,
       branch_id: defaultBranchId,
       sort_by: "revenue",
+      quantity_basis: "legacy_pack",
       limit: 20,
     }),
     [range, defaultBranchId],
@@ -65,6 +91,8 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
     watched.to !== params.to ||
     (watched.branch_id || undefined) !== params.branch_id ||
     watched.sort_by !== params.sort_by ||
+    (watched.sort_by === "quantity" ? watched.quantity_basis : "legacy_pack") !==
+      params.quantity_basis ||
     watched.limit !== params.limit;
 
   const apply = form.handleSubmit((values) => {
@@ -162,7 +190,12 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
               active: watched.sort_by !== defaults.sort_by,
               onClear: () => {
                 form.setValue("sort_by", defaults.sort_by);
-                setParams((current) => ({ ...current, sort_by: defaults.sort_by }));
+                form.setValue("quantity_basis", defaults.quantity_basis);
+                setParams((current) => ({
+                  ...current,
+                  sort_by: defaults.sort_by,
+                  quantity_basis: defaults.quantity_basis,
+                }));
               },
               content: (
                 <div>
@@ -170,6 +203,33 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
                   <Select id="top_products_sort" {...form.register("sort_by")}>
                     <option value="revenue">Выручке</option>
                     <option value="quantity">Количеству</option>
+                  </Select>
+                </div>
+              ),
+            },
+            {
+              id: "quantity_basis",
+              label: "Единица рейтинга",
+              defaultVisible: true,
+              available: watched.sort_by === "quantity",
+              activeLabel: QUANTITY_BASES.find((basis) => basis.value === watched.quantity_basis)
+                ?.label,
+              active:
+                watched.sort_by === "quantity" &&
+                watched.quantity_basis !== defaults.quantity_basis,
+              onClear: () => {
+                form.setValue("quantity_basis", defaults.quantity_basis);
+                setParams((current) => ({ ...current, quantity_basis: defaults.quantity_basis }));
+              },
+              content: (
+                <div>
+                  <Label htmlFor="top_products_quantity_basis">Единица рейтинга</Label>
+                  <Select id="top_products_quantity_basis" {...form.register("quantity_basis")}>
+                    {QUANTITY_BASES.map((basis) => (
+                      <option key={basis.value} value={basis.value}>
+                        {basis.label}
+                      </option>
+                    ))}
                   </Select>
                 </div>
               ),
@@ -247,7 +307,9 @@ export function TopProductsPanel({ reportTimezone }: { reportTimezone: string })
                         "Форма выпуска не указана"}
                     </p>
                   </TD>
-                  <TD className="text-right font-mono">{formatQuantity(row.quantity)}</TD>
+                  <TD className="text-right font-mono">
+                    <ProductQuantities row={row} />
+                  </TD>
                   <TD className="text-right font-mono">{row.receipts_count}</TD>
                   <TD className="text-right font-mono font-semibold">
                     {formatMoney(row.revenue, query.data.currency)}
@@ -286,8 +348,25 @@ function toParams(values: FilterValues): TopProductsParams {
     to: values.to,
     branch_id: values.branch_id || undefined,
     sort_by: values.sort_by,
+    quantity_basis: values.sort_by === "quantity" ? values.quantity_basis : "legacy_pack",
     limit: values.limit,
   };
+}
+
+function ProductQuantities({ row }: { row: TopProductRow }): JSX.Element {
+  const physical = row.physical_quantities ?? [];
+  return (
+    <div className="space-y-1">
+      {(Number(row.quantity) !== 0 || physical.length === 0) && (
+        <p>{formatQuantity(row.quantity)} уп.</p>
+      )}
+      {physical.map(({ unit, quantity }) => (
+        <p key={unit}>
+          {BigInt(quantity).toLocaleString("ru-RU")} {UNIT_LABELS[unit]}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 function formatQuantity(value: string): string {

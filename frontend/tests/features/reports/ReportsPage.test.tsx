@@ -427,6 +427,7 @@ describe("ReportsPage", () => {
     await openReportTab(/^Товары/);
 
     expect(await screen.findByText("Парацетамол 500 мг")).toBeInTheDocument();
+    expect(screen.getByText("14 уп.")).toBeInTheDocument();
     expect(screen.getByText(/Возвраты уже вычтены/)).toBeInTheDocument();
     expect(getTopProducts).toHaveBeenCalledWith(
       expect.objectContaining({ sort_by: "revenue", limit: 20 }),
@@ -474,6 +475,121 @@ describe("ReportsPage", () => {
     const productsTab = screen.getByRole("tab", { name: /^Товары/ });
     expect(productsTab).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("Продаж за выбранный период нет")).toBeInTheDocument();
+  });
+
+  it("shows ordinary packs and signed physical units separately without losing integer precision", async () => {
+    getTopProducts.mockResolvedValue({
+      date_from: "2026-05-01",
+      date_to: "2026-05-23",
+      branch_name: null,
+      currency: "TJS",
+      sort_by: "revenue",
+      quantity_basis: "legacy_pack",
+      rows: [
+        {
+          catalog_id: "catalog-mixed-units",
+          name: "Товар с разными единицами",
+          form: null,
+          dosage: null,
+          pack_size: null,
+          quantity: "14.125",
+          physical_quantities: [
+            { unit: "tablet", quantity: "22" },
+            { unit: "capsule", quantity: "-3" },
+            { unit: "sachet", quantity: "900719925474099312345" },
+          ],
+          revenue: "91.00",
+          receipts_count: 2,
+        },
+        {
+          catalog_id: "catalog-physical-only",
+          name: "Возврат физических единиц",
+          form: null,
+          dosage: null,
+          pack_size: null,
+          quantity: "0.000",
+          physical_quantities: [{ unit: "ampoule", quantity: "-2" }],
+          revenue: "0.00",
+          receipts_count: 0,
+        },
+      ],
+    });
+    renderPage();
+    await openReportTab(/^Товары/);
+    const row = within(await screen.findByRole("row", { name: /Товар с разными единицами/ }));
+    expect(row.getByText("14,125 уп.")).toBeInTheDocument();
+    expect(row.getByText("22 табл.")).toBeInTheDocument();
+    expect(row.getByText("-3 капс.")).toBeInTheDocument();
+    expect(row.getByText(/900\s719\s925\s474\s099\s312\s345 саше/)).toBeInTheDocument();
+    expect(row.getAllByText("91,00 TJS")).toHaveLength(1);
+    const returnRow = within(screen.getByRole("row", { name: /Возврат физических единиц/ }));
+    expect(returnRow.getByText("-2 амп.")).toBeInTheDocument();
+    expect(returnRow.queryByText("0 уп.")).not.toBeInTheDocument();
+  });
+
+  it("applies and clears the quantity basis through the ranking filter", async () => {
+    renderPage();
+    await openReportTab(/^Товары/);
+    await screen.findByText("Продаж за выбранный период нет");
+    expect(screen.queryByLabelText("Единица рейтинга")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    const basis = screen.getByLabelText("Единица рейтинга");
+    expect(
+      within(basis)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Обычные упаковки", "Таблетки", "Капсулы", "Ампулы", "Саше", "Суппозитории"]);
+    fireEvent.change(basis, { target: { value: "capsule" } });
+    expect(getTopProducts).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Условия изменены/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "quantity", quantity_basis: "capsule" }),
+      ),
+    );
+    expect(screen.queryByText(/Условия изменены/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить фильтр «Единица рейтинга»" }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "quantity", quantity_basis: "legacy_pack" }),
+      ),
+    );
+    expect(screen.getByLabelText("Единица рейтинга")).toHaveValue("legacy_pack");
+  });
+
+  it("does not restrict revenue ranking to a previously selected physical unit and resets defaults", async () => {
+    renderPage();
+    await openReportTab(/^Товары/);
+    await screen.findByText("Продаж за выбранный период нет");
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    fireEvent.change(screen.getByLabelText("Единица рейтинга"), { target: { value: "tablet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "quantity", quantity_basis: "tablet" }),
+      ),
+    );
+    const calls = getTopProducts.mock.calls.length;
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "revenue" } });
+    expect(screen.queryByLabelText("Единица рейтинга")).not.toBeInTheDocument();
+    expect(getTopProducts).toHaveBeenCalledTimes(calls);
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await waitFor(() =>
+      expect(getTopProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort_by: "revenue", quantity_basis: "legacy_pack" }),
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    fireEvent.change(screen.getByLabelText("Единица рейтинга"), {
+      target: { value: "suppository" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Сбросить всё/ }));
+    expect(screen.getByLabelText("Рейтинг по")).toHaveValue("revenue");
+    expect(screen.queryByLabelText("Единица рейтинга")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Условия изменены/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Рейтинг по"), { target: { value: "quantity" } });
+    expect(screen.getByLabelText("Единица рейтинга")).toHaveValue("legacy_pack");
   });
 
   it("does not show reports with an unknown timezone after settings fail", async () => {

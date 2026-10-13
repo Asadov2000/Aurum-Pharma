@@ -124,22 +124,22 @@ async def test_close_shift_computes_expected_and_diff(
     audit_rows = (
         (
             await db_session.execute(
-                select(AuditLog)
-                .where(
+                select(AuditLog).where(
                     AuditLog.table_name == "shift",
                     AuditLog.record_id == shift.id,
                 )
-                .order_by(AuditLog.created_at)
             )
         )
         .scalars()
         .all()
     )
-    assert [row.action for row in audit_rows] == ["INSERT", "UPDATE"]
-    assert audit_rows[0].new_values is not None
-    assert audit_rows[0].new_values["opening_cash"] == 50.0
-    assert audit_rows[1].changed_fields is not None
-    assert audit_rows[1].changed_fields["closing_cash_actual"] == 55.0
+    # Audit timestamps share the transaction's now(), so they cannot order these events.
+    assert sorted(row.action for row in audit_rows) == ["INSERT", "UPDATE"]
+    audit_by_action = {row.action: row for row in audit_rows}
+    assert audit_by_action["INSERT"].new_values is not None
+    assert audit_by_action["INSERT"].new_values["opening_cash"] == 50.0
+    assert audit_by_action["UPDATE"].changed_fields is not None
+    assert audit_by_action["UPDATE"].changed_fields["closing_cash_actual"] == 55.0
 
 
 async def test_close_shift_rejects_unfinished_sale_with_items(

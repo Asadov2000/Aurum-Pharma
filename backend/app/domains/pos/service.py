@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 import structlog
+from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
@@ -91,6 +92,7 @@ from app.domains.pos.schemas import (
     POSRefundAttemptPaymentRead,
     POSRefundAttemptRead,
     POSSaleCreateCommandResult,
+    ProductQuantityBasis,
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
@@ -111,6 +113,7 @@ from app.domains.pos.schemas import (
     StockOnDateData,
     StockOnDateOverview,
     StockRow,
+    TopProductPhysicalQuantity,
     TopProductRow,
     TopProductsOverview,
     ZReportData,
@@ -3075,6 +3078,7 @@ class POSService:
         branch_id: UUID | None,
         sort_by: str,
         limit: int,
+        quantity_basis: str = "legacy_pack",
     ) -> TopProductsOverview:
         if date_from > date_to:
             raise BusinessRuleError(
@@ -3088,6 +3092,12 @@ class POSService:
             )
         if sort_by not in {"revenue", "quantity"}:
             raise BusinessRuleError("Unsupported top products sort")
+        try:
+            basis = TypeAdapter[ProductQuantityBasis](ProductQuantityBasis).validate_python(
+                quantity_basis
+            )
+        except PydanticValidationError:
+            raise BusinessRuleError("Unsupported top products quantity basis") from None
 
         raw = await self.repo.top_products(
             tenant_id=tenant_id,
@@ -3096,6 +3106,7 @@ class POSService:
             branch_id=branch_id,
             sort_by=sort_by,
             limit=limit,
+            quantity_basis=basis,
             tz=await self._report_tz(tenant_id),
         )
         branch_name: str | None = None
@@ -3103,23 +3114,30 @@ class POSService:
             branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
 
-        currency = str(raw[0]["currency"]) if raw else "TJS"
+        currency = raw[0].currency if raw else "TJS"
+        physical_quantities = TypeAdapter[list[TopProductPhysicalQuantity]](
+            list[TopProductPhysicalQuantity]
+        )
         return TopProductsOverview(
             date_from=date_from,
             date_to=date_to,
             branch_name=branch_name,
             currency=currency,
             sort_by=sort_by,
+            quantity_basis=basis,
             rows=[
                 TopProductRow(
-                    catalog_id=row["catalog_id"],
-                    name=row["name"] or "Без названия",
-                    form=row["form"],
-                    dosage=row["dosage"],
-                    pack_size=row["pack_size"],
-                    quantity=Decimal(str(row["quantity"])),
-                    revenue=Decimal(str(row["revenue"])).quantize(Decimal("0.01")),
-                    receipts_count=int(row["receipts_count"]),
+                    catalog_id=row.catalog_id,
+                    name=row.name or "Без названия",
+                    form=row.form,
+                    dosage=row.dosage,
+                    pack_size=row.pack_size,
+                    quantity=row.quantity,
+                    physical_quantities=physical_quantities.validate_python(
+                        row.physical_quantities
+                    ),
+                    revenue=row.revenue.quantize(Decimal("0.01")),
+                    receipts_count=row.receipts_count,
                 )
                 for row in raw
             ],
