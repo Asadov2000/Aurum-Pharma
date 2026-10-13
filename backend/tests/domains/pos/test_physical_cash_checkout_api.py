@@ -58,9 +58,7 @@ async def test_training_cash_http_rejects_intent_and_completion_without_effects(
         path = cash_path(sale_id)
         if prior_intent:
             assert (await client.post(f"{path}/intent", json=body)).status_code == 200
-        await db_session.execute(
-            text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
-        )
+        await db_session.execute(text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id})
         before = await facts(db_session)
         assert (await client.post(f"{path}/intent", json=body)).status_code == 422
         assert await facts(db_session) == before

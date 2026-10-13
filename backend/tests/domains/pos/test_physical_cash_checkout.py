@@ -103,9 +103,7 @@ async def test_training_sale_rejects_cash_intent_preparation_and_completion_with
 
     if prior_intent:
         await save_confirmation()
-    await db_session.execute(
-        text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
-    )
+    await db_session.execute(text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id})
     before = await facts(db_session)
     with pytest.raises(BusinessRuleError, match="Physical test sales"):
         await save_confirmation()
@@ -126,9 +124,7 @@ async def test_database_rejects_bound_training_stock_command_before_any_effect(
     await put_physical(db_session, sale_id)
     request = await saved_request(db_session, source.sale)
     context = runtime(db_session)
-    await db_session.execute(
-        text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
-    )
+    await db_session.execute(text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id})
     before = await facts(db_session)
     with pytest.raises(DBAPIError, match="physical_checkout_draft_invalid"):
         async with db_session.begin_nested():
