@@ -108,9 +108,13 @@ async def test_projection_roundtrip_keeps_history_raw_acls_rls_and_other_functio
             migration().upgrade()
         assert connection.execute(tables, {"tables": list(RAW_TABLES)}).all() == before_tables
         assert connection.execute(definitions).all() == before_functions
-        assert tuple(
-            connection.scalar(text(f"SELECT count(*) FROM public.{table}")) for table in RAW_TABLES
-        ) == before_counts
+        assert (
+            tuple(
+                connection.scalar(text(f"SELECT count(*) FROM public.{table}"))
+                for table in RAW_TABLES
+            )
+            == before_counts
+        )
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
