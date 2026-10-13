@@ -84,10 +84,16 @@ vi.mock("@/features/catalog/api", () => ({
   getCatalogItem: calls.catalog,
 }));
 vi.mock("@/features/pos/PrescriptionModal", () => ({
-  PrescriptionModal: (props: { onSaved: (payload: { prescription_number: string }) => void }) => (
-    <button onClick={() => props.onSaved({ prescription_number: "RX-test" })}>
-      Сохранить тестовый рецепт
-    </button>
+  PrescriptionModal: (props: {
+    onSaved: (payload: { prescription_number: string }) => void;
+    onClose: () => void;
+  }) => (
+    <>
+      <button onClick={() => props.onSaved({ prescription_number: "RX-test" })}>
+        Сохранить тестовый рецепт
+      </button>
+      <button onClick={props.onClose}>Закрыть тестовый рецепт</button>
+    </>
   ),
 }));
 vi.mock("@/lib/desktopBridge", () => ({
@@ -757,7 +763,7 @@ describe("SaleArea physical cart integration", () => {
       await expect(panel.beforeStart()).rejects.toThrow("Сначала заполните рецепт");
     });
     expect(calls.prescription).not.toHaveBeenCalled();
-    expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: false }));
+    expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: true }));
     fireEvent.click(await screen.findByRole("button", { name: "Сохранить тестовый рецепт" }));
     await act(async () => {
       panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
@@ -766,6 +772,54 @@ describe("SaleArea physical cart integration", () => {
     expect(calls.prescription).toHaveBeenCalledWith("sale-1", { prescription_number: "RX-test" });
     expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: true }));
   });
+
+  it.each(["physical", "mixed"] as const)(
+    "allows %s OTC payment after cancelling Rx and changing the cart",
+    async (kind) => {
+      const legacyItems = kind === "mixed" ? [legacyItem] : [];
+      calls.sale.mockResolvedValue(sale({ items: legacyItems }));
+      calls.catalog.mockImplementation(async (id: string) => ({
+        id,
+        tenant_id: POS_SCOPE.tenantId,
+        is_active: true,
+        dispensing_type: id === physicalItem.catalog_id ? "prescription" : "otc",
+      }));
+      const { client } = mount();
+      await cashPanelCallbacks();
+      let panel = calls.panel.mock.calls.at(-1)?.[0] as {
+        beforeStart: () => Promise<void>;
+        canPay: boolean;
+      };
+      await act(async () => {
+        await expect(panel.beforeStart()).rejects.toThrow("Сначала заполните рецепт");
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "Закрыть тестовый рецепт" }));
+      calls.sale.mockResolvedValue(
+        sale({
+          items: legacyItems,
+          prepared_cart_items: [{ ...physicalItem, id: "otc-line", catalog_id: "otc-catalog" }],
+        }),
+      );
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: posKeys.sale("sale-1") });
+      });
+      await waitFor(() =>
+        expect(calls.panel).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            items: [expect.objectContaining({ catalog_id: "otc-catalog" })],
+          }),
+        ),
+      );
+      panel = calls.panel.mock.calls.at(-1)?.[0] as typeof panel;
+      expect(panel.canPay).toBe(true);
+      await act(async () => {
+        await expect(panel.beforeStart()).resolves.toBeUndefined();
+      });
+      expect(calls.catalog).toHaveBeenCalledWith("otc-catalog");
+      expect(calls.prescription).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Сохранить тестовый рецепт" })).toBeNull();
+    },
+  );
 
   it.each([
     { is_active: false },

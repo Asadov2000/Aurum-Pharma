@@ -797,7 +797,7 @@ function ActiveWorkspace({
       await addPrescription.mutateAsync({ saleId, payload: prescription });
       if (!sessionIsActive() || saleIdRef.current !== saleId)
         throw new Error("Сессия кассира завершена.");
-    }
+    } else setRequiresRx(false);
   };
 
   const acceptPhysicalCash = useCallback(
@@ -2407,7 +2407,6 @@ function ActiveWorkspace({
                       isDraft &&
                       preparedItems.length > 0 &&
                       sale?.is_test === false &&
-                      (!requiresRx || prescription !== null) &&
                       recordedPayments.length === 0 &&
                       stagedPayments.length === 0 &&
                       !physicalCartBusy &&
