@@ -157,6 +157,9 @@ async def test_unit_sale_and_partial_then_full_refund_reconcile_every_report(
 
     gross = checkout_gross(original)
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    # Validate the first operation, then restore the normal transaction mode:
+    # the next journal inserts its parent before its lines and slices.
+    await db_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
     original_row = await db_session.scalar(
         text("SELECT to_jsonb(sale) FROM sale WHERE id=:id"), {"id": original_id}
     )
