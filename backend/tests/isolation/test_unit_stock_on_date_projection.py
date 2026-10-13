@@ -53,10 +53,14 @@ async def test_physical_history_uses_exclusive_movement_cutoff_not_current_lot_c
     }
     old = (await db_session.execute(READ_SQL, params)).mappings().one()
     new = (
-        await db_session.execute(
-            READ_SQL, {**params, "cutoff": datetime.now(UTC) + timedelta(seconds=1)}
+        (
+            await db_session.execute(
+                READ_SQL, {**params, "cutoff": datetime.now(UTC) + timedelta(seconds=1)}
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert old["physical_stock"]["closed_packs"] == "2"
     assert old["physical_stock"]["opened_units"] == "0"
     assert old["physical_stock"]["base_units"] == "60"
@@ -168,9 +172,12 @@ async def test_actual_app_projection_fails_closed_without_expanding_source_acces
     finally:
         await db_session.execute(text("SELECT set_config('app.support_session','false',true)"))
         await set_receiving_context(db_session, context.stock, context.actor_id)
-    assert await db_session.scalar(
-        text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
-    ) == 1
+    assert (
+        await db_session.scalar(
+            text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
+        )
+        == 1
+    )
 
 
 async def test_real_support_login_with_active_platform_capability_reads_physical_balance(
