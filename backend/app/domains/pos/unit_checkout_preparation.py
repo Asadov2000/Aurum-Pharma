@@ -96,6 +96,8 @@ class UnitCheckoutPreparationService:
             sale = await UnitCartService(self.cart).lock_editable_sale(
                 tenant_id, request.sale_id, actor_id, allowed_branch_ids
             )
+            if sale.is_test:
+                raise BusinessRuleError("Physical test sales are not supported yet")
             units = await self.cart.list_items(tenant_id, sale.id)
             if not units or any(item.physical_packaging is None for item in units):
                 raise BusinessRuleError("Physical checkout requires physical unit cart positions")

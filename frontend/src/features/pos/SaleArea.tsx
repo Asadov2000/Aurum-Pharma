@@ -2385,9 +2385,11 @@ function ActiveWorkspace({
               saleId &&
               (branchId || sale?.branch_id) ? (
                 <Suspense fallback={<p role="status">Загрузка оплаты…</p>}>
-                  {cashKind === "mixed" && sale?.is_test && (
+                  {sale?.is_test === true && (
                     <p role="status" className="mb-3 text-sm text-foreground-muted">
-                      Смешанная корзина пока недоступна в тренировочной продаже.
+                      {cashKind === "mixed"
+                        ? "Смешанная корзина пока недоступна в тренировочной продаже."
+                        : "Поштучная продажа пока недоступна в тренировочной продаже."}
                     </p>
                   )}
                   <PhysicalCashPanel
@@ -2404,7 +2406,7 @@ function ActiveWorkspace({
                       hasOpenShift &&
                       isDraft &&
                       preparedItems.length > 0 &&
-                      (cashKind !== "mixed" || sale?.is_test === false) &&
+                      sale?.is_test === false &&
                       (cashKind !== "mixed" || !requiresRx || prescription !== null) &&
                       recordedPayments.length === 0 &&
                       stagedPayments.length === 0 &&

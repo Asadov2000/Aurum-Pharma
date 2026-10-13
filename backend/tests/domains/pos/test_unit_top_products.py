@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.errors import BusinessRuleError
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.service import CatalogService
 from app.domains.catalog.unit_sales import DispenseUnit
@@ -281,29 +282,24 @@ async def test_quantity_basis_filters_before_limit_and_ties_keep_stable_product_
     assert [row.catalog_id for row in physical.rows] == [runtime(db_session).stock.catalog_id]
 
 
-async def test_test_physical_receipt_and_draft_are_excluded(db_session: AsyncSession) -> None:
+async def test_training_physical_checkout_is_rejected_and_draft_is_excluded(
+    db_session: AsyncSession,
+) -> None:
     source = await checkout_source(db_session)
     await put_physical(
         db_session, source.sale.id, sale_format="pack", quantity=1, discount=Decimal("59.99")
     )
     assert (await top(db_session)).rows == []
     await POSRepository(db_session).update_sale(source.sale, is_test=True)
-    posted = await complete(db_session, await saved_request(db_session, source.sale))
+    request = await saved_request(db_session, source.sale)
+    tenant_id = runtime(db_session).stock.tenant_id
+    before = await physical_facts(db_session, tenant_id)
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await complete(db_session, request)
+    assert await physical_facts(db_session, tenant_id) == before
     await validate_constraints(db_session)
-    assert posted.is_test is True
     assert (await top(db_session)).rows == []
     assert (await top(db_session, sort="quantity", basis="tablet")).rows == []
-    selections = (PhysicalReturnSelection(posted.lines[0].id, "unit", 1),)
-    await PhysicalZeroReturnService(PhysicalZeroReturnRepository(db_session)).receive(
-        tenant_id=posted.tenant_id,
-        actor_id=posted.cashier_id,
-        parent_sale_id=posted.sale_id,
-        operation_id=uuid4(),
-        selections=selections,
-        expected_revision_hash=physical_refund_revision(posted, {}, selections),
-    )
-    await validate_constraints(db_session)
-    assert (await top(db_session)).rows == []
 
 
 async def test_refund_on_next_day_and_shift_is_negative_only_in_its_own_period(

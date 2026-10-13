@@ -52,7 +52,11 @@ def test_three_formats_keep_order_discount_and_original_prices() -> None:
             payments=[{"id": uuid4(), "method": "cash", "amount": "70.50"}],
         )
     )
-    items = physical_receipt_lines(build_physical_receipt(result))
+    receipt = build_physical_receipt(result)
+    # A saved historical training document remains valid for display even though
+    # current physical cash posting refuses to create another one.
+    assert result.is_test is True and receipt.is_test is True
+    items = physical_receipt_lines(receipt)
     assert [item.position for item in items] == [1, 2, 3]
     assert [item.unit_label for item in items] == ["уп.", "блист.", "табл."]
     assert [str(item.qty) for item in items] == ["2", "2", "2"]
