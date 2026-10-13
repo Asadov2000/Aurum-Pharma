@@ -110,6 +110,29 @@ _FULL_REFUND_SQL = """
 """
 
 
+# The server-written immutable receipt owns every v3/v4 line, including
+# legacy lines in mixed receipts. Adding SaleItem discounts would count them twice.
+# Keep this scalar correlated to the outer sale so line counts never multiply money.
+_SALE_DISCOUNT_SQL = """
+  CASE WHEN
+    s.receipt_snapshot @> '{"schema_version": 3,"document_kind": "physical_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 4,"document_kind": "mixed_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 3,
+      "document_kind": "physical_cash_refund_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 4,
+      "document_kind": "mixed_cash_refund_receipt"}'::jsonb
+  THEN COALESCE((
+    SELECT SUM(COALESCE(line->>'discount_amount', 'invalid')::numeric)
+    FROM jsonb_array_elements(s.receipt_snapshot->'lines') AS line
+  )::text, 'invalid')::numeric
+  ELSE COALESCE((
+    SELECT SUM(si.discount_amount) FROM sale_item si
+    WHERE si.sale_id = s.id AND si.tenant_id = s.tenant_id
+  ), 0)
+  END
+"""
+
+
 class POSRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -1367,13 +1390,15 @@ class POSRepository:
         )
         total_refunds, returns_count = (await self.session.execute(refunds_stmt)).one()
 
-        disc_stmt = (
-            select(func.coalesce(func.sum(SaleItem.discount_amount), 0))
-            .select_from(SaleItem)
-            .join(Sale, Sale.id == SaleItem.sale_id)
-            .where(_fwd())
-        )
-        total_discounts = (await self.session.execute(disc_stmt)).scalar_one()
+        disc_stmt = text(f"""
+            SELECT COALESCE(SUM({_SALE_DISCOUNT_SQL}), 0)
+            FROM sale s
+            WHERE s.shift_id = :shift_id AND s.status IN ('completed', 'voided')
+              AND s.sale_type = 'sale' AND s.is_test = false
+        """)
+        total_discounts = (
+            await self.session.execute(disc_stmt, {"shift_id": shift_id})
+        ).scalar_one()
 
         # Per-sale method: count distinct methods on its payment lines; >1 → mixed.
         per_sale = (
@@ -1713,14 +1738,10 @@ class POSRepository:
                     ELSE s.status
                   END AS status,
                   s.sale_type,
-                  s.total_amount + COALESCE(
-                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
-                  ) AS gross, s.currency,
+                  s.total_amount + ({_SALE_DISCOUNT_SQL}) AS gross, s.currency,
                   b.name AS branch_name,
                   u.full_name AS cashier_name,
-                  COALESCE(
-                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
-                  ) AS discount,
+                  ({_SALE_DISCOUNT_SQL}) AS discount,
                   (SELECT CASE
                             WHEN COUNT(DISTINCT p.payment_method) = 0 THEN 'none'
                             WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
@@ -1750,8 +1771,8 @@ class POSRepository:
         t = (await self.session.execute(totals_sql, params)).mappings().one()
 
         disc_sql = text(f"""
-            SELECT COALESCE(SUM(si.discount_amount), 0) AS d
-            FROM sale_item si JOIN sale s ON s.id = si.sale_id
+            SELECT COALESCE(SUM({_SALE_DISCOUNT_SQL}), 0) AS d
+            FROM sale s
             WHERE {fwd_done}
             """)
         total_discounts = (await self.session.execute(disc_sql, params)).scalar_one()
@@ -1790,11 +1811,7 @@ class POSRepository:
                     WHERE s.sale_type = 'return'), 0) AS total_refunds,
                   COALESCE(SUM(
                     CASE WHEN s.sale_type = 'sale' THEN
-                      COALESCE((
-                        SELECT SUM(si.discount_amount)
-                        FROM sale_item si
-                        WHERE si.sale_id = s.id
-                      ), 0)
+                      ({_SALE_DISCOUNT_SQL})
                     ELSE 0 END
                   ), 0) AS total_discounts,
                   COUNT(*) FILTER (WHERE s.sale_type = 'sale') AS sales_count,

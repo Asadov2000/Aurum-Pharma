@@ -17,10 +17,8 @@ from alembic.operations import Operations
 from tests.domains.pos.test_unit_line import post, seed_line_context
 
 
-def _migration() -> ModuleType:
-    source = (
-        Path(__file__).resolve().parents[2] / "alembic/versions/0165_prepared_unit_sale_lines.py"
-    )
+def _migration(filename: str = "0165_prepared_unit_sale_lines.py") -> ModuleType:
+    source = Path(__file__).resolve().parents[2] / "alembic/versions" / filename
     spec = importlib.util.spec_from_file_location("prepared_unit_line_migration", source)
     assert spec is not None and spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
@@ -42,29 +40,53 @@ async def test_line_migration_roundtrip_or_preserves_recorded_history(
                     with connection.begin_nested():
                         migration.downgrade()
                 return
-            migration.downgrade()
+            line_oid = connection.scalar(text("SELECT 'public.pos_unit_sale_line'::regclass::oid"))
+            savepoint = connection.begin_nested()
+            try:
+                # Revision 0169 references these tables even when no history exists.
+                # Roll back the rehearsal to restore every later schema extension.
+                _migration("0169_prepared_unit_return_quarantine.py").downgrade()
+                migration.downgrade()
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_command')"))
+                    is None
+                )
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_line')"))
+                    is None
+                )
+                migration.upgrade()
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_command')"))
+                    is not None
+                )
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_line')"))
+                    is not None
+                )
+                assert connection.scalar(text("""
+                    SELECT count(*) FROM pg_class
+                    WHERE oid IN ('public.pos_unit_sale_line'::regclass,
+                      'public.pos_unit_sale_command'::regclass)
+                      AND relrowsecurity AND relforcerowsecurity
+                """)) == 2
+            finally:
+                savepoint.rollback()
             assert (
-                connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_command')"))
-                is None
-            )
-            assert (
-                connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_line')")) is None
-            )
-            migration.upgrade()
-            assert (
-                connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_command')"))
-                is not None
-            )
-            assert (
-                connection.scalar(text("SELECT to_regclass('public.pos_unit_sale_line')"))
-                is not None
+                connection.scalar(text("SELECT 'public.pos_unit_sale_line'::regclass::oid"))
+                == line_oid
             )
             assert connection.scalar(text("""
-                SELECT count(*) FROM pg_class
-                WHERE oid IN ('public.pos_unit_sale_line'::regclass,
-                  'public.pos_unit_sale_command'::regclass)
-                  AND relrowsecurity AND relforcerowsecurity
-            """)) == 2
+                SELECT count(*) FROM pg_constraint
+                WHERE conrelid = 'public.pos_unit_return_command'::regclass
+                  AND confrelid = 'public.pos_unit_sale_line'::regclass
+                  AND contype = 'f'
+            """)) == 1
+            assert connection.scalar(text("""
+                SELECT count(*) FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'pos_unit_sale_command'
+                  AND column_name = 'stock_source_kind'
+            """)) == 1
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
