@@ -45,6 +45,29 @@ async def quoted_request(client: AsyncClient, sale_id: UUID) -> CashConfirmation
     )
 
 
+@pytest.mark.parametrize("prior_intent", [False, True])
+async def test_training_cash_http_rejects_intent_and_completion_without_effects(
+    client: AsyncClient, db_session: AsyncSession, prior_intent: bool
+) -> None:
+    source = await checkout_source(db_session)
+    sale_id = source.sale.id
+    await put_physical(db_session, sale_id)
+    async with cart_actor(db_session):
+        request = await quoted_request(client, sale_id)
+        body = request.model_dump(mode="json")
+        path = cash_path(sale_id)
+        if prior_intent:
+            assert (await client.post(f"{path}/intent", json=body)).status_code == 200
+        await db_session.execute(
+            text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
+        )
+        before = await facts(db_session)
+        assert (await client.post(f"{path}/intent", json=body)).status_code == 422
+        assert await facts(db_session) == before
+        assert (await client.post(f"{path}/complete", json=body)).status_code == 422
+        assert await facts(db_session) == before
+
+
 @pytest.mark.parametrize(
     "sale_format,quantity,units", [("pack", 1, 30), ("blister", 2, 20), ("unit", 5, 5)]
 )

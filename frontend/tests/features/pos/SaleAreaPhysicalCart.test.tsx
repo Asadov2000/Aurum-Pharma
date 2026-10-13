@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SaleArea } from "@/features/pos/SaleArea";
 import { draftKey } from "@/features/pos/draftStorage";
+import * as mixedCashApi from "@/features/pos/mixedCashCheckout";
 import { type PhysicalCartItem } from "@/features/pos/physicalCart";
+import * as physicalCashApi from "@/features/pos/physicalCashCheckout";
 import { type PhysicalCashCheckoutResult } from "@/features/pos/physicalCashCheckout";
 import {
   physicalCashRecoveryKey,
@@ -35,6 +37,7 @@ const calls = vi.hoisted(() => ({
   drawer: vi.fn(),
   catalog: vi.fn(),
   prescription: vi.fn(),
+  realCashPanel: false,
 }));
 vi.mock("@tanstack/react-router", async (original) => ({
   ...(await original<typeof import("@tanstack/react-router")>()),
@@ -112,16 +115,20 @@ vi.mock("@/features/pos/PhysicalCartEditor", () => ({
     );
   },
 }));
-vi.mock("@/features/pos/PhysicalCashPanel", () => ({
-  PhysicalCashPanel: (props: { canPay: boolean; onBlockedChange: (blocked: boolean) => void }) => {
-    calls.panel(props);
-    return (
-      <section aria-label="Оплата наличными">
-        {props.canPay ? "Оплата доступна" : "Восстановление оплаты"}
-      </section>
-    );
-  },
-}));
+vi.mock("@/features/pos/PhysicalCashPanel", async (original) => {
+  const { PhysicalCashPanel } = await original<typeof import("@/features/pos/PhysicalCashPanel")>();
+  return {
+    PhysicalCashPanel: (props: Parameters<typeof PhysicalCashPanel>[0]) => {
+      calls.panel(props);
+      if (calls.realCashPanel) return <PhysicalCashPanel {...props} />;
+      return (
+        <section aria-label="Оплата наличными">
+          {props.canPay ? "Оплата доступна" : "Восстановление оплаты"}
+        </section>
+      );
+    },
+  };
+});
 
 const shift: Shift = {
   id: "sh-1",
@@ -294,6 +301,7 @@ describe("SaleArea physical cart integration", () => {
     authenticatePos();
     window.localStorage.clear();
     vi.clearAllMocks();
+    calls.realCashPanel = false;
     calls.shift.mockResolvedValue(shift);
     calls.sale.mockResolvedValue(sale());
     window.localStorage.setItem(
@@ -305,6 +313,58 @@ describe("SaleArea physical cart integration", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+
+  it.each([
+    { kind: "physical", testFlag: true },
+    { kind: "mixed", testFlag: true },
+    { kind: "physical", testFlag: undefined },
+    { kind: "mixed", testFlag: undefined },
+  ] as const)(
+    "blocks real cash requests for $kind when is_test is $testFlag",
+    async ({ kind, testFlag }) => {
+      calls.realCashPanel = true;
+      calls.sale.mockResolvedValue({
+        ...sale({ items: kind === "mixed" ? [legacyItem] : [] }),
+        is_test: testFlag,
+      });
+      const requests = [
+        vi.spyOn(physicalCashApi, "parsePhysicalCashQuote"),
+        vi.spyOn(physicalCashApi, "savePhysicalCashIntent"),
+        vi.spyOn(physicalCashApi, "completePhysicalCash"),
+        vi.spyOn(mixedCashApi, "parseMixedCashQuote"),
+        vi.spyOn(mixedCashApi, "saveMixedCashIntent"),
+        vi.spyOn(mixedCashApi, "completeMixedCash"),
+      ];
+      for (const request of requests) {
+        request.mockRejectedValue(new Error("Training sale must not request real cash"));
+      }
+      mount();
+      const panel = await screen.findByRole("region", { name: "Оплата наличными" });
+      const pay = within(panel).getByRole("button", { name: "Завершить продажу" });
+      expect(pay).toBeDisabled();
+      expect(within(panel).getByLabelText("Получено наличными, TJS")).toBeDisabled();
+      expect(calls.panel).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind, canPay: false }),
+      );
+      if (testFlag === true) {
+        expect(
+          screen.getByText(
+            kind === "mixed"
+              ? "Смешанная корзина пока недоступна в тренировочной продаже."
+              : "Поштучная продажа пока недоступна в тренировочной продаже.",
+          ),
+        ).toBeInTheDocument();
+      }
+      fireEvent.click(pay);
+      for (const key of ["Enter", "F4", "F2"]) fireEvent.keyDown(window, { key });
+      for (const request of requests) expect(request).not.toHaveBeenCalled();
+      expect(calls.addPayment).not.toHaveBeenCalled();
+      expect(calls.checkout).not.toHaveBeenCalled();
+      expect(calls.complete).not.toHaveBeenCalled();
+      expect(calls.attempt).not.toHaveBeenCalled();
+      expect(calls.drawer).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["keyboard", "touch"] as const)(
     "restores physical rows and prevents legacy payment entry points in %s mode",

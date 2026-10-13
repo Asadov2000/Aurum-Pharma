@@ -42,6 +42,7 @@ from tests.domains.pos.test_unit_cart_quote import add_legacy
 from tests.domains.pos.test_unit_physical_cart import physical_request, put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import (
     checkout_source,
+    prepare,
     saved_request,
 )
 from tests.domains.pos.test_unit_physical_checkout_preparation import facts as stock_and_sale_facts
@@ -78,6 +79,71 @@ async def complete(
         allowed_branch_ids={context.stock.branch_id},
         request=request,
     )
+
+
+@pytest.mark.parametrize("sale_format", ["pack", "blister", "unit"])
+@pytest.mark.parametrize("prior_intent", [False, True])
+async def test_training_sale_rejects_cash_intent_preparation_and_completion_without_effects(
+    db_session: AsyncSession, sale_format: SaleFormatV2, prior_intent: bool
+) -> None:
+    source = await checkout_source(db_session)
+    sale_id = source.sale.id
+    await put_physical(db_session, sale_id, sale_format=sale_format)
+    request = await physical_request(db_session, sale_id)
+    context = runtime(db_session)
+    service = PhysicalCashCheckoutService(PhysicalCashCheckoutRepository(db_session))
+
+    async def save_confirmation() -> None:
+        await service.save_intent(
+            tenant_id=context.stock.tenant_id,
+            actor_id=context.actor_id,
+            allowed_branch_ids={context.stock.branch_id},
+            request=request,
+        )
+
+    if prior_intent:
+        await save_confirmation()
+    await db_session.execute(
+        text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
+    )
+    before = await facts(db_session)
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await save_confirmation()
+    assert await facts(db_session) == before
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await prepare(db_session, request)
+    assert await facts(db_session) == before
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await complete(db_session, request)
+    assert await facts(db_session) == before
+
+
+async def test_database_rejects_bound_training_stock_command_before_any_effect(
+    db_session: AsyncSession,
+) -> None:
+    source = await checkout_source(db_session)
+    sale_id = source.sale.id
+    await put_physical(db_session, sale_id)
+    request = await saved_request(db_session, source.sale)
+    context = runtime(db_session)
+    await db_session.execute(
+        text("UPDATE sale SET is_test=true WHERE id=:id"), {"id": sale_id}
+    )
+    before = await facts(db_session)
+    with pytest.raises(DBAPIError, match="physical_checkout_draft_invalid"):
+        async with db_session.begin_nested():
+            await PhysicalUnitLedgerV2Service(
+                UnitDispensingV2Repository(db_session)
+            ).dispense_priced_cart(
+                tenant_id=context.stock.tenant_id,
+                branch_id=context.stock.branch_id,
+                actor_id=context.actor_id,
+                allowed_branch_ids={context.stock.branch_id},
+                command_id=request.operation_id,
+                lines=(retail_line(source.stock, "unit", 1),),
+                checkout_sale_id=sale_id,
+            )
+    assert await facts(db_session) == before
 
 
 @pytest.mark.parametrize(

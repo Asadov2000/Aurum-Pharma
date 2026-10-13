@@ -2,7 +2,13 @@
 
 from uuid import UUID
 
-from app.core.errors import AurumError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.errors import (
+    AurumError,
+    BusinessRuleError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.time import utc_now
 from app.domains.inventory.unit_dispensing_v2_retail import UnitPricedCartLineV2
 from app.domains.pos.physical_cash_checkout_models import PhysicalCashCheckout
@@ -39,7 +45,18 @@ class PhysicalCashCheckoutService:
         request: CashConfirmationRequestV2,
     ) -> SavedCashIntentV2:
         """Keep incompatible confirmations out of this physical-only channel."""
+        request = CashConfirmationRequestV2.model_validate(request)
+        cart = UnitCartRepository(self.repository.session)
+        await cart.assert_actor(tenant_id, actor_id)
         async with self.repository.session.begin_nested():
+            sale = await cart.lock_sale(tenant_id, request.sale_id)
+            if sale is None:
+                raise NotFoundError("Physical checkout sale not found")
+            if sale.branch_id not in allowed_branch_ids or sale.cashier_user_id != actor_id:
+                raise PermissionDeniedError("Physical checkout branch or cashier access denied")
+            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            if sale.is_test:
+                raise BusinessRuleError("Physical test sales are not supported yet")
             saved = await UnitCashIntentService(
                 UnitCashIntentRepository(self.repository.session)
             ).save(
@@ -74,6 +91,8 @@ class PhysicalCashCheckoutService:
             if sale.branch_id not in allowed_branch_ids or sale.cashier_user_id != actor_id:
                 raise PermissionDeniedError("Physical checkout branch or cashier access denied")
             await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            if sale.is_test:
+                raise BusinessRuleError("Physical test sales are not supported yet")
             saved = await UnitCashIntentService(
                 UnitCashIntentRepository(self.repository.session)
             ).read_saved(
