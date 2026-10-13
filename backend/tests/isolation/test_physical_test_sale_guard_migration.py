@@ -40,6 +40,8 @@ UNCHANGED_FUNCTIONS = (
     "public.trg_unit_cart_payment_boundary()",
     "public.assert_mixed_checkout(uuid,uuid,boolean)",
     "public.trg_mixed_stock_checkout_binding()",
+    "public.physical_customer_return_queue(uuid,uuid,text)",
+    "public.pos_product_totals_for_report(uuid,timestamptz,timestamptz,uuid)",
 )
 
 

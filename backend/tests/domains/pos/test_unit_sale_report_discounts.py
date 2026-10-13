@@ -17,7 +17,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.deps import CurrentUser
-from app.core.errors import NotFoundError
+from app.core.errors import BusinessRuleError, NotFoundError
 from app.core.storage import ensure_bucket, get_object, put_object
 from app.domains.pos.mixed_cash_refund_schemas import MixedCashRefundResultV4
 from app.domains.pos.mixed_documents import MixedCheckoutResultV4
@@ -340,14 +340,14 @@ async def test_matching_snapshot_with_missing_money_fails_without_legacy_fallbac
         await savepoint.rollback()
 
 
-async def test_physical_draft_and_test_receipt_discounts_are_excluded(
+async def test_rejected_training_draft_has_no_reported_discounts_or_revenue(
     db_session: AsyncSession,
 ) -> None:
     source = await checkout_source(db_session)
     await put_physical(db_session, source.sale.id, quantity=2, discount=Decimal("0.01"))
     service = POSService(POSRepository(db_session))
-    # Set the supported flag while the sale is still an editable draft; no
-    # completed sale or receipt is rewritten to manufacture a reporting fixture.
+    # Training cannot post physical stock or cash; completed history is never
+    # rewritten to manufacture a reporting fixture.
     await service.repo.update_sale(source.sale, is_test=True)
     day = await report_day(db_session)
     context = runtime(db_session)
@@ -359,9 +359,12 @@ async def test_physical_draft_and_test_receipt_discounts_are_excluded(
     }
     draft = await service.build_sales_summary(**filters)
     assert draft.rows == [] and draft.gross_sales == Decimal("0.00")
-    result = await complete(db_session, await saved_request(db_session, source.sale))
+    request = await saved_request(db_session, source.sale)
+    before = await physical_facts(db_session)
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await complete(db_session, request)
+    assert await physical_facts(db_session) == before
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
-    assert result.is_test is True
     summary = await service.build_sales_summary(**filters)
     overview = await service.get_sales_summary_overview(**filters)
     z = await service.build_z_report(source.sale.shift_id)

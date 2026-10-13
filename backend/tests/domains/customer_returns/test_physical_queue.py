@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.deps import CurrentUser
+from app.core.errors import BusinessRuleError
 from app.domains.customer_returns.physical_repository import PhysicalCustomerReturnsRepository
 from app.domains.pos.physical_cash_refund_review import physical_refund_revision
 from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundResultV3
@@ -122,11 +123,12 @@ async def test_zero_queue_has_no_refund_sale_and_uses_historical_name(
 
 
 @pytest.mark.parametrize("unpublished_kind", ["prepared_only", "test_sale"])
-async def test_queue_excludes_internal_journals_and_test_documents(
+async def test_queue_excludes_internal_journals_and_rejected_training_documents(
     client: AsyncClient, db_session: AsyncSession, unpublished_kind: str
 ) -> None:
     if unpublished_kind == "test_sale":
-        await cash_source(db_session, quantity=1, returned=1, is_test=True)
+        with pytest.raises(BusinessRuleError, match="Physical test sales"):
+            await cash_source(db_session, quantity=1, returned=1, is_test=True)
     else:
         source = await checkout_source(db_session)
         item = await put_physical(db_session, source.sale.id, sale_format="pack")
