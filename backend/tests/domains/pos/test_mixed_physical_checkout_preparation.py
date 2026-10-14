@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.inventory.repository import InventoryRepository
@@ -37,6 +37,7 @@ from tests.domains.pos.test_unit_physical_checkout_preparation import facts as s
 from tests.domains.pos.test_unit_physical_checkout_preparation import prepare as prepare_physical
 from tests.domains.pos.test_unit_prescription import attach
 from tests.domains.pos.test_unit_return import runtime
+from tests.domains.pos.unit_shift_history_helpers import close_historical_unit_shift
 
 db_session = receiving_session_fixture
 
@@ -217,7 +218,7 @@ async def test_legacy_eligibility_and_fefo_are_rechecked_after_saving_cash(
 
 @pytest.mark.parametrize("scope", ["actor", "actual_actor", "tenant", "branch", "closed_shift"])
 async def test_mixed_preflight_requires_current_cashier_and_open_allowed_shift(
-    db_session: AsyncSession, scope: str
+    db_session: AsyncSession, maintenance_engine: AsyncEngine, scope: str
 ) -> None:
     source = await checkout_source(db_session)
     await legacy_with_stock(db_session, source.sale)
@@ -227,10 +228,7 @@ async def test_mixed_preflight_requires_current_cashier_and_open_allowed_shift(
     if scope == "actual_actor":
         await set_receiving_context(db_session, context.stock, uuid4())
     elif scope == "closed_shift":
-        await db_session.execute(
-            text("UPDATE shift SET status='closed',closed_at=now() WHERE id=:id"),
-            {"id": source.sale.shift_id},
-        )
+        await close_historical_unit_shift(db_session, maintenance_engine, source.sale.shift_id)
     before = await facts(db_session)
     with pytest.raises((PermissionDeniedError, NotFoundError, BusinessRuleError, ConflictError)):
         await MixedPhysicalCheckoutPreparationService(UnitCheckoutRepository(db_session)).prepare(

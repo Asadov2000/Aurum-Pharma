@@ -16,13 +16,14 @@ from tests.domains.pos.test_unit_cart import put_cart_item
 from tests.domains.pos.test_unit_cart_quote import add_legacy
 from tests.domains.pos.test_unit_physical_cart import physical_draft, put_physical
 from tests.domains.pos.test_unit_return import runtime
+from tests.domains.pos.unit_shift_history_helpers import close_historical_unit_shift
 
 db_session = receiving_session_fixture
 
 
 @pytest.mark.parametrize("kind", ["empty", "physical", "v1", "mixed"])
 async def test_sale_details_restore_prepared_rows_after_shift_closes(
-    client: AsyncClient, db_session: AsyncSession, kind: str
+    client: AsyncClient, db_session: AsyncSession, maintenance_engine: AsyncEngine, kind: str
 ) -> None:
     sale = await physical_draft(db_session)
     expected_ids: list[str] = []
@@ -41,10 +42,7 @@ async def test_sale_details_restore_prepared_rows_after_shift_closes(
                 discount=Decimal("0.01"),
             )
             expected_ids.append(str(item.id))
-    await db_session.execute(
-        text("UPDATE shift SET status='closed',closed_at=now() WHERE id=:id"),
-        {"id": sale.shift_id},
-    )
+    await close_historical_unit_shift(db_session, maintenance_engine, sale.shift_id)
     async with cart_actor(db_session) as actor:
         actor.permissions.add("sales.view.own")
         actor.permission_scopes["sales.view.own"] = frozenset({sale.branch_id})
