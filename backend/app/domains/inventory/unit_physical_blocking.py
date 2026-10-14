@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
 from app.domains.pos.unit_contracts import FrozenContract
 
@@ -27,6 +27,7 @@ class PhysicalLotBlockingService:
         actor_id: UUID,
         allowed_branch_ids: set[UUID],
         is_blocked: bool,
+        expected_blocking_revision: int | None = None,
     ) -> PhysicalLotBlockState:
         """Serialize against dispensing on the same lot; caller owns commit.
 
@@ -50,6 +51,13 @@ class PhysicalLotBlockingService:
             lot = await self.repository.lock_physical_lot(tenant_id, branch_id, lot_id)
             if lot is None:
                 raise NotFoundError("Physical lot not found")
+            if not await self.repository.block_actor_allowed(tenant_id, branch_id, actor_id):
+                raise PermissionDeniedError("Physical lot blocking permission denied")
+            if (
+                expected_blocking_revision is not None
+                and lot.blocking_revision != expected_blocking_revision
+            ):
+                raise ConflictError("Physical lot blocking state changed; refresh the list")
             if lot.is_blocked != is_blocked:
                 await self.repository.set_physical_blocked(lot, is_blocked)
             return PhysicalLotBlockState(
