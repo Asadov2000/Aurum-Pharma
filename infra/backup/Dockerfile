@@ -4,6 +4,9 @@ ARG GO_IMAGE=golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83f
 
 FROM ${GO_IMAGE} AS tools-builder
 
+# Avoid HTTP/2 transport failures while retaining HTTPS and checksum verification.
+ENV GODEBUG=http2client=0
+
 ARG TARGETARCH
 
 RUN apk add --no-cache git
