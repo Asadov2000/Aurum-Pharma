@@ -132,9 +132,7 @@ async def test_http_scope_and_missing_lot_are_denied(
     async with inventory_actor(db_session) as actor:
         denied = await client.get(PATH, params={"branch_id": str(uuid4())})
         assert denied.status_code == 403
-        missing = await client.patch(
-            f"{PATH}/{uuid4()}/blocking", json=body(db_session, True, "0")
-        )
+        missing = await client.patch(f"{PATH}/{uuid4()}/blocking", json=body(db_session, True, "0"))
         assert missing.status_code == 404
         actor.permissions = {"batches.view"}
         denied = await client.patch(
