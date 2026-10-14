@@ -330,6 +330,9 @@ for (const zero of [false, true]) {
       await panel
         .getByRole("button", { name: "Проверить сохранённое решение", exact: true })
         .click();
+      // Opening recovery starts a status lookup. Keep the outage in place until
+      // that lookup has failed, then explicitly check the now reachable server.
+      await expect(dialog.getByRole("alert")).toBeVisible();
       await expect(
         dialog.getByRole("button", { name: "Проверить результат", exact: true }),
       ).toBeEnabled();
