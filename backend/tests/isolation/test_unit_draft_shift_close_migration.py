@@ -52,9 +52,12 @@ async def assert_blocked(session: AsyncSession, shift_id: UUID) -> None:
             await session.execute(CLOSE, {"shift": shift_id})
     assert getattr(error.value.orig, "sqlstate", None) == "23514"
     assert getattr(error.value.orig.__cause__, "constraint_name", None) == CONSTRAINT
-    assert await session.scalar(
-        text("SELECT status FROM public.shift WHERE id=:shift"), {"shift": shift_id}
-    ) == "open"
+    assert (
+        await session.scalar(
+            text("SELECT status FROM public.shift WHERE id=:shift"), {"shift": shift_id}
+        )
+        == "open"
+    )
 
 
 @pytest.mark.parametrize("physical", [False, True])
@@ -67,9 +70,12 @@ async def test_direct_shift_close_rejects_own_unfinished_unit_items(
     else:
         await put_cart_item(db_session, sale.id)
     await assert_blocked(db_session, sale.shift_id)
-    assert await db_session.scalar(
-        text("SELECT status FROM public.sale WHERE id=:sale"), {"sale": sale.id}
-    ) == "draft"
+    assert (
+        await db_session.scalar(
+            text("SELECT status FROM public.sale WHERE id=:sale"), {"sale": sale.id}
+        )
+        == "draft"
+    )
 
 
 async def test_shift_manager_cannot_bypass_other_cashier_cart_rls(
@@ -80,14 +86,20 @@ async def test_shift_manager_cannot_bypass_other_cashier_cart_rls(
     sale = await physical_draft(db_session)
     item = await put_physical(db_session, sale.id)
     await set_receiving_context(db_session, context.stock, manager)
-    assert await db_session.scalar(
-        text("SELECT count(*) FROM public.pos_unit_cart_item WHERE id=:item"), {"item": item.id}
-    ) == 0
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM public.pos_unit_cart_item WHERE id=:item"), {"item": item.id}
+        )
+        == 0
+    )
     await assert_blocked(db_session, sale.shift_id)
     # The restrictive trigger must not reveal the hidden cart after rejecting closure.
-    assert await db_session.scalar(
-        text("SELECT count(*) FROM public.pos_unit_cart_item WHERE id=:item"), {"item": item.id}
-    ) == 0
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM public.pos_unit_cart_item WHERE id=:item"), {"item": item.id}
+        )
+        == 0
+    )
 
 
 async def test_empty_and_removed_cart_shifts_can_close_independently(
@@ -137,10 +149,13 @@ async def test_completed_physical_sale_retains_cart_and_allows_close(
     source = await checkout_source(db_session)
     await put_physical(db_session, source.sale.id)
     await complete(db_session, await saved_request(db_session, source.sale))
-    assert await db_session.scalar(
-        text("SELECT count(*) FROM public.pos_unit_cart_item WHERE sale_id=:sale"),
-        {"sale": source.sale.id},
-    ) == 1
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM public.pos_unit_cart_item WHERE sale_id=:sale"),
+            {"sale": source.sale.id},
+        )
+        == 1
+    )
     assert await db_session.scalar(CLOSE, {"shift": source.sale.shift_id}) == "closed"
 
 
@@ -193,10 +208,13 @@ async def test_committed_shift_close_rejects_waiting_cart_writer(
             started.set()
             with pytest.raises(BusinessRuleError):
                 await put_physical(editor, sale.id)
-            assert await editor.scalar(
-                text("SELECT count(*) FROM public.pos_unit_cart_item WHERE sale_id=:sale"),
-                {"sale": sale.id},
-            ) == 0
+            assert (
+                await editor.scalar(
+                    text("SELECT count(*) FROM public.pos_unit_cart_item WHERE sale_id=:sale"),
+                    {"sale": sale.id},
+                )
+                == 0
+            )
             return "blocked"
 
     task = asyncio.create_task(edit_after_close())
@@ -245,9 +263,12 @@ async def test_guard_acl_and_downgrade_roundtrip_preserve_history(
         history = connection.execute(history_query).all()
         with Operations.context(MigrationContext.configure(connection)):
             migration().downgrade()
-            assert connection.scalar(
-                text("SELECT to_regprocedure('public.trg_shift_unfinished_unit_cart()')")
-            ) is None
+            assert (
+                connection.scalar(
+                    text("SELECT to_regprocedure('public.trg_shift_unfinished_unit_cart()')")
+                )
+                is None
+            )
             assert connection.execute(history_query).all() == history
             migration().upgrade()
         assert connection.execute(query).mappings().one() == before
