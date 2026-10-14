@@ -46,6 +46,7 @@ def return_journal_migration() -> ModuleType:
 
 
 def downgrade_cash_for_roundtrip() -> None:
+    physical_training_guard_migration().downgrade()
     downgrade_refund_for_roundtrip()
     return_journal_migration().downgrade()
     compatibility_migration().downgrade()
@@ -57,6 +58,7 @@ def upgrade_cash_after_roundtrip() -> None:
     compatibility_migration().upgrade()
     return_journal_migration().upgrade()
     upgrade_refund_after_roundtrip()
+    physical_training_guard_migration().upgrade()
 
 
 def cash_refund_migration() -> ModuleType:
@@ -80,6 +82,7 @@ def cash_refund_policy_migration() -> ModuleType:
 
 
 def downgrade_refund_for_roundtrip() -> None:
+    physical_disposition_migration().downgrade()
     mixed_quarantine_disposition_migration().downgrade()
     mixed_quarantine_read_migration().downgrade()
     mixed_zero_return_migration().downgrade()
@@ -101,6 +104,29 @@ def upgrade_refund_after_roundtrip() -> None:
     mixed_zero_return_migration().upgrade()
     mixed_quarantine_read_migration().upgrade()
     mixed_quarantine_disposition_migration().upgrade()
+    physical_disposition_migration().upgrade()
+
+
+def physical_disposition_migration() -> ModuleType:
+    directory = Path(__file__).resolve().parents[2] / "alembic/versions"
+    spec = importlib.util.spec_from_file_location(
+        "physical_disposition", directory / "0198_physical_quarantine_disposition.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def physical_training_guard_migration() -> ModuleType:
+    directory = Path(__file__).resolve().parents[2] / "alembic/versions"
+    spec = importlib.util.spec_from_file_location(
+        "physical_training_guard", directory / "0197_physical_test_sale_guard.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def mixed_quarantine_disposition_migration() -> ModuleType:

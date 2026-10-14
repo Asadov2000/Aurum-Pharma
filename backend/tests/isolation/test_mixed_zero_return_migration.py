@@ -26,6 +26,7 @@ from tests.domains.pos.test_mixed_zero_return import source
 from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
+    physical_disposition_migration,
 )
 
 db_session = receiving_session_fixture
@@ -243,6 +244,10 @@ async def test_zero_migration_roundtrip_preserves_guard_owners_acl_and_rls(
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 assert connection.execute(dispositions).scalars().all() == disposition_history
             else:
+                # Preserve the independent physical journal; remove only its later
+                # audit insertion while the older mixed redactor is rehearsed.
+                physical = physical_disposition_migration()
+                physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
                 mixed_quarantine_disposition_migration().downgrade()
                 mixed_quarantine_read_migration().downgrade()
                 migration().downgrade()
@@ -253,6 +258,7 @@ async def test_zero_migration_roundtrip_preserves_guard_owners_acl_and_rls(
                 migration().upgrade()
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
+                physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
             assert connection.execute(FUNCTIONS).all() == before
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

@@ -31,6 +31,10 @@ import {
 import { describeApiError } from "@/lib/errorMessages";
 import { refundReasonLabel } from "@/lib/refundReasons";
 
+import {
+  PhysicalDispositionWorkspace,
+  type PhysicalDispositionActions,
+} from "./PhysicalDispositionWorkspace";
 import { usePhysicalCustomerReturnsQuery } from "./queries";
 import { type PhysicalCustomerReturnItem } from "./types";
 
@@ -42,6 +46,14 @@ const filterSchema = z.object({
 type Filters = z.infer<typeof filterSchema>;
 
 export function PhysicalCustomerReturnsPanel(): JSX.Element {
+  const { user } = useAuth();
+  return (
+    <PhysicalDispositionWorkspace key={`${user?.id}:${user?.active_tenant_id}`}>
+      {(actions) => <PhysicalCustomerReturnsQueue {...actions} />}
+    </PhysicalDispositionWorkspace>
+  );
+}
+function PhysicalCustomerReturnsQueue(actions: PhysicalDispositionActions): JSX.Element {
   const { user } = useAuth();
   const canFilterBranches = hasPermission(user, "branches.view");
   const branches = useBranchesQuery(canFilterBranches);
@@ -80,9 +92,10 @@ export function PhysicalCustomerReturnsPanel(): JSX.Element {
   };
 
   return (
-    <section aria-label="Физические возвраты в карантине" className="space-y-4">
+    <div className="space-y-4">
       <p className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-foreground-secondary">
-        Товар изолирован от продажи. Окончательное действие с ним здесь пока не оформляется.
+        Товар изолирован от продажи. Решение фиксирует уже выполненное действие для всего принятого
+        объёма.
       </p>
       <ConfigurableFilterBar
         preferenceKey={preferenceKey}
@@ -165,12 +178,12 @@ export function PhysicalCustomerReturnsPanel(): JSX.Element {
         </TableEmpty>
       ) : (
         <>
-          <PhysicalReturnTable items={query.data.items} />
-          <PhysicalReturnCards items={query.data.items} />
+          <PhysicalReturnTable items={query.data.items} actions={actions} />
+          <PhysicalReturnCards items={query.data.items} actions={actions} />
           <Pagination page={page} pageSize={PAGE_SIZE} total={query.data.total} onPage={setPage} />
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -200,7 +213,13 @@ function Reason({ item }: { item: PhysicalCustomerReturnItem }): JSX.Element {
     </div>
   );
 }
-function PhysicalReturnTable({ items }: { items: PhysicalCustomerReturnItem[] }): JSX.Element {
+function PhysicalReturnTable({
+  items,
+  actions,
+}: {
+  items: PhysicalCustomerReturnItem[];
+  actions: PhysicalDispositionActions;
+}): JSX.Element {
   return (
     <div className="hidden md:block">
       <Table aria-label="Очередь физических возвратов">
@@ -213,6 +232,7 @@ function PhysicalReturnTable({ items }: { items: PhysicalCustomerReturnItem[] })
             <TH>Причина</TH>
             <TH className="text-right">Количество</TH>
             <TH>Статус</TH>
+            <TH>Действие</TH>
           </TR>
         </THead>
         <TBody>
@@ -244,6 +264,18 @@ function PhysicalReturnTable({ items }: { items: PhysicalCustomerReturnItem[] })
               <TD>
                 <Badge tone="warning">В карантине</Badge>
               </TD>
+              <TD>
+                {actions.canResolve(item) ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={actions.blocked}
+                    onClick={() => actions.onResolve(item)}
+                  >
+                    Оформить решение
+                  </Button>
+                ) : null}
+              </TD>
             </TR>
           ))}
         </TBody>
@@ -251,7 +283,13 @@ function PhysicalReturnTable({ items }: { items: PhysicalCustomerReturnItem[] })
     </div>
   );
 }
-function PhysicalReturnCards({ items }: { items: PhysicalCustomerReturnItem[] }): JSX.Element {
+function PhysicalReturnCards({
+  items,
+  actions,
+}: {
+  items: PhysicalCustomerReturnItem[];
+  actions: PhysicalDispositionActions;
+}): JSX.Element {
   return (
     <div className="space-y-3 md:hidden">
       {items.map((item) => (
@@ -279,6 +317,16 @@ function PhysicalReturnCards({ items }: { items: PhysicalCustomerReturnItem[] })
             <span className="text-foreground-muted">Причина: </span>
             <Reason item={item} />
           </div>
+          {actions.canResolve(item) ? (
+            <Button
+              variant="secondary"
+              className="mt-3"
+              disabled={actions.blocked}
+              onClick={() => actions.onResolve(item)}
+            >
+              Оформить решение
+            </Button>
+          ) : null}
         </article>
       ))}
     </div>

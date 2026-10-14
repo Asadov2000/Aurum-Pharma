@@ -34,10 +34,16 @@ export function useCustomerReturnsQuery(params: CustomerReturnSearchParams) {
 }
 
 export function usePhysicalCustomerReturnsQuery(params: PhysicalCustomerReturnSearchParams) {
+  const { user } = useAuth();
   return useQuery({
-    queryKey: customerReturnsKeys.physical(params),
+    queryKey: [
+      ...customerReturnsKeys.physical(params),
+      user?.active_tenant_id,
+      user?.id,
+      permissionBranchScope(user, "customer_returns.view"),
+    ],
     queryFn: () => listPhysicalCustomerReturns(params),
-    placeholderData: keepPreviousData,
+    enabled: hasPermission(user, "customer_returns.view"),
   });
 }
 
