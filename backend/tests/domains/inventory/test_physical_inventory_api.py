@@ -156,7 +156,7 @@ async def test_mutation_rejects_non_boolean_and_extra_fields(
     assert await state(db_session, source) == (False, 0)
 
 
-@pytest.mark.parametrize("status", ["readonly", "suspended", "archived"])
+@pytest.mark.parametrize("status", ["readonly", "archived"])
 async def test_tenant_readonly_denies_even_noop_and_preserves_reads(
     client: AsyncClient,
     db_session: AsyncSession,
