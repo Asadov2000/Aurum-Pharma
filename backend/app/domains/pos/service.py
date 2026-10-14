@@ -1438,7 +1438,7 @@ class POSService:
             # Managers cannot read another cashier's prepared rows through RLS.
             # The database guard still prevents stranding that cashier's draft.
             constraint = getattr(exc.orig, "constraint_name", None) or getattr(
-                exc.orig.__cause__, "constraint_name", None
+                getattr(exc.orig, "__cause__", None), "constraint_name", None
             )
             if constraint != "ck_shift_unfinished_unit_cart":
                 raise
