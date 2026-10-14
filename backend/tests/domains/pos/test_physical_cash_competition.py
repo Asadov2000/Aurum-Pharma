@@ -198,7 +198,7 @@ def winning_result(
     winner = winners[0]
     original = results[winner]
     assert isinstance(original, PhysicalCheckoutResultV3)
-    assert isinstance(results[1 - winner], (BusinessRuleError, ConflictError))
+    assert isinstance(results[1 - winner], BusinessRuleError | ConflictError)
     return winner, original
 
 
