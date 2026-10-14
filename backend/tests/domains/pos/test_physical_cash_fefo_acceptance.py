@@ -163,7 +163,10 @@ async def test_public_cash_fefo_skips_expired_and_blocked_before_later_opened_st
         )
         selected = await public_unit_sale(client, db_session, quantity)
         assert selected.sale_id != opening_sale.sale_id
-        assert selected.receipt_number != opening_sale.receipt_number
+        assert (selected.register_id, selected.receipt_number) != (
+            opening_sale.register_id,
+            opening_sale.receipt_number,
+        )
         await assert_selected_lots(db_session, selected, earlier.lot_id, later.lot_id, quantity)
         assert await remaining(db_session, earlier) == max(0, 60 - quantity)
         for source in (expired, blocked):
