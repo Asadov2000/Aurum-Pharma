@@ -20,9 +20,7 @@ async def close_historical_unit_shift(
         assert str(await connection.scalar(text("SELECT current_database()"))).endswith("_test")
         assert await connection.scalar(text("SELECT session_user")) == "aurum_migrator"
         assert await connection.scalar(text("SELECT current_user")) == "aurum_schema_owner"
-        await connection.execute(
-            text(
-                f"""
+        await connection.execute(text(f"""
                 CREATE FUNCTION public.{function}(p_tenant UUID,p_shift UUID,p_actor UUID)
                 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER
                 SET search_path=pg_catalog,pg_temp AS $$
@@ -44,9 +42,7 @@ async def close_historical_unit_shift(
                   END IF;
                   ALTER TABLE public.shift ENABLE TRIGGER shift_unfinished_unit_cart_guard;
                 END $$
-                """
-            )
-        )
+                """))
         await connection.execute(
             text(f"REVOKE ALL ON FUNCTION public.{function}(UUID,UUID,UUID) FROM PUBLIC")
         )
