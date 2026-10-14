@@ -17,19 +17,18 @@ from alembic.operations import Operations
 from app.core.errors import BusinessRuleError
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cart_service import UnitCartService
-from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import (
     ReceivingRuntime,
     seed_receiving_actor,
     set_receiving_context,
 )
+from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.inventory.test_unit_ledger import seed_ledger_context
 from tests.domains.pos.test_physical_cash_checkout import complete
 from tests.domains.pos.test_unit_cart import put_cart_item, seed_cart_draft
 from tests.domains.pos.test_unit_physical_cart import physical_draft, put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
-
 
 db_session = receiving_session_fixture
 CLOSE = text("UPDATE public.shift SET status='closed' WHERE id=:shift RETURNING status")
