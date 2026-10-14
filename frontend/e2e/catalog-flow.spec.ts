@@ -125,6 +125,8 @@ test.describe("Catalog flow (owner)", () => {
     await selectActionMenuItem(page, `Действия для ${name}`, "Изменить");
 
     const dialog = page.locator('div[role="dialog"]');
+    // Finish the initial detail read before mutating the same item's barcodes.
+    await expect(dialog.getByText("Пока нет штрихкодов", { exact: true })).toBeVisible();
     const code = `123456${Date.now().toString().slice(-7)}`.slice(0, 13);
     const addBarcodeResponse = page.waitForResponse(
       (response) =>
