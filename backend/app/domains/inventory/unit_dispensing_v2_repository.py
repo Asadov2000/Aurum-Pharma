@@ -49,9 +49,17 @@ class UnitDispensingV2Repository(UnitLedgerRepository):
     async def block_actor_allowed(self, tenant_id: UUID, branch_id: UUID, actor_id: UUID) -> bool:
         authorized = await self.session.scalar(
             text(
-                "SELECT current_user='aurum_app' AND NOT public.is_support_session() "
+                "SELECT current_user='aurum_app' AND session_user='aurum_app' "
+                "AND NOT public.is_support_session() AND NOT public.is_tenant_support_session() "
                 "AND public.current_app_user_id()=:actor "
-                "AND public.current_tenant_id()=:tenant AND "
+                "AND EXISTS(SELECT 1 FROM public.app_user WHERE id=:actor AND status='active') "
+                "AND public.current_tenant_id()=:tenant "
+                "AND EXISTS(SELECT 1 FROM public.tenant WHERE id=:tenant "
+                "AND status NOT IN ('readonly','suspended','archived')) AND "
+                "EXISTS(SELECT 1 FROM public.tenant_access_policy WHERE tenant_id=:tenant "
+                "AND NOT ((expires_at IS NULL OR expires_at>statement_timestamp()) "
+                "AND (mode='readonly' OR 'inventory'=ANY(blocked_modules)))) AND "
+                "public.tenant_actor_has_scoped_permission(:tenant,'batches.view',:branch) AND "
                 "public.tenant_actor_has_scoped_permission(:tenant,'batches.update',:branch)"
             ),
             {"actor": actor_id, "tenant": tenant_id, "branch": branch_id},
