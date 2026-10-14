@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -311,6 +312,46 @@ describe("physical disposition confirmation form", () => {
   );
 });
 describe("physical disposition modal recovery", () => {
+  it("keeps one pending inspection through StrictMode remount and allows recovery after failure", async () => {
+    mocks.load.mockReturnValue(saved());
+    let fail: ((reason: Error) => void) | undefined;
+    mocks.inspect.mockImplementationOnce(
+      () =>
+        new Promise<ResolvedPhysicalDisposition>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const onClose = vi.fn();
+    render(
+      <StrictMode>
+        <PhysicalDispositionModal
+          scope={scope}
+          item={null}
+          pending={saved()}
+          onClose={onClose}
+          onResolved={vi.fn()}
+        />
+      </StrictMode>,
+    );
+    expect(mocks.inspect).toHaveBeenCalledExactlyOnceWith(operationScope);
+    const check = screen.getByRole("button", { name: "Проверить результат" });
+    expect(check).toBeDisabled();
+    fireEvent.click(check);
+    expect(mocks.inspect).toHaveBeenCalledOnce();
+    await act(async () => {
+      fail?.(new Error("Не удалось проверить статус"));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Не удалось проверить статус");
+    expect(check).toBeEnabled();
+    mocks.inspect.mockResolvedValue(resolved());
+    fireEvent.click(check);
+    await screen.findByText("Решение сохранено");
+    expect(mocks.inspect).toHaveBeenCalledTimes(2);
+    expect(mocks.run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить проверку" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(mocks.acknowledge).toHaveBeenCalledExactlyOnceWith(operationScope, resolved());
+  });
   it("mount only inspects saved intent; not_found requires explicit retry with no replacement input", async () => {
     mocks.load.mockReturnValue(saved());
     modal(null, saved());

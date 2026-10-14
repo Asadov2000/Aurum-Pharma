@@ -69,7 +69,8 @@ export function PhysicalDispositionModal({
   const [pending, setPending] = useState(initialPending);
   const [result, setResult] = useState<ResolvedPhysicalDisposition | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(initialPending !== null);
+  const inspecting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const policy = useTenantAccessPolicy(scope.userId, scope.tenantId, true);
   const canWrite =
@@ -84,7 +85,8 @@ export function PhysicalDispositionModal({
     defaultValues: { disposition_type: "", reason_code: "", comment: "", confirmed: false },
   });
   const inspect = useCallback(async (): Promise<void> => {
-    if (!active()) return;
+    if (!active() || inspecting.current) return;
+    inspecting.current = true;
     setBusy(true);
     setError(null);
     setNotFound(false);
@@ -100,6 +102,7 @@ export function PhysicalDispositionModal({
     } catch (reason) {
       if (active()) setError(errorMessage(reason));
     } finally {
+      inspecting.current = false;
       if (active()) setBusy(false);
     }
   }, [active, operationScope, scope]);
