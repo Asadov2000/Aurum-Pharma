@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.foundation.repository import FoundationRepository
@@ -40,6 +40,7 @@ from tests.domains.pos.test_unit_cash_intent import save
 from tests.domains.pos.test_unit_physical_cart import physical_request, put_physical
 from tests.domains.pos.test_unit_prescription import attach
 from tests.domains.pos.test_unit_return import runtime
+from tests.domains.pos.unit_shift_history_helpers import close_historical_unit_shift
 
 db_session = receiving_session_fixture
 
@@ -293,14 +294,13 @@ async def test_physical_preparation_requires_actual_cashier_and_allowed_scope(
         )
 
 
-async def test_physical_preparation_rechecks_closed_shift(db_session: AsyncSession) -> None:
+async def test_physical_preparation_rechecks_closed_shift(
+    db_session: AsyncSession, maintenance_engine: AsyncEngine
+) -> None:
     source = await checkout_source(db_session)
     await put_physical(db_session, source.sale.id)
     request = await saved_request(db_session, source.sale)
-    await db_session.execute(
-        text("UPDATE shift SET status='closed',closed_at=now() WHERE id=:id"),
-        {"id": source.sale.shift_id},
-    )
+    await close_historical_unit_shift(db_session, maintenance_engine, source.sale.shift_id)
     with pytest.raises((BusinessRuleError, ConflictError)):
         await prepare(db_session, request)
 

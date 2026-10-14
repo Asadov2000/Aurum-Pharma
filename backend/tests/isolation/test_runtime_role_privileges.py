@@ -237,6 +237,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_shift_unfinished_unit_cart",
     "physical_customer_return_disposition_status",
     "record_physical_customer_return_disposition",
     "physical_customer_return_disposition_history",
@@ -1607,6 +1608,13 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
+    shift_guard = next(
+        row for row in function_privileges if row["proname"] == "trg_shift_unfinished_unit_cart"
+    )
+    assert shift_guard["is_security_definer"] is True
+    assert shift_guard["app_can_execute"] is False
+    assert shift_guard["support_can_execute"] is False
+    assert shift_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     _assert_prepared_stock_function_privileges(function_privileges)
     assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {

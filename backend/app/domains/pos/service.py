@@ -1422,17 +1422,29 @@ class POSService:
         cash_in = Decimal(totals.get("cash", "0"))
         expected = shift.opening_cash + cash_in
         diff = closing_cash_actual - expected
-        return await self.repo.update_shift(
-            shift,
-            status="closed",
-            closed_at=self._now(),
-            closed_by_user_id=closed_by_user_id,
-            closing_cash_actual=closing_cash_actual,
-            closing_cash_expected=expected,
-            closing_difference=diff,
-            totals=totals,
-            notes=notes,
-        )
+        try:
+            return await self.repo.update_shift(
+                shift,
+                status="closed",
+                closed_at=self._now(),
+                closed_by_user_id=closed_by_user_id,
+                closing_cash_actual=closing_cash_actual,
+                closing_cash_expected=expected,
+                closing_difference=diff,
+                totals=totals,
+                notes=notes,
+            )
+        except IntegrityError as exc:
+            # Managers cannot read another cashier's prepared rows through RLS.
+            # The database guard still prevents stranding that cashier's draft.
+            constraint = getattr(exc.orig, "constraint_name", None) or getattr(
+                getattr(exc.orig, "__cause__", None), "constraint_name", None
+            )
+            if constraint != "ck_shift_unfinished_unit_cart":
+                raise
+            raise BusinessRuleError(
+                "Cannot close a shift while unfinished sales contain items or payments"
+            ) from exc
 
     async def z_report(
         self,

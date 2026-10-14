@@ -334,6 +334,9 @@ class POSRepository:
 
     async def has_active_draft_sales(self, shift_id: UUID) -> bool:
         item_exists = exists().where(SaleItem.sale_id == Sale.id)
+        unit_item_exists = exists().where(
+            UnitCartItem.tenant_id == Sale.tenant_id, UnitCartItem.sale_id == Sale.id
+        )
         payment_exists = exists().where(SalePayment.sale_id == Sale.id)
         prescription_exists = exists().where(PrescriptionLog.sale_id == Sale.id)
         stmt = select(
@@ -341,7 +344,7 @@ class POSRepository:
                 and_(
                     Sale.shift_id == shift_id,
                     Sale.status == "draft",
-                    or_(item_exists, payment_exists, prescription_exists),
+                    or_(item_exists, unit_item_exists, payment_exists, prescription_exists),
                 )
             )
         )

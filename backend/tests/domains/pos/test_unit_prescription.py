@@ -25,6 +25,7 @@ from tests.domains.incoming.test_unit_acceptance import (
 from tests.domains.pos.test_unit_cart import put_cart_item, seed_cart_draft
 from tests.domains.pos.test_unit_cart_quote import add_legacy
 from tests.domains.pos.test_unit_return import runtime
+from tests.domains.pos.unit_shift_history_helpers import close_historical_unit_shift
 
 db_session = receiving_session_fixture
 
@@ -324,7 +325,7 @@ async def test_recipe_details_remain_masked_in_audit(db_session: AsyncSession) -
 
 
 async def test_current_special_policy_and_closed_shift_block_unit_prescriptions(
-    db_session: AsyncSession,
+    db_session: AsyncSession, maintenance_engine: AsyncEngine
 ) -> None:
     sale_id, item_id = await rx_cart(db_session)
     await attach(db_session, sale_id, item_id)
@@ -335,12 +336,10 @@ async def test_current_special_policy_and_closed_shift_block_unit_prescriptions(
     )
     with pytest.raises(BusinessRuleError, match="Special-dispensing"):
         await complete(db_session, sale_id)
-    await db_session.execute(
-        text(
-            "UPDATE shift SET status='closed',closed_at=now() WHERE id="
-            "(SELECT shift_id FROM sale WHERE id=:sale)"
-        ),
-        {"sale": sale_id},
+    shift_id = await db_session.scalar(
+        text("SELECT shift_id FROM sale WHERE id=:sale"), {"sale": sale_id}
     )
+    assert isinstance(shift_id, UUID)
+    await close_historical_unit_shift(db_session, maintenance_engine, shift_id)
     with pytest.raises(BusinessRuleError):
         await attach(db_session, sale_id, item_id)
