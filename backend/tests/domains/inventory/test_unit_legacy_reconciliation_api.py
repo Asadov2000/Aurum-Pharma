@@ -240,9 +240,7 @@ async def test_readonly_tenant_can_preview_exhausted_blocked_expired_batch(
     await set_receiving_context(db_session, context.stock, context.actor_id)
     before = await facts(db_session)
     async with inventory_actor(db_session):
-        response = await client.post(
-            path(batch.id), json={**body(db_session), "closed_packs": 0}
-        )
+        response = await client.post(path(batch.id), json={**body(db_session), "closed_packs": 0})
     assert response.status_code == 200, response.text
     assert response.json()["comparison"] == "matched"
     assert await facts(db_session) == before
