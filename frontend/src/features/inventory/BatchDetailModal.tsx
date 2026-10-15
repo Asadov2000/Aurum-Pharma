@@ -30,6 +30,7 @@ import { expiryLabel, expiryTone, movementLabel, movementSourceLabel } from "./l
 import { useBatchQuery } from "./queries";
 import { type Movement } from "./types";
 import { WriteOffForm } from "./WriteOffForm";
+import { LegacyTransitionPanel } from "./LegacyTransitionPanel";
 
 export function BatchDetailModal({
   batchId,
@@ -233,6 +234,8 @@ export function BatchDetailModal({
             <Field label="Код партии" value={batch.id.slice(0, 8)} mono />
           </dl>
         </section>
+
+        {!isPreview && <LegacyTransitionPanel batch={batch} />}
 
         <section aria-labelledby="batch-movements-heading">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
