@@ -118,41 +118,40 @@ def plan_legacy_transition(
     No rounding, valuation adjustment or inferred price is permitted. The writer
     must independently validate the new ledger's physical and monetary basis.
     """
-    if not isinstance(reconciliation_id, UUID):
-        raise ValueError("an explicit reconciliation UUID is required")
-    comparison = preview_legacy_reconciliation(
-        source, observation, tenant_id=tenant_id, branch_id=branch_id
-    )
-    # The preview reconstructs nested models to reject forged model_copy values.
-    source = comparison.source
-    observation = comparison.observation
-    if (
-        not comparison.recorded_quantity_representable
-        or comparison.comparison != "matched"
-        or comparison.observed_base_units <= 0
-    ):
-        raise ValueError("transition requires a matching positive exact physical count")
-    pack_cost = _validated_money(historical_pack_cost)
-    carried = _validated_money(carried_cost)
     with localcontext(Context(prec=60)):
+        if not isinstance(reconciliation_id, UUID):
+            raise ValueError("an explicit reconciliation UUID is required")
+        comparison = preview_legacy_reconciliation(
+            source, observation, tenant_id=tenant_id, branch_id=branch_id
+        )
+        # The preview reconstructs nested models to reject forged model_copy values.
+        source = comparison.source
+        observation = comparison.observation
+        if (
+            not comparison.recorded_quantity_representable
+            or comparison.comparison != "matched"
+            or comparison.observed_base_units <= 0
+        ):
+            raise ValueError("transition requires a matching positive exact physical count")
+        pack_cost = _validated_money(historical_pack_cost)
+        carried = _validated_money(carried_cost)
         exact_legacy_cost = _validated_money(source.legacy_quantity * pack_cost)
         legacy_delta = -source.legacy_quantity
-    if exact_legacy_cost != carried:
-        raise ValueError("carried cost differs from the exact legacy valuation")
-    closed = _closed_range(observation, pack_cost)
-    opened = _opened_slices(observation, pack_cost)
-    with localcontext(Context(prec=60)):
+        if exact_legacy_cost != carried:
+            raise ValueError("carried cost differs from the exact legacy valuation")
+        closed = _closed_range(observation, pack_cost)
+        opened = _opened_slices(observation, pack_cost)
         total = sum((part.amount for part in opened), closed.amount if closed else Decimal("0.00"))
-    if total > MAX_MONEY or total != carried:
-        raise ValueError("physical cost layout cannot preserve the carried amount")
-    return LegacyTransitionPlan(
-        source=source,
-        observation=observation,
-        reconciliation_id=reconciliation_id,
-        legacy_quantity_delta=legacy_delta,
-        historical_pack_cost=pack_cost,
-        closed_range=closed,
-        opened_slices=opened,
-        total_base_units=comparison.observed_base_units,
-        total_cost=carried,
-    )
+        if total > MAX_MONEY or total != carried:
+            raise ValueError("physical cost layout cannot preserve the carried amount")
+        return LegacyTransitionPlan(
+            source=source,
+            observation=observation,
+            reconciliation_id=reconciliation_id,
+            legacy_quantity_delta=legacy_delta,
+            historical_pack_cost=pack_cost,
+            closed_range=closed,
+            opened_slices=opened,
+            total_base_units=comparison.observed_base_units,
+            total_cost=carried,
+        )

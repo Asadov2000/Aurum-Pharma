@@ -221,6 +221,7 @@ def test_plan_is_independent_of_decimal_precision_and_traps() -> None:
     with localcontext() as context:
         context.prec = 1
         context.traps[Inexact] = context.traps[Rounded] = context.traps[InvalidOperation] = True
+        context.flags[InvalidOperation] = context.flags[Rounded] = True
         flags = dict(context.flags)
         result = plan(original, counted, MAX_MONEY, MAX_MONEY)
         assert result.total_cost == MAX_MONEY
