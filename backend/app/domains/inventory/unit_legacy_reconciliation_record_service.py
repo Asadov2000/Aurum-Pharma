@@ -77,6 +77,12 @@ class LegacyReconciliationRecordService:
             )
         )
         await self.repository.lock_command(tenant_id=tenant_id, record_id=request.reconciliation_id)
+        # Waiting for another request may outlive the HTTP authorization snapshot.
+        # Replay must recheck actual database permissions, not just the INSERT guard.
+        if not await self.repository.is_record_actor_allowed(
+            tenant_id=tenant_id, actor_id=actor_id, branch_id=request.branch_id
+        ):
+            raise PermissionDeniedError("Batch reconciliation permission denied")
         existing = await self.repository.read_record(
             tenant_id=tenant_id, record_id=request.reconciliation_id
         )

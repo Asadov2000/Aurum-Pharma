@@ -23,6 +23,29 @@ class LegacyReconciliationRecordRepository(LegacyReconciliationPreviewRepository
             {"scope": f"aurum-legacy-reconciliation-key:{tenant_id}:{record_id}"},
         )
 
+    async def is_record_actor_allowed(
+        self, *, tenant_id: UUID, actor_id: UUID, branch_id: UUID
+    ) -> bool:
+        authorized = await self.session.scalar(
+            text(
+                "SELECT current_user='aurum_app' AND session_user='aurum_app' "
+                "AND NOT public.is_support_session() "
+                "AND NOT public.is_tenant_support_session() "
+                "AND public.current_tenant_id()=:tenant "
+                "AND public.current_app_user_id()=:actor "
+                "AND EXISTS(SELECT 1 FROM public.app_user WHERE id=:actor AND status='active') "
+                "AND public.tenant_actor_has_scoped_permission(:tenant,'batches.view',:branch) "
+                "AND public.tenant_actor_has_scoped_permission(:tenant,'batches.update',:branch) "
+                "AND EXISTS(SELECT 1 FROM public.tenant t "
+                "JOIN public.tenant_access_policy p ON p.tenant_id=t.id "
+                "WHERE t.id=:tenant AND t.status NOT IN ('readonly','suspended','archived') "
+                "AND (p.expires_at<=statement_timestamp() "
+                "OR (p.mode<>'readonly' AND NOT ('inventory'=ANY(p.blocked_modules)))))"
+            ),
+            {"tenant": tenant_id, "actor": actor_id, "branch": branch_id},
+        )
+        return authorized is True
+
     async def read_record(
         self, *, tenant_id: UUID, record_id: UUID
     ) -> LegacyReconciliationRecord | None:

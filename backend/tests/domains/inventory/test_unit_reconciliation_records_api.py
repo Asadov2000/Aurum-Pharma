@@ -243,3 +243,52 @@ async def test_saved_opened_pack_preserves_physical_composition_on_read(
         )
         assert read.status_code == 200 and read.json() == payload
     assert await stock_facts(db_session) == before
+
+
+async def test_saved_replay_rechecks_revoked_update_permission_from_database(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+) -> None:
+    context = runtime(db_session)
+    viewer = await seed_receiving_actor(
+        db_engine, maintenance_engine, context.stock, permissions=("batches.view",)
+    )
+    batch = await legacy_batch(db_session)
+    request = request_body(db_session)
+    async with inventory_actor(db_session):
+        saved = await client.post(path(batch.id), json=request)
+        assert saved.status_code == 200, saved.text
+        await db_session.commit()
+        async with db_engine.begin() as support:
+            await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+            await support.execute(
+                text(
+                    "UPDATE user_assignment SET role_id=(SELECT role_id FROM user_assignment "
+                    "WHERE user_id=:viewer AND tenant_id=:tenant AND branch_id=:branch) "
+                    "WHERE user_id=:actor AND tenant_id=:tenant AND branch_id=:branch"
+                ),
+                {
+                    "viewer": viewer,
+                    "actor": context.actor_id,
+                    "tenant": context.stock.tenant_id,
+                    "branch": context.stock.branch_id,
+                },
+            )
+        await set_receiving_context(db_session, context.stock, context.actor_id)
+        assert (
+            await db_session.scalar(
+                text("SELECT tenant_actor_has_scoped_permission(:tenant,'batches.update',:branch)"),
+                {"tenant": context.stock.tenant_id, "branch": context.stock.branch_id},
+            )
+            is False
+        )
+        before = await facts(db_session)
+        denied = await client.post(path(batch.id), json=request)
+        assert denied.status_code == 403
+        read = await client.get(
+            f"{path(batch.id)}/{saved.json()['id']}", params={"branch_id": str(batch.branch_id)}
+        )
+        assert read.status_code == 200 and read.json() == saved.json()
+        assert await facts(db_session) == before
