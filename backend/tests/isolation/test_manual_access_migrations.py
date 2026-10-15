@@ -74,7 +74,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "unit_legacy_transition",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188/0189/0190/0191/0193/0198/0200/0201.
+        # Later inventory and financial migrations through 0201 remain installed.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -206,7 +206,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
         security_before = connection.execute(security_sql).all()
         policies_before = connection.execute(policies_sql).all()
         redactor_sql = text(
-            "SELECT pg_get_functiondef('public.audit_redact_table_snapshot(text,jsonb)'::regprocedure)"
+            "SELECT pg_get_functiondef("
+            "'public.audit_redact_table_snapshot(text,jsonb)'::regprocedure)"
         )
         redactor_before = connection.scalar(redactor_sql)
         counts_before = [

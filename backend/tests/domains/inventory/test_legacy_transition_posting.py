@@ -17,11 +17,13 @@ from app.domains.inventory.unit_legacy_transition_posting_repository import (
     LegacyTransitionPostingRepository,
 )
 from app.domains.inventory.unit_stock_v2 import UnitPackagingV2
-from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import (
     IncomingContext,
     seed_receiving_actor,
     set_receiving_context,
+)
+from tests.domains.incoming.test_unit_acceptance import (
+    db_session as receiving_session_fixture,
 )
 from tests.domains.inventory.test_legacy_transition_source import (
     PERMISSIONS,

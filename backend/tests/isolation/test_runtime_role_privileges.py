@@ -1587,7 +1587,9 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["support_can_execute"] is False
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     journal_guard = next(
-        row for row in function_privileges if row["proname"] == "trg_unit_legacy_transition_immutable"
+        row
+        for row in function_privileges
+        if row["proname"] == "trg_unit_legacy_transition_immutable"
     )
     assert journal_guard["is_security_definer"] is False
     assert journal_guard["app_can_execute"] is False
