@@ -181,7 +181,8 @@ async def test_full_opened_pack_remains_opened_when_quantity_and_value_match(
     lot = (
         await db_session.execute(
             text(
-                "SELECT closed_packs,initial_closed_packs,initial_opened_packs,initial_opened_units "
+                "SELECT closed_packs,initial_closed_packs,"
+                "initial_opened_packs,initial_opened_units "
                 "FROM unit_stock_lot_v2 WHERE id=:id"
             ),
             {"id": result["lot_id"]},
