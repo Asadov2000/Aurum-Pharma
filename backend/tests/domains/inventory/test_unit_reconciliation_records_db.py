@@ -217,16 +217,19 @@ async def test_downgrade_refuses_to_erase_a_saved_observation(
     assert await count_record(db_session, record_id) == 1
 
 
-@pytest.mark.parametrize("duplicate_pack", [False, True])
+@pytest.mark.parametrize("invalid", ["remainder", "duplicate", "date_only", "offset_24"])
 async def test_raw_insert_rejects_invalid_opened_pack_structure(
-    client: AsyncClient, db_session: AsyncSession, duplicate_pack: bool
+    client: AsyncClient, db_session: AsyncSession, invalid: str
 ) -> None:
     record_id = await saved_record(client, db_session)
     pack = {
         "id": str(uuid4()),
-        "opened_at": "2026-10-15T12:00:00Z",
+        "opened_at": {
+            "date_only": "2026-10-15",
+            "offset_24": "2026-10-15T12:00:00+24:00",
+        }.get(invalid, "2026-10-15T12:00:00Z"),
         "intact_blisters": [3, 1],
-        "opened_blisters": [{"number": 2, "remaining_units": 4 if duplicate_pack else 10}],
+        "opened_blisters": [{"number": 2, "remaining_units": 10 if invalid == "remainder" else 4}],
         "loose_units": 0,
     }
     count = {
@@ -238,7 +241,7 @@ async def test_raw_insert_rejects_invalid_opened_pack_structure(
             "dispense_step": 1,
         },
         "closed_packs": 0,
-        "opened_packs": [pack, pack] if duplicate_pack else [pack],
+        "opened_packs": [pack, pack] if invalid == "duplicate" else [pack],
     }
     with pytest.raises(DBAPIError) as error:
         async with db_session.begin_nested():

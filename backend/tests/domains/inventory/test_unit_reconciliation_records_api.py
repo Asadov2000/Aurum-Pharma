@@ -214,7 +214,7 @@ async def test_saved_opened_pack_preserves_physical_composition_on_read(
     batch = await legacy_batch(db_session)
     pack = {
         "id": str(uuid4()),
-        "opened_at": "2026-10-15T12:00:00Z",
+        "opened_at": "2026-10-15T12:00:00Z" if known_blisters else "2026-10-15T12:00:00+23:59",
         "intact_blisters": [3, 1] if known_blisters else [],
         "opened_blisters": [{"number": 2, "remaining_units": 4}] if known_blisters else [],
         "loose_units": 0 if known_blisters else 15,

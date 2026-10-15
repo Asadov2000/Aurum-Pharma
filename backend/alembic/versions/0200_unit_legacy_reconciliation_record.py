@@ -93,14 +93,19 @@ BEGIN
     OR v_pack-ARRAY['id','opened_at','intact_blisters','opened_blisters','loose_units']
       <>'{}'::JSONB
     OR jsonb_typeof(v_pack->'id') IS DISTINCT FROM 'string'
+    OR NOT (v_pack->>'id' ~* '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$')
     OR jsonb_typeof(v_pack->'opened_at') IS DISTINCT FROM 'string'
-    OR NOT (v_pack->>'opened_at' ~ '(Z|[+-][0-9]{2}:[0-9]{2})$')
+    OR NOT (v_pack->>'opened_at' ~ (
+      '^[0-9]{4}-[0-9]{2}-[0-9]{2}T(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]'
+      || '(\.[0-9]{1,6})?(Z|[+-](0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$'))
     OR jsonb_typeof(v_pack->'intact_blisters') IS DISTINCT FROM 'array'
     OR jsonb_typeof(v_pack->'opened_blisters') IS DISTINCT FROM 'array' THEN
    RAISE EXCEPTION 'legacy_reconciliation_opened_pack_shape' USING ERRCODE='23514';
   END IF;
   v_id:=(v_pack->>'id')::UUID;
-  PERFORM (v_pack->>'opened_at')::TIMESTAMPTZ;
+  -- Validate calendar/time independently: Python permits UTC offsets beyond
+  -- PostgreSQL's timezone range, while the stored typed count preserves them.
+  PERFORM substr(v_pack->>'opened_at',1,19)::TIMESTAMP;
   IF v_id=ANY(v_seen) THEN
    RAISE EXCEPTION 'legacy_reconciliation_pack_duplicate' USING ERRCODE='23514';
   END IF;
