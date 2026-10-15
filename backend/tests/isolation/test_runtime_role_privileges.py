@@ -1561,6 +1561,19 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
     assert actual == expected
 
 
+def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
+    for name in (
+        "trg_unit_legacy_reconciliation_record_guard",
+        "validate_unit_legacy_reconciliation_count",
+        "trg_shift_unfinished_unit_cart",
+    ):
+        guard = next(row for row in function_privileges if row["proname"] == name)
+        assert guard["is_security_definer"] is True
+        assert guard["app_can_execute"] is False
+        assert guard["support_can_execute"] is False
+        assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
 async def test_runtime_role_has_only_row_level_table_privileges(
     support_engine_privileges: AsyncEngine,
 ) -> None:
@@ -1611,22 +1624,7 @@ async def test_runtime_role_has_only_row_level_table_privileges(
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
-    for name in (
-        "trg_unit_legacy_reconciliation_record_guard",
-        "validate_unit_legacy_reconciliation_count",
-    ):
-        guard = next(row for row in function_privileges if row["proname"] == name)
-        assert guard["is_security_definer"] is True
-        assert guard["app_can_execute"] is False
-        assert guard["support_can_execute"] is False
-        assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
-    shift_guard = next(
-        row for row in function_privileges if row["proname"] == "trg_shift_unfinished_unit_cart"
-    )
-    assert shift_guard["is_security_definer"] is True
-    assert shift_guard["app_can_execute"] is False
-    assert shift_guard["support_can_execute"] is False
-    assert shift_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    _assert_private_inventory_guards(function_privileges)
     _assert_prepared_stock_function_privileges(function_privileges)
     assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {
