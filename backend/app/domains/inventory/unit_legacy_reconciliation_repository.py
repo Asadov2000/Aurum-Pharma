@@ -1,4 +1,4 @@
-"""Scoped, cost-free legacy source projection, without row locks or writes."""
+"""Scoped, cost-free legacy projection; optional shared lock when saving a count."""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -22,23 +22,24 @@ class LegacyReconciliationPreviewRepository:
         self.session = session
 
     async def read_batch(
-        self, *, tenant_id: UUID, branch_id: UUID, batch_id: UUID
+        self, *, tenant_id: UUID, branch_id: UUID, batch_id: UUID, lock: bool = False
     ) -> LegacyReconciliationBatch | None:
-        result = await self.session.execute(
-            select(
-                Batch.tenant_id,
-                Batch.branch_id,
-                Batch.catalog_id,
-                Batch.id.label("batch_id"),
-                Batch.qty_remaining.label("legacy_quantity"),
-                Batch.unit_packaging_preparation.is_not(None).label("has_preparation"),
-                Batch.unit_packaging_snapshot_v2.is_not(None).label("has_physical_snapshot"),
-            ).where(
-                Batch.tenant_id == tenant_id,
-                Batch.branch_id == branch_id,
-                Batch.id == batch_id,
-            )
+        statement = select(
+            Batch.tenant_id,
+            Batch.branch_id,
+            Batch.catalog_id,
+            Batch.id.label("batch_id"),
+            Batch.qty_remaining.label("legacy_quantity"),
+            Batch.unit_packaging_preparation.is_not(None).label("has_preparation"),
+            Batch.unit_packaging_snapshot_v2.is_not(None).label("has_physical_snapshot"),
+        ).where(
+            Batch.tenant_id == tenant_id,
+            Batch.branch_id == branch_id,
+            Batch.id == batch_id,
         )
+        if lock:
+            statement = statement.with_for_update(read=True)
+        result = await self.session.execute(statement)
         row = result.one_or_none()
         if row is None:
             return None
