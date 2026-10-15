@@ -109,6 +109,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "unit_stock_opening_pack_v2",
     "unit_legacy_transition",
     "unit_stock_opened_pack_v2",
     "access_role_version",
@@ -239,6 +240,13 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "unit_legacy_opening_state",
+    "unit_legacy_opening_time",
+    "trg_unit_opening_pack_guard",
+    "trg_unit_opening_pack_apply",
+    "trg_unit_initial_opened_basis_guard",
+    "assert_unit_legacy_opened_complete",
+    "post_unit_legacy_opened_transition",
     "assert_unit_legacy_transition_actor",
     "trg_unit_legacy_transition_immutable",
     "unit_legacy_transition_row_matches",
@@ -1572,6 +1580,13 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "unit_legacy_opening_state",
+        "unit_legacy_opening_time",
+        "trg_unit_opening_pack_guard",
+        "trg_unit_opening_pack_apply",
+        "trg_unit_initial_opened_basis_guard",
+        "assert_unit_legacy_opened_complete",
+        "post_unit_legacy_opened_transition",
         "assert_unit_legacy_transition_actor",
         "unit_legacy_transition_row_matches",
         "trg_unit_legacy_transition_movement",

@@ -435,7 +435,11 @@ class PhysicalUnitLedgerV2Service:
             nonlocal entry_order
             lot = lot_by_id[lot_id]
             sealed_count = -closed_delta if closed_delta else None
-            sealed_start = lot.initial_closed_packs - closed[lot_id] + 1 if sealed_count else None
+            sealed_start = (
+                lot.initial_closed_packs + lot.initial_opened_packs - closed[lot_id] + 1
+                if sealed_count
+                else None
+            )
             await self.repo.insert_movement(
                 UnitStockMovementV2(
                     id=uuid4(),
@@ -490,7 +494,9 @@ class PhysicalUnitLedgerV2Service:
                 )
                 if pick.newly_opened and key[1] not in real_packs:
                     lot = lot_by_id[pick.batch_id]
-                    ordinal = lot.initial_closed_packs - closed[lot.id] + 1
+                    ordinal = (
+                        lot.initial_closed_packs + lot.initial_opened_packs - closed[lot.id] + 1
+                    )
                     real_packs[key[1]] = uuid5(
                         NAMESPACE_URL,
                         f"aurum-unit-open-v2:{command.tenant_id}:{command.id}:{lot.id}:{ordinal}",

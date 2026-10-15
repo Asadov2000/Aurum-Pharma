@@ -72,9 +72,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "physical_customer_return_disposition",
             "unit_legacy_reconciliation_record",
             "unit_legacy_transition",
+            "unit_stock_opening_pack_v2",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # Later inventory and financial migrations through 0201 remain installed.
+        # Later inventory and financial migrations through 0203 remain installed.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -95,7 +96,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.pos_mixed_return_slice, public.pos_mixed_cash_refund,
               public.pos_mixed_zero_return, public.mixed_customer_return_disposition,
               public.physical_customer_return_disposition,
-              public.unit_legacy_reconciliation_record,public.unit_legacy_transition
+              public.unit_legacy_reconciliation_record,public.unit_legacy_transition,
+              public.unit_stock_opening_pack_v2
               IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
@@ -131,7 +133,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
               'public.unit_legacy_reconciliation_record'::regclass,
-              'public.unit_legacy_transition'::regclass)
+              'public.unit_legacy_transition'::regclass,
+              'public.unit_stock_opening_pack_v2'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -165,7 +168,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
               'public.unit_legacy_reconciliation_record'::regclass,
-              'public.unit_legacy_transition'::regclass)
+              'public.unit_legacy_transition'::regclass,
+              'public.unit_stock_opening_pack_v2'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -199,7 +203,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
               'public.unit_legacy_reconciliation_record'::regclass,
-              'public.unit_legacy_transition'::regclass)
+              'public.unit_legacy_transition'::regclass,
+              'public.unit_stock_opening_pack_v2'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()

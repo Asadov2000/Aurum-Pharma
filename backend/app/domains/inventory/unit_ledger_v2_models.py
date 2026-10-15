@@ -52,6 +52,15 @@ class UnitStockLotV2(StockIdentity, SourceSnapshot, Base):
 
     expires_at: Mapped[date] = mapped_column(Date, nullable=False)
     initial_closed_packs: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    initial_opened_packs: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    initial_opened_units: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    initial_opened_cost: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, server_default=text("0")
+    )
     closed_packs: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     purchase_cost_per_pack: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     cost_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
