@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useFieldArray, useForm, type UseFormReturn } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { isAxiosError } from "axios";
@@ -61,7 +61,7 @@ interface Fields {
     openedAt: string;
     intact: string;
     loose: string;
-    blisters: { number: string; remaining: string }[];
+    blisters: { rowId: string; number: string; remaining: string }[];
   }[];
 }
 type Checked = { count: LegacyCount; preview: LegacyPreview; fingerprint: string };
@@ -77,7 +77,16 @@ function OpenedPackFields({
   hasBlisters: boolean;
   remove: () => void;
 }): JSX.Element {
-  const blisters = useFieldArray({ control: form.control, name: `openedPacks.${index}.blisters` });
+  const blisters = form.watch(`openedPacks.${index}.blisters`);
+  const replaceBlisters = (next: Fields["openedPacks"][number]["blisters"]) => {
+    const values = form.getValues();
+    form.reset({
+      ...values,
+      openedPacks: values.openedPacks.map((pack, packIndex) =>
+        packIndex === index ? { ...pack, blisters: next } : pack,
+      ),
+    });
+  };
   const intact = form.watch(`openedPacks.${index}.intact`);
   const loose = form.watch(`openedPacks.${index}.loose`);
   const position = index + 1;
@@ -100,7 +109,7 @@ function OpenedPackFields({
           Укажите известные дату и время вскрытия по времени Таджикистана (UTC+05:00).
         </p>
       </div>
-      {(hasBlisters || intact !== "" || blisters.fields.length > 0) && (
+      {(hasBlisters || intact !== "" || blisters.length > 0) && (
         <div className="space-y-2">
           <div>
             <Label htmlFor={`legacy-intact-${index}`}>Целые блистеры {position}</Label>
@@ -113,8 +122,8 @@ function OpenedPackFields({
               Номера целых блистеров через запятую. Пусто — целых блистеров нет.
             </p>
           </div>
-          {blisters.fields.map((blister, blisterIndex) => (
-            <div key={blister.id} className="grid gap-2 sm:grid-cols-3">
+          {blisters.map((blister, blisterIndex) => (
+            <div key={blister.rowId} className="grid gap-2 sm:grid-cols-3">
               <div>
                 <Label htmlFor={`legacy-blister-number-${index}-${blisterIndex}`}>
                   Номер блистера {position}.{blisterIndex + 1}
@@ -138,7 +147,13 @@ function OpenedPackFields({
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => blisters.remove(blisterIndex)}
+                onClick={() =>
+                  replaceBlisters(
+                    form
+                      .getValues(`openedPacks.${index}.blisters`)
+                      .filter((_, rowIndex) => rowIndex !== blisterIndex),
+                  )
+                }
               >
                 Удалить блистер {position}.{blisterIndex + 1}
               </Button>
@@ -148,7 +163,12 @@ function OpenedPackFields({
             <Button
               type="button"
               variant="secondary"
-              onClick={() => blisters.append({ number: "", remaining: "" })}
+              onClick={() =>
+                replaceBlisters([
+                  ...form.getValues(`openedPacks.${index}.blisters`),
+                  { rowId: crypto.randomUUID(), number: "", remaining: "" },
+                ])
+              }
             >
               Добавить вскрытый блистер
             </Button>
@@ -257,7 +277,7 @@ function TransitionWorkspace({
       openedPacks: [],
     },
   });
-  const openedPacks = useFieldArray({ control: form.control, name: "openedPacks" });
+  const openedPacks = form.watch("openedPacks");
   const hasBlisters = form.watch("blister") !== "";
   const recovery = useForm<{ recordId: string; commandId: string }>({
     defaultValues: { recordId: "", commandId: "" },
@@ -473,33 +493,46 @@ function TransitionWorkspace({
                 <Input id={`legacy-${name}`} inputMode="numeric" {...form.register(name)} />
               </div>
             ))}
-            {openedPacks.fields.length === 0 && (
+            {openedPacks.length === 0 && (
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" {...form.register("noOpened")} />
                 Подтверждаю: открытых упаковок нет
               </label>
             )}
             <div className="space-y-3 sm:col-span-2">
-              {openedPacks.fields.map((pack, index) => (
+              {openedPacks.map((pack, index) => (
                 <OpenedPackFields
-                  key={pack.id}
+                  key={pack.packId}
                   form={form}
                   index={index}
                   hasBlisters={hasBlisters}
-                  remove={() => openedPacks.remove(index)}
+                  remove={() => {
+                    const values = form.getValues();
+                    form.reset({
+                      ...values,
+                      openedPacks: values.openedPacks.filter((_, packIndex) => packIndex !== index),
+                    });
+                  }}
                 />
               ))}
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  form.setValue("noOpened", false);
-                  openedPacks.append({
-                    packId: crypto.randomUUID(),
-                    openedAt: "",
-                    intact: "",
-                    loose: "0",
-                    blisters: [],
+                  const values = form.getValues();
+                  form.reset({
+                    ...values,
+                    noOpened: false,
+                    openedPacks: [
+                      ...values.openedPacks,
+                      {
+                        packId: crypto.randomUUID(),
+                        openedAt: "",
+                        intact: "",
+                        loose: "0",
+                        blisters: [],
+                      },
+                    ],
                   });
                 }}
               >
