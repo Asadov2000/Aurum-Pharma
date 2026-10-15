@@ -189,10 +189,13 @@ async def test_full_opened_pack_remains_opened_when_quantity_and_value_match(
         )
     ).one()
     assert tuple(lot) == (1, 1, 1, 30)
-    assert await db_session.scalar(
-        text("SELECT remaining_units FROM unit_stock_opened_pack_v2 WHERE lot_id=:id"),
-        {"id": result["lot_id"]},
-    ) == 30
+    assert (
+        await db_session.scalar(
+            text("SELECT remaining_units FROM unit_stock_opened_pack_v2 WHERE lot_id=:id"),
+            {"id": result["lot_id"]},
+        )
+        == 30
+    )
 
 
 @pytest.mark.parametrize("conflict", ["new_command", "other_record", "other_batch"])
