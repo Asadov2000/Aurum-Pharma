@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -28,3 +29,22 @@ class LegacyReconciliationRecordResponse(ReconciliationContract):
     created_at: datetime
     created_by: UUID
     preview: LegacyReconciliationPreview
+
+
+LegacyReconciliationIssue = Literal[
+    "source_missing",
+    "source_identity_changed",
+    "source_mode_changed",
+    "quantity_changed",
+    "quantity_not_representable",
+    "count_discrepancy",
+]
+
+
+class LegacyReconciliationComparisonResponse(ReconciliationContract):
+    """Current quantity comparison, never authorization to transfer stock."""
+
+    record: LegacyReconciliationRecordResponse
+    current_comparison: LegacyReconciliationPreview | None
+    issues: tuple[LegacyReconciliationIssue, ...]
+    conversion_authorized: Literal[False] = False
