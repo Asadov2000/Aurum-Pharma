@@ -71,9 +71,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "mixed_customer_return_disposition",
             "physical_customer_return_disposition",
             "unit_legacy_reconciliation_record",
+            "unit_legacy_transition",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188/0189/0190/0191/0193/0198/0200.
+        # 0160/0162/0165/0169/0170/0171/0175/0176/0181/0183/0184/0188/0189/0190/0191/0193/0198/0200/0201.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -94,7 +95,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.pos_mixed_return_slice, public.pos_mixed_cash_refund,
               public.pos_mixed_zero_return, public.mixed_customer_return_disposition,
               public.physical_customer_return_disposition,
-              public.unit_legacy_reconciliation_record
+              public.unit_legacy_reconciliation_record,public.unit_legacy_transition
               IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
@@ -129,7 +130,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_zero_return'::regclass,
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
-              'public.unit_legacy_reconciliation_record'::regclass)
+              'public.unit_legacy_reconciliation_record'::regclass,
+              'public.unit_legacy_transition'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -162,7 +164,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_zero_return'::regclass,
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
-              'public.unit_legacy_reconciliation_record'::regclass)
+              'public.unit_legacy_reconciliation_record'::regclass,
+              'public.unit_legacy_transition'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -195,12 +198,17 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_mixed_zero_return'::regclass,
               'public.mixed_customer_return_disposition'::regclass,
               'public.physical_customer_return_disposition'::regclass,
-              'public.unit_legacy_reconciliation_record'::regclass)
+              'public.unit_legacy_reconciliation_record'::regclass,
+              'public.unit_legacy_transition'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()
         security_before = connection.execute(security_sql).all()
         policies_before = connection.execute(policies_sql).all()
+        redactor_sql = text(
+            "SELECT pg_get_functiondef('public.audit_redact_table_snapshot(text,jsonb)'::regprocedure)"
+        )
+        redactor_before = connection.scalar(redactor_sql)
         counts_before = [
             connection.scalar(text(f"SELECT count(*) FROM public.{table}"))
             for table in later_tables
@@ -235,6 +243,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             assert connection.execute(trigger_sql).all() == triggers_before
             assert connection.execute(security_sql).all() == security_before
             assert connection.execute(policies_sql).all() == policies_before
+            assert connection.scalar(redactor_sql) == redactor_before
             assert [
                 connection.scalar(text(f"SELECT count(*) FROM public.{table}"))
                 for table in later_tables
