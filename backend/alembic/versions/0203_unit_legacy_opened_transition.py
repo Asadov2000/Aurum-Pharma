@@ -329,7 +329,7 @@ def _patches(*, upgrade: bool) -> None:
         (
             "public.unit_legacy_transition_row_matches(text,jsonb)",
             "(p_row->>'quantity')::BIGINT IS DISTINCT FROM j.quantity",
-            "(p_row->>'quantity')::BIGINT IS DISTINCT FROM j.quantity+CASE WHEN j.initialization_version=2 THEN\n       (SELECT jsonb_array_length(count->'opened_packs') FROM public.unit_legacy_reconciliation_record\n         WHERE tenant_id=j.tenant_id AND id=j.record_id) ELSE 0 END",
+            "(p_row->>'quantity')::BIGINT IS DISTINCT FROM (j.quantity+CASE WHEN j.initialization_version=2 THEN\n       (SELECT jsonb_array_length(count->'opened_packs') FROM public.unit_legacy_reconciliation_record\n         WHERE tenant_id=j.tenant_id AND id=j.record_id) ELSE 0 END)",
         ),
         (
             "public.trg_unit_pack_v2_projection_guard()",
