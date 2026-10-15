@@ -104,9 +104,11 @@ class LegacyReconciliationObservation(ReconciliationContract):
     def revalidate_packs(cls, value: object) -> object:
         if isinstance(value, tuple | list):
             return tuple(
-                OpenedPackV2.model_validate(pack.model_dump())
-                if isinstance(pack, OpenedPackV2)
-                else pack
+                (
+                    OpenedPackV2.model_validate(pack.model_dump())
+                    if isinstance(pack, OpenedPackV2)
+                    else pack
+                )
                 for pack in value
             )
         return value
