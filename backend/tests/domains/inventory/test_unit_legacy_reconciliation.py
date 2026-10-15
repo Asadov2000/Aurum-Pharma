@@ -16,7 +16,7 @@ from app.domains.inventory.unit_legacy_reconciliation import (
 from app.domains.inventory.unit_stock_v2 import OpenedBlisterV2, OpenedPackV2, UnitPackagingV2
 
 TENANT, BRANCH, CATALOG, BATCH = (UUID(int=i) for i in (101, 102, 103, 104))
-IDENTITY = dict(tenant_id=TENANT, branch_id=BRANCH, catalog_id=CATALOG, batch_id=BATCH)
+IDENTITY = {"tenant_id": TENANT, "branch_id": BRANCH, "catalog_id": CATALOG, "batch_id": BATCH}
 
 
 def source(quantity: object = "1") -> LegacyReconciliationSource:
