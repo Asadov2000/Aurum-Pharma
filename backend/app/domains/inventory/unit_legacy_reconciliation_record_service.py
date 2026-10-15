@@ -18,6 +18,8 @@ from app.domains.inventory.unit_legacy_reconciliation_record_repository import (
     LegacyReconciliationRecordRepository,
 )
 from app.domains.inventory.unit_legacy_reconciliation_schemas import (
+    LegacyReconciliationComparisonResponse,
+    LegacyReconciliationIssue,
     LegacyReconciliationRecordResponse,
     LegacyReconciliationSaveRequest,
 )
@@ -57,6 +59,62 @@ def _check_branch(branch_id: UUID, allowed_branch_ids: set[UUID] | None) -> None
 class LegacyReconciliationRecordService:
     def __init__(self, repository: LegacyReconciliationRecordRepository) -> None:
         self.repository = repository
+
+    async def compare(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        batch_id: UUID,
+        record_id: UUID,
+        view_branch_ids: set[UUID] | None,
+    ) -> LegacyReconciliationComparisonResponse:
+        """Read a point-in-time comparison without reserving or approving stock.
+
+        Equal quantities cannot prove that no intervening movements occurred.
+        A future conversion must independently recheck facts under its locks.
+        """
+        record = await self.read(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            batch_id=batch_id,
+            record_id=record_id,
+            view_branch_ids=view_branch_ids,
+        )
+        batch = await self.repository.read_batch(
+            tenant_id=tenant_id, branch_id=branch_id, batch_id=batch_id
+        )
+        source_issue: LegacyReconciliationIssue | None = None
+        if batch is None:
+            source_issue = "source_missing"
+        elif batch.source.model_dump(exclude={"legacy_quantity"}) != (
+            record.preview.source.model_dump(exclude={"legacy_quantity"})
+        ):
+            source_issue = "source_identity_changed"
+        elif batch.has_preparation or batch.has_physical_snapshot:
+            source_issue = "source_mode_changed"
+        if source_issue is not None or batch is None:
+            return LegacyReconciliationComparisonResponse(
+                record=record,
+                current_comparison=None,
+                issues=(source_issue or "source_missing",),
+            )
+        current = preview_legacy_reconciliation(
+            batch.source,
+            record.preview.observation,
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+        )
+        issues: list[LegacyReconciliationIssue] = []
+        if batch.source.legacy_quantity != record.preview.source.legacy_quantity:
+            issues.append("quantity_changed")
+        if not current.recorded_quantity_representable:
+            issues.append("quantity_not_representable")
+        if current.comparison != "matched":
+            issues.append("count_discrepancy")
+        return LegacyReconciliationComparisonResponse(
+            record=record, current_comparison=current, issues=tuple(issues)
+        )
 
     async def save(
         self,

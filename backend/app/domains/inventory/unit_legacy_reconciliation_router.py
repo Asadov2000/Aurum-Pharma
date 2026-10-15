@@ -19,6 +19,7 @@ from app.domains.inventory.unit_legacy_reconciliation_repository import (
     LegacyReconciliationPreviewRepository,
 )
 from app.domains.inventory.unit_legacy_reconciliation_schemas import (
+    LegacyReconciliationComparisonResponse,
     LegacyReconciliationPreviewRequest,
     LegacyReconciliationRecordResponse,
     LegacyReconciliationSaveRequest,
@@ -28,6 +29,34 @@ from app.domains.inventory.unit_legacy_reconciliation_service import (
 )
 
 router = APIRouter()
+
+
+@router.get(
+    "/{batch_id}/unit-reconciliation/records/{record_id}/comparison",
+    response_model=LegacyReconciliationComparisonResponse,
+)
+async def compare_legacy_batch_reconciliation(
+    batch_id: UUID,
+    record_id: UUID,
+    branch_id: UUID,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("batches.view", policy="resource"))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> LegacyReconciliationComparisonResponse:
+    if user.tenant_id is None or not user.can_access_branch("batches.view", branch_id):
+        raise PermissionDeniedError("Batch viewing permission denied")
+    response.headers["Cache-Control"] = "private, no-store"
+    return await LegacyReconciliationRecordService(
+        LegacyReconciliationRecordRepository(db)
+    ).compare(
+        tenant_id=user.tenant_id,
+        branch_id=branch_id,
+        batch_id=batch_id,
+        record_id=record_id,
+        view_branch_ids=user.branch_scope_for("batches.view"),
+    )
 
 
 @router.post("/{batch_id}/unit-reconciliation/preview", response_model=LegacyReconciliationPreview)
