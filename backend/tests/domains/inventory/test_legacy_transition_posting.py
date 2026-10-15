@@ -330,11 +330,10 @@ async def test_converted_stock_can_be_dispensed_once_and_has_correct_historical_
     assert not any(row["physical_stock"] for row in old_rows)
     await dispense(db_session, physical, (cart_line(physical, "unit", 1),))
     assert await remaining(db_session, physical) == 59
-    rows = (
-        await db_session.execute(
-            read, {**params, "cutoff": datetime.now(UTC) + timedelta(seconds=1)}
-        )
-    ).mappings().all()
+    report = await db_session.execute(
+        read, {**params, "cutoff": datetime.now(UTC) + timedelta(seconds=1)}
+    )
+    rows = report.mappings().all()
     physical_rows = [row for row in rows if row["physical_stock"]]
     assert len(physical_rows) == 1
     assert physical_rows[0]["physical_stock"]["base_units"] == "59"
@@ -379,10 +378,11 @@ async def test_concurrent_exact_replay_creates_only_one_transfer(db_session: Asy
     assert results[0] == results[1]
     await set_receiving_context(db_session, context.stock, context.actor_id)
     for table in ("unit_legacy_transition", "unit_stock_lot_v2", "unit_stock_entry_v2"):
-        assert await db_session.scalar(
+        count = await db_session.scalar(
             text(f"SELECT count(*) FROM {table} WHERE tenant_id=:tenant"),
             {"tenant": context.stock.tenant_id},
-        ) == 1
+        )
+        assert count == 1
 
 
 async def test_another_tenant_cannot_read_or_replay_transition(db_session: AsyncSession) -> None:
