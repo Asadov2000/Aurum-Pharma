@@ -2,24 +2,45 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 
 from app.domains.inventory.unit_legacy_transition_repository import (
+    _ACTOR_SQL,
     LegacyTransitionSourceRepository,
+)
+from app.domains.inventory.unit_legacy_transition_schemas import (
+    LegacyTransitionPostingResult,
 )
 
 
-class LegacyTransitionPostingResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    command_id: UUID
-    lot_id: UUID
-    operation_id: UUID
-    movement_id: UUID
-
-
 class LegacyTransitionPostingRepository(LegacyTransitionSourceRepository):
+    async def read(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        batch_id: UUID,
+        command_id: UUID,
+        actor_id: UUID,
+    ) -> LegacyTransitionPostingResult | None:
+        result = await self.session.execute(
+            text(
+                "SELECT id AS command_id,lot_id,operation_id,movement_id "
+                "FROM public.unit_legacy_transition "
+                "WHERE tenant_id=:tenant AND branch_id=:branch AND batch_id=:batch "
+                f"AND id=:command AND created_by=:actor AND ({_ACTOR_SQL})"
+            ),
+            {
+                "tenant": tenant_id,
+                "branch": branch_id,
+                "batch": batch_id,
+                "command": command_id,
+                "actor": actor_id,
+            },
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else LegacyTransitionPostingResult.model_validate(row)
+
     async def post(
         self,
         *,
