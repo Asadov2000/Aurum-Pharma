@@ -76,18 +76,14 @@ class LegacyReconciliationSource(ReconciliationContract):
         return value
 
 
-class LegacyReconciliationObservation(ReconciliationContract):
-    """Explicit count against a legacy batch; pack UUIDs are observation identities.
+class LegacyReconciliationCount(ReconciliationContract):
+    """An explicit physical count without source or destination authority.
 
     Packaging must be supplied explicitly, never inferred from today's catalog.
     These fields neither identify nor initialize an authoritative physical lot.
     Expiry, blocking and dispense-step eligibility do not remove counted remnants.
     """
 
-    tenant_id: UUID
-    branch_id: UUID
-    catalog_id: UUID
-    batch_id: UUID
     packaging: UnitPackagingV2
     closed_packs: int = Field(strict=True, ge=0, le=MAX_BASE_UNITS)
     opened_packs: tuple[OpenedPackV2, ...]
@@ -125,6 +121,15 @@ class LegacyReconciliationObservation(ReconciliationContract):
         if total > MAX_BASE_UNITS:
             raise ValueError("observed stock exceeds the base unit limit")
         return self
+
+
+class LegacyReconciliationObservation(LegacyReconciliationCount):
+    """Count associated with a legacy batch, never an authoritative physical lot."""
+
+    tenant_id: UUID
+    branch_id: UUID
+    catalog_id: UUID
+    batch_id: UUID
 
 
 class LegacyReconciliationPreview(ReconciliationContract):
