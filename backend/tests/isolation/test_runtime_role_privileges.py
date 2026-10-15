@@ -109,6 +109,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "unit_legacy_transition",
     "unit_stock_opened_pack_v2",
     "access_role_version",
     "access_role_version_permission",
@@ -238,6 +239,13 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_unit_legacy_transition_actor",
+    "trg_unit_legacy_transition_immutable",
+    "unit_legacy_transition_row_matches",
+    "trg_unit_legacy_transition_movement",
+    "assert_unit_legacy_transition_complete",
+    "trg_unit_legacy_transition_complete",
+    "post_unit_legacy_transition",
     "trg_unit_legacy_reconciliation_record_guard",
     "validate_unit_legacy_reconciliation_count",
     "trg_shift_unfinished_unit_cart",
@@ -658,6 +666,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "post_unit_legacy_transition",
     "physical_customer_return_disposition_status",
     "record_physical_customer_return_disposition",
     "physical_customer_return_disposition_history",
@@ -1563,6 +1572,11 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "assert_unit_legacy_transition_actor",
+        "unit_legacy_transition_row_matches",
+        "trg_unit_legacy_transition_movement",
+        "assert_unit_legacy_transition_complete",
+        "trg_unit_legacy_transition_complete",
         "trg_unit_legacy_reconciliation_record_guard",
         "validate_unit_legacy_reconciliation_count",
         "trg_shift_unfinished_unit_cart",
@@ -1572,6 +1586,22 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["app_can_execute"] is False
         assert guard["support_can_execute"] is False
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    journal_guard = next(
+        row
+        for row in function_privileges
+        if row["proname"] == "trg_unit_legacy_transition_immutable"
+    )
+    assert journal_guard["is_security_definer"] is False
+    assert journal_guard["app_can_execute"] is False
+    assert journal_guard["support_can_execute"] is False
+    assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    posting = next(
+        row for row in function_privileges if row["proname"] == "post_unit_legacy_transition"
+    )
+    assert posting["is_security_definer"] is True
+    assert posting["app_can_execute"] is True
+    assert posting["support_can_execute"] is False
+    assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
 
 
 async def test_runtime_role_has_only_row_level_table_privileges(
