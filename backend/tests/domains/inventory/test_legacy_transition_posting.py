@@ -164,7 +164,7 @@ async def test_changed_or_wrong_source_fails_without_partial_stock(
     assert await snapshot(db_session) == before
 
 
-async def test_opened_count_is_rejected_even_when_quantity_and_value_match(
+async def test_full_opened_pack_remains_opened_when_quantity_and_value_match(
     db_session: AsyncSession,
 ) -> None:
     batch_id = await accepted_batch(db_session)
@@ -176,11 +176,22 @@ async def test_opened_count_is_rejected_even_when_quantity_and_value_match(
             {"id": str(uuid4()), "opened_at": "2026-10-15T12:00:00Z", "loose_units": 30},
         ],
     )
-    before = await snapshot(db_session)
-    with pytest.raises(DBAPIError):
-        async with db_session.begin_nested():
-            await post(db_session, batch_id, record_id, uuid4())
-    assert await snapshot(db_session) == before
+    result = await post(db_session, batch_id, record_id, uuid4())
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    lot = (
+        await db_session.execute(
+            text(
+                "SELECT closed_packs,initial_closed_packs,initial_opened_packs,initial_opened_units "
+                "FROM unit_stock_lot_v2 WHERE id=:id"
+            ),
+            {"id": result["lot_id"]},
+        )
+    ).one()
+    assert tuple(lot) == (1, 1, 1, 30)
+    assert await db_session.scalar(
+        text("SELECT remaining_units FROM unit_stock_opened_pack_v2 WHERE lot_id=:id"),
+        {"id": result["lot_id"]},
+    ) == 30
 
 
 @pytest.mark.parametrize("conflict", ["new_command", "other_record", "other_batch"])

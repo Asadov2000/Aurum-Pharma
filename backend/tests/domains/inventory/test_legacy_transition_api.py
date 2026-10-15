@@ -109,21 +109,12 @@ async def test_malformed_identifiers_do_not_claim_a_command(
     assert await snapshot(db_session) == before
 
 
-@pytest.mark.parametrize("changed", ["quantity", "opened"])
-async def test_unsupported_or_stale_saved_count_returns_validation_error_without_writes(
-    client: AsyncClient, db_session: AsyncSession, changed: str
+async def test_stale_saved_count_returns_validation_error_without_writes(
+    client: AsyncClient, db_session: AsyncSession
 ) -> None:
     batch_id = await accepted_batch(db_session)
-    packs = (
-        [{"id": str(uuid4()), "opened_at": "2026-10-15T12:00:00Z", "loose_units": 30}]
-        if changed == "opened"
-        else None
-    )
-    record_id = await record_count(
-        db_session, batch_id, closed=1 if packs else 2, opened_packs=packs
-    )
-    if changed == "quantity":
-        await increase_quantity(db_session, batch_id)
+    record_id = await record_count(db_session, batch_id)
+    await increase_quantity(db_session, batch_id)
     before = await snapshot(db_session)
     async with transition_actor(db_session):
         response = await client.post(path(batch_id), json=body(db_session, record_id))
