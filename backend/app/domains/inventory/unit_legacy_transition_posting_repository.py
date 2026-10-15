@@ -41,4 +41,3 @@ class LegacyTransitionPostingRepository(LegacyTransitionSourceRepository):
         )
         row = result.mappings().one()
         return LegacyTransitionPostingResult.model_validate(row)
-
