@@ -223,9 +223,10 @@ async def test_mixed_writeoff_is_independent_of_sales_and_replay_does_not_repeat
         "pos_physical_checkout",
     ):
         assert after[table] == before[table]
-    assert await post(
-        db_session, source, selected, operation_id=operation_id, comment="Broken carton"
-    ) == result
+    assert (
+        await post(db_session, source, selected, operation_id=operation_id, comment="Broken carton")
+        == result
+    )
     assert await status(db_session, operation_id) == result
     assert await facts(db_session) == after
 
@@ -808,9 +809,12 @@ async def test_database_projection_matches_the_pure_planner_for_actual_opened_st
         (pack.id, pack.model_dump(mode="json", exclude={"id", "opened_at"}))
         for pack in expected.after.opened_packs
     ]
-    assert await db_session.scalar(
-        text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
-    ) == expected.after.closed_packs
+    assert (
+        await db_session.scalar(
+            text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
+        )
+        == expected.after.closed_packs
+    )
 
 
 async def test_concurrent_sale_and_writeoff_cannot_both_consume_the_last_unit(
