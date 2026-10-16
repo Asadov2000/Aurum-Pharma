@@ -66,10 +66,10 @@ def render_profit_report_xlsx(data: ProfitReportOverview) -> bytes:
         for column in (5, 6, 7):
             sheet.cell(sheet.max_row, column).number_format = "0.00"
     sheet.freeze_panes = "A2"
-    for column in ("A", "B", "C", "D"):
-        sheet.column_dimensions[column].width = 30
-    for column in ("E", "F", "G", "H"):
-        sheet.column_dimensions[column].width = 22
+    for column_letter in ("A", "B", "C", "D"):
+        sheet.column_dimensions[column_letter].width = 30
+    for column_letter in ("E", "F", "G", "H"):
+        sheet.column_dimensions[column_letter].width = 22
     stream = BytesIO()
     workbook.save(stream)
     return stream.getvalue()
