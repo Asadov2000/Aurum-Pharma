@@ -261,6 +261,12 @@ def upgrade() -> None:
             AND public.tenant_actor_has_scoped_permission(s.tenant_id,'pos.sell',s.branch_id)));
       CREATE INDEX ix_unit_checkout_component_sale
         ON public.pos_unit_checkout_payment_component(tenant_id,sale_id);
+      CREATE INDEX ix_unit_checkout_component_physical
+        ON public.pos_unit_checkout_payment_component(tenant_id,physical_checkout_id)
+        WHERE physical_checkout_id IS NOT NULL;
+      CREATE INDEX ix_unit_checkout_component_mixed
+        ON public.pos_unit_checkout_payment_component(tenant_id,mixed_checkout_id)
+        WHERE mixed_checkout_id IS NOT NULL;
     """)
     _sql(SQL)
     for signature in FUNCTIONS:
