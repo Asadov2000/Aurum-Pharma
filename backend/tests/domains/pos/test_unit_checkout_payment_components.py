@@ -123,15 +123,14 @@ async def test_cash_checkout_records_exact_payment_once(
     assert await read_status(db_session, request, mixed) == result
     assert await journal(db_session) == before
     assert await facts(db_session) == before_facts
-    audit_snapshots = (
-        await db_session.execute(
-            text(
-                "SELECT new_values FROM audit_log "
-                "WHERE table_name='pos_unit_checkout_payment_component' AND record_id=:id"
-            ),
-            {"id": result.payments[0].id},
-        )
-    ).scalars().all()
+    audit_rows = await db_session.execute(
+        text(
+            "SELECT new_values FROM audit_log "
+            "WHERE table_name='pos_unit_checkout_payment_component' AND record_id=:id"
+        ),
+        {"id": result.payments[0].id},
+    )
+    audit_snapshots = audit_rows.scalars().all()
     assert len(audit_snapshots) == 1
     audit_snapshot = audit_snapshots[0]
     assert isinstance(audit_snapshot, dict)
