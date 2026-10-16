@@ -360,7 +360,7 @@ async def test_cancel_rechecks_actor_after_waiting_for_operation_lock(
                 "SELECT pg_advisory_xact_lock(hashtextextended("
                 "'physical-writeoff:'||CAST(:tenant AS text)||':'||CAST(:operation AS text),0))"
             ),
-            {"tenant": context.stock.tenant_id, "operation": operation_id},
+            {"tenant": str(context.stock.tenant_id), "operation": str(operation_id)},
         )
         task = asyncio.create_task(attempt())
         await asyncio.wait_for(started.wait(), timeout=10)
