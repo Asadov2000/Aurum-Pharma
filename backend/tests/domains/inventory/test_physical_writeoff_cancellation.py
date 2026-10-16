@@ -74,15 +74,25 @@ async def test_cancel_is_terminal_idempotent_and_does_not_change_stock_or_cost(
     assert result["status"] == "cancelled"
     assert result["selection"] == selection(closed=1)
     assert_no_cost_fields(result)
+    after = await facts(db_session)
+    assert after == before | {"audit_log": after["audit_log"]}
+    assert len(after["audit_log"]) == len(before["audit_log"]) + 1
+    added = [row for row in after["audit_log"] if row not in before["audit_log"]]
+    assert len(added) == 1
+    audit = added[0]
+    assert isinstance(audit, dict)
+    assert audit["table_name"] == "physical_writeoff_cancellation"
+    assert audit["action"] == "INSERT"
+    assert audit["new_values"]["id"] == str(operation_id)
     assert await cancel(db_session, source, operation_id) == result
     assert await status(db_session, operation_id) == result
-    assert await facts(db_session) == before
+    assert await facts(db_session) == after
     async with db_session.begin_nested() as savepoint:
         with pytest.raises(DBAPIError) as error:
             await post(db_session, source, selection(closed=1), operation_id=operation_id)
         assert getattr(error.value.orig, "sqlstate", None) == "23505"
         await savepoint.rollback()
-    assert await facts(db_session) == before
+    assert await facts(db_session) == after
 
 
 async def test_cancel_after_post_returns_original_result_without_reversal(
