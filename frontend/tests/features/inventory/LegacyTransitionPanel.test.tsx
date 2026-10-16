@@ -623,7 +623,7 @@ describe("explicit opened-pack legacy transition", () => {
       });
     fireEvent.click(screen.getByRole("button", { name: "Добавить открытую упаковку" }));
     fireEvent.change(screen.getByLabelText("Дата и время вскрытия 1"), {
-      target: { value: "2026-10-01T10:00:00" },
+      target: { value: "2026-10-01T10:00" },
     });
     if (loose)
       fireEvent.change(screen.getByLabelText("Отдельных единиц 1"), { target: { value: "15" } });

@@ -64,9 +64,7 @@ for (const scenario of [
         await panel
           .getByRole("button", { name: "Добавить открытую упаковку", exact: true })
           .click();
-        await panel
-          .getByLabel("Дата и время вскрытия 1", { exact: true })
-          .fill("2026-10-01T10:00:00");
+        await panel.getByLabel("Дата и время вскрытия 1", { exact: true }).fill("2026-10-01T10:00");
         await panel.getByLabel("Целые блистеры 1", { exact: true }).fill("1");
         await panel.getByRole("button", { name: "Добавить вскрытый блистер", exact: true }).click();
         await panel.getByLabel("Номер блистера 1.1", { exact: true }).fill("2");
