@@ -46,8 +46,8 @@ def upgrade() -> None:
           AND c.register_id=s.register_id AND c.shift_id=s.shift_id
           AND c.cashier_user_id=s.cashier_user_id AND c.receipt_payload=s.receipt_snapshot
         WHERE s.sale_type='sale' AND s.status='completed'
-          AND s.receipt_snapshot @> '{"schema_version":3,"document_kind":"physical_receipt"}'
-          AND c.result_payload @> '{"schema_version":3,"document_kind":"physical_checkout"}'
+          AND s.receipt_snapshot @> '{"schema_version": 3,"document_kind":"physical_receipt"}'
+          AND c.result_payload @> '{"schema_version": 3,"document_kind":"physical_checkout"}'
         UNION ALL
         SELECT s.id,c.id,c.stock_command_id,s.tenant_id,s.branch_id,s.completed_at,
           c.result_payload->'lines',4,'mixed'
@@ -56,8 +56,8 @@ def upgrade() -> None:
           AND c.register_id=s.register_id AND c.shift_id=s.shift_id
           AND c.cashier_user_id=s.cashier_user_id AND c.receipt_payload=s.receipt_snapshot
         WHERE s.sale_type='sale' AND s.status='completed'
-          AND s.receipt_snapshot @> '{"schema_version":4,"document_kind":"mixed_receipt"}'
-          AND c.result_payload @> '{"schema_version":4,"document_kind":"mixed_checkout"}'
+          AND s.receipt_snapshot @> '{"schema_version": 4,"document_kind":"mixed_receipt"}'
+          AND c.result_payload @> '{"schema_version": 4,"document_kind":"mixed_checkout"}'
       ), returns AS (
         SELECT m.tenant_id,m.id,m.parent_sale_id,m.branch_id,j.parent_checkout_id,
           j.stock_command_id,3 AS version,s.completed_at AS occurred_at,'refund'::TEXT AS kind,
@@ -72,7 +72,7 @@ def upgrade() -> None:
           AND j.state='prepared_quarantine' AND j.total_amount=s.total_amount
         WHERE s.sale_type='return' AND s.status='completed' AND j.total_amount>0
           AND s.completed_at>=p_from AND s.completed_at<p_to
-          AND s.receipt_snapshot @> '{"schema_version":3,
+          AND s.receipt_snapshot @> '{"schema_version": 3,
             "document_kind":"physical_cash_refund_receipt"}'
         UNION ALL
         SELECT m.tenant_id,m.id,m.parent_sale_id,m.branch_id,j.parent_checkout_id,
@@ -87,7 +87,7 @@ def upgrade() -> None:
           AND j.state='prepared_quarantine' AND j.total_amount=s.total_amount
         WHERE s.sale_type='return' AND s.status='completed' AND j.total_amount>0
           AND s.completed_at>=p_from AND s.completed_at<p_to
-          AND s.receipt_snapshot @> '{"schema_version":4,
+          AND s.receipt_snapshot @> '{"schema_version": 4,
             "document_kind":"mixed_cash_refund_receipt"}'
         UNION ALL
         SELECT m.tenant_id,m.id,m.parent_sale_id,m.branch_id,j.parent_checkout_id,
@@ -123,11 +123,11 @@ def upgrade() -> None:
           ON catalog.tenant_id=si.tenant_id AND catalog.id=si.catalog_id
         WHERE s.sale_type IN ('sale','return') AND s.completed_at>=p_from AND s.completed_at<p_to
           AND NOT coalesce(
-            s.receipt_snapshot @> '{"schema_version":3,"document_kind":"physical_receipt"}'
-            OR s.receipt_snapshot @> '{"schema_version":4,"document_kind":"mixed_receipt"}'
-            OR s.receipt_snapshot @> '{"schema_version":3,
+            s.receipt_snapshot @> '{"schema_version": 3,"document_kind":"physical_receipt"}'
+            OR s.receipt_snapshot @> '{"schema_version": 4,"document_kind":"mixed_receipt"}'
+            OR s.receipt_snapshot @> '{"schema_version": 3,
               "document_kind":"physical_cash_refund_receipt"}'
-            OR s.receipt_snapshot @> '{"schema_version":4,
+            OR s.receipt_snapshot @> '{"schema_version": 4,
               "document_kind":"mixed_cash_refund_receipt"}',false)
         UNION ALL
         SELECT c.tenant_id,c.sale_id,(line->>'id')::UUID,c.branch_id,line->>'name',c.completed_at,

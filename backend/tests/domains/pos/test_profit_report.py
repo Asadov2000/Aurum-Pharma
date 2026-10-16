@@ -189,7 +189,10 @@ async def test_api_export_and_database_permissions_mask_every_cost_field(
         assert data["total"] == 2 and len(data["rows"]) == 1
         assert data["cost_status"] == ("known" if visible else "hidden")
         for field in (
-            "net_sales_cost", "known_net_sales_cost", "gross_profit", "known_gross_profit"
+            "net_sales_cost",
+            "known_net_sales_cost",
+            "gross_profit",
+            "known_gross_profit",
         ):
             assert (data[field] is not None) == visible
         assert (data["rows"][0]["cost"] is not None) == visible
