@@ -26,7 +26,8 @@ from tests.domains.incoming.test_unit_acceptance import seed_receiving_actor, se
 from tests.domains.inventory.test_physical_writeoff_cancellation import cancel
 from tests.domains.inventory.test_physical_writeoff_posting import post, selection
 from tests.domains.inventory.test_unit_cost_ledger_v2 import priced_source
-from tests.domains.pos.test_mixed_zero_return import intake, source as mixed_zero
+from tests.domains.pos.test_mixed_zero_return import intake
+from tests.domains.pos.test_mixed_zero_return import source as mixed_zero
 from tests.domains.pos.test_unit_return import runtime
 from tests.domains.pos.test_unit_sale_report_discounts import (
     checkout_gross,
