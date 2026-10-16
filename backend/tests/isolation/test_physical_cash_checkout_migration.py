@@ -81,7 +81,19 @@ def cash_refund_policy_migration() -> ModuleType:
     return module
 
 
+def payment_component_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0210_unit_checkout_payment_components.py"
+    )
+    spec = importlib.util.spec_from_file_location("unit_checkout_payment_components", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_refund_for_roundtrip() -> None:
+    payment_component_migration().downgrade()
     physical_disposition_migration().downgrade()
     mixed_quarantine_disposition_migration().downgrade()
     mixed_quarantine_read_migration().downgrade()
@@ -105,6 +117,7 @@ def upgrade_refund_after_roundtrip() -> None:
     mixed_quarantine_read_migration().upgrade()
     mixed_quarantine_disposition_migration().upgrade()
     physical_disposition_migration().upgrade()
+    payment_component_migration().upgrade()
 
 
 def physical_disposition_migration() -> ModuleType:
@@ -264,7 +277,8 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
                     "EXISTS(SELECT 1 FROM pos_physical_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
-                    "EXISTS(SELECT 1 FROM pos_mixed_checkout)"
+                    "EXISTS(SELECT 1 FROM pos_mixed_checkout) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_checkout WHERE payment_journal_version=2)"
                 )
             )
             if history:

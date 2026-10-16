@@ -34,6 +34,8 @@ from app.domains.pos.unit_cash_intent_service import (
     UnitCashIntentService,
     cash_intent_request_hash,
 )
+from app.domains.pos.unit_checkout_payment_repository import UnitCheckoutPaymentRepository
+from app.domains.pos.unit_checkout_payment_service import UnitCheckoutPaymentService
 from app.domains.pos.unit_checkout_repository import UnitCheckoutRepository
 from app.domains.pos.unit_contracts import EXACT_CONTEXT, CheckoutPaymentV2, LegacyResultLineV2
 
@@ -149,6 +151,9 @@ class MixedCashCheckoutService:
                 if original.sale_id != sale.id or original.request_hash != request_hash:
                     raise ConflictError("Mixed checkout operation was reused")
                 result = self._replay(sale, original, saved)
+                await UnitCheckoutPaymentService(
+                    UnitCheckoutPaymentRepository(self.repository.session)
+                ).validate_saved(original.payment_journal_version, result)
                 await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
                 return result
             prepared = await MixedPhysicalCheckoutPreparationService(
@@ -221,6 +226,7 @@ class MixedCashCheckoutService:
                     cash_intent_id=request.operation_id,
                     stock_command_id=request.operation_id,
                     payment_id=request.operation_id,
+                    payment_journal_version=2,
                     request_hash=request_hash,
                     result_payload=result.model_dump(mode="json"),
                     receipt_payload=receipt.model_dump(mode="json"),
@@ -234,6 +240,9 @@ class MixedCashCheckoutService:
                 request_hash=request_hash,
                 amount=result.total_amount,
             )
+            await UnitCheckoutPaymentService(
+                UnitCheckoutPaymentRepository(self.repository.session)
+            ).record_cash(result)
             await self.repository.complete_sale(sale, receipt, completed_at)
             await self.repository.validate_completion()
             await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
