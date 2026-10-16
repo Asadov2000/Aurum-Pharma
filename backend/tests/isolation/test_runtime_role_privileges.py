@@ -160,6 +160,8 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "physical_writeoff_command",
+    "physical_writeoff_entry",
     "physical_customer_return_disposition",
     "mixed_customer_return_disposition",
     "billing_cash_document",
@@ -240,6 +242,15 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "physical_writeoff_selection",
+    "assert_physical_writeoff_actor",
+    "physical_writeoff_result",
+    "physical_writeoff_status",
+    "trg_physical_writeoff_immutable",
+    "trg_physical_writeoff_entry",
+    "trg_physical_writeoff_apply",
+    "trg_physical_writeoff_complete",
+    "record_physical_writeoff",
     "unit_legacy_opening_state",
     "unit_legacy_opening_time",
     "trg_unit_opening_pack_guard",
@@ -674,6 +685,8 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "physical_writeoff_status",
+    "record_physical_writeoff",
     "post_unit_legacy_transition",
     "physical_customer_return_disposition_status",
     "record_physical_customer_return_disposition",
@@ -1503,6 +1516,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                     CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
                       ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
                     WHERE schemas.nspname='public' AND relations.relname IN (
+                      'physical_writeoff_command','physical_writeoff_entry',
                       'mixed_customer_return_disposition','physical_customer_return_disposition',
                       'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
@@ -1513,6 +1527,8 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "physical_writeoff_command",
+        "physical_writeoff_entry",
         "physical_customer_return_disposition",
         "mixed_customer_return_disposition",
         "pos_mixed_cash_refund",
@@ -1543,6 +1559,8 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
         if row["granted"]:
             journal_actual[(row["rolname"], row["relname"])].add(row["privilege"])
     wrapper_only_tables = {
+        "physical_writeoff_command",
+        "physical_writeoff_entry",
         "mixed_customer_return_disposition",
         "physical_customer_return_disposition",
     }
@@ -1580,6 +1598,12 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "assert_physical_writeoff_actor",
+        "physical_writeoff_result",
+        "trg_physical_writeoff_immutable",
+        "trg_physical_writeoff_entry",
+        "trg_physical_writeoff_apply",
+        "trg_physical_writeoff_complete",
         "unit_legacy_opening_state",
         "unit_legacy_opening_time",
         "trg_unit_opening_pack_guard",
@@ -1601,22 +1625,22 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["app_can_execute"] is False
         assert guard["support_can_execute"] is False
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
-    journal_guard = next(
-        row
-        for row in function_privileges
-        if row["proname"] == "trg_unit_legacy_transition_immutable"
-    )
-    assert journal_guard["is_security_definer"] is False
-    assert journal_guard["app_can_execute"] is False
-    assert journal_guard["support_can_execute"] is False
-    assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
-    posting = next(
-        row for row in function_privileges if row["proname"] == "post_unit_legacy_transition"
-    )
-    assert posting["is_security_definer"] is True
-    assert posting["app_can_execute"] is True
-    assert posting["support_can_execute"] is False
-    assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in ("trg_unit_legacy_transition_immutable", "physical_writeoff_selection"):
+        journal_guard = next(row for row in function_privileges if row["proname"] == name)
+        assert journal_guard["is_security_definer"] is False
+        assert journal_guard["app_can_execute"] is False
+        assert journal_guard["support_can_execute"] is False
+        assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "post_unit_legacy_transition",
+        "physical_writeoff_status",
+        "record_physical_writeoff",
+    ):
+        posting = next(row for row in function_privileges if row["proname"] == name)
+        assert posting["is_security_definer"] is True
+        assert posting["app_can_execute"] is True
+        assert posting["support_can_execute"] is False
+        assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
 
 
 async def test_runtime_role_has_only_row_level_table_privileges(
