@@ -122,7 +122,9 @@ def _payments(
     )
     by_id: dict[UUID, Decimal] = {}
     for allocated_method, amount in allocated_methods:
-        matching = tuple(source for source in original.payments if source.method == allocated_method)
+        matching = tuple(
+            source for source in original.payments if source.method == allocated_method
+        )
         components = allocate_refund_payments(
             refund_total=amount,
             original_amounts={str(source.id): source.amount for source in matching},
