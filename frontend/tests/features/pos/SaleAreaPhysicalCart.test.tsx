@@ -17,6 +17,7 @@ import {
   type PhysicalCartRecovery,
 } from "@/features/pos/physicalCartRecovery";
 import { posKeys } from "@/features/pos/queries";
+import { unitPaymentMarkerKey } from "@/features/pos/unitPaymentPreparationPresence";
 import { type SaleDetails, type Shift } from "@/features/pos/types";
 import { useAuthStore } from "@/stores/auth";
 
@@ -34,6 +35,7 @@ const calls = vi.hoisted(() => ({
   attempt: vi.fn(),
   editor: vi.fn(),
   panel: vi.fn(),
+  preparation: vi.fn(),
   drawer: vi.fn(),
   catalog: vi.fn(),
   prescription: vi.fn(),
@@ -135,6 +137,20 @@ vi.mock("@/features/pos/PhysicalCashPanel", async (original) => {
     },
   };
 });
+vi.mock("@/features/pos/PhysicalPaymentPreparationPanel", () => ({
+  PhysicalPaymentPreparationPanel: (props: {
+    canPrepare: boolean;
+    onBlockedChange: (blocked: boolean) => void;
+  }) => {
+    calls.preparation(props);
+    return (
+      <section aria-label="Подготовка карты и QR">
+        <button onClick={() => props.onBlockedChange(true)}>Закрепить тестовый план</button>
+        <button onClick={() => props.onBlockedChange(false)}>Отменить тестовый план</button>
+      </section>
+    );
+  },
+}));
 
 const shift: Shift = {
   id: "sh-1",
@@ -282,7 +298,7 @@ function completedSale(overrides: Partial<SaleDetails> = {}): SaleDetails {
     ...overrides,
   });
 }
-function mount(mode: "keyboard" | "touch" = "keyboard") {
+function mount(mode: "keyboard" | "touch" = "keyboard", options: { canSell?: boolean } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -297,6 +313,7 @@ function mount(mode: "keyboard" | "touch" = "keyboard") {
         mixedPaymentEnabled
         paymentSettingsLoading={false}
         paymentSettingsUnavailable={false}
+        canSell={options.canSell}
       />
     </QueryClientProvider>,
   );
@@ -318,6 +335,54 @@ describe("SaleArea physical cart integration", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("freezes physical editing and cash while a payment plan is bound, then releases both", async () => {
+    mount();
+    const preparation = await screen.findByRole("region", { name: "Подготовка карты и QR" });
+    await waitFor(() =>
+      expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: true })),
+    );
+    fireEvent.click(within(preparation).getByRole("button", { name: "Закрепить тестовый план" }));
+    await waitFor(() =>
+      expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: false })),
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Физическая корзина" })).getByRole("button"),
+    ).toBeDisabled();
+    // Preparation remains recoverable; its own block must not disable cancellation.
+    expect(calls.preparation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canPrepare: true }),
+    );
+    expect(calls.addPayment).not.toHaveBeenCalled();
+    expect(calls.attempt).not.toHaveBeenCalled();
+    fireEvent.click(within(preparation).getByRole("button", { name: "Отменить тестовый план" }));
+    await waitFor(() =>
+      expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: true })),
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Физическая корзина" })).getByRole("button"),
+    ).toBeEnabled();
+  });
+
+  it("keeps saved preparation reachable in readonly after the shift closes", async () => {
+    window.localStorage.setItem(
+      unitPaymentMarkerKey("sale-1", POS_SCOPE),
+      "10000000-0000-4000-8000-000000000001",
+    );
+    calls.shift.mockResolvedValue(null);
+    window.localStorage.setItem(
+      draftKey("reg-1", POS_SCOPE),
+      JSON.stringify({ saleId: "sale-1", nameById: {}, savedAt: Date.now() - 60 * 60_000 }),
+    );
+    mount("keyboard", { canSell: false });
+    await screen.findByRole("region", { name: "Подготовка карты и QR" });
+    expect(calls.preparation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ canPrepare: false, canCancel: false }),
+    );
+    expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: false }));
+    expect(calls.addPayment).not.toHaveBeenCalled();
+    expect(calls.attempt).not.toHaveBeenCalled();
   });
 
   it.each([
