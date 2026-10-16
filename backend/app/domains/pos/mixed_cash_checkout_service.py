@@ -150,10 +150,7 @@ class MixedCashCheckoutService:
             if original is not None:
                 if original.sale_id != sale.id or original.request_hash != request_hash:
                     raise ConflictError("Mixed checkout operation was reused")
-                result = self._replay(sale, original, saved)
-                await UnitCheckoutPaymentService(
-                    UnitCheckoutPaymentRepository(self.repository.session)
-                ).validate_saved(original.payment_journal_version, result)
+                result = await self._replay(sale, original, saved)
                 await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
                 return result
             prepared = await MixedPhysicalCheckoutPreparationService(
@@ -296,9 +293,8 @@ class MixedCashCheckoutService:
         )
         return retail
 
-    @staticmethod
-    def _replay(
-        sale: Sale, original: MixedCashCheckout, saved: SavedCashIntentV2
+    async def _replay(
+        self, sale: Sale, original: MixedCashCheckout, saved: SavedCashIntentV2
     ) -> MixedCheckoutResultV4:
         result = MixedCheckoutResultV4.model_validate(original.result_payload)
         quote = saved.confirmation.quote
@@ -332,4 +328,7 @@ class MixedCashCheckoutService:
             or original.receipt_payload != sale.receipt_snapshot
         ):
             raise AurumError("Stored mixed checkout is inconsistent")
+        await UnitCheckoutPaymentService(
+            UnitCheckoutPaymentRepository(self.repository.session)
+        ).validate_saved(original.payment_journal_version, result)
         return result
