@@ -4246,7 +4246,9 @@ class POSService:
             refund_total=refund_total,
             original_amounts=per_method,
             already_refunded={
-                method: amount for method, amount in already_refunded.items() if method in per_method
+                method: amount
+                for method, amount in already_refunded.items()
+                if method in per_method
             },
         )
 
