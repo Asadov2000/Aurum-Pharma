@@ -56,7 +56,8 @@ for (const scenario of [
       await page.setViewportSize({ width: 1366, height: 900 });
       await loginInBrowser(page, OWNER);
       await page.goto("/reports");
-      await page.getByRole("tab", { name: "Карантин", exact: true }).click();
+      // Report tabs include their description in the accessible name on desktop.
+      await page.getByRole("tab", { name: /^Карантин(?:\s|$)/ }).click();
       const panel = page.getByRole("region", { name: "Карантин на дату", exact: true });
       // Use the page's tenant-local date instead of the test runner's time zone.
       const reportDate = await panel.getByLabel("Дата карантина", { exact: true }).inputValue();
