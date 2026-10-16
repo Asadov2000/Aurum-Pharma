@@ -158,9 +158,12 @@ def test_repeated_partial_refunds_finish_at_exact_original_tender_totals() -> No
             returned[method] = returned.get(method, Decimal("0")) + amount
             assert returned[method] <= original[method]
     assert returned == original
-    assert allocate_refund_payments(
-        refund_total=Decimal("0.00"), original_amounts=original, already_refunded=returned
-    ) == []
+    assert (
+        allocate_refund_payments(
+            refund_total=Decimal("0.00"), original_amounts=original, already_refunded=returned
+        )
+        == []
+    )
     with pytest.raises(BusinessRuleError, match="exceeds the remaining"):
         allocate_refund_payments(
             refund_total=Decimal("0.01"), original_amounts=original, already_refunded=returned
@@ -175,9 +178,12 @@ def test_zero_sources_unknown_history_and_over_refunded_sources_keep_legacy_sema
         refund_total=Decimal("2.00"), original_amounts=original, already_refunded=history
     ) == [("card", Decimal("2.00"))]
     assert original == original_before and history == history_before
-    assert allocate_refund_payments(
-        refund_total=Decimal("0"), original_amounts=original, already_refunded={}
-    ) == []
+    assert (
+        allocate_refund_payments(
+            refund_total=Decimal("0"), original_amounts=original, already_refunded={}
+        )
+        == []
+    )
     with pytest.raises(BusinessRuleError, match="exceeds the remaining"):
         allocate_refund_payments(
             refund_total=Decimal("2.01"), original_amounts=original, already_refunded=history
