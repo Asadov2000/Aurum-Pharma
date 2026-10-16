@@ -162,7 +162,9 @@ class UnitPaymentIntentService:
                 intent.register_id,
                 intent.shift_id,
                 intent.cashier_user_id,
-            ) or payment_intent_request_hash(plan.request) != intent.request_hash:
+            ) or payment_intent_request_hash(
+                plan.request
+            ) != intent.request_hash:
                 raise ValueError("Stored payment plan scope or request differs")
             return SavedUnitPaymentIntent(
                 operation_id=intent.id, saved_at=intent.created_at, plan=plan
