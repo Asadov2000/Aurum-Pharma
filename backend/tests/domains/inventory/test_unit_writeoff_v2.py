@@ -28,9 +28,7 @@ def pack_selection(
     )
 
 
-def plan(
-    stock: UnitStockBatchV2, selection: PhysicalWriteOffSelectionV2
-) -> PhysicalWriteOffPlanV2:
+def plan(stock: UnitStockBatchV2, selection: PhysicalWriteOffSelectionV2) -> PhysicalWriteOffPlanV2:
     return plan_physical_writeoff_v2(
         batch=stock, tenant_id=TENANT, branch_id=BRANCH, selection=selection
     )
