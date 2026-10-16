@@ -136,9 +136,7 @@ async def test_reports_only_reader_cost_scope_matches_api_and_export(
 ) -> None:
     context = runtime(db_session)
     await confirmed(db_session)
-    permissions = ("reports.view", "reports.export") + (
-        ("batches.view_costs",) if visible else ()
-    )
+    permissions = ("reports.view", "reports.export") + (("batches.view_costs",) if visible else ())
     reader = await seed_receiving_actor(
         db_engine, maintenance_engine, context.stock, permissions=permissions
     )
@@ -158,9 +156,7 @@ async def test_reports_only_reader_cost_scope_matches_api_and_export(
         workbook = load_workbook(BytesIO(exported.content))
         sheet = workbook.active
         assert sheet is not None
-        assert sheet.cell(4, 2).value == (
-            float(Decimal(data["total_value"])) if visible else None
-        )
+        assert sheet.cell(4, 2).value == (float(Decimal(data["total_value"])) if visible else None)
         assert sheet.cell(sheet.max_row, 6).value == ("Известна" if visible else "Нет доступа")
         denied = await client.get(PATH, params={**params, "branch_id": str(uuid4())})
         assert denied.status_code == 403
