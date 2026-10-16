@@ -14,6 +14,8 @@ from app.domains.inventory.physical_schemas import (
     PhysicalLotBlockRequest,
     PhysicalLotList,
 )
+from app.domains.inventory.physical_writeoff_stock_repository import PhysicalWriteOffStockRepository
+from app.domains.inventory.physical_writeoff_stock_schemas import PhysicalWriteOffStockRead
 from app.domains.inventory.unit_dispensing_v2_repository import UnitDispensingV2Repository
 from app.domains.inventory.unit_physical_blocking import PhysicalLotBlockingService
 
@@ -50,6 +52,31 @@ async def list_physical_lots(
         is_blocked=is_blocked,
         show_empty=show_empty,
         q=q.strip(),
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/{lot_id}/write-off-stock", response_model=PhysicalWriteOffStockRead)
+async def read_physical_writeoff_stock(
+    lot_id: UUID,
+    branch_id: Annotated[UUID, Query()],
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("batches.write_off", policy="resource"))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+    page: Annotated[int, Query(ge=1, le=2147483647)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> PhysicalWriteOffStockRead:
+    tenant_id = _tenant(user, "batches.view", branch_id)
+    _tenant(user, "batches.write_off", branch_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await PhysicalWriteOffStockRepository(db).read(
+        tenant_id=tenant_id,
+        actor_id=user.user_id,
+        branch_id=branch_id,
+        lot_id=lot_id,
         page=page,
         page_size=page_size,
     )

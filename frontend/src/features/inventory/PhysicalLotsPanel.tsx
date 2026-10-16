@@ -24,6 +24,7 @@ import { describeApiError } from "@/features/foundation/errors";
 import { useTenantAccessPolicy } from "@/features/tenantAccess/queries";
 import { capturePosSessionGuard } from "@/features/pos/posStorageScope";
 import { formatInventoryDate } from "./formatters";
+import { PhysicalWriteOffWorkspace } from "./PhysicalWriteOffWorkspace";
 import {
   physicalLotKeys,
   physicalUnitLabels,
@@ -75,6 +76,8 @@ function PhysicalLotsWorkspace(): JSX.Element {
     show_empty: false,
   });
   const [selected, setSelected] = useState<PhysicalLot | null>(null);
+  const [writeoffLot, setWriteoffLot] = useState<PhysicalLot | null>(null);
+  const [writeoffBarrier, setWriteoffBarrier] = useState(true);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -96,6 +99,12 @@ function PhysicalLotsWorkspace(): JSX.Element {
     !policy.data.blocked_modules.includes("inventory");
   const canChange = (lot: PhysicalLot) =>
     !query.isFetching && writable && hasPermissionForBranch(user, "batches.update", lot.branch_id);
+  const canWriteOff = (lot: PhysicalLot) =>
+    !query.isFetching &&
+    writable &&
+    !lot.is_blocked &&
+    BigInt(lot.base_units) > 0n &&
+    hasPermissionForBranch(user, "batches.write_off", lot.branch_id);
   const refresh = async (): Promise<void> => {
     await client.invalidateQueries({ queryKey: physicalLotKeys.all });
   };
@@ -128,6 +137,12 @@ function PhysicalLotsWorkspace(): JSX.Element {
         Физические остатки в базовых единицах. Блокировка запрещает продажу партии целиком и не
         меняет количество товара.
       </p>
+      <PhysicalWriteOffWorkspace
+        lot={writeoffLot}
+        writable={writable}
+        onClose={() => setWriteoffLot(null)}
+        onBarrier={setWriteoffBarrier}
+      />
       <form
         className="flex flex-wrap items-end gap-3"
         onSubmit={form.handleSubmit((values) => {
@@ -138,6 +153,7 @@ function PhysicalLotsWorkspace(): JSX.Element {
           }
           setFilterError(null);
           setSelected(null);
+          setWriteoffLot(null);
           setMessage(null);
           setParams({
             branch_id: result.data.branch_id,
@@ -238,6 +254,16 @@ function PhysicalLotsWorkspace(): JSX.Element {
                       >
                         {lot.is_blocked ? "Разблокировать" : "Заблокировать"}
                       </Button>
+                      {hasPermissionForBranch(user, "batches.write_off", lot.branch_id) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy || writeoffBarrier || !canWriteOff(lot)}
+                          onClick={() => setWriteoffLot(lot)}
+                        >
+                          Списать
+                        </Button>
+                      )}
                     </TD>
                   </TR>
                 ))}
