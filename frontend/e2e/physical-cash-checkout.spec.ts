@@ -271,3 +271,162 @@ for (const { loseResponse, requiresPrescription } of [
     },
   );
 }
+
+function preparationFacts(saleId: string, catalogId: string): string {
+  for (const value of [saleId, catalogId]) expect(value).toMatch(/^[0-9a-f-]{36}$/i);
+  const sql = `SELECT jsonb_build_object(
+    'sale', (SELECT jsonb_build_object('status',status,'total',total_amount,
+      'receipt',receipt_number,'completed_at',completed_at) FROM sale WHERE id='${saleId}'),
+    'payments', (SELECT count(*) FROM sale_payment WHERE sale_id='${saleId}'),
+    'attempts', (SELECT count(*) FROM pos_payment_attempt WHERE sale_id='${saleId}'),
+    'checkouts', (SELECT count(*) FROM pos_physical_checkout WHERE sale_id='${saleId}'),
+    'commands', (SELECT count(*) FROM unit_stock_cart_command_v2
+      WHERE checkout_sale_id='${saleId}'),
+    'stock', (SELECT jsonb_agg(to_jsonb(l) ORDER BY l.id)
+      FROM unit_stock_lot_v2 l WHERE catalog_id='${catalogId}'),
+    'opened', (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id)
+      FROM unit_stock_opened_pack_v2 p WHERE p.lot_id IN
+        (SELECT id FROM unit_stock_lot_v2 WHERE catalog_id='${catalogId}')),
+    'movements', (SELECT jsonb_agg(to_jsonb(m) ORDER BY m.id)
+      FROM unit_stock_movement_v2 m WHERE m.lot_id IN
+        (SELECT id FROM unit_stock_lot_v2 WHERE catalog_id='${catalogId}'))
+  );`;
+  return dockerExec(E2E_POSTGRES_CONTAINER, [
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    E2E_POSTGRES_DB,
+    "-At",
+    "-c",
+    sql,
+  ]).trim();
+}
+
+test("recovers card preparation after a lost binding response and cancels without payment", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Payment preparation branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("Payment preparation register"));
+    const medicine = await seedCatalogItem(
+      api,
+      uniqueName("Payment preparation medicine"),
+      "10.00",
+    );
+    expect(
+      (
+        await api.patch(`catalog/${medicine.id}`, {
+          data: {
+            dispensing_type: "otc",
+            unit_sale_preparation: {
+              version: 1,
+              state: "prepared",
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+              unit_price: "0.50",
+            },
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await receivePhysicalStock(api, branch.id, medicine.id);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену" }).click();
+    await expect(page.getByText("Смена открыта")).toBeVisible();
+    const saleId = await addPhysicalFormats(page, medicine.brand_name);
+    const before = preparationFacts(saleId, medicine.id);
+    const preparation = page.getByRole("region", {
+      name: "Подготовка электронной оплаты",
+      exact: true,
+    });
+    const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
+    const cash = page.getByRole("region", { name: "Оплата наличными", exact: true });
+    await preparation.getByRole("button", { name: "Подготовка карты/QR", exact: true }).click();
+    await expect(preparation.getByLabel("Картой, TJS", { exact: true })).toHaveValue("16.00");
+    await preparation.getByRole("button", { name: "Подготовить оплату", exact: true }).click();
+    await expect(
+      preparation.getByRole("button", { name: "Закрепить план", exact: true }),
+    ).toBeEnabled();
+    let boundId = "";
+    const bindingPath = `**/api/v1/sales/${saleId}/unit-payment-plan/intents/*/bind`;
+    await page.route(bindingPath, async (route) => {
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      const bound = (await response.json()) as { state: string; operation_id: string };
+      expect(bound.state).toBe("bound");
+      boundId = bound.operation_id;
+      await route.abort("failed");
+    });
+    await preparation.getByRole("button", { name: "Закрепить план", exact: true }).click();
+    await expect.poll(() => boundId).toMatch(/^[0-9a-f-]{36}$/i);
+    await expect(
+      editor.getByRole("button", { name: "Изменить", exact: true }).first(),
+    ).toBeDisabled();
+    await expect(
+      cash.getByRole("button", { name: "Завершить продажу", exact: true }),
+    ).toBeDisabled();
+    expect(preparationFacts(saleId, medicine.id)).toBe(before);
+    await page.unroute(bindingPath);
+    const recovered = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${saleId}/unit-payment-plan/active-binding` &&
+        response.ok(),
+    );
+    await page.reload();
+    expect(await (await recovered).json()).toMatchObject({
+      sale_id: saleId,
+      intent: {
+        operation_id: boundId,
+        plan: { request: { payments: [{ method: "card", amount: "16.00" }] } },
+      },
+      binding: { operation_id: boundId, state: "bound" },
+    });
+    await expect(
+      preparation.getByText("План закреплён. Корзина защищена от изменений.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      editor.getByRole("button", { name: "Изменить", exact: true }).first(),
+    ).toBeDisabled();
+    await expect(
+      cash.getByRole("button", { name: "Завершить продажу", exact: true }),
+    ).toBeDisabled();
+    const cancelled = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${saleId}/unit-payment-plan/intents/${boundId}/cancel-binding`,
+    );
+    await preparation.getByRole("button", { name: "Отменить подготовку", exact: true }).click();
+    expect((await cancelled).ok()).toBe(true);
+    await expect(
+      editor.getByRole("button", { name: "Изменить", exact: true }).first(),
+    ).toBeEnabled();
+    await expect(
+      cash.getByRole("button", { name: "Завершить продажу", exact: true }),
+    ).toBeEnabled();
+    const late = await api.post(`sales/${saleId}/unit-payment-plan/intents/${boundId}/bind`);
+    expect(late.status()).toBe(409);
+    const final = await api.get(`sales/${saleId}/unit-payment-plan/active-binding`);
+    expect(final.ok()).toBe(true);
+    expect(await final.json()).toEqual({ sale_id: saleId, intent: null, binding: null });
+    expect(preparationFacts(saleId, medicine.id)).toBe(before);
+    await expect(page.getByRole("button", { name: "Печать чека", exact: true })).toHaveCount(0);
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});
