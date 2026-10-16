@@ -12,6 +12,7 @@ from app.domains.catalog.models import TenantCatalog
 from app.domains.inventory.unit_ledger_v2_models import UnitStockLotV2, UnitStockOpenedPackV2
 from app.domains.pos.models import POSPaymentAttempt, Sale, SaleItem, SalePayment, Shift
 from app.domains.pos.unit_cart_models import UnitCartItem
+from app.domains.pos.unit_payment_binding_models import UnitPaymentBinding, UnitPaymentBindingCancel
 
 
 class UnitCartRepository:
@@ -74,6 +75,14 @@ class UnitCartRepository:
                 exists().where(SalePayment.tenant_id == tenant_id, SalePayment.sale_id == sale_id)
                 | exists().where(
                     POSPaymentAttempt.tenant_id == tenant_id, POSPaymentAttempt.sale_id == sale_id
+                )
+                | exists().where(
+                    UnitPaymentBinding.tenant_id == tenant_id,
+                    UnitPaymentBinding.sale_id == sale_id,
+                    ~exists().where(
+                        UnitPaymentBindingCancel.tenant_id == UnitPaymentBinding.tenant_id,
+                        UnitPaymentBindingCancel.id == UnitPaymentBinding.id,
+                    ),
                 )
             )
         )
