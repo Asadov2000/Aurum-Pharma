@@ -42,6 +42,7 @@ export function PhysicalWriteOffModal({
   const [page, setPage] = useState(1);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectionChanged, setSelectionChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   // Only observed physical components can be selected, including across pages.
@@ -80,7 +81,8 @@ export function PhysicalWriteOffModal({
     !stock.data.lot.is_blocked;
   useEffect(() => {
     if (!stock.data) return;
-    for (const key of observedPages.current.get(page) ?? []) available.current.delete(key);
+    const previousKeys = observedPages.current.get(page) ?? [];
+    for (const key of previousKeys) available.current.delete(key);
     const keys: string[] = [];
     const remember = (packId: string, number: number | null, units: number) => {
       const key = `${packId}_${number ?? "loose"}`;
@@ -92,11 +94,19 @@ export function PhysicalWriteOffModal({
         remember(pack.pack_id, number, stock.data.lot.packaging.units_per_blister ?? 0);
       for (const blister of pack.state.opened_blisters)
         remember(pack.pack_id, blister.number, blister.remaining_units);
-      remember(pack.pack_id, null, pack.state.loose_units);
+      if (pack.state.loose_units > 0) remember(pack.pack_id, null, pack.state.loose_units);
+    }
+    for (const key of previousKeys) {
+      if (keys.includes(key)) continue;
+      const value = form.getValues(`quantities.${key}`);
+      if (value && value !== "0") {
+        form.setValue(`quantities.${key}`, "0");
+        setSelectionChanged(true);
+      }
     }
     observedPages.current.set(page, keys);
     setReviewed(null);
-  }, [stock.data, page]);
+  }, [stock.data, page, form]);
   function review(values: Fields): void {
     setError(null);
     const parsed = fieldsSchema.safeParse(values);
@@ -172,6 +182,12 @@ export function PhysicalWriteOffModal({
           {lot.catalog_name ?? "Без названия"} · {lot.lot_id}
         </p>
         {error && <p role="alert">{error}</p>}
+        {selectionChanged && (
+          <p role="status">
+            Остатки изменились. Недоступные блистеры или россыпь убраны из выбора. Проверьте
+            обновлённое списание.
+          </p>
+        )}
         {stock.error && (
           <p role="alert">
             {describeApiError(stock.error, "Не удалось загрузить состав остатка.")}

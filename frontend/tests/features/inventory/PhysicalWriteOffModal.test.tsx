@@ -257,4 +257,49 @@ describe("physical write-off explicit selection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("конкретном блистере");
     expect(submit).not.toHaveBeenCalled();
   });
+
+  it.each(["blister", "pack", "loose"] as const)(
+    "removes a vanished selected %s after refresh and allows reviewing the remaining selection",
+    async (kind) => {
+      const initial = stock();
+      if (kind === "loose") {
+        initial.lot.packaging.units_per_blister = null;
+        initial.opened_packs[0].state = {
+          intact_blisters: [],
+          opened_blisters: [],
+          loose_units: 15,
+        };
+      }
+      mocks.stock.mockResolvedValue(initial);
+      render(view());
+      await ready();
+      change("Закрытые упаковки", "1");
+      const label = kind === "loose" ? `Россыпь · ${id(4)}` : `Блистер 2 · ${id(4)}`;
+      change(label, "4");
+      const fresh = structuredClone(initial);
+      if (kind === "blister") {
+        fresh.opened_packs[0].state.opened_blisters = [];
+        fresh.opened_packs[0].remaining_units = "10";
+        fresh.lot.opened_units = "10";
+        fresh.lot.base_units = "50";
+      } else {
+        fresh.opened_packs = [];
+        fresh.total = 0;
+        fresh.lot.opened_units = "0";
+        fresh.lot.base_units = "40";
+      }
+      mocks.stock.mockResolvedValue(fresh);
+      fireEvent.click(screen.getByRole("button", { name: "Обновить остатки" }));
+      expect(await screen.findByRole("status")).toHaveTextContent("убраны из выбора");
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+      await ready();
+      fireEvent.click(screen.getByRole("button", { name: "Проверить списание" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Подтвердить списание" }));
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit).toHaveBeenCalledWith(
+        expect.objectContaining({ selection: { closed_packs: 1, opened_packs: [] } }),
+        "20",
+      );
+    },
+  );
 });
