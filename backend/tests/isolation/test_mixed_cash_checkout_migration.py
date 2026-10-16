@@ -18,6 +18,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_read_migration,
     mixed_return_migration,
     mixed_zero_return_migration,
+    payment_component_migration,
     physical_disposition_migration,
 )
 
@@ -196,14 +197,17 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
             if connection.scalar(
                 text(
                     "SELECT EXISTS(SELECT 1 FROM pos_mixed_checkout) OR EXISTS(SELECT 1 "
-                    "FROM unit_stock_cart_command_v2 WHERE mixed_checkout_sale_id IS NOT NULL)"
+                    "FROM unit_stock_cart_command_v2 WHERE mixed_checkout_sale_id IS NOT NULL) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_checkout WHERE payment_journal_version=2)"
                 )
             ):
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
+                        payment_component_migration().downgrade()
                         migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                payment_component_migration().downgrade()
                 # Keep physical history; suspend only the later audit insertion.
                 physical = physical_disposition_migration()
                 physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
@@ -228,6 +232,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
                 physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
+                payment_component_migration().upgrade()
             assert connection.execute(FUNCTIONS).all() == functions
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

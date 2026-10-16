@@ -24,6 +24,8 @@ from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cash_confirmation import CashConfirmationRequestV2
 from app.domains.pos.unit_cash_intent_repository import UnitCashIntentRepository
 from app.domains.pos.unit_cash_intent_service import UnitCashIntentService, cash_intent_request_hash
+from app.domains.pos.unit_checkout_payment_repository import UnitCheckoutPaymentRepository
+from app.domains.pos.unit_checkout_payment_service import UnitCheckoutPaymentService
 
 
 class PhysicalCashCheckoutStatusService:
@@ -131,6 +133,9 @@ class PhysicalCashCheckoutStatusService:
             or receipt != sale_receipt
         ):
             raise AurumError("Stored physical checkout is inconsistent")
+        await UnitCheckoutPaymentService(
+            UnitCheckoutPaymentRepository(self.repository.session)
+        ).validate_saved(checkout.payment_journal_version, result)
         await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
         return PhysicalCashOperationCompleted(
             operation_id=operation_id, sale_id=sale_id, saved_intent=saved, result=result
