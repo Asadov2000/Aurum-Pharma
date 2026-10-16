@@ -53,7 +53,13 @@ class UnitPaymentActiveService:
                 intent.shift_id,
                 intent.created_by,
             ) != (
-                tenant_id, sale_id, row.branch_id, actor_id, row.register_id, row.shift_id, actor_id
+                tenant_id,
+                sale_id,
+                row.branch_id,
+                actor_id,
+                row.register_id,
+                row.shift_id,
+                actor_id,
             ):
                 raise AurumError("Stored payment preparation scope is inconsistent")
             saved = UnitPaymentIntentService._result(intent)
