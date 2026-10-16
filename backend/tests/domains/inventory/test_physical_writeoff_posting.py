@@ -21,11 +21,11 @@ from app.domains.inventory.unit_writeoff_v2 import (
     PhysicalWriteOffSelectionV2,
     plan_physical_writeoff_v2,
 )
+from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import (
     seed_receiving_actor,
     set_receiving_context,
 )
-from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance_v2 import accept_v2, seed_v2_incoming
 from tests.domains.inventory.test_legacy_opened_transition import (
     all_facts,
