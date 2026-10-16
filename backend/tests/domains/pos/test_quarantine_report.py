@@ -135,11 +135,12 @@ async def test_reports_only_reader_cost_scope_matches_api_and_export(
     visible: bool,
 ) -> None:
     context = runtime(db_session)
-    await confirmed(db_session)
     permissions = ("reports.view", "reports.export") + (("batches.view_costs",) if visible else ())
     reader = await seed_receiving_actor(
         db_engine, maintenance_engine, context.stock, permissions=permissions
     )
+    # Assignment guards lock the tenant: seed before the stock transaction holds FK locks.
+    await confirmed(db_session)
     params = {"date": str(await report_day(db_session)), "branch_id": str(context.stock.branch_id)}
     async with report_actor(db_session, reader):
         response = await client.get(PATH, params=params)
@@ -165,13 +166,13 @@ async def test_reports_only_reader_cost_scope_matches_api_and_export(
 async def test_database_scoping_denies_forged_tenant_branch_and_missing_reports_permission(
     db_session: AsyncSession, db_engine: AsyncEngine, maintenance_engine: AsyncEngine
 ) -> None:
-    await confirmed(db_session)
     context = runtime(db_session)
-    assert (await snapshot(db_session, tenant_id=uuid4())).total == 0
-    assert (await snapshot(db_session, branch_id=uuid4())).total == 0
     reader = await seed_receiving_actor(
         db_engine, maintenance_engine, context.stock, permissions=("customer_returns.view",)
     )
+    await confirmed(db_session)
+    assert (await snapshot(db_session, tenant_id=uuid4())).total == 0
+    assert (await snapshot(db_session, branch_id=uuid4())).total == 0
     await set_receiving_context(db_session, context.stock, reader)
     assert (await snapshot(db_session)).total == 0
     await set_receiving_context(db_session, context.stock, context.actor_id)
