@@ -20,7 +20,7 @@ import re
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, localcontext
 from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -76,6 +76,7 @@ from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundRecei
 from app.domains.pos.physical_documents import PhysicalReceiptDocumentV3
 from app.domains.pos.physical_receipt_read import physical_receipt_lines, physical_receipt_snapshot
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
+from app.domains.pos.refund_payment_allocation import allocate_refund_payments
 from app.domains.pos.repository import (
     FavoriteCatalogRow,
     PaymentReconciliationRow,
@@ -4235,63 +4236,19 @@ class POSService:
         already_refunded: Mapping[str, Decimal],
     ) -> list[tuple[str, Decimal]]:
         per_method: dict[str, Decimal] = {}
-        for payment in original_payments:
-            if payment.amount > 0:
-                per_method[payment.payment_method] = (
-                    per_method.get(payment.payment_method, Decimal("0")) + payment.amount
-                )
-        source_total = sum(per_method.values(), Decimal("0"))
-        if source_total <= 0:
-            raise BusinessRuleError("Original sale has no valid payment allocation")
-
-        quantum = Decimal("0.01")
-        methods = list(per_method)
-        remaining = {
-            method: max(
-                Decimal("0"),
-                per_method[method] - already_refunded.get(method, Decimal("0")),
-            )
-            for method in methods
-        }
-        remaining_total = sum(remaining.values(), Decimal("0"))
-        if refund_total > remaining_total:
-            raise BusinessRuleError("Refund exceeds the remaining original payment allocation")
-        if refund_total == remaining_total:
-            return [(method, remaining[method]) for method in methods if remaining[method] > 0]
-
-        exact = {method: refund_total * per_method[method] / source_total for method in methods}
-        allocated = {
-            method: min(
-                remaining[method],
-                exact[method].quantize(quantum, rounding=ROUND_DOWN),
-            )
-            for method in methods
-        }
-        missing_cents = int(
-            ((refund_total - sum(allocated.values(), Decimal("0"))) / quantum).to_integral_value()
+        with localcontext(Context(prec=28, rounding=ROUND_HALF_EVEN)):
+            for payment in original_payments:
+                if payment.amount > 0:
+                    per_method[payment.payment_method] = (
+                        per_method.get(payment.payment_method, Decimal("0")) + payment.amount
+                    )
+        return allocate_refund_payments(
+            refund_total=refund_total,
+            original_amounts=per_method,
+            already_refunded={
+                method: amount for method, amount in already_refunded.items() if method in per_method
+            },
         )
-        remainder_order = sorted(
-            methods,
-            key=lambda method: (
-                exact[method] - allocated[method],
-                remaining[method] - allocated[method],
-            ),
-            reverse=True,
-        )
-        for _index in range(missing_cents):
-            method = next(
-                (
-                    candidate
-                    for candidate in remainder_order
-                    if allocated[candidate] + quantum <= remaining[candidate]
-                ),
-                None,
-            )
-            if method is None:
-                raise AurumError("Unable to allocate refund across original payment methods")
-            allocated[method] += quantum
-
-        return [(method, allocated[method]) for method in methods if allocated[method] > 0]
 
     async def _find_existing_refund(
         self,
