@@ -215,7 +215,6 @@ async def test_cancel_audit_redacts_comment(db_session: AsyncSession, client: As
     assert "comment" not in snapshots[0]
 
 
-
 @pytest.mark.parametrize("forged", ["actor", "tenant", "branch"])
 async def test_cancel_arguments_cannot_override_scope(
     db_session: AsyncSession, forged: str
