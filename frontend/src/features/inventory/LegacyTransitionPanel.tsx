@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { isAxiosError } from "axios";
@@ -12,6 +12,7 @@ import { useTenantAccessPolicy } from "@/features/tenantAccess/queries";
 import { useConnectivity } from "@/lib/connectivityContext";
 import {
   legacyPackagingSchema,
+  legacyCountSchema,
   previewLegacyReconciliation,
   saveLegacyReconciliation,
   readLegacyReconciliation,
@@ -31,8 +32,22 @@ const fieldsSchema = z.object({
   units: z.string().regex(/^[1-9]\d*$/),
   blister: z.string().regex(/^$|^[1-9]\d*$/),
   step: z.string().regex(/^[1-9]\d*$/),
-  closed: z.string().regex(/^[1-9]\d*$/),
-  noOpened: z.literal(true),
+  closed: z.string().regex(/^(0|[1-9]\d*)$/),
+  noOpened: z.boolean(),
+  openedPacks: z.array(
+    z.object({
+      packId: z.string().uuid(),
+      openedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/),
+      intact: z.string().regex(/^\s*$|^\s*[1-9]\d*(\s*,\s*[1-9]\d*)*\s*$/),
+      loose: z.string().regex(/^(0|[1-9]\d*)$/),
+      blisters: z.array(
+        z.object({
+          number: z.string().regex(/^[1-9]\d*$/),
+          remaining: z.string().regex(/^[1-9]\d*$/),
+        }),
+      ),
+    }),
+  ),
 });
 interface Fields {
   unit: string;
@@ -41,8 +56,145 @@ interface Fields {
   step: string;
   closed: string;
   noOpened: boolean;
+  openedPacks: {
+    packId: string;
+    openedAt: string;
+    intact: string;
+    loose: string;
+    blisters: { rowId: string; number: string; remaining: string }[];
+  }[];
 }
 type Checked = { count: LegacyCount; preview: LegacyPreview; fingerprint: string };
+
+function OpenedPackFields({
+  form,
+  index,
+  hasBlisters,
+  remove,
+}: {
+  form: UseFormReturn<Fields>;
+  index: number;
+  hasBlisters: boolean;
+  remove: () => void;
+}): JSX.Element {
+  const blisters = form.watch(`openedPacks.${index}.blisters`);
+  const replaceBlisters = (next: Fields["openedPacks"][number]["blisters"]) => {
+    const values = form.getValues();
+    form.reset({
+      ...values,
+      openedPacks: values.openedPacks.map((pack, packIndex) =>
+        packIndex === index ? { ...pack, blisters: next } : pack,
+      ),
+    });
+  };
+  const intact = form.watch(`openedPacks.${index}.intact`);
+  const loose = form.watch(`openedPacks.${index}.loose`);
+  const position = index + 1;
+  return (
+    <fieldset
+      aria-label={`Открытая упаковка ${position}`}
+      className="space-y-3 rounded border border-border p-3"
+    >
+      <legend className="text-sm font-medium">Открытая упаковка {position}</legend>
+      <div>
+        <Label htmlFor={`legacy-opened-at-${index}`}>Дата и время вскрытия {position}</Label>
+        <Input
+          id={`legacy-opened-at-${index}`}
+          type="datetime-local"
+          step="1"
+          aria-describedby={`legacy-opened-time-help-${index}`}
+          {...form.register(`openedPacks.${index}.openedAt`)}
+        />
+        <p id={`legacy-opened-time-help-${index}`} className="text-xs text-muted-foreground">
+          Укажите известные дату и время вскрытия по времени Таджикистана (UTC+05:00).
+        </p>
+      </div>
+      {(hasBlisters || intact !== "" || blisters.length > 0) && (
+        <div className="space-y-2">
+          <div>
+            <Label htmlFor={`legacy-intact-${index}`}>Целые блистеры {position}</Label>
+            <Input
+              id={`legacy-intact-${index}`}
+              placeholder="1, 3"
+              {...form.register(`openedPacks.${index}.intact`)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Номера целых блистеров через запятую. Пусто — целых блистеров нет.
+            </p>
+          </div>
+          {blisters.map((blister, blisterIndex) => (
+            <div key={blister.rowId} className="grid gap-2 sm:grid-cols-3">
+              <div>
+                <Label htmlFor={`legacy-blister-number-${index}-${blisterIndex}`}>
+                  Номер блистера {position}.{blisterIndex + 1}
+                </Label>
+                <Input
+                  id={`legacy-blister-number-${index}-${blisterIndex}`}
+                  inputMode="numeric"
+                  {...form.register(`openedPacks.${index}.blisters.${blisterIndex}.number`)}
+                />
+              </div>
+              <div>
+                <Label htmlFor={`legacy-blister-remaining-${index}-${blisterIndex}`}>
+                  Остаток блистера {position}.{blisterIndex + 1}
+                </Label>
+                <Input
+                  id={`legacy-blister-remaining-${index}-${blisterIndex}`}
+                  inputMode="numeric"
+                  {...form.register(`openedPacks.${index}.blisters.${blisterIndex}.remaining`)}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  replaceBlisters(
+                    form
+                      .getValues(`openedPacks.${index}.blisters`)
+                      .filter((_, rowIndex) => rowIndex !== blisterIndex),
+                  )
+                }
+              >
+                Удалить блистер {position}.{blisterIndex + 1}
+              </Button>
+            </div>
+          ))}
+          {hasBlisters && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                replaceBlisters([
+                  ...form.getValues(`openedPacks.${index}.blisters`),
+                  { rowId: crypto.randomUUID(), number: "", remaining: "" },
+                ])
+              }
+            >
+              Добавить вскрытый блистер
+            </Button>
+          )}
+        </div>
+      )}
+      {(!hasBlisters || loose !== "0") && (
+        <div>
+          <Label htmlFor={`legacy-loose-${index}`}>Отдельных единиц {position}</Label>
+          <Input
+            id={`legacy-loose-${index}`}
+            inputMode="numeric"
+            {...form.register(`openedPacks.${index}.loose`)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Для упаковок без известного состава блистеров. При известном составе укажите остаток
+            каждого блистера, а здесь — 0.
+          </p>
+        </div>
+      )}
+      <Button type="button" variant="secondary" onClick={remove}>
+        Удалить открытую упаковку {position}
+      </Button>
+    </fieldset>
+  );
+}
 
 export function LegacyTransitionPanel({ batch }: { batch: BatchDetails }): JSX.Element | null {
   const { user } = useAuth();
@@ -115,8 +267,18 @@ function TransitionWorkspace({
   const [result, setResult] = useState<LegacyResult | null>(null);
   const [confirm, setConfirm] = useState(false);
   const form = useForm<Fields>({
-    defaultValues: { unit: "", units: "", blister: "", step: "", closed: "", noOpened: false },
+    defaultValues: {
+      unit: "",
+      units: "",
+      blister: "",
+      step: "",
+      closed: "",
+      noOpened: false,
+      openedPacks: [],
+    },
   });
+  const openedPacks = form.watch("openedPacks");
+  const hasBlisters = form.watch("blister") !== "";
   const recovery = useForm<{ recordId: string; commandId: string }>({
     defaultValues: { recordId: "", commandId: "" },
   });
@@ -149,8 +311,10 @@ function TransitionWorkspace({
   const preview = form.handleSubmit(async (values) => {
     if (!writable || !eligible || saveId || commandId) return;
     const parsed = fieldsSchema.safeParse(values);
-    if (!parsed.success) {
-      setMessage("Заполните целые количества и подтвердите отсутствие открытых упаковок.");
+    if (!parsed.success || (!values.openedPacks.length && !values.noOpened)) {
+      setMessage(
+        "Заполните целые количества и состав открытых упаковок либо подтвердите их отсутствие.",
+      );
       return;
     }
     const packaging = legacyPackagingSchema.safeParse({
@@ -169,11 +333,27 @@ function TransitionWorkspace({
       setMessage("Проверьте состав упаковки, шаг отпуска и количество.");
       return;
     }
-    const count: LegacyCount = {
+    const validated = legacyCountSchema.safeParse({
       packaging: packaging.data,
       closed_packs: closed,
-      opened_packs: [],
-    };
+      opened_packs: values.openedPacks.map((pack) => ({
+        id: pack.packId,
+        opened_at: `${pack.openedAt.length === 16 ? `${pack.openedAt}:00` : pack.openedAt}+05:00`,
+        intact_blisters: pack.intact.trim() ? pack.intact.split(",").map(Number) : [],
+        opened_blisters: pack.blisters.map((blister) => ({
+          number: Number(blister.number),
+          remaining_units: Number(blister.remaining),
+        })),
+        loose_units: Number(pack.loose),
+      })),
+    });
+    if (!validated.success) {
+      setMessage(
+        "Проверьте дату вскрытия, номера блистеров и остатки открытых упаковок. Номера не должны повторяться, остатки — превышать состав упаковки.",
+      );
+      return;
+    }
+    const count: LegacyCount = validated.data;
     const submitted = JSON.stringify(values);
     setChecked(null);
     await run(async () => {
@@ -277,8 +457,9 @@ function TransitionWorkspace({
     >
       <h3 className="font-semibold">Перенос в поштучный учёт</h3>
       <p className="text-sm">
-        Только целые закрытые упаковки. Пересчитайте товар и укажите фактический состав старой
-        упаковки. Открытые упаковки пока перенести нельзя.
+        Пересчитайте товар и укажите фактический состав старой упаковки. Каждую открытую упаковку
+        добавьте отдельно с её остатком и известным временем вскрытия. Не восстанавливайте эти
+        данные по предположению.
       </p>
       {!writable && (
         <p role="status" className="text-sm">
@@ -312,10 +493,52 @@ function TransitionWorkspace({
                 <Input id={`legacy-${name}`} inputMode="numeric" {...form.register(name)} />
               </div>
             ))}
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" {...form.register("noOpened")} />
-              Подтверждаю: открытых упаковок нет
-            </label>
+            {openedPacks.length === 0 && (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" {...form.register("noOpened")} />
+                Подтверждаю: открытых упаковок нет
+              </label>
+            )}
+            <div className="space-y-3 sm:col-span-2">
+              {openedPacks.map((pack, index) => (
+                <OpenedPackFields
+                  key={pack.packId}
+                  form={form}
+                  index={index}
+                  hasBlisters={hasBlisters}
+                  remove={() => {
+                    const values = form.getValues();
+                    form.reset({
+                      ...values,
+                      openedPacks: values.openedPacks.filter((_, packIndex) => packIndex !== index),
+                    });
+                  }}
+                />
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  const values = form.getValues();
+                  form.reset({
+                    ...values,
+                    noOpened: false,
+                    openedPacks: [
+                      ...values.openedPacks,
+                      {
+                        packId: crypto.randomUUID(),
+                        openedAt: "",
+                        intact: "",
+                        loose: "0",
+                        blisters: [],
+                      },
+                    ],
+                  });
+                }}
+              >
+                Добавить открытую упаковку
+              </Button>
+            </div>
             <Button type="submit">Проверить пересчёт</Button>
           </fieldset>
           {current && (
@@ -358,6 +581,7 @@ function TransitionWorkspace({
         <div className="space-y-2 text-sm">
           <p>
             Пересчёт сохранён: {record.preview.observation.closed_packs} закрытых упаковок,{" "}
+            {record.preview.observation.opened_packs.length} открытых упаковок,{" "}
             {record.preview.observed_base_units} ед.
           </p>
           <p>
@@ -366,6 +590,22 @@ function TransitionWorkspace({
             {record.preview.observation.packaging.units_per_blister ?? "не указано"}; шаг отпуска:{" "}
             {record.preview.observation.packaging.dispense_step}.
           </p>
+          {record.preview.observation.opened_packs.map((pack, index) => (
+            <p key={pack.id}>
+              Открытая упаковка {index + 1}: вскрыта{" "}
+              {new Intl.DateTimeFormat("ru-RU", {
+                timeZone: "Asia/Dushanbe",
+                dateStyle: "short",
+                timeStyle: "medium",
+              }).format(new Date(pack.opened_at))}{" "}
+              (Таджикистан). Целые блистеры: {pack.intact_blisters.join(", ") || "нет"}; остатки
+              блистеров:{" "}
+              {pack.opened_blisters
+                .map((blister) => `${blister.number}: ${blister.remaining_units} ед.`)
+                .join(", ") || "нет"}
+              ; отдельных единиц: {pack.loose_units}.
+            </p>
+          ))}
           <Button
             disabled={
               busy ||

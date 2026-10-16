@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MeResponse } from "@/features/auth/types";
 import type { BatchDetails } from "@/features/inventory/types";
-import type { LegacyCount } from "@/features/inventory/legacyTransition";
+import type { LegacyCount, LegacyPreview } from "@/features/inventory/legacyTransition";
 import {
   previewLegacyReconciliation,
   saveLegacyReconciliation,
@@ -101,7 +101,7 @@ const packaging: LegacyCount["packaging"] = {
   units_per_blister: 10,
   dispense_step: 1,
 };
-function preview() {
+function preview(): LegacyPreview {
   const identity = { tenant_id: id(2), branch_id: id(3), catalog_id: id(5), batch_id: id(4) };
   return {
     source: { ...identity, legacy_quantity: "4.000" },
@@ -609,6 +609,231 @@ describe("explicit closed-pack legacy transition", () => {
       mocks.user!.support_access = {} as NonNullable<MeResponse["support_access"]>;
     render(view());
     expect(screen.queryByRole("button", { name: "Проверить пересчёт" })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit opened-pack legacy transition", () => {
+  function fillOpened(closed = "0", loose = false) {
+    fill();
+    fireEvent.change(screen.getByLabelText("Закрытых упаковок"), { target: { value: closed } });
+    if (loose)
+      fireEvent.change(screen.getByLabelText("Единиц в блистере (необязательно)"), {
+        target: { value: "" },
+      });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить открытую упаковку" }));
+    fireEvent.change(screen.getByLabelText("Дата и время вскрытия 1"), {
+      target: { value: "2026-10-01T10:00" },
+    });
+    if (loose)
+      fireEvent.change(screen.getByLabelText("Отдельных единиц 1"), { target: { value: "15" } });
+    else {
+      fireEvent.change(screen.getByLabelText("Целые блистеры 1"), { target: { value: "1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Добавить вскрытый блистер" }));
+      fireEvent.change(screen.getByLabelText("Номер блистера 1.1"), { target: { value: "2" } });
+      fireEvent.change(screen.getByLabelText("Остаток блистера 1.1"), { target: { value: "5" } });
+    }
+  }
+  function acceptOpened(lostSave = false) {
+    let saved: ReturnType<typeof record>;
+    mocks.post.mockImplementation(
+      async (
+        path: string,
+        payload: LegacyCount & { reconciliation_id: string; command_id: string },
+      ) => {
+        const response = preview();
+        response.source.legacy_quantity = "0.750";
+        response.observation = {
+          ...response.observation,
+          packaging: payload.packaging,
+          closed_packs: payload.closed_packs,
+          opened_packs: payload.opened_packs,
+        };
+        response.observed_base_units = 15;
+        response.recorded_base_units = "15.000";
+        if (path.endsWith("/preview")) return { data: response };
+        if (path.endsWith("/records")) {
+          saved = { ...record(payload.reconciliation_id), preview: response };
+          if (lostSave) throw new Error("connection lost");
+          return { data: saved };
+        }
+        if (path.endsWith("/unit-transition")) return { data: result(payload.command_id) };
+        throw new Error("Unexpected request");
+      },
+    );
+    mocks.get.mockImplementation(async () => ({ data: saved }));
+  }
+  it.each([false, true])(
+    "saves partial opened stock with zero closed packs, loose=%s",
+    async (loose) => {
+      acceptOpened();
+      render(view({ ...batch, qty_remaining: "0.750" }));
+      fillOpened("0", loose);
+      fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Сохранить пересчёт" })).toBeEnabled(),
+      );
+      const observed = mocks.post.mock.calls[0][1] as LegacyCount;
+      expect(observed.closed_packs).toBe(0);
+      expect(observed.opened_packs).toHaveLength(1);
+      expect(observed.opened_packs[0]).toEqual({
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        opened_at: "2026-10-01T10:00:00+05:00",
+        intact_blisters: loose ? [] : [1],
+        opened_blisters: loose ? [] : [{ number: 2, remaining_units: 5 }],
+        loose_units: loose ? 15 : 0,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить пересчёт" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Перенести остаток" })).toBeEnabled(),
+      );
+      expect((saveCalls()[0][1] as LegacyCount).opened_packs).toEqual(observed.opened_packs);
+      expect(transferCalls()).toHaveLength(0);
+      fireEvent.click(
+        within(openConfirmation()).getByRole("button", { name: "Подтвердить перенос" }),
+      );
+      await screen.findByText(/Перенос подтверждён/);
+      expect(transferCalls()).toHaveLength(1);
+    },
+  );
+  it.each([
+    ["Целые блистеры 1", "1,1"],
+    ["Целые блистеры 1", "3"],
+    ["Номер блистера 1.1", "1"],
+    ["Остаток блистера 1.1", "10"],
+    ["Остаток блистера 1.1", "0"],
+    ["Дата и время вскрытия 1", ""],
+  ])("rejects invalid observed composition %s=%s", async (label, value) => {
+    render(view());
+    fillOpened();
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await screen.findByRole("alert");
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it("recovers the exact opened observation after a lost save response without resaving", async () => {
+    acceptOpened(true);
+    render(view({ ...batch, qty_remaining: "0.750" }));
+    fillOpened();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Сохранить пересчёт" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить пересчёт" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByLabelText("Дата и время вскрытия 1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить сохранение" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Перенести остаток" })).toBeEnabled(),
+    );
+    expect(saveCalls()).toHaveLength(1);
+    expect(transferCalls()).toHaveLength(0);
+  });
+  it("invalidates an opened preview when its blister count changes", async () => {
+    acceptOpened();
+    render(view());
+    fillOpened();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Сохранить пересчёт" })).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText("Остаток блистера 1.1"), { target: { value: "4" } });
+    expect(screen.queryByRole("button", { name: "Сохранить пересчёт" })).not.toBeInTheDocument();
+    expect(saveCalls()).toHaveLength(0);
+  });
+  it("keeps the second pack and its blister identity after deleting the first", async () => {
+    acceptOpened();
+    render(view());
+    fillOpened();
+    fireEvent.click(screen.getByRole("button", { name: "Добавить открытую упаковку" }));
+    fireEvent.change(screen.getByLabelText("Дата и время вскрытия 2"), {
+      target: { value: "2026-10-02T11:00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("Целые блистеры 2"), { target: { value: "2" } });
+    const second = screen.getByRole("group", { name: "Открытая упаковка 2" });
+    fireEvent.click(within(second).getByRole("button", { name: "Добавить вскрытый блистер" }));
+    fireEvent.change(screen.getByLabelText("Номер блистера 2.1"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Остаток блистера 2.1"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    const secondId = (mocks.post.mock.calls[0][1] as LegacyCount).opened_packs[1].id;
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Проверить пересчёт" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Удалить открытую упаковку 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
+    expect((mocks.post.mock.calls[1][1] as LegacyCount).opened_packs).toEqual([
+      {
+        id: secondId,
+        opened_at: "2026-10-02T11:00:00+05:00",
+        intact_blisters: [2],
+        opened_blisters: [{ number: 1, remaining_units: 3 }],
+        loose_units: 0,
+      },
+    ]);
+  });
+  it("removes nested blister values and adds a fresh row without reviving deleted remainders", async () => {
+    acceptOpened();
+    render(view());
+    fillOpened();
+    fireEvent.change(screen.getByLabelText("Целые блистеры 1"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить вскрытый блистер" }));
+    fireEvent.change(screen.getByLabelText("Номер блистера 1.2"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Остаток блистера 1.2"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Удалить блистер 1.1" }));
+    expect(screen.getByLabelText("Номер блистера 1.1")).toHaveValue("1");
+    expect(screen.getByLabelText("Остаток блистера 1.1")).toHaveValue("7");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить вскрытый блистер" }));
+    expect(screen.getByLabelText("Номер блистера 1.2")).toHaveValue("");
+    expect(screen.getByLabelText("Остаток блистера 1.2")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Номер блистера 1.2"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Остаток блистера 1.2"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect((mocks.post.mock.calls[0][1] as LegacyCount).opened_packs[0].opened_blisters).toEqual([
+      { number: 1, remaining_units: 7 },
+      { number: 2, remaining_units: 4 },
+    ]);
+  });
+  it("creates a fresh pack identity and empty composition after removing and readding the last pack", async () => {
+    acceptOpened();
+    render(view());
+    fillOpened();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    const oldId = (mocks.post.mock.calls[0][1] as LegacyCount).opened_packs[0].id;
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Проверить пересчёт" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Удалить открытую упаковку 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Добавить открытую упаковку" }));
+    expect(screen.getByLabelText("Дата и время вскрытия 1")).toHaveValue("");
+    expect(screen.getByLabelText("Целые блистеры 1")).toHaveValue("");
+    expect(screen.queryByLabelText("Номер блистера 1.1")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Дата и время вскрытия 1"), {
+      target: { value: "2026-10-02T11:00:00" },
+    });
+    fireEvent.change(screen.getByLabelText("Целые блистеры 1"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
+    const current = (mocks.post.mock.calls[1][1] as LegacyCount).opened_packs;
+    expect(current).toHaveLength(1);
+    expect(current[0].id).not.toBe(oldId);
+    expect(current[0]).toMatchObject({
+      opened_at: "2026-10-02T11:00:00+05:00",
+      intact_blisters: [2],
+      opened_blisters: [],
+      loose_units: 0,
+    });
+  });
+  it("requires a new explicit no-open declaration after removing the last opened pack", async () => {
+    render(view());
+    fillOpened("1");
+    fireEvent.click(screen.getByRole("button", { name: "Удалить открытую упаковку 1" }));
+    expect(screen.getByLabelText("Подтверждаю: открытых упаковок нет")).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить пересчёт" }));
+    await screen.findByRole("alert");
     expect(mocks.post).not.toHaveBeenCalled();
   });
 });
