@@ -93,6 +93,7 @@ from app.domains.pos.schemas import (
     ZReport,
 )
 from app.domains.pos.service import POSService
+from app.domains.pos.unit_payment_plan_router import router as unit_payment_plan_router
 
 router = APIRouter(prefix="/api/v1", tags=["pos"])
 router.include_router(mixed_cash_checkout_router)
@@ -104,6 +105,7 @@ router.include_router(physical_cash_refund_router)
 router.include_router(physical_zero_return_router)
 router.include_router(quarantine_report_router)
 router.include_router(profit_report_router)
+router.include_router(unit_payment_plan_router)
 
 
 async def _service(
