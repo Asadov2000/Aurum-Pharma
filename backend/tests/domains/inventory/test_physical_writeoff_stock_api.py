@@ -138,9 +138,8 @@ async def test_missing_lot_and_http_scope_are_not_disclosed(
     params = {"branch_id": str(source.incoming.stock.branch_id)}
     async with writeoff_actor(db_session) as actor:
         assert (await client.get(path(uuid4()), params=params)).status_code == 404
-        assert (
-            await client.get(path(source.lot_id), params={"branch_id": str(uuid4())})
-        ).status_code == 403
+        wrong_branch = await client.get(path(source.lot_id), params={"branch_id": str(uuid4())})
+        assert wrong_branch.status_code == 403
         actor.permissions = {"batches.write_off"}
         assert (await client.get(path(source.lot_id), params=params)).status_code == 403
 
@@ -210,6 +209,8 @@ async def test_expired_stock_is_visible_without_rewriting_accepted_history(
         {"tenant": context.stock.tenant_id},
     )
     async with writeoff_actor(db_session):
-        response = await client.get(path(lot_id), params={"branch_id": str(context.stock.branch_id)})
+        response = await client.get(
+            path(lot_id), params={"branch_id": str(context.stock.branch_id)}
+        )
         assert response.status_code == 200, response.text
         assert response.json()["lot"]["base_units"] == "60"
