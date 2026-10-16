@@ -36,6 +36,7 @@ from app.domains.pos.physical_cart_router import router as physical_cart_router
 from app.domains.pos.physical_cash_checkout_router import router as physical_cash_checkout_router
 from app.domains.pos.physical_cash_refund_router import router as physical_cash_refund_router
 from app.domains.pos.physical_zero_return_router import router as physical_zero_return_router
+from app.domains.pos.profit_report_router import router as profit_report_router
 from app.domains.pos.quarantine_report_router import router as quarantine_report_router
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
@@ -102,6 +103,7 @@ router.include_router(physical_cash_checkout_router)
 router.include_router(physical_cash_refund_router)
 router.include_router(physical_zero_return_router)
 router.include_router(quarantine_report_router)
+router.include_router(profit_report_router)
 
 
 async def _service(

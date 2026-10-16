@@ -15,13 +15,14 @@ import { DEFAULT_REPORT_TIME_ZONE } from "./calendar";
 import { useZReportQuery } from "./queries";
 import { SalesOverviewPanel } from "./SalesOverviewPanel";
 import { ShiftHistoryPanel } from "./ShiftHistoryPanel";
+import { GrossProfitPanel } from "./GrossProfitPanel";
 import { QuarantineOnDatePanel } from "./QuarantineOnDatePanel";
 import { StockOnDatePanel } from "./StockOnDatePanel";
 import { TopProductsPanel } from "./TopProductsPanel";
 import { type ShiftHistoryItem } from "./types";
 import { ZReportCard } from "./ZReportCard";
 
-type ReportView = "sales" | "products" | "stock" | "shifts" | "quarantine";
+type ReportView = "sales" | "products" | "stock" | "shifts" | "quarantine" | "profit";
 
 const REPORT_VIEW_KEY = "aurum:reports:view:v1";
 const LAST_CLOSED_SHIFT_KEY = "pos:lastClosedShiftId";
@@ -31,6 +32,7 @@ const REPORT_VIEWS: Array<{ value: ReportView; label: string; description: strin
   { value: "products", label: "Товары", description: "Лидеры продаж" },
   { value: "stock", label: "Остатки", description: "Склад и сроки" },
   { value: "quarantine", label: "Карантин", description: "Неразрешённые возвраты" },
+  { value: "profit", label: "Прибыль", description: "Валовая прибыль" },
   { value: "shifts", label: "Смены", description: "Итоги кассовых смен" },
 ];
 
@@ -96,6 +98,12 @@ export function ReportsPage(): JSX.Element {
             {view === "sales" ? (
               <SalesOverviewPanel
                 key={`sales-overview-${reportTimezone}-${scopeKey}`}
+                reportTimezone={reportTimezone}
+                canExport={canExport}
+              />
+            ) : view === "profit" ? (
+              <GrossProfitPanel
+                key={`profit-${reportTimezone}-${scopeKey}-${user?.id}-${user?.active_tenant_id}`}
                 reportTimezone={reportTimezone}
                 canExport={canExport}
               />
@@ -178,7 +186,7 @@ function ReportTabs({
 
   return (
     <div
-      className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface md:grid-cols-5"
+      className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface md:grid-cols-6"
       role="tablist"
       aria-label="Разделы отчётов"
     >
@@ -228,7 +236,8 @@ function readInitialReportView(): ReportView {
     return stored === "products" ||
       stored === "shifts" ||
       stored === "stock" ||
-      stored === "quarantine"
+      stored === "quarantine" ||
+      stored === "profit"
       ? stored
       : "sales";
   } catch {

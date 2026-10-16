@@ -78,7 +78,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "physical_writeoff_cancellation",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # Later inventory and financial migrations through 0206 remain installed.
+        # Later inventory and financial migrations through 0207 remain installed.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
