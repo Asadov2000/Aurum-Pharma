@@ -12,6 +12,7 @@ from app.domains.inventory.physical_writeoff_repository import PhysicalWriteOffR
 from app.domains.inventory.physical_writeoff_schemas import (
     PhysicalWriteOffRead,
     PhysicalWriteOffRequest,
+    PhysicalWriteOffStatus,
 )
 from app.domains.inventory.physical_writeoff_service import PhysicalWriteOffService
 
@@ -45,7 +46,27 @@ async def post_physical_writeoff(
     )
 
 
-@router.get("/operations/{operation_id}", response_model=PhysicalWriteOffRead)
+@router.post(
+    "/cancel",
+    response_model=PhysicalWriteOffStatus,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def cancel_physical_writeoff(
+    payload: PhysicalWriteOffRequest,
+    response: Response,
+    user: Annotated[
+        CurrentUser, Depends(require_branch_permission("batches.write_off", policy="resource"))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db, scope="function")],
+) -> PhysicalWriteOffStatus:
+    tenant_id = _tenant(user, payload.branch_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await PhysicalWriteOffService(PhysicalWriteOffRepository(db)).cancel(
+        tenant_id=tenant_id, actor_id=user.user_id, request=payload
+    )
+
+
+@router.get("/operations/{operation_id}", response_model=PhysicalWriteOffStatus)
 async def read_physical_writeoff(
     operation_id: UUID,
     branch_id: Annotated[UUID, Query()],
@@ -54,7 +75,7 @@ async def read_physical_writeoff(
         CurrentUser, Depends(require_branch_permission("batches.write_off", policy="resource"))
     ],
     db: Annotated[AsyncSession, Depends(get_db, scope="function")],
-) -> PhysicalWriteOffRead:
+) -> PhysicalWriteOffStatus:
     tenant_id = _tenant(user, branch_id)
     response.headers["Cache-Control"] = "private, no-store"
     return await PhysicalWriteOffService(PhysicalWriteOffRepository(db)).read(

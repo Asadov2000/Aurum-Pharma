@@ -9,6 +9,7 @@ from app.domains.inventory.physical_writeoff_repository import PhysicalWriteOffR
 from app.domains.inventory.physical_writeoff_schemas import (
     PhysicalWriteOffRead,
     PhysicalWriteOffRequest,
+    PhysicalWriteOffStatus,
 )
 
 
@@ -27,9 +28,18 @@ class PhysicalWriteOffService:
         # journals under locks. An earlier preview cannot authorize a mutation.
         return await self.repo.post(tenant_id=tenant_id, actor_id=actor_id, request=request)
 
+    async def cancel(
+        self, *, tenant_id: UUID, actor_id: UUID, request: PhysicalWriteOffRequest
+    ) -> PhysicalWriteOffStatus:
+        try:
+            request = PhysicalWriteOffRequest.model_validate(request.model_dump())
+        except ValidationError:
+            raise BusinessRuleError("Invalid physical write-off request") from None
+        return await self.repo.cancel(tenant_id=tenant_id, actor_id=actor_id, request=request)
+
     async def read(
         self, *, tenant_id: UUID, branch_id: UUID, operation_id: UUID
-    ) -> PhysicalWriteOffRead:
+    ) -> PhysicalWriteOffStatus:
         return await self.repo.read(
             tenant_id=tenant_id, branch_id=branch_id, operation_id=operation_id
         )

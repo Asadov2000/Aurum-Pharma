@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  cancelPhysicalWriteoff,
   completePhysicalWriteoff,
   getPhysicalWriteoffStatus,
   getPhysicalWriteoffStock,
@@ -13,6 +14,7 @@ import {
   loadPhysicalWriteoff,
   physicalWriteoffKey,
   runPhysicalWriteoff,
+  requestPhysicalWriteoffCancellation,
 } from "@/features/inventory/physicalWriteoffRecovery";
 
 const mocks = vi.hoisted(() => ({
@@ -337,4 +339,140 @@ describe("durable write-off recovery", () => {
     });
     await expect(acknowledgePhysicalWriteoff(scope)).rejects.toThrow("изменилось");
   });
+});
+
+const cancelled = (command: PhysicalWriteoffRequest) => ({
+  ...command,
+  status: "cancelled",
+  cancelled_at: "2026-10-16T10:00:00Z",
+});
+describe("durable write-off cancellation", () => {
+  async function uncertain() {
+    mocks.post.mockRejectedValueOnce(new Error("lost"));
+    await expect(runPhysicalWriteoff(scope, input, "30")).rejects.toThrow("lost");
+    return loadPhysicalWriteoff(scope)!;
+  }
+  it("persists irreversible cancellation intent before GET and retries only cancellation after lost response", async () => {
+    const original = await uncertain();
+    mocks.get.mockImplementation(() => {
+      expect(loadPhysicalWriteoff(scope)?.cancelRequested).toBe(true);
+      return absent();
+    });
+    mocks.post.mockRejectedValueOnce(new Error("cancel response lost"));
+    await expect(requestPhysicalWriteoffCancellation(scope)).rejects.toThrow(
+      "cancel response lost",
+    );
+    expect(loadPhysicalWriteoff(scope)?.request).toEqual(original.request);
+    await expect(runPhysicalWriteoff(scope)).rejects.toThrow("Запрошена отмена");
+    expect(await inspectPhysicalWriteoff(scope)).toBeNull();
+    await expect(acknowledgePhysicalWriteoff(scope)).rejects.toThrow("не подтверждён");
+    mocks.post.mockResolvedValueOnce({ data: cancelled(original.request) });
+    await requestPhysicalWriteoffCancellation(scope);
+    expect(mocks.post.mock.calls.map((call) => call[0])).toEqual([
+      "/batches/physical/write-offs",
+      "/batches/physical/write-offs/cancel",
+      "/batches/physical/write-offs/cancel",
+    ]);
+    expect(mocks.post.mock.calls[2]?.[1]).toEqual(original.request);
+    mocks.get.mockResolvedValue({ data: cancelled(original.request) });
+    await acknowledgePhysicalWriteoff(scope);
+    expect(loadPhysicalWriteoff(scope)).toBeNull();
+  });
+  it("recovers cancelled by GET without another mutation and accepts only a fresh terminal acknowledgement", async () => {
+    const original = await uncertain();
+    mocks.post.mockRejectedValueOnce(new Error("lost"));
+    await expect(requestPhysicalWriteoffCancellation(scope)).rejects.toThrow();
+    mocks.get.mockResolvedValue({ data: cancelled(original.request) });
+    expect(await inspectPhysicalWriteoff(scope)).toEqual(cancelled(original.request));
+    expect(mocks.post).toHaveBeenCalledTimes(2);
+    await acknowledgePhysicalWriteoff(scope);
+    expect(loadPhysicalWriteoff(scope)).toBeNull();
+  });
+  it("returns already committed result, without claiming inventory was unchanged", async () => {
+    const original = await uncertain();
+    mocks.get.mockResolvedValue({ data: result(original.request) });
+    expect(await requestPhysicalWriteoffCancellation(scope)).toEqual(result(original.request));
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+  it("accepts a completed race returned by the cancel endpoint", async () => {
+    const original = await uncertain();
+    mocks.post.mockResolvedValueOnce({ data: result(original.request) });
+    expect(await requestPhysicalWriteoffCancellation(scope)).toEqual(result(original.request));
+  });
+  it("does not dispatch cancellation if persistence fails", async () => {
+    await uncertain();
+    mocks.get.mockClear();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    await expect(requestPhysicalWriteoffCancellation(scope)).rejects.toThrow("Запрос не отправлен");
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+  it("rejects cancellation for another branch and after logout during GET", async () => {
+    await uncertain();
+    await expect(
+      requestPhysicalWriteoffCancellation({ ...scope, branchId: id(9) }),
+    ).rejects.toThrow("другой точке");
+    mocks.get.mockImplementation(() => {
+      mocks.generation++;
+      return absent();
+    });
+    await expect(requestPhysicalWriteoffCancellation(scope)).rejects.toThrow("Аккаунт изменился");
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+  });
+  it.each(["operation_id", "branch_id", "lot_id", "reason", "comment", "selection"])(
+    "rejects mismatching cancelled %s",
+    async (field) => {
+      const wrong =
+        field === "selection"
+          ? { closed_packs: 2, opened_packs: [] }
+          : field.endsWith("id")
+            ? id(9)
+            : "other";
+      mocks.post.mockResolvedValue({ data: { ...cancelled(request), [field]: wrong } });
+      await expect(cancelPhysicalWriteoff(scope, request, "30")).rejects.toThrow();
+    },
+  );
+  it("compares complete cancellation selections canonically while rejecting extra completion fields", async () => {
+    const command = {
+      ...request,
+      selection: {
+        closed_packs: 1,
+        opened_packs: [
+          {
+            pack_id: id(8),
+            loose_units: 0,
+            blisters: [
+              { number: 2, units: 1 },
+              { number: 1, units: 2 },
+            ],
+          },
+          { pack_id: id(7), loose_units: 3, blisters: [] },
+        ],
+      },
+    };
+    const response = cancelled(command);
+    response.selection = {
+      ...command.selection,
+      opened_packs: [...command.selection.opened_packs]
+        .reverse()
+        .map((pack) => ({ ...pack, blisters: [...pack.blisters].reverse() })),
+    };
+    mocks.post.mockResolvedValue({ data: response });
+    await expect(cancelPhysicalWriteoff(scope, command, "36")).resolves.toEqual(response);
+    mocks.post.mockResolvedValue({ data: { ...response, base_units: "36" } });
+    await expect(cancelPhysicalWriteoff(scope, command, "36")).rejects.toThrow();
+  });
+});
+
+it("does not cancel a replacement command while waiting for confirmation", async () => {
+  mocks.post.mockRejectedValueOnce(new Error("lost"));
+  await expect(runPhysicalWriteoff(scope, input, "30")).rejects.toThrow();
+  const saved = loadPhysicalWriteoff(scope)!;
+  await expect(
+    requestPhysicalWriteoffCancellation(scope, { ...saved.request, operation_id: id(9) }),
+  ).rejects.toThrow("Подтвердите отмену заново");
+  expect(loadPhysicalWriteoff(scope)?.cancelRequested).toBeUndefined();
+  expect(mocks.post).toHaveBeenCalledTimes(1);
 });

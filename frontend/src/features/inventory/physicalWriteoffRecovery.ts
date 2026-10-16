@@ -6,13 +6,15 @@ import { removeStoredValue, writeStoredJson } from "@/features/pos/operationStor
 import { capturePosSessionGuard, type PosStorageScope } from "@/features/pos/posStorageScope";
 
 import {
+  cancelPhysicalWriteoff,
   completePhysicalWriteoff,
   getPhysicalWriteoffStatus,
   physicalWriteoffInputSchema,
   physicalWriteoffInteger,
   physicalWriteoffRequestSchema,
   type PhysicalWriteoffInput,
-  type PhysicalWriteoffResult,
+  type PhysicalWriteoffOutcome,
+  type PhysicalWriteoffRequest,
   type PhysicalWriteoffScope,
 } from "./physicalWriteoff";
 
@@ -21,6 +23,7 @@ const identity = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid
 const pendingSchema = identity
   .extend({
     version: z.literal(1),
+    cancelRequested: z.literal(true).optional(),
     branchId: z.string().uuid(),
     request: physicalWriteoffRequestSchema,
     expectedBaseUnits: physicalWriteoffInteger.refine(
@@ -81,7 +84,7 @@ function assertCurrent(
 /** Opening the workspace only observes; even 404 cannot authorize a new command. */
 export async function inspectPhysicalWriteoff(
   scope: PhysicalWriteoffScope,
-): Promise<PhysicalWriteoffResult | null> {
+): Promise<PhysicalWriteoffOutcome | null> {
   return exclusively(scope, async (active) => {
     const pending = loadPhysicalWriteoff(scope);
     if (!pending) return null;
@@ -100,12 +103,14 @@ export async function runPhysicalWriteoff(
   scope: PhysicalWriteoffScope,
   input?: PhysicalWriteoffInput,
   expectedBaseUnits?: string,
-): Promise<PhysicalWriteoffResult> {
+): Promise<PhysicalWriteoffOutcome> {
   return exclusively(scope, async (active) => {
     let pending = loadPhysicalWriteoff(scope);
     const firstSubmission = pending === null;
     if (pending) {
       assertCurrent(pending, scope, active);
+      if (pending.cancelRequested)
+        throw new Error("Запрошена отмена. Проверьте результат или повторите отмену.");
       if (
         input &&
         JSON.stringify(
@@ -186,5 +191,39 @@ export async function acknowledgePhysicalWriteoff(scope: PhysicalWriteoffScope):
     if (!result) throw new Error("Результат списания ещё не подтверждён.");
     if (!removeStoredValue(physicalWriteoffKey(scope)))
       throw new Error("Не удалось убрать подтверждённое списание. Проверьте хранилище.");
+  });
+}
+
+/** Persist cancellation intent before any network request; it cannot become a write-off retry. */
+export async function requestPhysicalWriteoffCancellation(
+  scope: PhysicalWriteoffScope,
+  confirmedRequest?: PhysicalWriteoffRequest,
+): Promise<PhysicalWriteoffOutcome> {
+  return exclusively(scope, async (active) => {
+    let pending = loadPhysicalWriteoff(scope);
+    if (!pending) throw new Error("Нет сохранённого списания для отмены.");
+    assertCurrent(pending, scope, active);
+    if (
+      confirmedRequest &&
+      JSON.stringify(physicalWriteoffRequestSchema.parse(confirmedRequest)) !==
+        JSON.stringify(pending.request)
+    )
+      throw new Error("Сохранённое списание изменилось. Подтвердите отмену заново.");
+    if (!pending.cancelRequested) {
+      pending = pendingSchema.parse({ ...pending, cancelRequested: true });
+      if (!writeStoredJson(physicalWriteoffKey(scope), pending))
+        throw new Error("Не удалось сохранить отмену. Запрос не отправлен.");
+    }
+    assertCurrent(pending, scope, active);
+    const existing = await getPhysicalWriteoffStatus(
+      scope,
+      pending.request,
+      pending.expectedBaseUnits,
+    );
+    assertCurrent(pending, scope, active);
+    if (existing) return existing;
+    const result = await cancelPhysicalWriteoff(scope, pending.request, pending.expectedBaseUnits);
+    assertCurrent(pending, scope, active);
+    return result;
   });
 }

@@ -7,12 +7,17 @@ import { capturePosSessionGuard } from "@/features/pos/posStorageScope";
 import { describeApiError } from "@/features/foundation/errors";
 import { useConnectivity } from "@/lib/connectivityContext";
 import { type PhysicalLot } from "./physicalLots";
-import { type PhysicalWriteoffInput, type PhysicalWriteoffResult } from "./physicalWriteoff";
+import {
+  type PhysicalWriteoffInput,
+  isPhysicalWriteoffCancelled,
+  type PhysicalWriteoffOutcome,
+} from "./physicalWriteoff";
 import {
   acknowledgePhysicalWriteoff,
   inspectPhysicalWriteoff,
   loadPhysicalWriteoff,
   runPhysicalWriteoff,
+  requestPhysicalWriteoffCancellation,
 } from "./physicalWriteoffRecovery";
 import { PhysicalWriteOffModal } from "./PhysicalWriteOffModal";
 
@@ -36,7 +41,8 @@ export function PhysicalWriteOffWorkspace({
   const [pending, setPending] = useState<ReturnType<typeof loadPhysicalWriteoff>>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<PhysicalWriteoffResult | null>(null);
+  const [result, setResult] = useState<PhysicalWriteoffOutcome | null>(null);
+  const [cancelConfirmation, setCancelConfirmation] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const read = useCallback(() => {
@@ -73,7 +79,7 @@ export function PhysicalWriteOffWorkspace({
     );
   };
   async function execute(
-    action: () => Promise<PhysicalWriteoffResult | null | void>,
+    action: () => Promise<PhysicalWriteoffOutcome | null | void>,
   ): Promise<void> {
     if (inFlight.current || !guard() || !online) return;
     inFlight.current = true;
@@ -122,13 +128,19 @@ export function PhysicalWriteOffWorkspace({
             Аптека: {pending.request.branch_id} · Партия: {pending.request.lot_id}
           </p>
           {result ? (
-            <p role="status">Списание выполнено.</p>
+            <p role="status">
+              {isPhysicalWriteoffCancelled(result)
+                ? "Списание отменено. Остатки не изменены."
+                : "Списание выполнено."}
+            </p>
           ) : (
             <p>
               Сохранена команда списания. До подтверждения результата новое списание недоступно.
             </p>
           )}
-          {result && <p>Списано: {result.base_units} базовых единиц.</p>}
+          {result && !isPhysicalWriteoffCancelled(result) && (
+            <p>Списано: {result.base_units} базовых единиц.</p>
+          )}
           {error && <p role="alert">{error}</p>}
           <Button
             disabled={busy || !online || !allowed(pending.request.branch_id)}
@@ -138,7 +150,7 @@ export function PhysicalWriteOffWorkspace({
           >
             Проверить результат
           </Button>
-          {!result && (
+          {!result && !pending.cancelRequested && (
             <Button
               disabled={busy || !online || !writable || !allowed(pending.request.branch_id)}
               onClick={() => {
@@ -147,6 +159,46 @@ export function PhysicalWriteOffWorkspace({
             >
               Повторить сохранённое списание
             </Button>
+          )}
+          {!result && (
+            <>
+              {pending.cancelRequested && (
+                <p>Отмена запрошена. Повторное списание недоступно до подтверждения результата.</p>
+              )}
+              {cancelConfirmation === pending.request.operation_id ? (
+                <div role="group" aria-label="Подтверждение отмены списания" className="space-y-2">
+                  <p>
+                    Сервер отменит только неподтверждённую операцию. Если списание уже выполнено,
+                    будет показан его результат.
+                  </p>
+                  <Button
+                    disabled={busy || !online || !writable || !allowed(pending.request.branch_id)}
+                    onClick={() => {
+                      if (scope) {
+                        setCancelConfirmation(null);
+                        void execute(() =>
+                          requestPhysicalWriteoffCancellation(scope, pending.request),
+                        );
+                      }
+                    }}
+                  >
+                    Подтвердить отмену списания
+                  </Button>
+                  <Button disabled={busy} onClick={() => setCancelConfirmation(null)}>
+                    Назад
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  disabled={busy || !online || !writable || !allowed(pending.request.branch_id)}
+                  onClick={() => setCancelConfirmation(pending.request.operation_id)}
+                >
+                  {pending.cancelRequested
+                    ? "Повторить отмену списания"
+                    : "Отменить неподтверждённое списание"}
+                </Button>
+              )}
+            </>
           )}
           {result && (
             <Button
