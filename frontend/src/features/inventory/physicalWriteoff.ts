@@ -81,6 +81,53 @@ export const physicalWriteoffResultSchema = physicalWriteoffInputSchema
     created_at: z.string().datetime({ offset: true }),
   })
   .strict();
+const physicalWriteoffCancelledSchema = physicalWriteoffRequestSchema
+  .extend({
+    status: z.literal("cancelled"),
+    cancelled_at: z.string().datetime({ offset: true }),
+  })
+  .strict();
+const physicalWriteoffOutcomeSchema = z.union([
+  physicalWriteoffResultSchema,
+  physicalWriteoffCancelledSchema,
+]);
+export type PhysicalWriteoffOutcome = z.infer<typeof physicalWriteoffOutcomeSchema>;
+export function isPhysicalWriteoffCancelled(
+  result: PhysicalWriteoffOutcome,
+): result is z.infer<typeof physicalWriteoffCancelledSchema> {
+  return "status" in result && result.status === "cancelled";
+}
+function canonicalSelection(selection: PhysicalWriteoffRequest["selection"]): string {
+  return JSON.stringify({
+    closed_packs: selection.closed_packs,
+    opened_packs: selection.opened_packs
+      .map((pack) => ({
+        pack_id: pack.pack_id.toLowerCase(),
+        blisters: [...pack.blisters].sort((a, b) => a.number - b.number),
+        loose_units: pack.loose_units,
+      }))
+      .sort((a, b) => a.pack_id.localeCompare(b.pack_id)),
+  });
+}
+function validateOutcome(
+  value: unknown,
+  request: PhysicalWriteoffRequest,
+  expectedBaseUnits: string,
+): PhysicalWriteoffOutcome {
+  const result = physicalWriteoffOutcomeSchema.parse(value);
+  if (!isPhysicalWriteoffCancelled(result))
+    return validatePhysicalWriteoffResult(result, request, expectedBaseUnits);
+  if (
+    result.operation_id !== request.operation_id ||
+    result.branch_id !== request.branch_id ||
+    result.lot_id !== request.lot_id ||
+    result.reason !== request.reason ||
+    result.comment !== request.comment ||
+    canonicalSelection(result.selection) !== canonicalSelection(request.selection)
+  )
+    throw new Error("Ответ сервера не соответствует отменяемому списанию.");
+  return result;
+}
 const packState = z
   .object({
     intact_blisters: z.array(z.number().int().positive().max(10000)),
@@ -221,7 +268,7 @@ export async function getPhysicalWriteoffStatus(
   scope: PhysicalWriteoffScope,
   request: PhysicalWriteoffRequest,
   expectedBaseUnits: string,
-): Promise<PhysicalWriteoffResult | null> {
+): Promise<PhysicalWriteoffOutcome | null> {
   const checked = physicalWriteoffRequestSchema.parse(request);
   if (checked.branch_id !== scope.branchId) throw new Error("Списание относится к другой точке.");
   const check = activeGuard(scope);
@@ -231,7 +278,7 @@ export async function getPhysicalWriteoffStatus(
       withAuthSession({ params: { branch_id: scope.branchId } }, true),
     );
     check();
-    return validatePhysicalWriteoffResult(data, checked, expectedBaseUnits);
+    return validateOutcome(data, checked, expectedBaseUnits);
   } catch (error) {
     check();
     if (isAxiosError(error) && error.response?.status === 404) return null;
@@ -253,4 +300,21 @@ export async function completePhysicalWriteoff(
   );
   check();
   return validatePhysicalWriteoffResult(data, checked, expectedBaseUnits);
+}
+
+export async function cancelPhysicalWriteoff(
+  scope: PhysicalWriteoffScope,
+  request: PhysicalWriteoffRequest,
+  expectedBaseUnits: string,
+): Promise<PhysicalWriteoffOutcome> {
+  const checked = physicalWriteoffRequestSchema.parse(request);
+  if (checked.branch_id !== scope.branchId) throw new Error("Списание относится к другой точке.");
+  const check = activeGuard(scope);
+  const { data } = await api.post<unknown>(
+    "/batches/physical/write-offs/cancel",
+    checked,
+    withAuthSession(undefined, true),
+  );
+  check();
+  return validateOutcome(data, checked, expectedBaseUnits);
 }

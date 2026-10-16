@@ -75,9 +75,10 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "unit_stock_opening_pack_v2",
             "physical_writeoff_command",
             "physical_writeoff_entry",
+            "physical_writeoff_cancellation",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # Later inventory and financial migrations through 0204 remain installed.
+        # Later inventory and financial migrations through 0205 remain installed.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -100,7 +101,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.physical_customer_return_disposition,
               public.unit_legacy_reconciliation_record,public.unit_legacy_transition,
               public.unit_stock_opening_pack_v2,
-              public.physical_writeoff_command,public.physical_writeoff_entry
+              public.physical_writeoff_command,public.physical_writeoff_entry,
+              public.physical_writeoff_cancellation
               IN ACCESS EXCLUSIVE MODE
         """))
         trigger_sql = text("""
@@ -139,7 +141,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_legacy_transition'::regclass,
               'public.unit_stock_opening_pack_v2'::regclass,
               'public.physical_writeoff_command'::regclass,
-              'public.physical_writeoff_entry'::regclass)
+              'public.physical_writeoff_entry'::regclass,
+              'public.physical_writeoff_cancellation'::regclass)
               AND NOT t.tgisinternal
             ORDER BY c.relname, t.tgname
         """)
@@ -176,7 +179,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_legacy_transition'::regclass,
               'public.unit_stock_opening_pack_v2'::regclass,
               'public.physical_writeoff_command'::regclass,
-              'public.physical_writeoff_entry'::regclass)
+              'public.physical_writeoff_entry'::regclass,
+              'public.physical_writeoff_cancellation'::regclass)
             ORDER BY relname
         """)
         policies_sql = text("""
@@ -213,7 +217,8 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.unit_legacy_transition'::regclass,
               'public.unit_stock_opening_pack_v2'::regclass,
               'public.physical_writeoff_command'::regclass,
-              'public.physical_writeoff_entry'::regclass)
+              'public.physical_writeoff_entry'::regclass,
+              'public.physical_writeoff_cancellation'::regclass)
             ORDER BY polrelid::regclass::text, polname
         """)
         triggers_before = connection.execute(trigger_sql).all()

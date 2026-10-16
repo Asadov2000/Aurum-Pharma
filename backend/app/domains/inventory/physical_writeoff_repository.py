@@ -3,7 +3,7 @@
 from typing import NoReturn
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from app.core.errors import BusinessRuleError, ConflictError, NotFoundError, Per
 from app.domains.inventory.physical_writeoff_schemas import (
     PhysicalWriteOffRead,
     PhysicalWriteOffRequest,
+    PhysicalWriteOffStatus,
 )
 
 
@@ -29,9 +30,9 @@ def _raise_writeoff_error(error: DBAPIError) -> NoReturn:
     raise error
 
 
-def _saved_result(payload: object) -> PhysicalWriteOffRead:
+def _saved_result(payload: object) -> PhysicalWriteOffStatus:
     try:
-        return PhysicalWriteOffRead.model_validate(payload)
+        return TypeAdapter(PhysicalWriteOffStatus).validate_python(payload)
     except ValidationError:
         raise BusinessRuleError("Saved physical write-off result is invalid") from None
 
@@ -63,11 +64,39 @@ class PhysicalWriteOffRepository:
             )
         except DBAPIError as error:
             _raise_writeoff_error(error)
+        result = _saved_result(payload)
+        if not isinstance(result, PhysicalWriteOffRead):
+            raise BusinessRuleError("Saved physical write-off result is invalid")
+        return result
+
+    async def cancel(
+        self, *, tenant_id: UUID, actor_id: UUID, request: PhysicalWriteOffRequest
+    ) -> PhysicalWriteOffStatus:
+        try:
+            payload = await self.session.scalar(
+                text(
+                    "SELECT public.cancel_physical_writeoff("
+                    ":tenant,:branch,:operation,:actor,:lot,:reason,:comment,"
+                    "CAST(:selection AS JSONB))"
+                ),
+                {
+                    "tenant": tenant_id,
+                    "branch": request.branch_id,
+                    "operation": request.operation_id,
+                    "actor": actor_id,
+                    "lot": request.lot_id,
+                    "reason": request.reason,
+                    "comment": request.comment,
+                    "selection": request.selection.model_dump_json(),
+                },
+            )
+        except DBAPIError as error:
+            _raise_writeoff_error(error)
         return _saved_result(payload)
 
     async def read(
         self, *, tenant_id: UUID, branch_id: UUID, operation_id: UUID
-    ) -> PhysicalWriteOffRead:
+    ) -> PhysicalWriteOffStatus:
         try:
             payload = await self.session.scalar(
                 text("SELECT public.physical_writeoff_status(:tenant,:branch,:operation)"),

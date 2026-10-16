@@ -147,7 +147,17 @@ async function openPhysicalInventory(page: Page, branchId: string): Promise<void
   await panel.getByRole("button", { name: "Показать партии", exact: true }).click();
 }
 
-for (const scenario of [
+interface WriteOffScenario {
+  name: string;
+  opened: boolean;
+  lostResponse: boolean;
+  before: string;
+  after: string;
+  cancel?: "before-post" | "after-post";
+  lostCancelResponse?: boolean;
+}
+
+const scenarios: WriteOffScenario[] = [
   { name: "sealed packs", opened: false, lostResponse: false, before: "80", after: "60" },
   {
     name: "lost response after reload",
@@ -157,7 +167,34 @@ for (const scenario of [
     after: "60",
   },
   { name: "explicit opened blister", opened: true, lostResponse: false, before: "15", after: "11" },
-]) {
+  {
+    name: "cancel before dispatch rejects a late write-off",
+    opened: false,
+    lostResponse: true,
+    before: "80",
+    after: "80",
+    cancel: "before-post",
+  },
+  {
+    name: "lost cancellation response recovers after reload",
+    opened: false,
+    lostResponse: true,
+    before: "80",
+    after: "80",
+    cancel: "before-post",
+    lostCancelResponse: true,
+  },
+  {
+    name: "cancel after commit recovers the completed write-off",
+    opened: false,
+    lostResponse: true,
+    before: "80",
+    after: "60",
+    cancel: "after-post",
+  },
+];
+
+for (const scenario of scenarios) {
   test(`physical write-off ${scenario.name} preserves explicit stock and operation identity`, async ({
     page,
   }) => {
@@ -203,6 +240,9 @@ for (const scenario of [
       const operations: string[] = [];
       const selections: unknown[] = [];
       const recoveries: string[] = [];
+      const commands: unknown[] = [];
+      const cancellations: unknown[] = [];
+      let droppedCancellationResponses = 0;
       page.on("request", (req) => {
         if (
           req.method() === "GET" &&
@@ -219,10 +259,21 @@ for (const scenario of [
         };
         operations.push(submitted.operation_id);
         selections.push(submitted.selection);
+        commands.push(submitted);
         if (!scenario.lostResponse) return route.continue();
+        if (scenario.cancel === "before-post") return route.abort("failed");
         const response = await route.fetch();
         expect(response.ok()).toBe(true);
         await route.abort("failed");
+      });
+      await page.route("**/api/v1/batches/physical/write-offs/cancel", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        cancellations.push(route.request().postDataJSON() as unknown);
+        if (!scenario.lostCancelResponse) return route.continue();
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        await route.abort("failed");
+        droppedCancellationResponses += 1;
       });
       await panel.getByRole("button", { name: "Списать", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Списание поштучного остатка", exact: true });
@@ -247,14 +298,49 @@ for (const scenario of [
           panel.getByRole("region", { name: "Результат списания", exact: true }).getByRole("alert"),
         ).toBeVisible();
         expect(operations).toHaveLength(1);
-        await page.reload();
-        await openPhysicalInventory(page, branch.id);
-        await page
-          .getByRole("region", { name: "Результат списания", exact: true })
-          .getByRole("button", { name: "Проверить результат", exact: true })
-          .click();
+        if (scenario.cancel) {
+          await page
+            .getByRole("button", { name: "Отменить неподтверждённое списание", exact: true })
+            .click();
+          expect(cancellations).toHaveLength(0);
+          await page
+            .getByRole("button", { name: "Подтвердить отмену списания", exact: true })
+            .click();
+          if (scenario.lostCancelResponse) {
+            await expect.poll(() => droppedCancellationResponses).toBe(1);
+            await expect(
+              panel
+                .getByRole("region", { name: "Результат списания", exact: true })
+                .getByRole("alert"),
+            ).toBeVisible();
+          }
+        }
+        if (!scenario.cancel || scenario.lostCancelResponse) {
+          await page.reload();
+          await openPhysicalInventory(page, branch.id);
+          if (scenario.lostCancelResponse) {
+            await expect(
+              page.getByRole("button", { name: "Повторить отмену списания", exact: true }),
+            ).toBeVisible();
+            await expect(
+              page.getByRole("button", { name: "Повторить сохранённое списание", exact: true }),
+            ).toHaveCount(0);
+            expect(cancellations).toHaveLength(1);
+            expect(operations).toHaveLength(1);
+          }
+          await page
+            .getByRole("region", { name: "Результат списания", exact: true })
+            .getByRole("button", { name: "Проверить результат", exact: true })
+            .click();
+        }
       }
-      await expect(page.getByText("Списание выполнено.", { exact: true })).toBeVisible();
+      const cancelled = scenario.cancel === "before-post";
+      await expect(
+        page.getByText(
+          cancelled ? "Списание отменено. Остатки не изменены." : "Списание выполнено.",
+          { exact: true },
+        ),
+      ).toBeVisible();
       await expect(panel.getByText(`${scenario.after} табл.`, { exact: true })).toBeVisible();
       expect(operations).toHaveLength(1);
       expect(selections[0]).toEqual(
@@ -281,19 +367,40 @@ for (const scenario of [
         params: { branch_id: branch.id },
       });
       expect(recovered.ok()).toBe(true);
-      expect(await recovered.json()).toMatchObject({
-        operation_id: operations[0],
-        branch_id: branch.id,
-        lot_id: initial.lot_id,
-        base_units: scenario.opened ? "4" : "20",
-        closed_packs: scenario.opened ? "0" : "1",
-      });
+      expect(await recovered.json()).toMatchObject(
+        cancelled
+          ? { status: "cancelled", operation_id: operations[0], selection: selections[0] }
+          : {
+              operation_id: operations[0],
+              branch_id: branch.id,
+              lot_id: initial.lot_id,
+              base_units: scenario.opened ? "4" : "20",
+              closed_packs: scenario.opened ? "0" : "1",
+            },
+      );
+      if (scenario.cancel) {
+        expect(cancellations).toEqual(cancelled ? commands : []);
+        if (cancelled) {
+          const latePost = await api.post("batches/physical/write-offs", { data: commands[0] });
+          expect(latePost.status()).toBe(409);
+          expect(await readLot(api, branch.id)).toEqual(after);
+        }
+      }
       await page.getByRole("button", { name: "Готово", exact: true }).click();
       await expect(
         panel.getByRole("region", { name: "Результат списания", exact: true }),
       ).toHaveCount(0);
       await expect(panel.getByRole("button", { name: "Списать", exact: true })).toBeEnabled();
       expect(operations).toHaveLength(1);
+      if (cancelled) {
+        // Acknowledgement releases the local barrier without reviving the cancelled command.
+        await panel.getByRole("button", { name: "Списать", exact: true }).click();
+        await expect(
+          page.getByRole("dialog", { name: "Списание поштучного остатка", exact: true }),
+        ).toBeVisible();
+        expect(cancellations).toHaveLength(1);
+        expect(operations).toHaveLength(1);
+      }
     } finally {
       await api.dispose();
       await anonymous.dispose();

@@ -1,5 +1,6 @@
 """Warehouse write-off commands and cost-free recovery results."""
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
@@ -43,3 +44,19 @@ class PhysicalWriteOffRead(BaseModel):
     base_units: IntegerString
     closed_packs: IntegerString
     created_at: AwareDatetime
+
+
+class PhysicalWriteOffCancelled(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["cancelled"]
+    operation_id: UUID
+    branch_id: UUID
+    lot_id: UUID
+    reason: WriteOffReason
+    comment: str | None
+    selection: PhysicalWriteOffSelectionV2
+    cancelled_at: AwareDatetime
+
+
+PhysicalWriteOffStatus = PhysicalWriteOffRead | PhysicalWriteOffCancelled

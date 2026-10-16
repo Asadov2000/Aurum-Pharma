@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   inspect: vi.fn(),
   acknowledge: vi.fn(),
+  cancel: vi.fn(),
 }));
 vi.mock("@/features/auth/hooks", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("@/lib/connectivityContext", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/features/inventory/physicalWriteoffRecovery", () => ({
   loadPhysicalWriteoff: (...args: unknown[]) => mocks.load(...args),
   runPhysicalWriteoff: (...args: unknown[]) => mocks.run(...args),
   inspectPhysicalWriteoff: (...args: unknown[]) => mocks.inspect(...args),
+  requestPhysicalWriteoffCancellation: (...args: unknown[]) => mocks.cancel(...args),
   acknowledgePhysicalWriteoff: (...args: unknown[]) => mocks.acknowledge(...args),
 }));
 vi.mock("@/features/inventory/PhysicalWriteOffModal", () => ({
@@ -280,5 +282,51 @@ describe("physical write-off recovery workspace", () => {
     expect(screen.getByRole("button", { name: "Повторить сохранённое списание" })).toBeDisabled();
     expect(mocks.run).not.toHaveBeenCalled();
     expect(mocks.inspect).not.toHaveBeenCalled();
+  });
+});
+
+describe("write-off cancellation controls", () => {
+  it("requires explicit confirmation, shows cancelled separately and acknowledges it", async () => {
+    saved = pending();
+    mocks.cancel.mockResolvedValue({
+      ...saved.request,
+      status: "cancelled",
+      cancelled_at: "2026-10-16T10:00:00Z",
+    });
+    render(view());
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Отменить неподтверждённое списание" }),
+    );
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену списания" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Списание отменено. Остатки не изменены.",
+    );
+    expect(screen.queryByText(/Списано:/)).not.toBeInTheDocument();
+    expect(mocks.run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await waitFor(() => expect(barrier).toHaveBeenLastCalledWith(false));
+  });
+  it("after reload with cancellation intent offers only status or cancellation retry", async () => {
+    saved = { ...pending(), cancelRequested: true };
+    mocks.cancel.mockResolvedValue(result());
+    render(view());
+    expect(await screen.findByRole("button", { name: "Повторить отмену списания" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Повторить сохранённое списание" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить отмену списания" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить отмену списания" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Списание выполнено.");
+    expect(screen.getByText("Списано: 20 базовых единиц.")).toBeInTheDocument();
+  });
+  it("disables cancellation in readonly mode", async () => {
+    saved = pending();
+    render(view(false));
+    expect(
+      await screen.findByRole("button", { name: "Отменить неподтверждённое списание" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Проверить результат" })).toBeEnabled();
   });
 });
