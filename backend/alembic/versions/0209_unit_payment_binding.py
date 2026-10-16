@@ -149,6 +149,11 @@ BEGIN
  FOR target IN SELECT DISTINCT (value->>'tenant')::UUID AS tenant,
    (value->>'sale')::UUID AS sale FROM jsonb_array_elements(parents)
    ORDER BY tenant,sale LOOP
+  -- BEFORE triggers run before INSERT RLS checks. Never inspect another tenant's parent.
+  IF session_user='aurum_app'
+    AND target.tenant IS DISTINCT FROM public.current_tenant_id() THEN
+   RAISE EXCEPTION 'unit_payment_binding_context_denied' USING ERRCODE='42501';
+  END IF;
   PERFORM 1 FROM public.sale WHERE tenant_id=target.tenant AND id=target.sale FOR UPDATE;
   IF public.unit_payment_binding_active(target.tenant,target.sale) THEN
    RAISE EXCEPTION 'unit_payment_binding_draft_frozen' USING ERRCODE='23514';

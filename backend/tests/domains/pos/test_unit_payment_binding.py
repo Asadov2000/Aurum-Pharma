@@ -349,3 +349,36 @@ async def test_sql_cancel_waiting_before_bind_preserves_timestamp_order(
     assert recovered.bound_at == bound.bound_at
     assert recovered.cancelled_at is not None and recovered.bound_at is not None
     assert recovered.cancelled_at >= recovered.bound_at
+
+
+@pytest.mark.parametrize("bound", [False, True])
+async def test_payment_fence_hides_binding_state_from_wrong_tenant_context(
+    db_session: AsyncSession, bound: bool
+) -> None:
+    request = await intent_request(db_session)
+    await save(db_session, request)
+    if bound:
+        await binding(db_session, request, "bind")
+    context = runtime(db_session)
+    before = await snapshot(db_session)
+    await db_session.execute(
+        text("SELECT set_config('app.tenant_id',:tenant,true)"), {"tenant": str(uuid4())}
+    )
+    try:
+        with pytest.raises(DBAPIError, match="unit_payment_binding_context_denied"):
+            async with db_session.begin_nested():
+                await db_session.execute(
+                    text(
+                        "INSERT INTO sale_payment "
+                        "(id,tenant_id,sale_id,payment_method,amount,currency) "
+                        "VALUES(:id,:tenant,:sale,'card',1.99,'TJS')"
+                    ),
+                    {
+                        "id": uuid4(),
+                        "tenant": context.stock.tenant_id,
+                        "sale": request.request.sale_id,
+                    },
+                )
+    finally:
+        await set_receiving_context(db_session, context.stock, context.actor_id)
+    assert await snapshot(db_session) == before
