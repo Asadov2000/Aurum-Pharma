@@ -11,6 +11,7 @@ from openpyxl import load_workbook
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.errors import BusinessRuleError
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
 from app.domains.pos.profit_report_repository import ProfitReportRepository
@@ -247,7 +248,10 @@ async def test_physical_zero_return_has_known_cost_and_no_refund_revenue(
     assert result.gross_profit == result.net_revenue - result.net_sales_cost
 
 
-async def test_training_sale_and_its_refund_are_excluded(db_session: AsyncSession) -> None:
-    await physical_cash(db_session, is_test=True)
+async def test_rejected_physical_training_sale_leaves_profit_report_empty(
+    db_session: AsyncSession,
+) -> None:
+    with pytest.raises(BusinessRuleError, match="Physical test sales"):
+        await physical_cash(db_session, is_test=True)
     result = await snapshot(db_session)
     assert result.total == 0 and result.net_revenue == result.gross_profit == 0
