@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_db, require_branch_permission
 from app.domains.inventory.expiry import ExpiryStatus
 from app.domains.inventory.physical_router import router as physical_router
+from app.domains.inventory.physical_writeoff_router import router as physical_writeoff_router
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.schemas import (
     BatchDetails,
@@ -32,6 +33,7 @@ from app.domains.inventory.unit_legacy_transition_router import (
 
 router = APIRouter(prefix="/api/v1/batches", tags=["inventory"])
 router.include_router(physical_router)
+router.include_router(physical_writeoff_router)
 router.include_router(unit_legacy_reconciliation_router)
 router.include_router(unit_legacy_transition_router)
 
