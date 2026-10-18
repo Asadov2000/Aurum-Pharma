@@ -139,9 +139,9 @@ async function renderPage(registers: Register[] = [REGISTER_A, REGISTER_B]) {
   };
 }
 
-function expectRegister(register: Register) {
+async function expectRegister(register: Register) {
   expect(screen.getByLabelText("Фактическая касса")).toHaveTextContent(register.id);
-  expect(loadDevicePreferences(DEVICE_SCOPE).lastRegisterId).toBe(register.id);
+  await waitFor(() => expect(loadDevicePreferences(DEVICE_SCOPE).lastRegisterId).toBe(register.id));
 }
 
 function requestRegister(register: Register) {
@@ -183,11 +183,11 @@ describe("POSPage register switch recovery", () => {
   ])("preserves a busy register after refresh with $name", async ({ registers }) => {
     saleControl.blocked = true;
     const page = await renderPage();
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
 
     await page.refreshRegisters(registers);
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("false");
     expect(screen.getByLabelText("Разрешение продажи")).toHaveTextContent("false");
     expect(screen.getByLabelText("Касса")).not.toHaveDisplayValue(REGISTER_B.name);
@@ -200,7 +200,7 @@ describe("POSPage register switch recovery", () => {
     const page = await renderPage();
     await page.refreshRegisters([REGISTER_B]);
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("false");
     expect(screen.getByLabelText("Разрешение продажи")).toHaveTextContent("false");
     expect(screen.getByLabelText("Касса")).not.toHaveDisplayValue(REGISTER_B.name);
@@ -208,11 +208,11 @@ describe("POSPage register switch recovery", () => {
     expect(
       await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
     ).toBeInTheDocument();
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
 
-    expectRegister(REGISTER_B);
+    await expectRegister(REGISTER_B);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("true");
   });
 
@@ -226,7 +226,7 @@ describe("POSPage register switch recovery", () => {
       const page = await renderPage();
       await page.refreshRegisters(registers);
 
-      expectRegister(REGISTER_A);
+      await expectRegister(REGISTER_A);
       expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("false");
       expect(screen.getByLabelText("Касса")).not.toHaveValue("");
     },
@@ -244,7 +244,7 @@ describe("POSPage register switch recovery", () => {
     const confirm = screen.queryByRole("button", { name: "Сохранить чек и перейти" });
     if (confirm) fireEvent.click(confirm);
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(saleControl.renderedRegisterIds).not.toContain(REGISTER_B.id);
   });
 
@@ -260,7 +260,7 @@ describe("POSPage register switch recovery", () => {
     const confirm = screen.queryByRole("button", { name: "Сохранить чек и перейти" });
     if (confirm) fireEvent.click(confirm);
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(saleControl.renderedRegisterIds).not.toContain(REGISTER_B.id);
   });
 
@@ -272,9 +272,9 @@ describe("POSPage register switch recovery", () => {
     selector.add(staleOption);
     fireEvent.change(selector, { target: { value: REGISTER_C.id } });
     staleOption.remove();
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     requestRegister(REGISTER_A);
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -282,14 +282,14 @@ describe("POSPage register switch recovery", () => {
     saleControl.reportReady = false;
     const page = await renderPage([REGISTER_B]);
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(saleControl.renderedRegisterIds).not.toContain(REGISTER_B.id);
     await page.reportState({ blocked: true, reportReady: true });
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
 
     await page.reportState({ blocked: false });
 
-    expectRegister(REGISTER_B);
+    await expectRegister(REGISTER_B);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("true");
   });
 
@@ -299,11 +299,11 @@ describe("POSPage register switch recovery", () => {
     const page = await renderPage();
     await page.refreshRegisters([REGISTER_B]);
     await page.reportState({ blocked: false });
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
 
     await page.reportState({ hasDraft: false });
 
-    expectRegister(REGISTER_B);
+    await expectRegister(REGISTER_B);
     expect(screen.getByLabelText("Касса")).toHaveDisplayValue(REGISTER_B.name);
   });
 
@@ -312,7 +312,7 @@ describe("POSPage register switch recovery", () => {
 
     await renderPage([REGISTER_B]);
 
-    expectRegister(REGISTER_B);
+    await expectRegister(REGISTER_B);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("true");
     expect(screen.getByLabelText("Разрешение продажи")).toHaveTextContent("true");
   });
@@ -332,7 +332,7 @@ describe("POSPage register switch recovery", () => {
 
     await renderPage();
 
-    expectRegister(REGISTER_A);
+    await expectRegister(REGISTER_A);
     expect(screen.getByLabelText("Касса доступна")).toHaveTextContent("true");
     expect(screen.getByLabelText("Разрешение продажи")).toHaveTextContent("false");
     expect(screen.getByLabelText("Разрешение открытия смены")).toHaveTextContent("false");
