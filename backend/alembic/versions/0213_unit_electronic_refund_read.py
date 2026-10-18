@@ -40,7 +40,6 @@ def upgrade() -> None:
               USING(
                 tenant_id=public.current_tenant_id()
                 AND current_user='aurum_app' AND session_user='aurum_app'
-                AND NOT public.is_support_session()
                 AND NOT public.is_tenant_support_session()
                 AND EXISTS(SELECT 1 FROM public.app_user actor
                   WHERE actor.id=public.current_app_user_id() AND actor.status='active')
