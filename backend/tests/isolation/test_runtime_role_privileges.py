@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_unit_refund_payment_component",
     "pos_unit_checkout_payment_component",
     "unit_legacy_reconciliation_record",
     "pos_mixed_cash_refund",
@@ -247,6 +248,9 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_unit_refund_payment_components",
+    "trg_unit_refund_payment_component_guard",
+    "trg_unit_refund_payment_component_complete",
     "assert_unit_checkout_payment_components",
     "trg_unit_checkout_payment_component_guard",
     "trg_unit_checkout_payment_component_complete",
@@ -1621,6 +1625,9 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "assert_unit_refund_payment_components",
+        "trg_unit_refund_payment_component_guard",
+        "trg_unit_refund_payment_component_complete",
         "assert_unit_checkout_payment_components",
         "trg_unit_checkout_payment_component_guard",
         "trg_unit_checkout_payment_component_complete",

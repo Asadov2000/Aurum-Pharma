@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, text
+from sqlalchemy import DateTime, SmallInteger, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -25,6 +25,9 @@ class PhysicalCashRefund(Base):
     shift_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     actor_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     payment_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payment_journal_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("1")
+    )
     request_hash: Mapped[str] = mapped_column(Text, nullable=False)
     reason_code: Mapped[str | None] = mapped_column(Text)
     comment: Mapped[str | None] = mapped_column(Text)
