@@ -85,8 +85,7 @@ def _original_payments(
             or payment.metadata is not None
             or not valid_operation
             or payment.operation_hash != history.checkout.request_hash
-            or (component.tenant_id, component.sale_id)
-            != (original.tenant_id, original.sale_id)
+            or (component.tenant_id, component.sale_id) != (original.tenant_id, original.sale_id)
             or component.physical_checkout_id != original.operation_id
             or component.mixed_checkout_id is not None
             or (component.method, component.amount, component.currency)

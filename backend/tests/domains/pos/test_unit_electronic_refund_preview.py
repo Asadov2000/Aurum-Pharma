@@ -475,9 +475,12 @@ async def test_blocking_real_actor_revokes_preview_without_financial_effects(
         await owner.execute(
             text("UPDATE app_user SET status='blocked' WHERE id=:id"), {"id": context.actor_id}
         )
-        assert await owner.scalar(
-            text("SELECT status FROM app_user WHERE id=:id"), {"id": context.actor_id}
-        ) == "blocked"
+        assert (
+            await owner.scalar(
+                text("SELECT status FROM app_user WHERE id=:id"), {"id": context.actor_id}
+            )
+            == "blocked"
+        )
     try:
         await set_receiving_context(db_session, context.stock, context.actor_id)
         with pytest.raises(PermissionDeniedError):

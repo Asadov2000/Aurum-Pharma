@@ -53,10 +53,13 @@ async def test_refund_read_policy_roundtrip_preserves_existing_security_and_hist
     assert str(await db_session.scalar(text("SELECT current_database()"))).endswith("_test")
     if with_history:
         source = await original(db_session)
-        assert await db_session.scalar(
-            text("SELECT count(*) FROM pos_unit_checkout_payment_component WHERE sale_id=:id"),
-            {"id": source.sale_id},
-        ) == 1
+        assert (
+            await db_session.scalar(
+                text("SELECT count(*) FROM pos_unit_checkout_payment_component WHERE sale_id=:id"),
+                {"id": source.sale_id},
+            )
+            == 1
+        )
         await db_session.commit()
 
     def rehearse(connection: Connection) -> None:
