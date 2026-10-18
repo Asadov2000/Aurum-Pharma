@@ -1,18 +1,21 @@
-import { type KeyboardEvent, useState } from "react";
+import { hashKey } from "@tanstack/react-query";
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AccessDeniedCard } from "@/components/AccessDeniedCard";
 import { Button, Modal, PageHeader, SkeletonRows } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { hasPermissionForBranch } from "@/features/auth/branchPermissions";
 import { hasPermission } from "@/features/auth/permissions";
 import { describeApiError } from "@/features/foundation/errors";
 import { useTenantOperationalSettingsQuery } from "@/features/foundation/queries";
 import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/utils";
+import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 import { useReportBranchScope } from "./branchScope";
 import { DEFAULT_REPORT_TIME_ZONE } from "./calendar";
-import { useZReportQuery } from "./queries";
+import { useZReportQuery, zReportAccessKey } from "./queries";
 import { SalesOverviewPanel } from "./SalesOverviewPanel";
 import { ShiftHistoryPanel } from "./ShiftHistoryPanel";
 import { GrossProfitPanel } from "./GrossProfitPanel";
@@ -40,7 +43,23 @@ export function ReportsPage(): JSX.Element {
   const { user } = useAuth();
   const { scopeKey, canView } = useReportBranchScope();
   const canExport = hasPermission(user, "reports.export");
-  const [selectedShift, setSelectedShift] = useState<ShiftHistoryItem | null>(null);
+  const sessionKey = hashKey([user?.id, user?.active_tenant_id, getAuthSessionGeneration()]);
+  const [selection, setSelection] = useState<{
+    shift: ShiftHistoryItem;
+    sessionKey: string;
+  } | null>(null);
+  const selectedShift =
+    selection?.sessionKey === sessionKey &&
+    hasPermissionForBranch(user, "reports.view", selection.shift.branch_id)
+      ? selection.shift
+      : null;
+  const setSelectedShift = useCallback(
+    (shift: ShiftHistoryItem | null) => setSelection(shift ? { shift, sessionKey } : null),
+    [sessionKey],
+  );
+  useEffect(() => {
+    if (selection && !selectedShift) setSelection(null);
+  }, [selection, selectedShift]);
   const [view, setView] = useState<ReportView>(readInitialReportView);
   const settings = useTenantOperationalSettingsQuery(canView);
   const reportTimezone = settings.data?.report_timezone ?? DEFAULT_REPORT_TIME_ZONE;
@@ -120,7 +139,7 @@ export function ReportsPage(): JSX.Element {
               />
             ) : view === "shifts" ? (
               <ShiftHistoryPanel
-                key={`shift-history-${reportTimezone}-${scopeKey}`}
+                key={`shift-history-${reportTimezone}-${scopeKey}-${sessionKey}`}
                 selectedShift={selectedShift}
                 onSelect={setSelectedShift}
                 reportTimezone={reportTimezone}
@@ -148,9 +167,10 @@ export function ReportsPage(): JSX.Element {
       >
         {selectedShift && (
           <ZReportSection
+            key={`${selectedShift.id}-${zReportAccessKey(user)}`}
             shift={selectedShift}
             reportTimezone={reportTimezone}
-            canExport={canExport}
+            canExport={hasPermissionForBranch(user, "reports.export", selectedShift.branch_id)}
           />
         )}
       </Modal>
@@ -262,20 +282,57 @@ function ZReportSection({
   reportTimezone: string;
   canExport: boolean;
 }): JSX.Element {
-  const { data, isLoading, error, refetch, isFetching } = useZReportQuery(shift.id);
+  const { user } = useAuth();
+  const accessKey = zReportAccessKey(user);
+  const { data, isLoading, error, refetch, isFetching } = useZReportQuery(
+    shift.id,
+    shift.branch_id,
+  );
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  const unsubscribeExport = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      unsubscribeExport.current?.();
+      unsubscribeExport.current = null;
+    };
+  }, []);
 
   const onDownload = async () => {
+    if (
+      inFlight.current ||
+      !canExport ||
+      !mounted.current ||
+      accessKey !== zReportAccessKey(useAuthStore.getState().user)
+    )
+      return;
+    inFlight.current = true;
+    let accessChanged = false;
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (zReportAccessKey(state.user) !== accessKey) accessChanged = true;
+    });
+    unsubscribeExport.current = unsubscribe;
+    const isCurrent = () =>
+      mounted.current &&
+      !accessChanged &&
+      accessKey === zReportAccessKey(useAuthStore.getState().user);
     setDownloadError(null);
     setDownloading(true);
     try {
       const blob = await getZReportXlsx(shift.id);
-      downloadBlob(blob, `z-report-${shift.id}.xlsx`);
+      if (isCurrent()) downloadBlob(blob, `z-report-${shift.id}.xlsx`);
     } catch (downloadFailure) {
-      setDownloadError(describeApiError(downloadFailure, "Не удалось скачать Z-отчёт"));
+      if (isCurrent())
+        setDownloadError(describeApiError(downloadFailure, "Не удалось скачать Z-отчёт"));
     } finally {
-      setDownloading(false);
+      unsubscribe();
+      unsubscribeExport.current = null;
+      inFlight.current = false;
+      if (mounted.current) setDownloading(false);
     }
   };
 

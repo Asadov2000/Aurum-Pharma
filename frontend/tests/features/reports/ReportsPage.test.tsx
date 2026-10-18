@@ -1,5 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getZReport = vi.fn();
@@ -13,6 +21,11 @@ const getZReportXlsx = vi.fn();
 const listBranches = vi.fn();
 const listRegisters = vi.fn();
 const getTenantOperationalSettings = vi.fn();
+const downloadBlob = vi.fn();
+
+vi.mock("@/lib/download", () => ({
+  downloadBlob: (...args: unknown[]) => downloadBlob(...args),
+}));
 
 vi.mock("@/features/reports/api", () => ({
   getZReport: (...args: unknown[]) => getZReport(...args),
@@ -35,17 +48,19 @@ vi.mock("@/features/foundation/api", () => ({
 }));
 
 import { ReportsPage } from "@/features/reports/ReportsPage";
+import { reportsKeys, useZReportQuery, zReportAccessKey } from "@/features/reports/queries";
 import { useAuthStore } from "@/stores/auth";
 
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <ReportsPage />
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 async function openReportTab(name: RegExp): Promise<void> {
@@ -118,6 +133,60 @@ const Z_REPORT = {
   returns_count: 1,
 };
 
+const SECOND_SHIFT = {
+  ...SHIFT,
+  id: "shift-2",
+  branch_id: "branch-2",
+  branch_name: "Точка Б",
+  register_id: "register-2",
+  register_name: "Касса 02",
+  cashier_user_id: "cashier-2",
+  cashier_name: "Кассир Б",
+};
+
+function scopedReportUser(
+  viewBranches = [SHIFT.branch_id, SECOND_SHIFT.branch_id],
+  exportBranches = viewBranches,
+) {
+  return {
+    ...REPORT_USER,
+    permission_scopes: { "reports.view": viewBranches, "reports.export": exportBranches },
+  };
+}
+
+function prepareScopedReports(): void {
+  act(() => useAuthStore.getState().setUser(scopedReportUser()));
+  listBranches.mockResolvedValue([
+    { id: SHIFT.branch_id, name: SHIFT.branch_name },
+    { id: SECOND_SHIFT.branch_id, name: SECOND_SHIFT.branch_name },
+  ]);
+  listShiftHistory.mockImplementation((params: { branch_id?: string }) =>
+    Promise.resolve({
+      ...SHIFT_LIST,
+      items: params.branch_id === SECOND_SHIFT.branch_id ? [SECOND_SHIFT] : [SHIFT],
+    }),
+  );
+  getZReport.mockImplementation((shiftId: string) =>
+    Promise.resolve({ ...Z_REPORT, shift_id: shiftId }),
+  );
+}
+
+async function openShiftReport(registerName: string = SHIFT.register_name): Promise<void> {
+  await openReportTab(/^Смены/);
+  const row = await screen.findByRole("row", { name: new RegExp(registerName) });
+  fireEvent.click(within(row).getByRole("button", { name: "Открыть", exact: true }));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
 const SALES_SUMMARY = {
   date_from: "2026-05-01",
   date_to: "2026-05-23",
@@ -165,6 +234,7 @@ describe("ReportsPage", () => {
     listBranches.mockReset();
     listRegisters.mockReset();
     getTenantOperationalSettings.mockReset();
+    downloadBlob.mockReset();
     listBranches.mockResolvedValue([]);
     listRegisters.mockResolvedValue([]);
     getTenantOperationalSettings.mockResolvedValue({ report_timezone: "Asia/Dushanbe" });
@@ -297,7 +367,7 @@ describe("ReportsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
 
     await waitFor(() => {
-      expect(getZReport).toHaveBeenCalledWith(SHIFT.id);
+      expect(getZReport).toHaveBeenCalledWith(SHIFT.id, expect.any(AbortSignal));
     });
     expect(await screen.findByText("На начало")).toBeInTheDocument();
     expect(screen.getAllByText("Аптека Рудаки").length).toBeGreaterThan(0);
@@ -305,6 +375,196 @@ describe("ReportsPage", () => {
     expect(screen.getAllByText("QR-код").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Банковский перевод").length).toBeGreaterThan(0);
   });
+
+  it("does not expose a cached Z-report or request it without its branch grant", () => {
+    prepareScopedReports();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(
+      reportsKeys.zReport(SHIFT.id, zReportAccessKey(scopedReportUser())),
+      Z_REPORT,
+    );
+    act(() => useAuthStore.getState().setUser(scopedReportUser([SECOND_SHIFT.branch_id])));
+    const { result } = renderHook(() => useZReportQuery(SHIFT.id, SHIFT.branch_id), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(result.current.data).toBeUndefined();
+    expect(getZReport).not.toHaveBeenCalled();
+  });
+
+  it.each(["one branch", "all reports"])(
+    "closes and evicts a Z-report after revoking %s without restoring it on regrant",
+    async (revocation) => {
+      prepareScopedReports();
+      const { queryClient } = renderPage();
+      await openShiftReport();
+      await screen.findByText("На начало");
+
+      act(() =>
+        useAuthStore
+          .getState()
+          .setUser(scopedReportUser(revocation === "one branch" ? [SECOND_SHIFT.branch_id] : [])),
+      );
+      expect(screen.queryByRole("dialog", { name: /Итог смены/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("На начало")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          queryClient.getQueryCache().findAll({ queryKey: ["reports", "z", SHIFT.id] }),
+        ).toHaveLength(0),
+      );
+      expect(getZReport).toHaveBeenCalledTimes(1);
+
+      act(() => useAuthStore.getState().setUser(scopedReportUser()));
+      expect(screen.queryByRole("dialog", { name: /Итог смены/ })).not.toBeInTheDocument();
+      const fresh = deferred<typeof Z_REPORT>();
+      getZReport.mockReturnValueOnce(fresh.promise);
+      await openShiftReport();
+      expect(screen.queryByText("На начало")).not.toBeInTheDocument();
+      await act(async () => fresh.resolve(Z_REPORT));
+      await screen.findByText("На начало");
+      expect(getZReport).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps branch B selected and exportable when only branch A is revoked", async () => {
+    prepareScopedReports();
+    getZReportXlsx.mockResolvedValue(new Blob(["synthetic xlsx"]));
+    renderPage();
+    await openReportTab(/^Смены/);
+    fireEvent.change(await screen.findByLabelText("Аптечная точка"), {
+      target: { value: SECOND_SHIFT.branch_id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Показать", exact: true }));
+    await openShiftReport(SECOND_SHIFT.register_name);
+    await screen.findByText("На начало");
+    act(() => useAuthStore.getState().setUser(scopedReportUser([SECOND_SHIFT.branch_id])));
+    const dialog = screen.getByRole("dialog", { name: /Итог смены/ });
+    expect(dialog).toBeVisible();
+    await within(dialog).findByText("На начало");
+    expect(
+      within(dialog).getByText(`${SECOND_SHIFT.branch_name} · ${SECOND_SHIFT.cashier_name}`),
+    ).toBeVisible();
+    expect(
+      within(screen.getByLabelText("Аптечная точка")).queryByRole("option", {
+        name: SHIFT.branch_name,
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Скачать XLSX" }));
+    await waitFor(() =>
+      expect(downloadBlob).toHaveBeenCalledWith(
+        expect.any(Blob),
+        `z-report-${SECOND_SHIFT.id}.xlsx`,
+      ),
+    );
+  });
+
+  it("cancels a pending Z-report and ignores its late JSON after branch revocation", async () => {
+    prepareScopedReports();
+    const pending = deferred<typeof Z_REPORT>();
+    getZReport.mockReturnValueOnce(pending.promise);
+    const { queryClient } = renderPage();
+    await openShiftReport();
+    await waitFor(() => expect(getZReport).toHaveBeenCalledTimes(1));
+    const signal = getZReport.mock.calls[0]?.[1] as AbortSignal;
+    act(() => useAuthStore.getState().setUser(scopedReportUser([SECOND_SHIFT.branch_id])));
+    expect(signal.aborted).toBe(true);
+    await act(async () => pending.resolve(Z_REPORT));
+    expect(screen.queryByRole("dialog", { name: /Итог смены/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("На начало")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryCache().findAll({ queryKey: ["reports", "z", SHIFT.id] }),
+      ).toHaveLength(0),
+    );
+  });
+
+  it.each(["view", "export", "close", "logout", "revoke and regrant"])(
+    "does not download a pending XLSX after %s changes its authority",
+    async (change) => {
+      prepareScopedReports();
+      const pending = deferred<Blob>();
+      getZReportXlsx.mockReturnValue(pending.promise);
+      renderPage();
+      await openShiftReport();
+      await screen.findByText("На начало");
+      const dialog = screen.getByRole("dialog", { name: /Итог смены/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Скачать XLSX" }));
+      expect(getZReportXlsx).toHaveBeenCalledWith(SHIFT.id);
+      if (change === "close") {
+        fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть", exact: true }));
+      } else {
+        act(() => {
+          if (change === "logout") useAuthStore.getState().clear();
+          else if (change === "view")
+            useAuthStore.getState().setUser(scopedReportUser([SECOND_SHIFT.branch_id]));
+          else {
+            useAuthStore
+              .getState()
+              .setUser(
+                scopedReportUser(
+                  [SHIFT.branch_id, SECOND_SHIFT.branch_id],
+                  [SECOND_SHIFT.branch_id],
+                ),
+              );
+            if (change === "revoke and regrant")
+              useAuthStore.getState().setUser(scopedReportUser());
+          }
+        });
+      }
+      await act(async () => pending.resolve(new Blob(["old authority xlsx"])));
+      expect(downloadBlob).not.toHaveBeenCalled();
+      if (change === "export") {
+        expect(screen.getByRole("dialog", { name: /Итог смены/ })).toBeVisible();
+        expect(screen.queryByRole("button", { name: "Скачать XLSX" })).not.toBeInTheDocument();
+      }
+      if (change === "revoke and regrant")
+        expect(screen.getByRole("button", { name: "Скачать XLSX" })).toBeEnabled();
+    },
+  );
+
+  it("ignores a late XLSX error after its dialog has closed", async () => {
+    prepareScopedReports();
+    const pending = deferred<Blob>();
+    getZReportXlsx.mockReturnValue(pending.promise);
+    renderPage();
+    await openShiftReport();
+    await screen.findByText("На начало");
+    const dialog = screen.getByRole("dialog", { name: /Итог смены/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Скачать XLSX" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть", exact: true }));
+    await act(async () => pending.reject(new Error("old export failed")));
+    await openShiftReport();
+    await screen.findByText("На начало");
+    expect(
+      screen.queryByText(/old export failed|Не удалось скачать Z-отчёт/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Скачать XLSX" })).toBeEnabled();
+  });
+
+  it.each(["user", "tenant"])(
+    "hides the old report and history immediately after changing %s with identical grants",
+    async (identity) => {
+      prepareScopedReports();
+      renderPage();
+      await openShiftReport();
+      await screen.findByText("На начало");
+      const history = deferred<typeof SHIFT_LIST>();
+      listShiftHistory.mockReturnValue(history.promise);
+      act(() =>
+        useAuthStore.getState().setUser({
+          ...scopedReportUser(),
+          ...(identity === "user" ? { id: "next-user" } : { active_tenant_id: "next-tenant" }),
+        }),
+      );
+      expect(screen.queryByRole("dialog", { name: /Итог смены/ })).not.toBeInTheDocument();
+      expect(screen.queryByText(SHIFT.cashier_name)).not.toBeInTheDocument();
+      expect(screen.queryByText("На начало")).not.toBeInTheDocument();
+      await act(async () => history.resolve({ ...SHIFT_LIST, items: [] }));
+      expect(getZReport).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("shows the screen sales summary with payment and daily breakdowns", async () => {
     renderPage();
@@ -339,7 +599,7 @@ describe("ReportsPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(getZReport).toHaveBeenCalledWith(SHIFT.id);
+      expect(getZReport).toHaveBeenCalledWith(SHIFT.id, expect.any(AbortSignal));
     });
     expect(await screen.findByText(/сходится/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыт" })).toBeInTheDocument();
