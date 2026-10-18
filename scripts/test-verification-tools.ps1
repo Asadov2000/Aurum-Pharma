@@ -484,6 +484,16 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
         Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher works without a saved website URL"
         Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=" -Because "missing website configuration remains unset in the child"
 
+        $metadataLauncherCode = @'
+function Get-Process { param([int]$Id); [pscustomobject]@{ Path = $null } }
+& '__LAUNCHER__' -DryRun -NoBrowser
+'@
+        $metadataLauncherCode = $metadataLauncherCode.Replace("__LAUNCHER__", $fixtureLauncher.Replace("'", "''"))
+        $metadataLauncherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($metadataLauncherCode))
+        $metadataLauncherOutput = & $powershellExecutable -NoProfile -EncodedCommand $metadataLauncherEncoded
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the actual launcher starts its child without process metadata"
+        Assert-Contains -Actual @($metadataLauncherOutput) -Expected "FIXTURE_WEBSITE=" -Because "the metadata-independent launcher preserves the child environment"
+
         [IO.File]::WriteAllText($fixtureWebsiteUrl, "https://saved.example.test/`n", $encoding)
         $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
         Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher accepts a saved HTTPS website URL"
@@ -730,6 +740,9 @@ finally {
     }
 }
 
-& (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+& {
+    function Get-Process { param([int]$Id); return [pscustomobject]@{ Path = $null } }
+    & (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+}
 Write-Host "Verification tooling self-test passed: $script:assertions assertions." -ForegroundColor Green
 exit 0
