@@ -13,9 +13,10 @@ from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.pos.test_unit_checkout_payment_components import complete, journal, request_for
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
-    electronic_checkout_migration,
+    downgrade_electronic_for_roundtrip,
     payment_component_migration,
     refund_payment_component_migration,
+    upgrade_electronic_after_roundtrip,
 )
 
 db_session = receiving_session_fixture
@@ -65,12 +66,12 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
             if connection.scalar(HISTORY):
                 with pytest.raises(DBAPIError) as denied:
                     with connection.begin_nested():
-                        electronic_checkout_migration().downgrade()
+                        downgrade_electronic_for_roundtrip()
                         refund_payment_component_migration().downgrade()
                         payment_component_migration().downgrade()
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
             else:
-                electronic_checkout_migration().downgrade()
+                downgrade_electronic_for_roundtrip()
                 refund_payment_component_migration().downgrade()
                 payment_component_migration().downgrade()
                 relation = connection.scalar(
@@ -80,7 +81,7 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
                 assert connection.execute(COLUMNS).all() == []
                 payment_component_migration().upgrade()
                 refund_payment_component_migration().upgrade()
-                electronic_checkout_migration().upgrade()
+                upgrade_electronic_after_roundtrip()
         assert [connection.execute(query).all() for query in queries] == before
 
     async with maintenance_engine.connect() as connection:
