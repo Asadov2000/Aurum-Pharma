@@ -182,7 +182,8 @@ test("cart menus target a single FEFO line and become read-only after payment", 
       .getByRole("group", { name: "Режим кассы", exact: true })
       .getByRole("button", { name: mode, exact: true })
       .click();
-    await expect(second.getByText(item.brand_name, { exact: true })).toBeVisible();
+    const productGroup = page.getByRole("listitem").filter({ has: second });
+    await expect(productGroup.getByText(item.brand_name, { exact: true })).toBeVisible();
     await expect(second.getByText(batchB, { exact: false })).toBeVisible();
     await expect
       .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
