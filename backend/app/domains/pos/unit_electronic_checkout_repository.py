@@ -1,7 +1,7 @@
 """Scoped persistence for the internal physical electronic checkout coordinator."""
 
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,7 +94,7 @@ class UnitElectronicCheckoutRepository(PhysicalCashCheckoutRepository):
                 payment_method=payment.method,
                 amount=payment.amount,
                 currency="TJS",
-                operation_id=payment.id,
+                operation_id=payment.id if payment.method == "cash" else uuid4(),
                 operation_hash=request_hash,
                 payment_attempt_id=None if payment.method == "cash" else payment.id,
                 metadata_json=null(),

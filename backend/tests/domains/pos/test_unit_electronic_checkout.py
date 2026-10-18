@@ -21,6 +21,7 @@ from app.domains.pos.unit_electronic_checkout_repository import UnitElectronicCh
 from app.domains.pos.unit_electronic_checkout_service import UnitElectronicCheckoutService
 from app.domains.pos.unit_payment_attempt_models import UnitPaymentAttemptBinding
 from app.domains.pos.unit_payment_intent_schemas import SaveUnitPaymentIntentRequest
+from app.domains.pos.unit_payment_intent_service import payment_intent_request_hash
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import receive_source
@@ -183,6 +184,25 @@ async def test_exact_confirmed_plan_posts_once_and_recovers_without_more_effects
         {"sale": result.sale_id},
     )
     assert all(row.status == "consumed" and row.consumed_at is not None for row in states)
+    payment_rows = await db_session.execute(
+        text(
+            "SELECT id,payment_method,operation_id,payment_attempt_id,operation_hash "
+            "FROM sale_payment WHERE sale_id=:sale"
+        ),
+        {"sale": result.sale_id},
+    )
+    persisted = payment_rows.all()
+    assert len(persisted) == len(methods)
+    assert len({row.operation_id for row in persisted}) == len(persisted)
+    for payment in persisted:
+        assert payment.operation_hash == payment_intent_request_hash(request.request)
+        if payment.payment_method == "cash":
+            assert payment.id == payment.operation_id == request.operation_id
+            assert payment.payment_attempt_id is None
+        else:
+            assert payment.id == payment.payment_attempt_id == ids[payment.payment_method]
+            assert isinstance(payment.operation_id, UUID) and payment.operation_id.version == 4
+            assert payment.operation_id not in {*ids.values(), request.operation_id}
     before = await financial_facts(db_session)
     assert await complete(db_session, request) == result
     assert await complete(db_session, request, read=True) == result

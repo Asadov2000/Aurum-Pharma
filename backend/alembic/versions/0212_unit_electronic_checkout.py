@@ -226,7 +226,11 @@ BEGIN
    OR EXISTS(SELECT 1 FROM public.sale_payment p WHERE p.sale_id=p_sale AND (
      p.tenant_id<>p_tenant OR NOT public.unit_electronic_payment_matches(
        p_tenant,p_sale,p.id,p.payment_method,p.amount,p.currency,p.payment_attempt_id)
-     OR p.operation_id IS DISTINCT FROM p.id OR p.operation_hash IS DISTINCT FROM m.request_hash
+     OR p.operation_id IS NULL OR p.operation_hash IS DISTINCT FROM m.request_hash
+     OR (p.payment_method='cash' AND p.operation_id<>p.id)
+     OR (p.payment_method<>'cash' AND (p.operation_id IN (p.id,m.id)
+       OR substring(p.operation_id::TEXT,15,1)<>'4'
+       OR substring(p.operation_id::TEXT,20,1) NOT IN ('8','9','a','b')))
      OR p.metadata IS NOT NULL)) THEN
   RAISE EXCEPTION 'unit_electronic_payments_invalid' USING ERRCODE='23514';
  END IF;
@@ -335,7 +339,13 @@ BEGIN
   RETURN public.unit_electronic_payment_matches(tenant,v_sale,(p_new->>'id')::UUID,
     p_new->>'payment_method',(p_new->>'amount')::NUMERIC,p_new->>'currency',
     (p_new->>'payment_attempt_id')::UUID)
-    AND p_new->>'operation_id'=p_new->>'id' AND p_new->>'operation_hash'=m.request_hash
+    AND CASE WHEN p_new->>'payment_method'='cash' THEN
+      p_new->>'operation_id'=p_new->>'id' ELSE
+      p_new->>'operation_id' IS NOT NULL
+      AND p_new->>'operation_id' NOT IN (p_new->>'id',i.id::TEXT)
+      AND substring(p_new->>'operation_id',15,1)='4'
+      AND substring(p_new->>'operation_id',20,1) IN ('8','9','a','b') END
+    AND p_new->>'operation_hash'=m.request_hash
     AND p_new->'metadata'='null'::JSONB;
  ELSIF p_table='sale' AND p_op='UPDATE' THEN
   RETURN p_old->>'status'='draft' AND p_new->>'status'='completed'

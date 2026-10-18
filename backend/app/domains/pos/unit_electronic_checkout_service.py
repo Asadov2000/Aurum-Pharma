@@ -13,7 +13,7 @@ from app.core.errors import (
 )
 from app.core.time import utc_now
 from app.domains.inventory.unit_dispensing_v2_retail import UnitCartRetailResultV2
-from app.domains.pos.models import POSPaymentAttempt, Sale
+from app.domains.pos.models import POSPaymentAttempt, Sale, SalePayment
 from app.domains.pos.physical_cash_checkout_models import PhysicalCashCheckout
 from app.domains.pos.physical_documents import (
     PhysicalCheckoutResultV3,
@@ -441,7 +441,7 @@ class UnitElectronicCheckoutService:
             or payment.payment_method != expected[payment.id].method
             or payment.amount != expected[payment.id].amount
             or payment.currency != "TJS"
-            or payment.operation_id != payment.id
+            or not self._payment_operation_matches(payment, marker.id)
             or payment.operation_hash != marker.request_hash
             or payment.payment_attempt_id
             != (None if payment.payment_method == "cash" else payment.id)
@@ -454,3 +454,13 @@ class UnitElectronicCheckoutService:
         ).validate_saved(3, result)
         await self.cart.assert_actor(sale.tenant_id, sale.cashier_user_id, sale.branch_id)
         return result
+
+    @staticmethod
+    def _payment_operation_matches(payment: SalePayment, checkout_id: UUID) -> bool:
+        if payment.payment_method == "cash":
+            return payment.operation_id == payment.id
+        return (
+            payment.operation_id is not None
+            and payment.operation_id.version == 4
+            and payment.operation_id not in {payment.id, checkout_id}
+        )
