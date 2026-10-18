@@ -909,6 +909,43 @@ class POSRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def has_bound_unit_payment_attempt(self, attempt: POSPaymentAttempt) -> bool:
+        """A frozen unit draft keeps its total unchanged until atomic completion."""
+        result = await self.session.scalar(
+            text(
+                "SELECT EXISTS(SELECT 1 FROM public.pos_unit_payment_attempt_binding b "
+                "JOIN public.pos_unit_payment_plan_intent i "
+                "ON i.tenant_id=b.tenant_id AND i.id=b.intent_id "
+                "JOIN public.pos_unit_payment_plan_binding active "
+                "ON active.tenant_id=i.tenant_id AND active.id=i.id "
+                "JOIN public.sale s ON s.tenant_id=b.tenant_id AND s.id=b.sale_id "
+                "WHERE b.tenant_id=:tenant AND b.id=:id AND b.id=:operation "
+                "AND b.sale_id=:sale AND b.cashier_user_id=:cashier "
+                "AND b.method=:method AND b.amount=:amount AND b.currency=:currency "
+                "AND i.sale_id=b.sale_id AND i.branch_id=b.branch_id "
+                "AND i.cashier_user_id=b.cashier_user_id AND active.sale_id=b.sale_id "
+                "AND s.status='draft' AND NOT s.is_test AND s.sale_type='sale' "
+                "AND s.parent_sale_id IS NULL AND s.branch_id=b.branch_id "
+                "AND s.cashier_user_id=b.cashier_user_id AND s.register_id=i.register_id "
+                "AND s.shift_id=i.shift_id AND s.currency=b.currency "
+                "AND NOT EXISTS(SELECT 1 FROM public.pos_unit_payment_plan_binding_cancel c "
+                "WHERE c.tenant_id=b.tenant_id AND c.id=b.intent_id) "
+                "AND EXISTS(SELECT 1 FROM jsonb_array_elements(i.request_payload->'payments') p "
+                "WHERE p->>'method'=b.method AND (p->>'amount')::NUMERIC=b.amount))"
+            ),
+            {
+                "tenant": attempt.tenant_id,
+                "id": attempt.id,
+                "operation": attempt.operation_id,
+                "sale": attempt.sale_id,
+                "cashier": attempt.cashier_user_id,
+                "method": attempt.payment_method,
+                "amount": attempt.amount,
+                "currency": attempt.currency,
+            },
+        )
+        return result is True
+
     async def insert_payment_attempt(self, **fields: Any) -> POSPaymentAttempt:
         attempt = POSPaymentAttempt(**fields)
         self.session.add(attempt)

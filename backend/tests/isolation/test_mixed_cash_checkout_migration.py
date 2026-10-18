@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.isolation.test_physical_cash_checkout_migration import (
+    electronic_checkout_migration,
     mixed_cash_refund_migration,
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
@@ -197,10 +198,11 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
             original = connection.execute(stock).scalars().all()
             if connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_mixed_checkout) OR EXISTS(SELECT 1 "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_mixed_checkout) OR EXISTS(SELECT 1 "
                     "FROM unit_stock_cart_command_v2 WHERE mixed_checkout_sale_id IS NOT NULL) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_checkout "
-                    "WHERE payment_journal_version=2) OR "
+                    "WHERE payment_journal_version>=2) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_cash_refund "
                     "WHERE payment_journal_version=2) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_cash_refund "
@@ -209,11 +211,13 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
             ):
                 with pytest.raises(DBAPIError) as error:
                     with connection.begin_nested():
+                        electronic_checkout_migration().downgrade()
                         refund_payment_component_migration().downgrade()
                         payment_component_migration().downgrade()
                         migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                electronic_checkout_migration().downgrade()
                 refund_payment_component_migration().downgrade()
                 payment_component_migration().downgrade()
                 # Keep physical history; suspend only the later audit insertion.
@@ -242,6 +246,7 @@ async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_ref
                 physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
                 payment_component_migration().upgrade()
                 refund_payment_component_migration().upgrade()
+                electronic_checkout_migration().upgrade()
             assert connection.execute(FUNCTIONS).all() == functions
             assert connection.execute(RELATION).one() == relation
             assert connection.execute(POLICIES).all() == policies

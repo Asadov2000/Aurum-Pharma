@@ -93,6 +93,7 @@ from app.domains.pos.schemas import (
     ZReport,
 )
 from app.domains.pos.service import POSService
+from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_payment_active_router import router as unit_payment_active_router
 from app.domains.pos.unit_payment_binding_router import router as unit_payment_binding_router
 from app.domains.pos.unit_payment_plan_router import router as unit_payment_plan_router
@@ -177,6 +178,36 @@ def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UU
     if len(branch_scope) == 1:
         return next(iter(branch_scope))
     raise BusinessRuleError("branch_id is required for branch-scoped reports")
+
+
+async def _require_legacy_payment_attempt_route(
+    user: CurrentUser,
+    service: POSService,
+    *,
+    sale_id: UUID | None = None,
+    attempt_id: UUID | None = None,
+) -> None:
+    """Keep external unit payments closed until their electronic refunds ship."""
+    tenant_id = _current_tenant_or_400(user)
+    if attempt_id is not None:
+        attempt = await service.repo.get_payment_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id:
+            raise NotFoundError("Payment attempt not found")
+        sale_id = attempt.sale_id
+    if sale_id is None:
+        raise NotFoundError("Sale not found")
+    sale = await service.repo.get_sale(sale_id)
+    if sale is None or sale.tenant_id != tenant_id:
+        raise NotFoundError("Sale not found")
+    service._assert_sale_owned_or_managed(
+        sale,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    if await UnitCartRepository(service.repo.session).list_items(tenant_id, sale_id):
+        raise BusinessRuleError("External unit payments are not available until electronic refunds")
 
 
 # =============================================================================
@@ -340,6 +371,7 @@ async def create_pos_payment_attempt(
     user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, sale_id=payload.sale_id)
     attempt = await service.create_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         sale_id=payload.sale_id,
@@ -413,6 +445,7 @@ async def begin_pos_payment_attempt_reconciliation(
     user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.begin_payment_attempt_reconciliation(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,
@@ -438,6 +471,7 @@ async def confirm_pos_payment_attempt(
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.confirm_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,
@@ -465,6 +499,7 @@ async def void_pos_payment_attempt(
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.void_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,

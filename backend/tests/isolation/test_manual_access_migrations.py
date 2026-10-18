@@ -61,6 +61,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "pos_unit_payment_plan_binding_cancel",
             "pos_unit_checkout_payment_component",
             "pos_unit_refund_payment_component",
+            "pos_unit_payment_attempt_binding",
             "pos_physical_checkout",
             "pos_physical_return_command",
             "pos_physical_return_line",
@@ -83,7 +84,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
             "physical_writeoff_cancellation",
         )
         # This is a selective 0155-0157 rehearsal, not a production rollback past
-        # Later inventory and financial migrations through 0211 remain installed.
+        # Later inventory and financial migrations through 0212 remain installed.
         # Preserve history and audit guards.
         connection.execute(text("""
             LOCK TABLE public.staff_pay_period, public.staff_pay_entry,
@@ -100,6 +101,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               public.pos_unit_payment_plan_binding, public.pos_unit_payment_plan_binding_cancel,
               public.pos_unit_checkout_payment_component,
               public.pos_unit_refund_payment_component,
+              public.pos_unit_payment_attempt_binding,
               public.pos_physical_checkout,
               public.pos_physical_return_command, public.pos_physical_return_line,
               public.pos_physical_return_slice, public.pos_physical_cash_refund,
@@ -137,6 +139,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_unit_payment_plan_binding_cancel'::regclass,
               'public.pos_unit_checkout_payment_component'::regclass,
               'public.pos_unit_refund_payment_component'::regclass,
+              'public.pos_unit_payment_attempt_binding'::regclass,
               'public.pos_physical_checkout'::regclass,
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,
@@ -180,6 +183,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_unit_payment_plan_binding_cancel'::regclass,
               'public.pos_unit_checkout_payment_component'::regclass,
               'public.pos_unit_refund_payment_component'::regclass,
+              'public.pos_unit_payment_attempt_binding'::regclass,
               'public.pos_physical_checkout'::regclass,
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,
@@ -223,6 +227,7 @@ async def test_manual_access_migrations_roundtrip(maintenance_engine: AsyncEngin
               'public.pos_unit_payment_plan_binding_cancel'::regclass,
               'public.pos_unit_checkout_payment_component'::regclass,
               'public.pos_unit_refund_payment_component'::regclass,
+              'public.pos_unit_payment_attempt_binding'::regclass,
               'public.pos_physical_checkout'::regclass,
               'public.pos_physical_return_command'::regclass,
               'public.pos_physical_return_line'::regclass,

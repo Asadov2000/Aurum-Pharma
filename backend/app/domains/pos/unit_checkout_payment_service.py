@@ -1,4 +1,4 @@
-"""Record and recover cash components inside the existing checkout coordinator."""
+"""Record and recover payment components inside their checkout transaction."""
 
 from app.core.errors import AurumError
 from app.domains.pos.mixed_documents import MixedCheckoutResultV4
@@ -37,11 +37,30 @@ class UnitCheckoutPaymentService:
             )
         )
 
+    async def record_electronic(self, result: PhysicalCheckoutResultV3) -> None:
+        if not any(payment.method != "cash" for payment in result.payments):
+            raise AurumError("Electronic checkout requires an electronic payment component")
+        for payment in result.payments:
+            await self.repository.insert(
+                UnitCheckoutPaymentComponent(
+                    tenant_id=result.tenant_id,
+                    id=payment.id,
+                    physical_checkout_id=result.operation_id,
+                    mixed_checkout_id=None,
+                    sale_id=result.sale_id,
+                    method=payment.method,
+                    amount=payment.amount,
+                    currency="TJS",
+                    payment_attempt_id=None if payment.method == "cash" else payment.id,
+                    created_by=result.cashier_id,
+                )
+            )
+
     async def validate_saved(self, version: int, result: Checkout) -> None:
         if version == 1:
             # Historical checkouts predate the journal; recovery never backfills it.
             return
-        if version != 2:
+        if version not in (2, 3) or (version == 3 and isinstance(result, MixedCheckoutResultV4)):
             raise AurumError("Stored checkout payment journal version is unsupported")
         mixed = isinstance(result, MixedCheckoutResultV4)
         components = await self.repository.for_checkout(
@@ -61,7 +80,8 @@ class UnitCheckoutPaymentService:
                 or component.method != payment.method
                 or component.amount != payment.amount
                 or component.currency != "TJS"
-                or component.payment_attempt_id is not None
+                or component.payment_attempt_id
+                != (payment.id if version == 3 and payment.method != "cash" else None)
                 or component.created_by != result.cashier_id
             ):
                 raise AurumError("Stored checkout payment journal is inconsistent")

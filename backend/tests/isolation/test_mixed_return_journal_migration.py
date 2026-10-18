@@ -37,6 +37,7 @@ from tests.domains.pos.test_unit_physical_cart import put_physical
 from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_source, saved_request
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
+    electronic_checkout_migration,
     mixed_cash_refund_migration,
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
@@ -456,16 +457,21 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
                 return
             if connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_checkout "
+                    "WHERE payment_journal_version=3) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_cash_refund "
                     "WHERE payment_journal_version=2)"
                 )
             ):
                 with pytest.raises(DBAPIError) as denied:
                     with connection.begin_nested():
+                        electronic_checkout_migration().downgrade()
                         refund_payment_component_migration().downgrade()
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
                 assert connection.execute(guards).all() == original_guards
                 return
+            electronic_checkout_migration().downgrade()
             refund_payment_component_migration().downgrade()
             # Keep physical history; suspend only the later audit insertion.
             physical = physical_disposition_migration()
@@ -486,6 +492,7 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
             mixed_quarantine_disposition_migration().upgrade()
             physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
             refund_payment_component_migration().upgrade()
+            electronic_checkout_migration().upgrade()
             assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (
