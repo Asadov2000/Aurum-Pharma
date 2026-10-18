@@ -101,9 +101,7 @@ class UnitElectronicCheckoutService:
         self._clean_session()
         if operation_id in attempt_ids.values():
             raise BusinessRuleError("Attempt IDs must differ from the payment plan operation")
-        if any(
-            not isinstance(value, UUID) or value.version != 4 for value in attempt_ids.values()
-        ):
+        if any(not isinstance(value, UUID) or value.version != 4 for value in attempt_ids.values()):
             raise BusinessRuleError("Electronic attempt identifiers must use UUID4")
         async with self.repository.session.begin_nested():
             await self.cart.assert_actor(tenant_id, actor_id)
@@ -114,9 +112,7 @@ class UnitElectronicCheckoutService:
             saved, sale = await self._source(
                 tenant_id, actor_id, allowed_branch_ids, sale_id, operation_id, lock=True
             )
-            methods = {
-                part.method for part in saved.plan.request.payments if part.method != "cash"
-            }
+            methods = {part.method for part in saved.plan.request.payments if part.method != "cash"}
             if set(attempt_ids) != methods or len(set(attempt_ids.values())) != len(methods):
                 raise BusinessRuleError("Attempt identifiers must match all electronic allocations")
             existing = await self.repository.bindings(tenant_id, operation_id)

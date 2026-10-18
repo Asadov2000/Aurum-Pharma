@@ -257,7 +257,6 @@ CUSTOM_FUNCTIONS = {
     "unit_electronic_write_allowed",
     "trg_unit_payment_attempt_binding_guard",
     "trg_unit_payment_attempt_binding_complete",
-
     "assert_unit_refund_payment_components",
     "trg_unit_refund_payment_component_guard",
     "trg_unit_refund_payment_component_complete",
@@ -1643,7 +1642,6 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         "unit_electronic_write_allowed",
         "trg_unit_payment_attempt_binding_guard",
         "trg_unit_payment_attempt_binding_complete",
-
         "assert_unit_refund_payment_components",
         "trg_unit_refund_payment_component_guard",
         "trg_unit_refund_payment_component_complete",
