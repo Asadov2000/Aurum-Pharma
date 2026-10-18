@@ -303,6 +303,7 @@ async def test_cash_checkout_is_outside_electronic_refund_preview(
             legacy.setattr(PhysicalCashCheckoutRepository, "insert", old_marker)
             legacy.setattr(UnitCheckoutPaymentRepository, "insert", no_component)
         source = await complete_cash(db_session, request, False)
+    assert isinstance(source, PhysicalCheckoutResultV3)
     before = await facts(db_session)
     with pytest.raises(BusinessRuleError):
         await preview(db_session, source)
