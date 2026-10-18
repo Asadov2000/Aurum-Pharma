@@ -18,7 +18,11 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $scopeScript = Join-Path $PSScriptRoot "task-scope.ps1"
 $selfTestScript = Join-Path $PSScriptRoot "test-verification-tools.ps1"
 $untrackedWhitespaceScript = Join-Path $PSScriptRoot "check-untracked-whitespace.ps1"
-$powershellExecutable = (Get-Process -Id $PID).Path
+# Sandboxes may hide process metadata; PSHOME belongs to the running engine.
+$powershellName = if ($PSEdition -eq "Desktop") { "powershell.exe" }
+elseif ($env:OS -eq "Windows_NT") { "pwsh.exe" }
+else { "pwsh" }
+$powershellExecutable = Join-Path $PSHOME $powershellName
 
 if ($Format -eq "Json" -and -not $PlanOnly) {
     throw "-Format Json is supported only with -PlanOnly."
