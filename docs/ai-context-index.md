@@ -6,6 +6,8 @@
 ## Быстрый старт задачи
 
 1. Прочитать `AGENTS.md`.
+   Перед продолжением сверить GitHub/main/PR по
+   [порядку восстановления работы](development-continuity.md).
    При первом входе в репозиторий открыть [карту проекта](project-structure.md);
    очередность новых блоков находится в [плане развития](implementation-roadmap.md).
 2. Выполнить `scripts/verify-change.ps1 -Mode Auto -PlanOnly`.
