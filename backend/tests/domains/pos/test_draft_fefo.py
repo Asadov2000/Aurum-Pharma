@@ -462,6 +462,18 @@ async def test_reallocation_does_not_change_other_catalog_positions(
         text("SELECT to_jsonb(row) FROM sale_item row WHERE id=:id"), {"id": other_id}
     )
     assert after == before
+    total = original.sale.total_amount
+    completed = await original.service.checkout(
+        tenant_id=original.sale.tenant_id,
+        register_id=original.sale.register_id,
+        cashier_user_id=original.cashier_id,
+        operation_id=uuid4(),
+        draft_sale_id=original.sale.id,
+        items=[(other.id, Decimal("1")), (original.catalog_id, Decimal("1"))],
+        payments=[("cash", total, None)],
+    )
+    assert [item.catalog_id for item in completed.items] == [other.id, original.catalog_id]
+    assert completed.total_amount == total
 
 
 async def test_fractional_repeated_scans_match_exact_money_and_checkout(
@@ -476,6 +488,154 @@ async def test_fractional_repeated_scans_match_exact_money_and_checkout(
     }
     assert original.sale.total_amount == Decimal("20.00")
     await checkout_matches_draft(original)
+
+
+async def fractional_draft(
+    session: AsyncSession,
+    factory: ScaffoldFactory,
+    *,
+    price: str,
+    stock: str = "5",
+) -> tuple[POSService, Sale, Scaffold]:
+    scaffold = await factory(batch_qty=Decimal(stock), sale_price=Decimal(price))
+    service = POSService(POSRepository(session))
+    await service.open_shift(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        opened_by_user_id=scaffold["cashier"].id,
+        opening_cash=Decimal("0"),
+    )
+    sale = await service.create_sale(
+        tenant_id=scaffold["tenant"].id,
+        register_id=scaffold["register"].id,
+        cashier_user_id=scaffold["cashier"].id,
+    )
+    return service, sale, scaffold
+
+
+@pytest.mark.parametrize(
+    ("price", "quantities", "expected"),
+    [
+        ("0.05", ("0.333", "0.333"), "0.04"),
+        ("0.07", ("0.333", "0.333"), "0.04"),
+        ("0.15", ("0.100", "0.100"), "0.04"),
+        ("0.05", ("0.100", "0.300"), "0.02"),
+        ("0.01", ("0.501", "0.501"), "0.02"),
+        ("0.05", ("0.333", "0.333", "0.333"), "0.06"),
+    ],
+)
+async def test_atomic_checkout_preserves_fractional_draft_rounding_and_replay(
+    db_session: AsyncSession,
+    pos_scaffold: ScaffoldFactory,
+    price: str,
+    quantities: tuple[str, ...],
+    expected: str,
+) -> None:
+    service, sale, scaffold = await fractional_draft(db_session, pos_scaffold, price=price)
+    for quantity in quantities:
+        await service.add_item(
+            sale_id=sale.id, catalog_id=scaffold["item"].id, qty=Decimal(quantity)
+        )
+    before = await service.repo.list_items(sale.id)
+    expected_lines = [(row.qty, row.total_price) for row in before]
+    assert sale.total_amount == Decimal(expected)
+    quantity = sum((Decimal(value) for value in quantities), Decimal("0"))
+    operation_id = uuid4()
+    result = await service.checkout(
+        tenant_id=sale.tenant_id,
+        register_id=sale.register_id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+        draft_sale_id=sale.id,
+        items=[(scaffold["item"].id, quantity)],
+        payments=[("cash", Decimal(expected), None)],
+    )
+    assert result.total_amount == Decimal(expected)
+    assert [(row.qty, row.total_price) for row in result.items] == expected_lines
+    await db_session.refresh(scaffold["batch"])
+    assert scaffold["batch"].qty_remaining == Decimal("5") - quantity
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    retried = await service.checkout(
+        tenant_id=sale.tenant_id,
+        register_id=sale.register_id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=operation_id,
+        draft_sale_id=sale.id,
+        items=[(scaffold["item"].id, Decimal(value)) for value in quantities],
+        payments=[("cash", Decimal(expected), None)],
+    )
+    assert retried == result
+    await db_session.refresh(scaffold["batch"])
+    assert scaffold["batch"].qty_remaining == Decimal("5") - quantity
+
+
+async def test_fractional_expansion_replays_batch_slices_in_fefo_not_position_order(
+    db_session: AsyncSession, pos_scaffold: ScaffoldFactory
+) -> None:
+    service, sale, scaffold = await fractional_draft(
+        db_session, pos_scaffold, price="0.05", stock="0.400"
+    )
+    inventory = InventoryRepository(db_session)
+    for days, quantity in ((240, "0.200"), (300, "1.000")):
+        batch = await inventory.create_batch(
+            tenant_id=sale.tenant_id,
+            branch_id=sale.branch_id,
+            catalog_id=scaffold["item"].id,
+            expires_at=date.today() + timedelta(days=days),
+            purchase_price=Decimal("0.01"),
+            sale_price=Decimal("0.05"),
+            qty_initial=Decimal(quantity),
+            qty_remaining=Decimal("0"),
+        )
+        await inventory.insert_movement(
+            tenant_id=sale.tenant_id,
+            batch_id=batch.id,
+            movement_type="incoming",
+            qty_delta=Decimal(quantity),
+        )
+        await db_session.refresh(batch)
+    first, _ = await service.add_item(
+        sale_id=sale.id, catalog_id=scaffold["item"].id, qty=Decimal("0.100")
+    )
+    await service.add_item(sale_id=sale.id, catalog_id=scaffold["item"].id, qty=Decimal("0.300"))
+    await service.update_item(sale_id=sale.id, item_id=first[0].id, qty=Decimal("0.700"))
+    rows = await service.repo.list_items(sale.id)
+    assert [row.qty for row in rows] == [
+        Decimal(qty) for qty in ("0.400", "0.300", "0.200", "0.100")
+    ]
+    expected_lines = sorted((row.batch_id, row.qty, row.total_price) for row in rows)
+    assert sale.total_amount == Decimal("0.05")
+    result = await service.checkout(
+        tenant_id=sale.tenant_id,
+        register_id=sale.register_id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        draft_sale_id=sale.id,
+        items=[(scaffold["item"].id, Decimal("1.000"))],
+        payments=[("cash", Decimal("0.05"), None)],
+    )
+    assert result.total_amount == Decimal("0.05")
+    assert (
+        sorted((row.batch_id, row.qty, row.total_price) for row in result.items) == expected_lines
+    )
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
+
+async def test_fractional_checkout_without_draft_keeps_canonical_aggregation(
+    db_session: AsyncSession, pos_scaffold: ScaffoldFactory
+) -> None:
+    service, sale, scaffold = await fractional_draft(db_session, pos_scaffold, price="0.05")
+    result = await service.checkout(
+        tenant_id=sale.tenant_id,
+        register_id=sale.register_id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        items=[(scaffold["item"].id, Decimal("0.333"))] * 2,
+        payments=[("cash", Decimal("0.03"), None)],
+    )
+    assert [(row.qty, row.total_price) for row in result.items] == [
+        (Decimal("0.666"), Decimal("0.03"))
+    ]
 
 
 async def test_split_preserves_line_scoped_prescription_with_only_doctor_license(
