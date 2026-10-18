@@ -327,9 +327,7 @@ async def test_splitting_discounted_row_preserves_absolute_discount_once(
         first, discount_amount=Decimal("1.00"), total_price=Decimal("9.00")
     )
     await original.service.repo.update_sale(original.sale, total_amount=Decimal("9.00"))
-    await original.service.update_item(
-        sale_id=original.sale.id, item_id=first.id, qty=Decimal("2")
-    )
+    await original.service.update_item(sale_id=original.sale.id, item_id=first.id, qty=Decimal("2"))
     rows = await original.service.repo.list_items(original.sale.id)
     assert sum((row.discount_amount for row in rows), Decimal("0")) == Decimal("1.00")
     assert sum((row.total_price for row in rows), Decimal("0")) == Decimal("29.00")
@@ -408,14 +406,17 @@ async def test_http_repeated_add_and_quantity_change_refetch_authoritative_fefo_
         assert current.status_code == 200, current.text
         assert Decimal(current.json()["total_amount"]) == Decimal("50.00")
         assert sum((Decimal(row["qty"]) for row in current.json()["items"]), Decimal("0")) == 3
-        assert sum(
-            (
-                Decimal(row["qty"])
-                for row in current.json()["items"]
-                if row["batch_id"] == str(original.first.id)
-            ),
-            Decimal("0"),
-        ) == 1
+        assert (
+            sum(
+                (
+                    Decimal(row["qty"])
+                    for row in current.json()["items"]
+                    if row["batch_id"] == str(original.first.id)
+                ),
+                Decimal("0"),
+            )
+            == 1
+        )
     await checkout_matches_draft(original)
 
 
@@ -486,9 +487,7 @@ async def test_split_preserves_line_scoped_prescription_with_only_doctor_license
         fields={"sale_item_id": first.id, "doctor_license": "SYNTHETIC-LICENSE"},
         actor_id=original.cashier_id,
     )
-    await original.service.update_item(
-        sale_id=original.sale.id, item_id=first.id, qty=Decimal("2")
-    )
+    await original.service.update_item(sale_id=original.sale.id, item_id=first.id, qty=Decimal("2"))
     rows = await original.service.repo.list_items(original.sale.id)
     logs = await original.service.repo.list_prescriptions(original.sale.id)
     assert len(rows) == len(logs) == 2
@@ -503,9 +502,7 @@ async def test_split_preserves_line_scoped_prescription_with_only_doctor_license
     assert completed.total_amount == Decimal("30.00")
 
 
-async def assert_stale_draft_cannot_complete(
-    session: AsyncSession, original: DraftSource
-) -> None:
+async def assert_stale_draft_cannot_complete(session: AsyncSession, original: DraftSource) -> None:
     async with session.begin_nested() as savepoint:
         await original.service.add_payment(
             sale_id=original.sale.id,

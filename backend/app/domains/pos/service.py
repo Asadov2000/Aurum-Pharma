@@ -3480,13 +3480,15 @@ class POSService:
         demands = [
             DraftDemand(
                 item,
-                changed_qty
-                if (
-                    changed_item is not None
-                    and item.id == changed_item.id
-                    and changed_qty is not None
-                )
-                else item.qty,
+                (
+                    changed_qty
+                    if (
+                        changed_item is not None
+                        and item.id == changed_item.id
+                        and changed_qty is not None
+                    )
+                    else item.qty
+                ),
                 item.discount_amount,
             )
             for item in items
