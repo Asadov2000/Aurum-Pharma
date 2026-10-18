@@ -130,6 +130,12 @@ const POS_USER = {
   is_tenant_owner: false,
   branch_assignments: {},
   permissions: ["pos.shift_open", "pos.shift_close", "pos.sell"],
+  permission_scopes: {
+    "pos.shift_open": null,
+    "pos.shift_close": null,
+    "pos.sell": null,
+    "reports.export": null,
+  },
   support_access: null,
 };
 
@@ -276,7 +282,9 @@ describe("POSPage", () => {
     fireEvent.change(registerSelect, { target: { value: second.id } });
 
     expect(registerSelect).toHaveValue(REGISTER.id);
-    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
 
     await waitFor(() => expect(screen.getByLabelText("Касса")).toHaveValue(second.id));

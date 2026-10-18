@@ -42,6 +42,7 @@ interface CommandRunResult {
 interface UsePosCommandResilienceOptions {
   registerId: string;
   scope?: PosStorageScope;
+  writable?: boolean;
   onApplied: (applied: AppliedPosCommand) => void;
 }
 
@@ -151,6 +152,7 @@ async function sendCommand(command: PendingPosCommand): Promise<unknown> {
 export function usePosCommandResilience({
   registerId,
   scope,
+  writable = true,
   onApplied,
 }: UsePosCommandResilienceOptions): PosCommandResilience {
   const queryClient = useQueryClient();
@@ -168,8 +170,10 @@ export function usePosCommandResilience({
   const recoveryStartedRef = useRef(false);
   const runningRef = useRef(false);
   const onAppliedRef = useRef(onApplied);
+  const writableRef = useRef(writable);
   pendingRef.current = pending;
   onAppliedRef.current = onApplied;
+  writableRef.current = writable;
 
   const markResolved = useCallback(
     async (command: PendingPosCommand, result: unknown): Promise<AppliedPosCommand | null> => {
@@ -232,7 +236,7 @@ export function usePosCommandResilience({
             setPhase("retry");
             return { applied: null };
           }
-          if (!allowReplay || isPosCommandExpired(command)) {
+          if (!allowReplay || !writableRef.current || isPosCommandExpired(command)) {
             setPhase(isPosCommandExpired(command) ? "expired" : "retry");
             return { applied: null };
           }
@@ -281,7 +285,8 @@ export function usePosCommandResilience({
 
   const begin = useCallback(
     async (input: NewPosCommand): Promise<CommandRunResult> => {
-      if (pendingRef.current || runningRef.current || !sessionIsActive()) return { applied: null };
+      if (pendingRef.current || runningRef.current || !sessionIsActive() || !writableRef.current)
+        return { applied: null };
       const command = createPendingPosCommand(input, storageScope);
       if (!command) {
         setPhase("idle");

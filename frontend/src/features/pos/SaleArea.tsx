@@ -31,7 +31,6 @@ import {
 import { PaymentPanel } from "./PaymentPanel";
 import { PosRecoveryGate } from "./PosRecoveryGate";
 import { SearchBar } from "./SearchBar";
-import { ShiftBar } from "./ShiftBar";
 import { getActivePaymentAttempt, getCheckoutResult } from "./api";
 import { beep } from "./beep";
 import {
@@ -46,6 +45,7 @@ import {
   markPendingCompletion,
 } from "./completionOperation";
 import { type DraftInit, loadDraft, scopedDraftStorage } from "./draftStorage";
+import { loadPendingPosCommand } from "./commandOperation";
 import {
   hasCashRecovery,
   hasMixedCashRecovery,
@@ -101,6 +101,11 @@ import { usePosRegisterLock } from "./usePosRegisterLock";
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
   return { default: module.ReceiptPrintModal };
+});
+
+const ShiftBar = lazy(async () => {
+  const module = await import("./ShiftBar");
+  return { default: module.ShiftBar };
 });
 
 // Favorites are useful but not required to scan the first item, so they load
@@ -211,6 +216,7 @@ function normalizePositiveMoney(value: string): string | null {
  */
 export function SaleArea({
   registerId,
+  registerAvailable = true,
   mode,
   soundOn,
   draftTtlMin,
@@ -229,6 +235,7 @@ export function SaleArea({
   onRegisterSwitchStateChange,
 }: {
   registerId: string;
+  registerAvailable?: boolean;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
@@ -259,36 +266,42 @@ export function SaleArea({
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
   const recoveryDraft = storageScope ? loadDraft(registerId, draftTtlMin, storageScope) : null;
-  const cashRecoveryRequired =
-    storageScope && recoveryDraft?.saleId
-      ? hasCashRecovery(recoveryDraft.saleId, storageScope)
-      : false;
-  const completedReceiptRequired = canSell && recoveryDraft?.status === "completed";
-  const preparationRecoveryRequired =
-    storageScope && recoveryDraft?.saleId
-      ? hasUnitPaymentPreparation(recoveryDraft.saleId, storageScope)
-      : false;
+  const savedWorkRequired = Boolean(
+    recoveryDraft?.saleId || loadPendingPosCommand(registerId, storageScope),
+  );
+  const workspaceKey = JSON.stringify([storageScope?.tenantId, storageScope?.userId, registerId]);
+  const [openedWorkspace, setOpenedWorkspace] = useState<string | null>(null);
+  // A command may clear its marker just before the live draft effect saves it.
+  // Preserve the mounted recovery context across that handoff when access changes.
+  const retainWorkspace = openedWorkspace === workspaceKey && (!registerAvailable || !canSell);
+  const workspaceRequired = Boolean(
+    storageScope && ((hasShift && canSell) || savedWorkRequired || retainWorkspace),
+  );
+  useEffect(() => {
+    if (workspaceRequired) setOpenedWorkspace(workspaceKey);
+  }, [workspaceKey, workspaceRequired]);
+  useEffect(() => {
+    if (!workspaceRequired)
+      onRegisterSwitchStateChange?.({ blocked: shiftQuery.isPending, hasDraft: false });
+  }, [onRegisterSwitchStateChange, shiftQuery.isPending, workspaceRequired]);
 
   return (
     <div className="min-w-0 xl:h-full xl:min-h-0">
-      {((hasShift && canSell) ||
-        cashRecoveryRequired ||
-        preparationRecoveryRequired ||
-        completedReceiptRequired) &&
-      storageScope ? (
+      {workspaceRequired && storageScope ? (
         <RegisterWorkspaceGate
           key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
           registerId={registerId}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
+          hasSavedWork={savedWorkRequired}
         >
           <PosRecoveryGate registerId={registerId} scope={storageScope}>
             <ActiveWorkspace
               storageScope={storageScope}
               registerId={registerId}
               branchId={shiftQuery.data?.branch_id ?? null}
-              hasOpenShift={hasShift && canSell}
-              preparationWritable={canSell}
+              hasOpenShift={hasShift && canSell && registerAvailable}
+              preparationWritable={canSell && registerAvailable}
               mode={mode}
               soundOn={soundOn}
               draftTtlMin={draftTtlMin}
@@ -298,9 +311,9 @@ export function SaleArea({
               paymentSettingsUnavailable={paymentSettingsUnavailable}
               cardTerminalId={cardTerminalId}
               qrTerminalId={qrTerminalId}
-              canCloseShift={canCloseShift}
-              canOpenShift={canOpenShift}
-              canReconcileExternalPayment={canReconcileExternalPayment}
+              canCloseShift={canCloseShift && registerAvailable}
+              canOpenShift={canOpenShift && registerAvailable}
+              canReconcileExternalPayment={canReconcileExternalPayment && registerAvailable}
               canExportReports={canExportReports}
               online={isOnline}
               workstationControls={workstationControls}
@@ -315,14 +328,16 @@ export function SaleArea({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canOpen={canOpenShift}
-            canClose={canCloseShift}
-            canExportReport={canExportReports}
-            online={isOnline}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && registerAvailable}
+              canClose={canCloseShift && registerAvailable}
+              canExportReport={canExportReports}
+              online={isOnline}
+            />
+          </Suspense>
         </div>
       )}
     </div>
@@ -333,19 +348,24 @@ function RegisterWorkspaceGate({
   registerId,
   workstationControls,
   onRegisterSwitchStateChange,
+  hasSavedWork,
   children,
 }: {
   registerId: string;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
+  hasSavedWork: boolean;
   children: ReactNode;
 }): JSX.Element {
   const registerLock = usePosRegisterLock(registerId);
 
   useEffect(() => {
     if (registerLock.isOwner) return;
-    onRegisterSwitchStateChange?.({ blocked: false, hasDraft: false });
-  }, [onRegisterSwitchStateChange, registerLock.isOwner]);
+    onRegisterSwitchStateChange?.({
+      blocked: registerLock.status === "checking",
+      hasDraft: hasSavedWork,
+    });
+  }, [hasSavedWork, onRegisterSwitchStateChange, registerLock.isOwner, registerLock.status]);
 
   if (registerLock.isOwner) return <>{children}</>;
 
@@ -432,6 +452,8 @@ function ActiveWorkspace({
     [storageScope],
   );
   const [sessionIsActive] = useState(() => capturePosSessionGuard(storageScope));
+  const writableRef = useRef(hasOpenShift);
+  writableRef.current = hasOpenShift;
 
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin, storageScope));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
@@ -532,6 +554,7 @@ function ActiveWorkspace({
   const posCommand = usePosCommandResilience({
     registerId,
     scope: storageScope,
+    writable: hasOpenShift,
     onApplied: onPosCommandApplied,
   });
   const addPayment = useAddPayment(sessionIsActive);
@@ -810,6 +833,7 @@ function ActiveWorkspace({
     const catalogs = await Promise.all(catalogIds.map((id) => getCatalogItem(id)));
     if (!sessionIsActive() || saleIdRef.current !== saleId)
       throw new Error("Сессия кассира завершена.");
+    if (!writableRef.current) throw new Error("Касса недоступна. Новая оплата не отправлена.");
     if (
       catalogs.some(
         (catalog, index) =>
@@ -1191,7 +1215,7 @@ function ActiveWorkspace({
     amount: string,
     metadata?: PaymentMetadata,
   ) => {
-    if (physicalCartActive || !saleId || !sessionIsActive()) return;
+    if (physicalCartActive || !saleId || !sessionIsActive() || !writableRef.current) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
     const normalizedAmount = amt.toFixed(2);
@@ -1409,6 +1433,7 @@ function ActiveWorkspace({
   };
 
   const submitPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
+    if (!writableRef.current) return;
     if (method === "card" || method === "qr") {
       if (recordedPayments.length > 0 || pendingPayment !== null) {
         setTopError(
@@ -1423,7 +1448,7 @@ function ActiveWorkspace({
   };
 
   const prepareExternalPayment = async (method: "card" | "qr", amount: string) => {
-    if (physicalCartActive) return;
+    if (physicalCartActive || !writableRef.current) return;
     void loadExternalPaymentEvidenceDialog();
     if (!saleId || !sessionIsActive() || externalPaymentConfirmationRef.current !== null) return;
     const normalizedAmount = normalizePositiveMoney(amount);
@@ -1455,6 +1480,7 @@ function ActiveWorkspace({
         return;
       }
       if (attempt.status === "pending") {
+        if (!writableRef.current) return;
         attempt = await beginPaymentAttemptReconciliation.mutateAsync(attempt.id);
         if (!sessionIsActive()) return;
       }
@@ -1485,15 +1511,20 @@ function ActiveWorkspace({
   prepareExternalPaymentRef.current = prepareExternalPayment;
 
   useEffect(() => {
+    if (!hasOpenShift) {
+      paymentAttemptRecoverySaleRef.current = null;
+      return;
+    }
     if (!saleId || sale?.status !== "draft") return;
     if (paymentAttemptRecoverySaleRef.current === saleId) return;
     paymentAttemptRecoverySaleRef.current = saleId;
+    let disposed = false;
     void (async () => {
       let storedAttempt = loadPaymentAttemptOperation(saleId);
       if (!storedAttempt) {
         try {
           const serverAttempt = await getActivePaymentAttempt(saleId);
-          if (!serverAttempt || !sessionIsActive()) return;
+          if (disposed || !serverAttempt || !sessionIsActive()) return;
           storedAttempt = saveRecoveredPaymentAttemptOperation(serverAttempt);
           if (!storedAttempt) {
             setTopError(
@@ -1502,6 +1533,7 @@ function ActiveWorkspace({
             return;
           }
         } catch (error) {
+          if (disposed) return;
           paymentAttemptRecoverySaleRef.current = null;
           setTopError(
             describeApiError(
@@ -1512,9 +1544,13 @@ function ActiveWorkspace({
           return;
         }
       }
-      await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
+      if (!disposed)
+        await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
     })();
-  }, [sale?.status, saleId, sessionIsActive]);
+    return () => {
+      disposed = true;
+    };
+  }, [hasOpenShift, sale?.status, saleId, sessionIsActive]);
 
   const closeExternalPaymentConfirmation = () => {
     externalPaymentConfirmationRef.current = null;
@@ -1522,7 +1558,7 @@ function ActiveWorkspace({
   };
 
   const cancelExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
-    if (!sessionIsActive()) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (
       externalPaymentMutationRef.current ||
       voidPaymentAttempt.isPending ||
@@ -1552,7 +1588,7 @@ function ActiveWorkspace({
   };
 
   const confirmExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
-    if (!sessionIsActive()) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (
       externalPaymentMutationRef.current ||
       confirmPaymentAttempt.isPending ||
@@ -1676,7 +1712,7 @@ function ActiveWorkspace({
 
   const completeLegacySale = async () => {
     if (physicalCartActive) return;
-    if (!sessionIsActive()) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (!saleId || completingRef.current || completeSale.isPending) return;
     if (pendingPayment || addPayment.isPending) {
       setTopError("Сначала подтвердите результат оплаты.");
@@ -1714,6 +1750,10 @@ function ActiveWorkspace({
         if (!sessionIsActive()) return;
         setPrescription(null);
         setRequiresRx(false);
+      }
+      if (!writableRef.current) {
+        completingRef.current = false;
+        return;
       }
       await completeSale.mutateAsync({
         saleId,
@@ -1764,7 +1804,7 @@ function ActiveWorkspace({
   };
 
   const onComplete = async () => {
-    if (physicalCartActive) return;
+    if (physicalCartActive || !writableRef.current) return;
     if (!saleId || !sale || completingRef.current || !sessionIsActive()) return;
     if (cartMutationPending) {
       setTopError("Дождитесь завершения изменения товаров в чеке.");
@@ -1813,7 +1853,7 @@ function ActiveWorkspace({
       setPendingCheckout(storedOperation);
       setCheckoutUncertain(true);
       const recovery = await recoverCheckout(storedOperation, true);
-      if (!sessionIsActive()) return;
+      if (!sessionIsActive() || !writableRef.current) return;
       if (recovery !== "not-found") return;
     }
 
@@ -1859,6 +1899,7 @@ function ActiveWorkspace({
     setTopError(null);
     completingRef.current = true;
     try {
+      if (!writableRef.current) return;
       const result = await checkoutSale.mutateAsync({
         operation_id: operation.operationId,
         register_id: registerId,
@@ -2143,15 +2184,17 @@ function ActiveWorkspace({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canOpen={canOpenShift && !physicalOperationsBlocked}
-            canClose={canCloseShift}
-            canExportReport={canExportReports}
-            closeBlocked={shiftCloseBlocked}
-            online={online}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && !physicalOperationsBlocked}
+              canClose={canCloseShift}
+              canExportReport={canExportReports}
+              closeBlocked={shiftCloseBlocked}
+              online={online}
+            />
+          </Suspense>
         </div>
 
         {staleNotice && (

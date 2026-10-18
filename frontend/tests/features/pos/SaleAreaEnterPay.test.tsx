@@ -25,6 +25,8 @@ const addPayment = vi.fn();
 const completeSale = vi.fn();
 const checkoutSale = vi.fn();
 const getCheckoutResult = vi.fn();
+const createSale = vi.fn();
+const getPosCommandResult = vi.fn();
 const findByBarcode = vi.fn();
 const addSaleItem = vi.fn();
 const getPosFavorites = vi.fn();
@@ -47,7 +49,8 @@ vi.mock("@/features/pos/api", () => ({
   closeShift: vi.fn(),
   getZReport: vi.fn(),
   getZReportXlsx: vi.fn(),
-  createSale: vi.fn(),
+  createSale: (...args: unknown[]) => createSale(...args),
+  getPosCommandResult: (...args: unknown[]) => getPosCommandResult(...args),
   addSaleItem: (...args: unknown[]) => addSaleItem(...args),
   updateSaleItem: vi.fn(),
   deleteSaleItem: vi.fn(),
@@ -89,6 +92,7 @@ import {
   loadPendingCheckoutOperation,
 } from "@/features/pos/checkoutOperation";
 import { draftKey } from "@/features/pos/draftStorage";
+import { createPendingPosCommand, loadPendingPosCommand } from "@/features/pos/commandOperation";
 import { posKeys } from "@/features/pos/queries";
 import { createPendingPaymentOperation } from "@/features/pos/paymentOperation";
 import {
@@ -231,17 +235,27 @@ function apiError(status: number, detail: string): unknown {
   };
 }
 
-function renderArea(canReconcileExternalPayment: boolean = true, cardTerminalId?: string) {
+function renderArea(
+  canReconcileExternalPayment: boolean = true,
+  cardTerminalId?: string,
+  initialAccess: { registerAvailable?: boolean; canSell?: boolean } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  const view = (paymentMethods: ("cash" | "card" | "qr")[], mixedPaymentEnabled: boolean) => (
+  const view = (
+    paymentMethods: ("cash" | "card" | "qr")[],
+    mixedPaymentEnabled: boolean,
+    access: { registerAvailable?: boolean; canSell?: boolean } = {},
+  ) => (
     <QueryClientProvider client={queryClient}>
       <SaleArea
         registerId={REG}
+        registerAvailable={access.registerAvailable}
+        canSell={access.canSell}
         mode="keyboard"
         soundOn={false}
         draftTtlMin={30}
@@ -254,10 +268,12 @@ function renderArea(canReconcileExternalPayment: boolean = true, cardTerminalId?
       />
     </QueryClientProvider>
   );
-  const result = render(view(["cash", "card", "qr"], true));
+  const result = render(view(["cash", "card", "qr"], true, initialAccess));
   return {
     ...result,
     queryClient,
+    rerenderAccess: (access: { registerAvailable?: boolean; canSell?: boolean }) =>
+      result.rerender(view(["cash", "card", "qr"], true, access)),
     rerenderPaymentSettings: (
       paymentMethods: ("cash" | "card" | "qr")[],
       mixedPaymentEnabled: boolean,
@@ -338,6 +354,8 @@ describe("SaleArea atomic checkout", () => {
     completeSale.mockReset();
     checkoutSale.mockReset();
     getCheckoutResult.mockReset();
+    createSale.mockReset();
+    getPosCommandResult.mockReset();
     findByBarcode.mockReset();
     addSaleItem.mockReset();
     getPosFavorites.mockReset();
@@ -486,7 +504,7 @@ describe("SaleArea atomic checkout", () => {
         status: "completed",
       },
     );
-    expect(screen.getByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
   });
 
   it("resets only the staged cash calculation and keeps the cart intact", async () => {
@@ -1229,6 +1247,146 @@ describe("SaleArea atomic checkout", () => {
         saleId: SALE.id,
       },
     );
+  });
+
+  it("keeps an in-flight checkout mounted when the register and shift become unavailable", async () => {
+    let resolveCheckout!: (value: ReturnType<typeof checkoutResult>) => void;
+    const response = new Promise<ReturnType<typeof checkoutResult>>((resolve) => {
+      resolveCheckout = resolve;
+    });
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockReturnValue(response);
+    const view = renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(checkoutSale).toHaveBeenCalledTimes(1));
+    const payload = checkoutSale.mock.calls[0]?.[0] as CheckoutPayload;
+    view.rerenderAccess({ registerAvailable: false, canSell: false });
+    act(() => view.queryClient.setQueryData(posKeys.shift(REG), null));
+    expect(screen.getByText("Текущий чек")).toBeInTheDocument();
+    expect(loadPendingCheckoutOperation(SALE.id, REG)?.operationId).toBe(payload.operation_id);
+    getSale.mockResolvedValue(completedSale(payload.operation_id));
+    await act(async () => resolveCheckout(checkoutResult(payload.operation_id)));
+    expect(await screen.findByText(/Чек № R-atomic оформлен/i)).toBeInTheDocument();
+    expect(checkoutSale).toHaveBeenCalledTimes(1);
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toBeNull();
+  });
+
+  it("keeps a forbidden checkout recovery reachable without treating it as an absent sale", async () => {
+    seedDraftSale(SALE.id);
+    const operation = createPendingCheckoutOperation(SALE.id, REG);
+    if (!operation) throw new Error("pending checkout was not persisted");
+    getCurrentShift.mockResolvedValue(null);
+    getSale.mockResolvedValue(SALE);
+    getCheckoutResult.mockRejectedValue(apiError(403, "access revoked"));
+    renderArea(true, undefined, { registerAvailable: false, canSell: false });
+    await screen.findByText(/Не удалось проверить результат продажи.*Не повторяйте оплату/i);
+    fireEvent.click(screen.getByRole("button", { name: "Сверить с сервером" }));
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(2));
+    expect(getCheckoutResult).toHaveBeenLastCalledWith(operation.operationId);
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toEqual(operation);
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toContain(SALE.id);
+    expect(checkoutSale).not.toHaveBeenCalled();
+    expect(addPayment).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "F2" });
+    expect(screen.getByText("Текущий чек")).toBeInTheDocument();
+  });
+
+  it("does not replay checkout after a deferred 404 if register access changed", async () => {
+    let rejectRecovery!: (reason: unknown) => void;
+    const response = new Promise<ReturnType<typeof checkoutResult>>((_resolve, reject) => {
+      rejectRecovery = reject;
+    });
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    checkoutSale.mockRejectedValue(new Error("response lost"));
+    getCheckoutResult
+      .mockRejectedValueOnce(apiError(404, "not committed yet"))
+      .mockReturnValueOnce(response);
+    const view = renderArea();
+    await stageCashPayment();
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Завершить продажу/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Завершить продажу/i }));
+    await waitFor(() => expect(getCheckoutResult).toHaveBeenCalledTimes(2));
+    const operation = loadPendingCheckoutOperation(SALE.id, REG);
+    view.rerenderAccess({ registerAvailable: false, canSell: false });
+    await act(async () => {
+      rejectRecovery(apiError(404, "not committed yet"));
+      await response.catch(() => undefined);
+    });
+    expect(checkoutSale).toHaveBeenCalledTimes(1);
+    expect(loadPendingCheckoutOperation(SALE.id, REG)).toEqual(operation);
+    expect(screen.getByText("Текущий чек")).toBeInTheDocument();
+  });
+
+  it("restores a saved electronic payment only after register access returns", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    const operation = createPaymentAttemptOperation(SALE.id, "card", "50.00");
+    if (!operation) throw new Error("payment attempt was not persisted");
+    const view = renderArea(true, undefined, { registerAvailable: false, canSell: false });
+    await screen.findByTestId("cart-item");
+    expect(loadPaymentAttemptOperation(SALE.id)).toEqual(operation);
+    expect(createPaymentAttempt).not.toHaveBeenCalled();
+    expect(beginPaymentAttemptReconciliation).not.toHaveBeenCalled();
+    expect(confirmPaymentAttempt).not.toHaveBeenCalled();
+    expect(voidPaymentAttempt).not.toHaveBeenCalled();
+    view.rerenderAccess({ registerAvailable: true, canSell: true });
+    await waitFor(() => expect(createPaymentAttempt).toHaveBeenCalledTimes(1));
+    expect(createPaymentAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation_id: operation.operationId,
+        sale_id: SALE.id,
+        payment_method: "card",
+        amount: "50.00",
+      }),
+    );
+  });
+
+  it("does not submit an already-open payment keypad after register access changes", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    const view = renderArea();
+    await screen.findByText(/Остаток/);
+    beginExternalPayment("Карта");
+    const dialog = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
+    view.rerenderAccess({ registerAvailable: false, canSell: false });
+    fireEvent.click(within(dialog).getByRole("button", { name: "ОК" }));
+    expect(createPaymentAttempt).not.toHaveBeenCalled();
+    expect(addPayment).not.toHaveBeenCalled();
+    expect(checkoutSale).not.toHaveBeenCalled();
+  });
+
+  it("retains the workspace during command-to-draft handoff when register access changes", async () => {
+    const command = createPendingPosCommand({ commandType: "sale.create", registerId: REG });
+    if (!command) throw new Error("pending command was not persisted");
+    let resolveSale!: (value: typeof SALE) => void;
+    const canonical = new Promise<typeof SALE>((resolve) => {
+      resolveSale = resolve;
+    });
+    getPosCommandResult.mockResolvedValue({
+      operation_id: command.operationId,
+      sale_id: SALE.id,
+      created_at: SALE.created_at,
+      result: { command_type: "sale.create", sale: SALE },
+    });
+    getSale.mockReturnValueOnce(canonical).mockResolvedValue(SALE);
+    const view = renderArea();
+    await waitFor(() => expect(getSale).toHaveBeenCalledWith(SALE.id));
+    await act(async () => {
+      view.rerenderAccess({ registerAvailable: false, canSell: false });
+      resolveSale(SALE);
+    });
+    await screen.findByTestId("cart-item");
+    expect(loadPendingPosCommand(REG)).toBeNull();
+    expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toContain(SALE.id);
+    expect(screen.getByText("Текущий чек")).toBeInTheDocument();
+    expect(createSale).not.toHaveBeenCalled();
   });
 
   it("retries an ambiguous checkout with the same operation id after a temporary 404", async () => {

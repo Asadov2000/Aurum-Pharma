@@ -82,7 +82,7 @@ const networkError = { isAxiosError: true, response: undefined };
 const notFoundError = { isAxiosError: true, response: { status: 404 } };
 const collisionError = { isAxiosError: true, response: { status: 409 } };
 
-function setup() {
+function setup(writable = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -90,9 +90,11 @@ function setup() {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
   const onApplied = vi.fn();
-  const hook = renderHook(() => usePosCommandResilience({ registerId: REGISTER_ID, onApplied }), {
-    wrapper,
-  });
+  const hook = renderHook(
+    ({ canWrite }) =>
+      usePosCommandResilience({ registerId: REGISTER_ID, onApplied, writable: canWrite }),
+    { wrapper, initialProps: { canWrite: writable } },
+  );
   return { ...hook, client, onApplied };
 }
 
@@ -158,6 +160,72 @@ describe("usePosCommandResilience", () => {
     expect(apiMocks.getPosCommandResult).toHaveBeenCalledWith(command!.operationId);
     expect(apiMocks.addSaleItem).not.toHaveBeenCalled();
     expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(loadPendingPosCommand(REGISTER_ID)).toBeNull();
+  });
+
+  it("keeps a read-only unresolved command and never replays or begins a mutation", async () => {
+    const command = createPendingPosCommand({
+      commandType: "sale.create",
+      registerId: REGISTER_ID,
+    });
+    if (!command) throw new Error("pending command was not persisted");
+    apiMocks.getPosCommandResult.mockRejectedValue(notFoundError);
+    const { result } = setup(false);
+    await waitFor(() => expect(result.current.canRetry).toBe(true));
+    await act(() => result.current.retry());
+    expect(apiMocks.getPosCommandResult).toHaveBeenLastCalledWith(command.operationId);
+    expect(apiMocks.createSale).not.toHaveBeenCalled();
+    expect(loadPendingPosCommand(REGISTER_ID)).toEqual(command);
+    await act(() =>
+      result.current.begin({
+        commandType: "item.delete",
+        registerId: REGISTER_ID,
+        saleId: SALE_ID,
+        itemId: ITEM_ID,
+      }),
+    );
+    expect(apiMocks.deleteSaleItem).not.toHaveBeenCalled();
+  });
+
+  it("checks current writability after a deferred command lookup returns 404", async () => {
+    const command = createPendingPosCommand({
+      commandType: "sale.create",
+      registerId: REGISTER_ID,
+    });
+    if (!command) throw new Error("pending command was not persisted");
+    let rejectLookup!: (reason: unknown) => void;
+    const lookup = new Promise<never>((_resolve, reject) => {
+      rejectLookup = reject;
+    });
+    apiMocks.getPosCommandResult.mockReturnValue(lookup);
+    const { result, rerender } = setup();
+    await waitFor(() => expect(apiMocks.getPosCommandResult).toHaveBeenCalled());
+    rerender({ canWrite: false });
+    await act(async () => {
+      rejectLookup(notFoundError);
+      await lookup.catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.canRetry).toBe(true));
+    expect(apiMocks.createSale).not.toHaveBeenCalled();
+    expect(loadPendingPosCommand(REGISTER_ID)).toEqual(command);
+  });
+
+  it("accepts an already-committed command in read-only mode without replay", async () => {
+    const command = createPendingPosCommand({
+      commandType: "sale.create",
+      registerId: REGISTER_ID,
+    });
+    if (!command) throw new Error("pending command was not persisted");
+    apiMocks.getPosCommandResult.mockResolvedValue({
+      operation_id: command.operationId,
+      sale_id: SALE_ID,
+      created_at: SALE.created_at,
+      result: { command_type: "sale.create", sale: SALE },
+    });
+    const { result, onApplied } = setup(false);
+    await waitFor(() => expect(result.current.blocked).toBe(false));
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createSale).not.toHaveBeenCalled();
     expect(loadPendingPosCommand(REGISTER_ID)).toBeNull();
   });
 
