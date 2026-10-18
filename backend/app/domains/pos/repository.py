@@ -676,6 +676,25 @@ class POSRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_checkout_draft_items(self, sale_id: UUID) -> list[SaleItem]:
+        """Replay draft slices in FEFO order, preserving boundaries within a batch."""
+        stmt = (
+            select(SaleItem)
+            .outerjoin(
+                Batch,
+                and_(Batch.id == SaleItem.batch_id, Batch.tenant_id == SaleItem.tenant_id),
+            )
+            .where(SaleItem.sale_id == sale_id)
+            .order_by(
+                Batch.expires_at.asc(),
+                Batch.created_at.asc(),
+                Batch.id.asc(),
+                SaleItem.position.asc(),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_items_with_batch(
         self, sale_id: UUID
     ) -> list[tuple[SaleItem, str | None, date | None, int | None, str | None]]:

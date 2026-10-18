@@ -585,6 +585,70 @@ test.describe("POS sale (owner)", () => {
     }
   });
 
+  test("fractional scans keep the displayed rounded total through cash checkout", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    try {
+      const branch = await seedBranch(api, uniqueName("ROUND-Branch"));
+      const register = await seedRegister(api, branch.id, uniqueName("ROUND-Cash"));
+      const supplier = await seedSupplier(api, uniqueName("ROUND-Supp"));
+      const item = await seedCatalogItem(api, uniqueName("ROUND-Med"), "0.05");
+      const batch = await seedAcceptedBatch(api, {
+        branchId: branch.id,
+        supplierId: supplier.id,
+        catalogId: item.id,
+        qty: "2",
+        purchasePrice: "0.01",
+        salePrice: "0.05",
+        expiresAt: isoDateInDays(90),
+      });
+      await installDesktopCashDrawerBridge(page);
+      await loginInBrowser(page, OWNER);
+      await page.goto("/pos");
+      await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+      await page.getByLabel("Наличные в кассе на начало смены").fill("0");
+      await page.getByRole("button", { name: "Открыть смену" }).click();
+      await expect(page.getByText("Смена открыта")).toBeVisible();
+      for (const expectedCartItems of [1, 2]) {
+        await addPosItemToCart(page, {
+          brandName: item.brand_name,
+          qty: "0.333",
+          expectedCartItems,
+        });
+      }
+      await payPosSaleCash(page, "0.04");
+      const checkoutResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/sales/checkout") &&
+          response.request().method() === "POST",
+      );
+      await completePosSale(page);
+      const response = await checkoutResponse;
+      expect(response.ok()).toBe(true);
+      const completed = (await response.json()) as {
+        total_amount: string;
+        items: Array<{ qty: string; total_price: string }>;
+      };
+      expect(Number(completed.total_amount)).toBe(0.04);
+      expect(completed.items.map((line) => [Number(line.qty), Number(line.total_price)])).toEqual([
+        [0.333, 0.02],
+        [0.333, 0.02],
+      ]);
+      const remaining = await api.get(`batches/${batch.id}`);
+      expect(remaining.ok()).toBe(true);
+      expect(Number(((await remaining.json()) as { qty_remaining: string }).qty_remaining)).toBe(
+        1.334,
+      );
+    } finally {
+      await apiAnon.dispose();
+      await api.dispose();
+    }
+  });
+
   test("Repeated scans retain cumulative FEFO prices through checkout recovery", async ({
     page,
   }) => {

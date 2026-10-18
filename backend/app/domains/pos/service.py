@@ -2125,12 +2125,13 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
         draft_sale_id: UUID | None,
+        items: list[tuple[UUID, Decimal]],
         can_manage_tenant: bool,
         allowed_branch_ids: set[UUID] | None,
         allowed_manage_branch_ids: set[UUID] | None,
-    ) -> Sale:
+    ) -> tuple[Sale, list[tuple[UUID, Decimal]]]:
         if draft_sale_id is None:
-            return await self.create_sale(
+            sale = await self.create_sale(
                 tenant_id=tenant_id,
                 register_id=register_id,
                 cashier_user_id=cashier_user_id,
@@ -2140,6 +2141,7 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
             )
+            return sale, items
 
         sale = await self._lock_sale(draft_sale_id)
         self._assert_sale_owned_or_managed(
@@ -2162,13 +2164,22 @@ class POSService:
         has_prescriptions = bool(await self.repo.list_prescriptions(sale.id))
         if has_payments or has_prescriptions:
             raise BusinessRuleError("Checkout draft contains legacy financial data")
+        draft_items = [
+            (item.catalog_id, item.qty)
+            for item in await self.repo.list_checkout_draft_items(sale.id)
+        ]
+        if draft_items and dict(self._aggregate_checkout_items(draft_items)) == dict(items):
+            # Keep the displayed line rounding when the requested cart is unchanged.
+            # FEFO order prevents existing batch slices from being split a second time.
+            items = draft_items
         await self.repo.delete_items(sale.id)
-        return await self.repo.update_sale(
+        sale = await self.repo.update_sale(
             sale,
             total_amount=Decimal("0"),
             operation_id=operation_id,
             operation_hash=operation_hash,
         )
+        return sale, items
 
     async def checkout(
         self,
@@ -2226,18 +2237,19 @@ class POSService:
                 },
             )
         self._validate_checkout_payments(normalized_payments)
-        sale = await self._prepare_checkout_sale(
+        sale, checkout_items = await self._prepare_checkout_sale(
             tenant_id=tenant_id,
             register_id=register_id,
             cashier_user_id=cashier_user_id,
             operation_id=operation_id,
             operation_hash=operation_hash,
             draft_sale_id=draft_sale_id,
+            items=aggregated_items,
             can_manage_tenant=can_manage_tenant,
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
-        for catalog_id, qty in aggregated_items:
+        for catalog_id, qty in checkout_items:
             await self.add_item(
                 sale_id=sale.id,
                 catalog_id=catalog_id,
