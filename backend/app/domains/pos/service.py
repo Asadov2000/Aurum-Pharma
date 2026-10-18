@@ -2171,6 +2171,8 @@ class POSService:
         if draft_items and dict(self._aggregate_checkout_items(draft_items)) == dict(items):
             # Keep the displayed line rounding when the requested cart is unchanged.
             # FEFO order prevents existing batch slices from being split a second time.
+            catalog_order = {catalog_id: index for index, (catalog_id, _) in enumerate(items)}
+            draft_items.sort(key=lambda item: catalog_order[item[0]])
             items = draft_items
         await self.repo.delete_items(sale.id)
         sale = await self.repo.update_sale(

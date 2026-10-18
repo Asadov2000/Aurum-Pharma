@@ -462,6 +462,18 @@ async def test_reallocation_does_not_change_other_catalog_positions(
         text("SELECT to_jsonb(row) FROM sale_item row WHERE id=:id"), {"id": other_id}
     )
     assert after == before
+    total = original.sale.total_amount
+    completed = await original.service.checkout(
+        tenant_id=original.sale.tenant_id,
+        register_id=original.sale.register_id,
+        cashier_user_id=original.cashier_id,
+        operation_id=uuid4(),
+        draft_sale_id=original.sale.id,
+        items=[(other.id, Decimal("1")), (original.catalog_id, Decimal("1"))],
+        payments=[("cash", total, None)],
+    )
+    assert [item.catalog_id for item in completed.items] == [other.id, original.catalog_id]
+    assert completed.total_amount == total
 
 
 async def test_fractional_repeated_scans_match_exact_money_and_checkout(
