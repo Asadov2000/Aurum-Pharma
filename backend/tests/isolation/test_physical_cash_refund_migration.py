@@ -83,7 +83,8 @@ async def test_refund_migration_roundtrip_preserves_guards_or_refuses_history(
         with Operations.context(MigrationContext.configure(connection)):
             if connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_checkout)"

@@ -13,6 +13,7 @@ from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.pos.test_unit_checkout_payment_components import complete, journal, request_for
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
+    electronic_checkout_migration,
     payment_component_migration,
     refund_payment_component_migration,
 )
@@ -20,7 +21,9 @@ from tests.isolation.test_physical_cash_checkout_migration import (
 db_session = receiving_session_fixture
 
 HISTORY = text(
-    "SELECT EXISTS(SELECT 1 FROM pos_unit_refund_payment_component) OR "
+    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+    "EXISTS(SELECT 1 FROM pos_physical_checkout WHERE payment_journal_version=3) OR "
+    "EXISTS(SELECT 1 FROM pos_unit_refund_payment_component) OR "
     "EXISTS(SELECT 1 FROM pos_physical_cash_refund WHERE payment_journal_version=2) OR "
     "EXISTS(SELECT 1 FROM pos_mixed_cash_refund WHERE payment_journal_version=2) OR "
     "EXISTS(SELECT 1 FROM pos_unit_checkout_payment_component) OR "
@@ -62,10 +65,12 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
             if connection.scalar(HISTORY):
                 with pytest.raises(DBAPIError) as denied:
                     with connection.begin_nested():
+                        electronic_checkout_migration().downgrade()
                         refund_payment_component_migration().downgrade()
                         payment_component_migration().downgrade()
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
             else:
+                electronic_checkout_migration().downgrade()
                 refund_payment_component_migration().downgrade()
                 payment_component_migration().downgrade()
                 relation = connection.scalar(
@@ -75,6 +80,7 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
                 assert connection.execute(COLUMNS).all() == []
                 payment_component_migration().upgrade()
                 refund_payment_component_migration().upgrade()
+                electronic_checkout_migration().upgrade()
         assert [connection.execute(query).all() for query in queries] == before
 
     async with maintenance_engine.connect() as connection:

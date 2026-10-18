@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_unit_payment_attempt_binding",
     "pos_unit_refund_payment_component",
     "pos_unit_checkout_payment_component",
     "unit_legacy_reconciliation_record",
@@ -248,6 +249,14 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "unit_electronic_current_quote",
+    "assert_unit_electronic_checkout",
+    "assert_unit_electronic_payments",
+    "assert_unit_payment_attempt_binding",
+    "unit_electronic_payment_matches",
+    "unit_electronic_write_allowed",
+    "trg_unit_payment_attempt_binding_guard",
+    "trg_unit_payment_attempt_binding_complete",
     "assert_unit_refund_payment_components",
     "trg_unit_refund_payment_component_guard",
     "trg_unit_refund_payment_component_complete",
@@ -1392,7 +1401,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in cash_functions.values()
     )
     assert {name for name, row in cash_functions.items() if row["is_security_definer"]} == (
-        cash_names - {"trg_physical_stock_checkout_binding", "trg_physical_checkout_guard"}
+        cash_names - {"trg_physical_checkout_guard"}
     )
     mixed_names = {
         "assert_mixed_checkout",
@@ -1625,6 +1634,14 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "unit_electronic_current_quote",
+        "assert_unit_electronic_checkout",
+        "assert_unit_electronic_payments",
+        "assert_unit_payment_attempt_binding",
+        "unit_electronic_payment_matches",
+        "unit_electronic_write_allowed",
+        "trg_unit_payment_attempt_binding_guard",
+        "trg_unit_payment_attempt_binding_complete",
         "assert_unit_refund_payment_components",
         "trg_unit_refund_payment_component_guard",
         "trg_unit_refund_payment_component_complete",

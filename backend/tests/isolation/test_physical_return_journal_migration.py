@@ -231,7 +231,8 @@ async def test_migration_roundtrip_preserves_rls_acl_or_refuses_committed_histor
             original_guards = connection.execute(guards).all()
             if connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_checkout)"
                 )

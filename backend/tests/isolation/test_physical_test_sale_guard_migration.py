@@ -113,7 +113,7 @@ async def test_guard_roundtrip_preserves_private_metadata_mixed_guards_and_histo
         before = definitions(connection, signatures)
         metadata = function_metadata(connection)
         assert len(metadata) == 2
-        assert {row["prosecdef"] for row in metadata} == {False, True}
+        assert all(row["prosecdef"] for row in metadata)
         for row in metadata:
             assert row["owner"] == "aurum_schema_owner"
             assert row["proconfig"] == ["search_path=pg_catalog, pg_temp"]

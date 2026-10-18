@@ -539,7 +539,10 @@ class POSService:
         attempt = await self.repo.lock_payment_attempt(attempt_id)
         if attempt is None or attempt.tenant_id != tenant_id or attempt.sale_id != sale.id:
             raise NotFoundError("Payment attempt not found")
-        if attempt.amount > sale.total_amount:
+        if (
+            attempt.amount > sale.total_amount
+            and not await self.repo.has_bound_unit_payment_attempt(attempt)
+        ):
             raise BusinessRuleError("Payment attempt exceeds the current sale total")
         if attempt.status in {"confirmed", "consumed"}:
             if (

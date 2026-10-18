@@ -103,7 +103,19 @@ def refund_payment_component_migration() -> ModuleType:
     return module
 
 
+def electronic_checkout_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0212_unit_electronic_checkout.py"
+    )
+    spec = importlib.util.spec_from_file_location("unit_electronic_checkout", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_refund_for_roundtrip() -> None:
+    electronic_checkout_migration().downgrade()
     refund_payment_component_migration().downgrade()
     payment_component_migration().downgrade()
     physical_disposition_migration().downgrade()
@@ -131,6 +143,7 @@ def upgrade_refund_after_roundtrip() -> None:
     physical_disposition_migration().upgrade()
     payment_component_migration().upgrade()
     refund_payment_component_migration().upgrade()
+    electronic_checkout_migration().upgrade()
 
 
 def physical_disposition_migration() -> ModuleType:
@@ -227,7 +240,8 @@ async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
         with Operations.context(MigrationContext.configure(connection)):
             history = connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_checkout) OR "
@@ -286,7 +300,8 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
         with Operations.context(MigrationContext.configure(connection)):
             history = connection.scalar(
                 text(
-                    "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
+                    "SELECT EXISTS(SELECT 1 FROM pos_unit_payment_attempt_binding) OR "
+                    "EXISTS(SELECT 1 FROM pos_physical_cash_refund) OR "
                     "EXISTS(SELECT 1 FROM pos_physical_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_zero_return) OR "
                     "EXISTS(SELECT 1 FROM pos_mixed_return_command) OR "
