@@ -47,6 +47,10 @@ from tests.domains.pos.test_unit_return import runtime
 db_session = receiving_session_fixture
 
 
+class DriverUUID(UUID):
+    """Preserve a driver's UUID subtype at the Pydantic request boundary."""
+
+
 async def original(
     session: AsyncSession, methods: tuple[str, ...] = ("card",)
 ) -> PhysicalCheckoutResultV3:
@@ -493,4 +497,36 @@ async def test_blocking_real_actor_revokes_preview_without_financial_effects(
                 text("UPDATE app_user SET status='active' WHERE id=:id"), {"id": context.actor_id}
             )
     await set_receiving_context(db_session, context.stock, context.actor_id)
+    assert await facts(db_session) == before
+
+
+async def test_preview_normalizes_driver_uuid_selection_before_strict_pure_planner(
+    db_session: AsyncSession,
+) -> None:
+    source = await original(db_session)
+    request = PhysicalRefundQuoteRequest.model_validate(
+        {
+            "items": [
+                {
+                    "line_id": DriverUUID(str(source.lines[0].id)),
+                    "sale_format": "unit",
+                    "quantity": 1,
+                }
+            ]
+        }
+    )
+    assert type(request.items[0].line_id) is DriverUUID
+    context = runtime(db_session)
+    before = await facts(db_session)
+    result = await UnitElectronicRefundPreviewService(
+        UnitElectronicRefundPreviewRepository(db_session)
+    ).quote(
+        tenant_id=context.stock.tenant_id,
+        parent_sale_id=source.sale_id,
+        actor_id=context.actor_id,
+        allowed_branch_ids={context.stock.branch_id},
+        request=request,
+    )
+    assert result.total_amount == Decimal("0.99")
+    assert result.lines[0].line_id == source.lines[0].id
     assert await facts(db_session) == before

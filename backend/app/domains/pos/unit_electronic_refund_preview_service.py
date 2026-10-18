@@ -9,7 +9,7 @@ from app.domains.pos.physical_cash_refund_api_schemas import (
     PhysicalRefundQuoteLine,
     PhysicalRefundQuoteRequest,
 )
-from app.domains.pos.physical_return_allocation import PhysicalReturnPlan
+from app.domains.pos.physical_return_allocation import PhysicalReturnPlan, PhysicalReturnSelection
 from app.domains.pos.physical_return_journal_repository import PhysicalReturnJournalRepository
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_electronic_refund_history import (
@@ -57,10 +57,16 @@ class UnitElectronicRefundPreviewService:
             goods = returned_goods(history, original)
             payments = returned_payments(history, original)
             require_reconciled_history(original, goods, payments)
+            # Driver UUID subclasses can survive Pydantic's Python input path.
+            # The pure allocator deliberately requires canonical UUID values.
+            selections = tuple(
+                PhysicalReturnSelection(UUID(str(item.line_id)), item.sale_format, item.quantity)
+                for item in request.items
+            )
             try:
                 plan = plan_physical_payment_refund(
                     original,
-                    request.selections(),
+                    selections,
                     returned_base_units=goods,
                     returned_payment_amounts=payments,
                 )
