@@ -130,6 +130,12 @@ const POS_USER = {
   is_tenant_owner: false,
   branch_assignments: {},
   permissions: ["pos.shift_open", "pos.shift_close", "pos.sell"],
+  permission_scopes: {
+    "pos.shift_open": null,
+    "pos.shift_close": null,
+    "pos.sell": null,
+    "reports.export": null,
+  },
   support_access: null,
 };
 

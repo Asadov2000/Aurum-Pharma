@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
@@ -14,6 +14,7 @@ import {
   TableEmpty,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
+import { hasPermissionForBranch } from "@/features/auth/branchPermissions";
 import { hasPermission } from "@/features/auth/permissions";
 import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
 import {
@@ -37,13 +38,12 @@ export function POSPage(): JSX.Element {
   const { mode, pref, setPref } = usePosMode();
   const { preferences: devicePreferences, updatePreferences: updateDevicePreferences } =
     useDevicePreferences();
-  const canOpenShift = hasPermission(user, "pos.shift_open");
-  const canCloseShift = hasPermission(user, "pos.shift_close");
-  const canSell = hasPermission(user, "pos.sell");
-  const canManageSales = hasPermission(user, "pos.manage_sales");
-  const canExportReports = hasPermission(user, "reports.export");
   const canCreateRegister = hasPermission(user, "registers.create");
   const registers = useRegistersQuery(null, false);
+  const registerList = useMemo(
+    () => registers.data?.filter((register) => register.is_active),
+    [registers.data],
+  );
   // POS draft TTL comes from tenant settings; fall back until they load (or if
   // the user can't read them).
   const settings = useTenantOperationalSettingsQuery(true, true);
@@ -61,27 +61,53 @@ export function POSPage(): JSX.Element {
   });
   const soundOn = devicePreferences.scannerSound;
   const [registerSwitchState, setRegisterSwitchState] = useState<RegisterSwitchState>({
-    blocked: false,
+    blocked: Boolean(registerId),
     hasDraft: false,
   });
+  const switchStateRef = useRef(registerSwitchState);
+  const activeRegisterRef = useRef(registerId);
   const [pendingRegisterId, setPendingRegisterId] = useState<string | null>(null);
 
-  const updateRegisterSwitchState = useCallback((state: RegisterSwitchState) => {
+  const selectRegister = useCallback((nextRegisterId: string) => {
+    activeRegisterRef.current = nextRegisterId;
+    const state = { blocked: Boolean(nextRegisterId), hasDraft: false };
+    switchStateRef.current = state;
     setRegisterSwitchState(state);
+    setRegisterId(nextRegisterId);
   }, []);
+  const updateRegisterSwitchState = useCallback(
+    (state: RegisterSwitchState) => {
+      if (activeRegisterRef.current !== registerId) return;
+      switchStateRef.current = state;
+      setRegisterSwitchState(state);
+    },
+    [registerId],
+  );
+  const canSelectRegister = (id: string) =>
+    !registers.isError && (id === "" || registerList?.some((register) => register.id === id));
 
   const requestRegisterChange = (nextRegisterId: string) => {
-    if (nextRegisterId === registerId || registerSwitchState.blocked) return;
-    if (registerSwitchState.hasDraft) {
+    if (
+      nextRegisterId === registerId ||
+      switchStateRef.current.blocked ||
+      !canSelectRegister(nextRegisterId)
+    )
+      return;
+    if (switchStateRef.current.hasDraft) {
       setPendingRegisterId(nextRegisterId);
       return;
     }
-    setRegisterId(nextRegisterId);
+    selectRegister(nextRegisterId);
   };
 
   const confirmRegisterChange = () => {
-    if (pendingRegisterId === null) return;
-    setRegisterId(pendingRegisterId);
+    if (
+      pendingRegisterId === null ||
+      switchStateRef.current.blocked ||
+      !canSelectRegister(pendingRegisterId)
+    )
+      return;
+    selectRegister(pendingRegisterId);
     setPendingRegisterId(null);
   };
 
@@ -89,39 +115,60 @@ export function POSPage(): JSX.Element {
     updateDevicePreferences({ scannerSound: on });
   };
 
-  // Register auto-selection:
-  // - exactly one register → pick it (the cashier never chooses manually);
-  // - two or more → the cashier must choose, so we only restore a still-valid
-  //   last choice and otherwise leave the selector blank;
-  // - zero → leave blank (the "no register" hint shows below).
+  // Never replace a workspace until its recovery/draft state is known and clear.
   useEffect(() => {
-    const list = registers.data;
-    if (!list) return;
-    if (list.length === 1) {
-      const only = list[0];
-      if (only && registerId !== only.id) setRegisterId(only.id);
-    } else if (list.length >= 2 && registerId && !list.some((r) => r.id === registerId)) {
-      setRegisterId("");
-    }
-  }, [registers.data, registerId]);
+    if (!registerList || registers.isError) return;
+    if (registerList.some((register) => register.id === registerId)) return;
+    if (registerId && (switchStateRef.current.blocked || switchStateRef.current.hasDraft)) return;
+    const nextRegisterId = registerList.length === 1 ? (registerList[0]?.id ?? "") : "";
+    if (nextRegisterId !== registerId) selectRegister(nextRegisterId);
+  }, [registerList, registerId, registerSwitchState, registers.isError, selectRegister]);
+
+  useEffect(() => {
+    if (
+      pendingRegisterId !== null &&
+      (registerSwitchState.blocked ||
+        registers.isError ||
+        (pendingRegisterId !== "" &&
+          !registerList?.some((register) => register.id === pendingRegisterId)))
+    )
+      setPendingRegisterId(null);
+  }, [pendingRegisterId, registerList, registerSwitchState.blocked, registers.isError]);
 
   useEffect(() => {
     if (registerId) updateDevicePreferences({ lastRegisterId: registerId });
   }, [registerId, updateDevicePreferences]);
 
-  const registerList = registers.data;
   const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
   const selectedRegister = registerList?.find((register) => register.id === registerId);
+  const registerAvailable = Boolean(selectedRegister) && !registers.isError;
+  const canOpenShift = hasPermissionForBranch(user, "pos.shift_open", selectedRegister?.branch_id);
+  const canCloseShift = hasPermissionForBranch(
+    user,
+    "pos.shift_close",
+    selectedRegister?.branch_id,
+  );
+  const canSell = hasPermissionForBranch(user, "pos.sell", selectedRegister?.branch_id);
+  const canManageSales = hasPermissionForBranch(
+    user,
+    "pos.manage_sales",
+    selectedRegister?.branch_id,
+  );
+  const canExportReports = hasPermissionForBranch(
+    user,
+    "reports.export",
+    selectedRegister?.branch_id,
+  );
   const workstationControls = (
     <div className="flex w-full max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
       {registers.isLoading ? (
         <Skeleton className="h-9 w-full sm:w-52" />
-      ) : registerList && registerList.length > 0 ? (
+      ) : registerList && (registerList.length > 0 || registerId) ? (
         <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">
           <Label htmlFor="register" className="mb-0 shrink-0 text-foreground-muted">
             Касса
           </Label>
-          {onlyRegister ? (
+          {onlyRegister?.id === registerId ? (
             <Input
               id="register"
               className={cn(
@@ -147,6 +194,9 @@ export function POSPage(): JSX.Element {
               )}
             >
               <option value="">— выберите —</option>
+              {registerId && !selectedRegister ? (
+                <option value={registerId}>Текущая касса недоступна</option>
+              ) : null}
               {registerList?.map((register) => (
                 <option key={register.id} value={register.id}>
                   {register.name}
@@ -211,6 +261,17 @@ export function POSPage(): JSX.Element {
         </div>
       )}
 
+      {registerId && registerList && !selectedRegister ? (
+        <p
+          role="status"
+          className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+        >
+          Текущая касса больше недоступна. Новые операции запрещены. Сверьте результат незавершённой
+          операции; если доступ отозван, обратитесь к ответственному сотруднику. Сохранённый чек
+          остаётся на этой кассе.
+        </p>
+      ) : null}
+
       {registerList && registerList.length === 0 && (
         <TableEmpty title="Нет доступной рабочей кассы">
           {canCreateRegister
@@ -226,6 +287,7 @@ export function POSPage(): JSX.Element {
       {registerId && (
         <SaleArea
           registerId={registerId}
+          registerAvailable={registerAvailable}
           mode={mode}
           soundOn={soundOn}
           draftTtlMin={draftTtlMin}
@@ -235,10 +297,10 @@ export function POSPage(): JSX.Element {
           paymentSettingsUnavailable={paymentSettingsUnavailable}
           cardTerminalId={selectedRegister?.card_terminal_id}
           qrTerminalId={selectedRegister?.qr_terminal_id}
-          canOpenShift={canOpenShift}
-          canCloseShift={canCloseShift}
+          canOpenShift={canOpenShift && registerAvailable}
+          canCloseShift={canCloseShift && registerAvailable}
           canSell={canSell}
-          canReconcileExternalPayment={canManageSales}
+          canReconcileExternalPayment={canManageSales && registerAvailable}
           canExportReports={canExportReports}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={updateRegisterSwitchState}
@@ -258,7 +320,12 @@ export function POSPage(): JSX.Element {
           <Button variant="secondary" onClick={() => setPendingRegisterId(null)}>
             Остаться
           </Button>
-          <Button onClick={confirmRegisterChange}>Сохранить чек и перейти</Button>
+          <Button
+            onClick={confirmRegisterChange}
+            disabled={registerSwitchState.blocked || !canSelectRegister(pendingRegisterId ?? "")}
+          >
+            Сохранить чек и перейти
+          </Button>
         </div>
       </Modal>
     </div>
