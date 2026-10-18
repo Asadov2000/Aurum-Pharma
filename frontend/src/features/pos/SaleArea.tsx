@@ -31,7 +31,6 @@ import {
 import { PaymentPanel } from "./PaymentPanel";
 import { PosRecoveryGate } from "./PosRecoveryGate";
 import { SearchBar } from "./SearchBar";
-import { ShiftBar } from "./ShiftBar";
 import { getActivePaymentAttempt, getCheckoutResult } from "./api";
 import { beep } from "./beep";
 import {
@@ -102,6 +101,11 @@ import { usePosRegisterLock } from "./usePosRegisterLock";
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
   return { default: module.ReceiptPrintModal };
+});
+
+const ShiftBar = lazy(async () => {
+  const module = await import("./ShiftBar");
+  return { default: module.ShiftBar };
 });
 
 // Favorites are useful but not required to scan the first item, so they load
@@ -324,14 +328,16 @@ export function SaleArea({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canOpen={canOpenShift && registerAvailable}
-            canClose={canCloseShift && registerAvailable}
-            canExportReport={canExportReports}
-            online={isOnline}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && registerAvailable}
+              canClose={canCloseShift && registerAvailable}
+              canExportReport={canExportReports}
+              online={isOnline}
+            />
+          </Suspense>
         </div>
       )}
     </div>
@@ -2178,15 +2184,17 @@ function ActiveWorkspace({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canOpen={canOpenShift && !physicalOperationsBlocked}
-            canClose={canCloseShift}
-            canExportReport={canExportReports}
-            closeBlocked={shiftCloseBlocked}
-            online={online}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && !physicalOperationsBlocked}
+              canClose={canCloseShift}
+              canExportReport={canExportReports}
+              closeBlocked={shiftCloseBlocked}
+              online={online}
+            />
+          </Suspense>
         </div>
 
         {staleNotice && (

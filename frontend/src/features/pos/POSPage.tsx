@@ -6,7 +6,6 @@ import {
   Button,
   Input,
   Label,
-  Modal,
   PageHeader,
   Select,
   Skeleton,
@@ -14,8 +13,7 @@ import {
   TableEmpty,
 } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
-import { hasPermissionForBranch } from "@/features/auth/branchPermissions";
-import { hasPermission } from "@/features/auth/permissions";
+import { hasPermission, hasPermissionForBranch } from "@/features/auth/permissions";
 import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
 import {
   useRegistersQuery,
@@ -31,6 +29,11 @@ import { usePosMode } from "./usePosMode";
 const ModeToggle = lazy(async () => {
   const module = await import("./ModeToggle");
   return { default: module.ModeToggle };
+});
+
+const RegisterSwitchNotice = lazy(async () => {
+  const module = await import("./RegisterSwitchNotice");
+  return { default: module.RegisterSwitchNotice };
 });
 
 export function POSPage(): JSX.Element {
@@ -142,6 +145,7 @@ export function POSPage(): JSX.Element {
   const onlyRegister = registerList?.length === 1 ? registerList[0] : undefined;
   const selectedRegister = registerList?.find((register) => register.id === registerId);
   const registerAvailable = Boolean(selectedRegister) && !registers.isError;
+  const registerUnavailable = Boolean(registerId && registerList && !selectedRegister);
   const canOpenShift = hasPermissionForBranch(user, "pos.shift_open", selectedRegister?.branch_id);
   const canCloseShift = hasPermissionForBranch(
     user,
@@ -261,15 +265,24 @@ export function POSPage(): JSX.Element {
         </div>
       )}
 
-      {registerId && registerList && !selectedRegister ? (
-        <p
-          role="status"
-          className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+      {registerUnavailable || pendingRegisterId !== null ? (
+        <Suspense
+          fallback={
+            registerUnavailable ? (
+              <p role="status">Касса недоступна. Новые операции запрещены.</p>
+            ) : null
+          }
         >
-          Текущая касса больше недоступна. Новые операции запрещены. Сверьте результат незавершённой
-          операции; если доступ отозван, обратитесь к ответственному сотруднику. Сохранённый чек
-          остаётся на этой кассе.
-        </p>
+          <RegisterSwitchNotice
+            unavailable={registerUnavailable}
+            confirmationOpen={pendingRegisterId !== null}
+            confirmBlocked={
+              registerSwitchState.blocked || !canSelectRegister(pendingRegisterId ?? "")
+            }
+            onCancel={() => setPendingRegisterId(null)}
+            onConfirm={confirmRegisterChange}
+          />
+        </Suspense>
       ) : null}
 
       {registerList && registerList.length === 0 && (
@@ -306,28 +319,6 @@ export function POSPage(): JSX.Element {
           onRegisterSwitchStateChange={updateRegisterSwitchState}
         />
       )}
-
-      <Modal
-        open={pendingRegisterId !== null}
-        onClose={() => setPendingRegisterId(null)}
-        title="Перейти на другую кассу?"
-      >
-        <p className="text-sm text-foreground-secondary">
-          Текущий чек останется сохранённым на этой кассе. При возвращении вы сможете продолжить
-          работу с ним.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setPendingRegisterId(null)}>
-            Остаться
-          </Button>
-          <Button
-            onClick={confirmRegisterChange}
-            disabled={registerSwitchState.blocked || !canSelectRegister(pendingRegisterId ?? "")}
-          >
-            Сохранить чек и перейти
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 }

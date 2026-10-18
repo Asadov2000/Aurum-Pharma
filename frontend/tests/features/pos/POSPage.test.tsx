@@ -282,7 +282,9 @@ describe("POSPage", () => {
     fireEvent.change(registerSelect, { target: { value: second.id } });
 
     expect(registerSelect).toHaveValue(REGISTER.id);
-    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
 
     await waitFor(() => expect(screen.getByLabelText("Касса")).toHaveValue(second.id));

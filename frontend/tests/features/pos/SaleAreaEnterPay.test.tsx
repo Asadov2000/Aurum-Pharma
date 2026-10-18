@@ -504,7 +504,7 @@ describe("SaleArea atomic checkout", () => {
         status: "completed",
       },
     );
-    expect(screen.getByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /Закрыть смену/i })).toBeEnabled();
   });
 
   it("resets only the staged cash calculation and keeps the cart intact", async () => {

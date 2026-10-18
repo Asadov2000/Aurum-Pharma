@@ -205,7 +205,9 @@ describe("POSPage register switch recovery", () => {
     expect(screen.getByLabelText("Разрешение продажи")).toHaveTextContent("false");
     expect(screen.getByLabelText("Касса")).not.toHaveDisplayValue(REGISTER_B.name);
     requestRegister(REGISTER_B);
-    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
+    ).toBeInTheDocument();
     expectRegister(REGISTER_A);
 
     fireEvent.click(screen.getByRole("button", { name: "Сохранить чек и перейти" }));
@@ -234,7 +236,9 @@ describe("POSPage register switch recovery", () => {
     saleControl.hasDraft = true;
     const page = await renderPage();
     requestRegister(REGISTER_B);
-    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
+    ).toBeInTheDocument();
     await page.reportState({ blocked: true });
 
     const confirm = screen.queryByRole("button", { name: "Сохранить чек и перейти" });
@@ -248,7 +252,9 @@ describe("POSPage register switch recovery", () => {
     saleControl.hasDraft = true;
     const page = await renderPage();
     requestRegister(REGISTER_B);
-    expect(screen.getByRole("dialog", { name: "Перейти на другую кассу?" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Перейти на другую кассу?" }),
+    ).toBeInTheDocument();
     await page.refreshRegisters([REGISTER_A, REGISTER_C]);
 
     const confirm = screen.queryByRole("button", { name: "Сохранить чек и перейти" });
