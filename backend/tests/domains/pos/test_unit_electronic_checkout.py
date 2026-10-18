@@ -387,7 +387,7 @@ async def test_attempt_bindings_cannot_be_changed_or_deleted(
     assert await financial_facts(db_session) == before
 
 
-async def test_test_sale_cannot_bind_electronic_plan(db_session: AsyncSession) -> None:
+async def test_training_sale_cannot_save_electronic_plan(db_session: AsyncSession) -> None:
     request = await intent_request(db_session)
     await db_session.execute(
         text("UPDATE sale SET is_test=true WHERE id=:sale"), {"sale": request.request.sale_id}
@@ -400,10 +400,9 @@ async def test_test_sale_cannot_bind_electronic_plan(db_session: AsyncSession) -
             )
         }
     )
-    await save(db_session, request)
     before = await financial_facts(db_session)
-    with pytest.raises(BusinessRuleError):
-        await binding(db_session, request, "bind")
+    with pytest.raises(BusinessRuleError, match="Physical test sales do not support payment plans"):
+        await save(db_session, request)
     assert await financial_facts(db_session) == before
 
 
