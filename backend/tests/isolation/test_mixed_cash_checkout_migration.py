@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.isolation.test_physical_cash_checkout_migration import (
-    electronic_checkout_migration,
+    downgrade_electronic_for_roundtrip,
     mixed_cash_refund_migration,
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
@@ -22,6 +22,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     payment_component_migration,
     physical_disposition_migration,
     refund_payment_component_migration,
+    upgrade_electronic_after_roundtrip,
 )
 
 FUNCTIONS = text(
@@ -183,7 +184,7 @@ async def test_mixed_completion_constraints_cover_marker_and_both_ledgers(
 
 
 def _downgrade_payment_journal_dependencies() -> None:
-    electronic_checkout_migration().downgrade()
+    downgrade_electronic_for_roundtrip()
     refund_payment_component_migration().downgrade()
     payment_component_migration().downgrade()
 
@@ -191,7 +192,7 @@ def _downgrade_payment_journal_dependencies() -> None:
 def _upgrade_payment_journal_dependencies() -> None:
     payment_component_migration().upgrade()
     refund_payment_component_migration().upgrade()
-    electronic_checkout_migration().upgrade()
+    upgrade_electronic_after_roundtrip()
 
 
 async def test_disposable_roundtrip_restores_rows_guards_policies_and_acl_or_refuses_history(

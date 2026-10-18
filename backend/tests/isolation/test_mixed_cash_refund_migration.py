@@ -30,13 +30,14 @@ from tests.domains.inventory.test_unit_ledger import LedgerContext
 from tests.domains.pos.test_mixed_return_journal import MixedSource, mixed_source
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
-    electronic_checkout_migration,
+    downgrade_electronic_for_roundtrip,
     mixed_cash_refund_migration,
     mixed_quarantine_disposition_migration,
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
     physical_disposition_migration,
     refund_payment_component_migration,
+    upgrade_electronic_after_roundtrip,
 )
 
 db_session = receiving_session_fixture
@@ -409,13 +410,13 @@ def _assert_refund_payment_downgrade_refuses_history(connection: Connection) -> 
 
 
 def _downgrade_payment_journal_dependencies() -> None:
-    electronic_checkout_migration().downgrade()
+    downgrade_electronic_for_roundtrip()
     refund_payment_component_migration().downgrade()
 
 
 def _upgrade_payment_journal_dependencies() -> None:
     refund_payment_component_migration().upgrade()
-    electronic_checkout_migration().upgrade()
+    upgrade_electronic_after_roundtrip()
 
 
 async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuses_history(

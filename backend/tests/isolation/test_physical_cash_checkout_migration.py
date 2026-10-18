@@ -114,8 +114,30 @@ def electronic_checkout_migration() -> ModuleType:
     return module
 
 
-def downgrade_refund_for_roundtrip() -> None:
+def electronic_refund_read_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0213_unit_electronic_refund_read.py"
+    )
+    spec = importlib.util.spec_from_file_location("unit_electronic_refund_read", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def downgrade_electronic_for_roundtrip() -> None:
+    # Component-table roundtrips must explicitly restore their later read policies.
+    electronic_refund_read_migration().downgrade()
     electronic_checkout_migration().downgrade()
+
+
+def upgrade_electronic_after_roundtrip() -> None:
+    electronic_checkout_migration().upgrade()
+    electronic_refund_read_migration().upgrade()
+
+
+def downgrade_refund_for_roundtrip() -> None:
+    downgrade_electronic_for_roundtrip()
     refund_payment_component_migration().downgrade()
     payment_component_migration().downgrade()
     physical_disposition_migration().downgrade()
@@ -143,7 +165,7 @@ def upgrade_refund_after_roundtrip() -> None:
     physical_disposition_migration().upgrade()
     payment_component_migration().upgrade()
     refund_payment_component_migration().upgrade()
-    electronic_checkout_migration().upgrade()
+    upgrade_electronic_after_roundtrip()
 
 
 def physical_disposition_migration() -> ModuleType:
