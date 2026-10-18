@@ -87,7 +87,10 @@ function Invoke-LocalLauncher {
         [Parameter(Mandatory = $true)][string[]]$Arguments
     )
 
-    $powershellExecutable = (Get-Process -Id $PID).Path
+    $powershellName = if ($PSEdition -eq "Desktop") { "powershell.exe" }
+    elseif ($env:OS -eq "Windows_NT") { "pwsh.exe" }
+    else { "pwsh" }
+    $powershellExecutable = Join-Path $PSHOME $powershellName
     $externalArguments = @("-NoProfile")
     if ($env:OS -eq "Windows_NT") {
         $externalArguments += @("-ExecutionPolicy", "Bypass")

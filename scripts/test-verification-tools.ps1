@@ -11,7 +11,11 @@ $whitespaceScript = Join-Path $PSScriptRoot "check-untracked-whitespace.ps1"
 $localLauncherScript = Join-Path $PSScriptRoot "start-local-demo-admin.ps1"
 $currentMainLauncherScript = Join-Path $PSScriptRoot "start-current-main-demo.ps1"
 $cmdLauncher = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) "Start-Aurum-Pharma-Admin.cmd"
-$powershellExecutable = (Get-Process -Id $PID).Path
+# Keep child fixtures on the same engine even when process metadata is hidden.
+$powershellName = if ($PSEdition -eq "Desktop") { "powershell.exe" }
+elseif ($env:OS -eq "Windows_NT") { "pwsh.exe" }
+else { "pwsh" }
+$powershellExecutable = Join-Path $PSHOME $powershellName
 $script:assertions = 0
 
 function Get-Scope {
@@ -251,6 +255,28 @@ Assert-Count -Actual $autoCatalogE2E -Expected 1 -Because "Auto schedules one is
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-flow.spec.ts" -Because "Auto passes the catalog flow to Playwright"
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-import.spec.ts" -Because "Auto passes the catalog import flow to Playwright"
 
+foreach ($metadataFailure in @("missing", "denied")) {
+    $metadataPlan = & {
+        param([string]$Failure)
+
+        function Get-Process {
+            param([int]$Id)
+            if ($Failure -eq "denied") { throw "Process metadata is unavailable." }
+            return [pscustomobject]@{ Path = $null }
+        }
+        function docker { throw "PlanOnly must not invoke Docker." }
+        function poetry { throw "PlanOnly must not invoke Poetry." }
+        Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py")
+    } $metadataFailure
+
+    foreach ($id in @("diff-untracked", "backend-tests", "backend-static", "e2e")) {
+        $metadataStep = @($metadataPlan.steps | Where-Object { $_.id -eq $id })
+        Assert-Count -Actual $metadataStep -Expected 1 -Because "$id is planned when process metadata is $metadataFailure"
+        Assert-Equal -Actual $metadataStep[0].command -Expected $powershellExecutable -Because "$id preserves the current PowerShell when process metadata is $metadataFailure"
+        Assert-Equal -Actual (Test-Path -LiteralPath $metadataStep[0].command -PathType Leaf) -Expected $true -Because "$id uses an existing executable when process metadata is $metadataFailure"
+    }
+}
+
 $poetryCatalog = Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py") -BackendRuntime Poetry
 foreach ($check in @(
     @{ Id = "backend-tests"; Check = "Tests" },
@@ -457,6 +483,16 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
         $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
         Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher works without a saved website URL"
         Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=" -Because "missing website configuration remains unset in the child"
+
+        $metadataLauncherCode = @'
+function Get-Process { param([int]$Id); [pscustomobject]@{ Path = $null } }
+& '__LAUNCHER__' -DryRun -NoBrowser
+'@
+        $metadataLauncherCode = $metadataLauncherCode.Replace("__LAUNCHER__", $fixtureLauncher.Replace("'", "''"))
+        $metadataLauncherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($metadataLauncherCode))
+        $metadataLauncherOutput = & $powershellExecutable -NoProfile -EncodedCommand $metadataLauncherEncoded
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the actual launcher starts its child without process metadata"
+        Assert-Contains -Actual @($metadataLauncherOutput) -Expected "FIXTURE_WEBSITE=" -Because "the metadata-independent launcher preserves the child environment"
 
         [IO.File]::WriteAllText($fixtureWebsiteUrl, "https://saved.example.test/`n", $encoding)
         $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
@@ -704,6 +740,9 @@ finally {
     }
 }
 
-& (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+& {
+    function Get-Process { param([int]$Id); return [pscustomobject]@{ Path = $null } }
+    & (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+}
 Write-Host "Verification tooling self-test passed: $script:assertions assertions." -ForegroundColor Green
 exit 0

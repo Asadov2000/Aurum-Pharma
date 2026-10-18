@@ -85,7 +85,11 @@ $shellArguments = @('-NoProfile')
 if ($env:OS -eq 'Windows_NT') { $shellArguments += @('-ExecutionPolicy', 'Bypass') }
 $shellArguments += @('-File', $runner, '-Check', 'Tests', '-PlanOnly',
     'tests/domains/catalog', 'tests/isolation/test_catalog_rls.py', '-q', '--tb=short')
-$externalJson = & (Get-Process -Id $PID).Path @shellArguments
+$powershellName = if ($PSEdition -eq "Desktop") { "powershell.exe" }
+elseif ($env:OS -eq "Windows_NT") { "pwsh.exe" }
+else { "pwsh" }
+$powershellExecutable = Join-Path $PSHOME $powershellName
+$externalJson = & $powershellExecutable @shellArguments
 Assert-True -Condition ($LASTEXITCODE -eq 0) -Because "the actual -File entrypoint accepts multiple targets and options"
 $externalPlan = ($externalJson -join [Environment]::NewLine) | ConvertFrom-Json
 Assert-True -Condition ((@($externalPlan.commands[0]) -join '|') -ceq ($pytestCommand -join '|')) -Because "external PowerShell binding preserves the complete pytest command"
