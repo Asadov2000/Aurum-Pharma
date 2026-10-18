@@ -367,6 +367,25 @@ for (const zero of [false, true]) {
       await panel
         .getByRole("button", { name: "Проверить сохранённое решение", exact: true })
         .click();
+      await expect(dialog.getByRole("alert")).toHaveText(
+        "Не удалось связаться с сервером. Проверьте соединение.",
+      );
+      // Opening the recovery modal checks automatically. Drain queued checks
+      // (including StrictMode's second effect) before enabling the manual recovery.
+      const recoveryLockName = await page.evaluate(() =>
+        Object.keys(localStorage).find((key) =>
+          key.startsWith("customerReturns:mixedDisposition:v1:"),
+        ),
+      );
+      expect(recoveryLockName).toBeDefined();
+      await expect
+        .poll(() =>
+          page.evaluate(async (lockName) => {
+            const { held, pending } = await navigator.locks.query();
+            return [...held, ...pending].filter((lock) => lock.name === lockName).length;
+          }, recoveryLockName),
+        )
+        .toBe(0);
       await expect(
         dialog.getByRole("button", { name: "Проверить результат", exact: true }),
       ).toBeEnabled();
