@@ -49,6 +49,7 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
+from app.domains.pos.draft_fefo import DraftDemand, plan_draft_fefo
 from app.domains.pos.mixed_cash_refund_read import (
     mixed_cash_refund_lines,
     mixed_cash_refund_snapshot,
@@ -3400,46 +3401,7 @@ class POSService:
             )
         self._assert_catalog_dispensing_allowed(catalog)
 
-        inventory = InventoryService(InventoryRepository(self.repo.session))
-        selection = await inventory.find_batches_fefo(
-            tenant_id=sale.tenant_id,
-            catalog_id=catalog_id,
-            branch_id=sale.branch_id,
-            qty_needed=qty,
-            today=today,
-        )
-        if selection.total_picked < qty:
-            raise BusinessRuleError(
-                "Insufficient stock for this catalog item",
-                details={
-                    "requested": str(qty),
-                    "available": str(selection.total_picked),
-                },
-            )
-        created: list[SaleItem] = []
-        for pick in selection.picks:
-            unit_price = pick.batch.sale_price or catalog.base_price or Decimal("0")
-            if unit_price <= 0:
-                raise BusinessRuleError(
-                    "Catalog item has no valid sale price",
-                    details={"catalog_id": str(catalog_id)},
-                )
-            total_price = (unit_price * pick.qty).quantize(Decimal("0.01"))
-            position = await self.repo.next_item_position(sale.id)
-            item = await self.repo.insert_item(
-                tenant_id=sale.tenant_id,
-                sale_id=sale.id,
-                catalog_id=catalog_id,
-                batch_id=pick.batch.id,
-                qty=pick.qty,
-                unit_price=unit_price,
-                total_price=total_price,
-                position=position,
-            )
-            created.append(item)
-
-        # Recompute sale total
-        await self._recompute_total(sale)
+        created = await self._reallocate_draft_catalog(sale, catalog, added_qty=qty, today=today)
         requires_rx = catalog.dispensing_type == "prescription"
         return created, requires_rx
 
@@ -3467,10 +3429,9 @@ class POSService:
         item = await self.repo.get_item(item_id)
         if item is None or item.sale_id != sale_id:
             raise NotFoundError("Sale item not found")
-        total_price = (item.unit_price * qty).quantize(Decimal("0.01"))
-        updated = await self.repo.update_item(item, qty=qty, total_price=total_price)
-        await self._recompute_total(sale)
-        return updated
+        catalog = await self._draft_catalog(sale, item.catalog_id)
+        await self._reallocate_draft_catalog(sale, catalog, changed_item=item, changed_qty=qty)
+        return item
 
     async def delete_item(
         self,
@@ -3492,10 +3453,129 @@ class POSService:
         )
         self._assert_draft(sale)
         await self._assert_sale_cart_mutable(sale.id)
-        rows = await self.repo.delete_item(item_id, sale_id=sale_id)
-        if rows == 0:
+        item = await self.repo.get_item(item_id)
+        if item is None or item.sale_id != sale_id:
             raise NotFoundError("Sale item not found")
-        await self._recompute_total(sale)
+        catalog = await self._draft_catalog(sale, item.catalog_id)
+        await self._reallocate_draft_catalog(sale, catalog, removed_item=item)
+
+    async def _draft_catalog(self, sale: Sale, catalog_id: UUID) -> TenantCatalog:
+        catalog = await self.repo.session.get(TenantCatalog, catalog_id)
+        if catalog is None or catalog.tenant_id != sale.tenant_id:
+            raise NotFoundError("Catalog item not found")
+        return catalog
+
+    async def _reallocate_draft_catalog(
+        self,
+        sale: Sale,
+        catalog: TenantCatalog,
+        *,
+        added_qty: Decimal | None = None,
+        changed_item: SaleItem | None = None,
+        changed_qty: Decimal | None = None,
+        removed_item: SaleItem | None = None,
+        today: date | None = None,
+    ) -> list[SaleItem]:
+        items = await self.repo.list_items(sale.id)
+        demands = [
+            DraftDemand(
+                item,
+                (
+                    changed_qty
+                    if (
+                        changed_item is not None
+                        and item.id == changed_item.id
+                        and changed_qty is not None
+                    )
+                    else item.qty
+                ),
+                item.discount_amount,
+            )
+            for item in items
+            if item.catalog_id == catalog.id
+            and (removed_item is None or item.id != removed_item.id)
+        ]
+        if added_qty is not None:
+            demands.append(DraftDemand(None, added_qty, Decimal("0")))
+        if any(demand.quantity <= 0 for demand in demands):
+            raise BusinessRuleError("Draft item quantity must be positive")
+        needed = sum((demand.quantity for demand in demands), Decimal("0"))
+        inventory = InventoryService(InventoryRepository(self.repo.session))
+        selection = await inventory.find_batches_fefo(
+            tenant_id=sale.tenant_id,
+            catalog_id=catalog.id,
+            branch_id=sale.branch_id,
+            qty_needed=needed,
+            today=today,
+        )
+        if selection.total_picked < needed:
+            if removed_item is not None:
+                async with self.repo.session.begin_nested():
+                    await self.repo.delete_item(removed_item.id, sale_id=sale.id)
+                    await self._recompute_total(sale)
+                return []
+            if (
+                changed_item is not None
+                and changed_qty is not None
+                and changed_qty < changed_item.qty
+            ):
+                # Other sales or expiry may leave the draft oversubscribed. Let
+                # the cashier reduce it progressively without repricing other rows.
+                with localcontext(Context(prec=28, rounding=ROUND_HALF_EVEN)):
+                    gross = (changed_item.unit_price * changed_qty).quantize(Decimal("0.01"))
+                    total = gross - changed_item.discount_amount
+                if total < 0:
+                    raise BusinessRuleError("Draft discount exceeds the reduced line amount")
+                async with self.repo.session.begin_nested():
+                    await self.repo.update_item(changed_item, qty=changed_qty, total_price=total)
+                    await self._recompute_total(sale)
+                return []
+            raise BusinessRuleError(
+                "Insufficient stock for this catalog item",
+                details={"requested": str(needed), "available": str(selection.total_picked)},
+            )
+        planned = plan_draft_fefo(demands, selection.picks, catalog.base_price)
+        created: list[SaleItem] = []
+        # Complete planning before the first write; keep original IDs on first slices.
+        async with self.repo.session.begin_nested():
+            if removed_item is not None:
+                await self.repo.delete_item(removed_item.id, sale_id=sale.id)
+            position = max((item.position for item in items), default=0)
+            for part in planned:
+                original = part.demand.item
+                if original is not None and part.first:
+                    await self.repo.update_item(
+                        original,
+                        batch_id=part.pick.batch.id,
+                        qty=part.quantity,
+                        unit_price=part.unit_price,
+                        total_price=part.total_price,
+                        discount_amount=part.discount,
+                    )
+                    continue
+                position += 1
+                item = await self.repo.insert_item(
+                    tenant_id=sale.tenant_id,
+                    sale_id=sale.id,
+                    catalog_id=catalog.id,
+                    batch_id=part.pick.batch.id,
+                    qty=part.quantity,
+                    unit_price=part.unit_price,
+                    total_price=part.total_price,
+                    discount_amount=part.discount,
+                    position=position,
+                )
+                if original is None:
+                    created.append(item)
+                else:
+                    await self.repo.copy_item_prescriptions(
+                        tenant_id=sale.tenant_id,
+                        sale_id=sale.id,
+                        source_item_id=original.id,
+                        target_item_id=item.id,
+                    )
+            await self._recompute_total(sale)
+        return created
 
     async def add_item_command(
         self,

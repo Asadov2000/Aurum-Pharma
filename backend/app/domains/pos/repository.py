@@ -1257,6 +1257,47 @@ class POSRepository:
         await self.session.refresh(pl)
         return pl
 
+    async def copy_item_prescriptions(
+        self, *, tenant_id: UUID, sale_id: UUID, source_item_id: UUID, target_item_id: UUID
+    ) -> None:
+        target_catalog = (
+            select(SaleItem.catalog_id)
+            .where(
+                SaleItem.tenant_id == tenant_id,
+                SaleItem.sale_id == sale_id,
+                SaleItem.id == target_item_id,
+            )
+            .correlate(None)
+            .scalar_subquery()
+        )
+        records = await self.session.scalars(
+            select(PrescriptionLog)
+            .join(SaleItem, SaleItem.id == PrescriptionLog.sale_item_id)
+            .where(
+                PrescriptionLog.tenant_id == tenant_id,
+                PrescriptionLog.sale_id == sale_id,
+                PrescriptionLog.sale_item_id == source_item_id,
+                SaleItem.tenant_id == tenant_id,
+                SaleItem.sale_id == sale_id,
+                SaleItem.catalog_id == target_catalog,
+            )
+        )
+        for source in records:
+            self.session.add(
+                PrescriptionLog(
+                    tenant_id=tenant_id,
+                    sale_id=sale_id,
+                    sale_item_id=target_item_id,
+                    prescription_number=source.prescription_number,
+                    doctor_name=source.doctor_name,
+                    doctor_license=source.doctor_license,
+                    patient_name=source.patient_name,
+                    notes=source.notes,
+                    created_by=source.created_by,
+                )
+            )
+        await self.session.flush()
+
     async def list_prescriptions(self, sale_id: UUID) -> list[PrescriptionLog]:
         stmt = select(PrescriptionLog).where(PrescriptionLog.sale_id == sale_id)
         result = await self.session.execute(stmt)

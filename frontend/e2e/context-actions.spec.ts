@@ -33,7 +33,7 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   const item = await seedCatalogItem(api, uniqueName("Cart product"), "10.00");
   const batchA = uniqueName("Cart A");
   const batchB = uniqueName("Cart B");
-  await seedAcceptedBatch(api, {
+  const firstBatch = await seedAcceptedBatch(api, {
     branchId: branch.id,
     supplierId: supplier.id,
     catalogId: item.id,
@@ -62,7 +62,22 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   await page.getByLabel("Наличные в кассе на начало смены").fill("0");
   await page.getByRole("button", { name: "Открыть смену" }).click();
   await expect(page.getByText("Смена открыта")).toBeVisible();
+  const added = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      /\/api\/v1\/sales\/[^/]+\/items$/.test(new URL(response.url()).pathname) &&
+      response.ok(),
+  );
   await addPosItemToCart(page, { brandName: item.brand_name, qty: "3", expectedCartItems: 2 });
+  const addedResponse = await added;
+  const initialItems = (
+    (await addedResponse.json()) as {
+      items: Array<{ id: string; batch_id: string }>;
+    }
+  ).items;
+  const originalFirstId = initialItems.find((line) => line.batch_id === firstBatch.id)?.id;
+  expect(originalFirstId).toBeDefined();
+  const salePath = new URL(addedResponse.url()).pathname.replace(/\/items$/, "");
   const first = page.getByTestId("cart-item").filter({ hasText: batchA });
   const second = page.getByTestId("cart-item").filter({ hasText: batchB });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -133,20 +148,42 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   const deleted = page.waitForResponse(
     (response) =>
       response.request().method() === "DELETE" &&
-      /\/api\/v1\/sales\/[^/]+\/items\/[^/]+$/.test(new URL(response.url()).pathname) &&
+      new URL(response.url()).pathname === `${salePath}/items/${originalFirstId}` &&
+      response.ok(),
+  );
+  const reallocated = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === salePath &&
       response.ok(),
   );
   await menu.getByRole("menuitem", { name: "Удалить из чека", exact: true }).click();
   await deleted;
-  await expect(first).toHaveCount(0);
+  const remaining = (await (await reallocated).json()) as {
+    total_amount: string;
+    items: Array<{ id: string; batch_id: string; qty: string }>;
+  };
+  expect(remaining.items.map((line) => line.id)).not.toContain(originalFirstId);
+  expect(remaining.items.find((line) => line.id === changed.id)?.batch_id).toBe(firstBatch.id);
+  expect(remaining.items.map((line) => [line.batch_id, Number(line.qty)]).sort()).toEqual(
+    [
+      [firstBatch.id, 1],
+      [secondBatch.id, 1],
+    ].sort(),
+  );
+  expect(Number(remaining.total_amount)).toBe(20);
+  await expect(first).toBeVisible();
   await expect(second).toBeVisible();
-  await expect(page.getByTestId("cart-item")).toHaveCount(1);
+  await expect(page.getByTestId("cart-item")).toHaveCount(2);
+  await expect(first.getByRole("button", { name: "Количество", exact: true })).toHaveText("1");
+  await expect(second.getByRole("button", { name: "Количество", exact: true })).toHaveText("1");
   for (const mode of ["Сенсор", "Клавиши"]) {
     await page
       .getByRole("group", { name: "Режим кассы", exact: true })
       .getByRole("button", { name: mode, exact: true })
       .click();
-    await expect(second.getByText(item.brand_name, { exact: true })).toBeVisible();
+    const productGroup = page.getByRole("listitem").filter({ has: second });
+    await expect(productGroup.getByText(item.brand_name, { exact: true })).toBeVisible();
     await expect(second.getByText(batchB, { exact: false })).toBeVisible();
     await expect
       .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))

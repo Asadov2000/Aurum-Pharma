@@ -585,7 +585,9 @@ test.describe("POS sale (owner)", () => {
     }
   });
 
-  test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {
+  test("Repeated scans retain cumulative FEFO prices through checkout recovery", async ({
+    page,
+  }) => {
     // Heaviest spec: seeds two accepted batches (~16 API calls) then drives
     // the whole sale UI. 60s is tight when the entire suite is hammering the
     // stack sequentially — give it headroom.
@@ -600,17 +602,16 @@ test.describe("POS sale (owner)", () => {
     const supplier = await seedSupplier(api, uniqueName("POS-Supp"));
     const item = await seedCatalogItem(api, uniqueName("POS-Med"), "20.00");
 
-    // Two batches, both qty=5, different expiries — FEFO must pull from
-    // the earlier-expiring batch first.
+    // A single earlier unit costs 10; later stock costs 20.
     const sooner = isoDateInDays(30);
     const later = isoDateInDays(180);
     await seedAcceptedBatch(api, {
       branchId: branch.id,
       supplierId: supplier.id,
       catalogId: item.id,
-      qty: "5",
-      purchasePrice: "15.00",
-      salePrice: "20.00",
+      qty: "1",
+      purchasePrice: "5.00",
+      salePrice: "10.00",
       expiresAt: sooner,
       batchNumber: "FEFO-A",
     });
@@ -640,24 +641,30 @@ test.describe("POS sale (owner)", () => {
 
     // The redesigned register shows the search directly (the draft is created
     // lazily on the first add — no "+ Новая продажа" step up front).
-    // Pick the catalog item and ask for 7 units → FEFO splits 5 + 2.
+    // Two separate scans must consume the earlier unit only once.
     const searchKey = catalogSearchKey(item.brand_name);
     await addPosItemToCart(page, {
       brandName: item.brand_name,
-      qty: "7",
+      qty: "1",
+      expectedCartItems: 1,
+      searchKey,
+    });
+    await addPosItemToCart(page, {
+      brandName: item.brand_name,
+      qty: "1",
       expectedCartItems: 2,
       searchKey,
     });
 
-    // Two items × 20 TJS each line = 140 TJS total to settle.
+    // Draft and checkout must both charge 10 + 20 = 30 TJS.
     await expect(page.getByText(/К оплате/)).toBeVisible();
-    await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("30.00", { exact: false }).first()).toBeVisible();
 
     // The tender is staged only in memory. Commit the complete sale command,
     // then lose both its HTTP response and the first recovery lookup. The POS
     // must stop in a safe uncertain state until a reload can reconcile the
     // exact operation without another checkout POST.
-    await payPosSaleCash(page, "140.00");
+    await payPosSaleCash(page, "30.00");
     let checkoutRequests = 0;
     let recoveryRequests = 0;
     let blockRecoveryLookup = true;
@@ -715,16 +722,16 @@ test.describe("POS sale (owner)", () => {
     const receipt = page.locator(".receipt-print");
     await expect(receipt).toBeVisible({ timeout: 15_000 });
     await expect(receipt.getByText("КАССОВЫЙ ЧЕК")).toBeVisible();
-    // FEFO split the 7 units into two lines, so the name appears twice.
+    // The two separately scanned units remain distinct receipt lines.
     await expect(receipt.getByText(new RegExp(item.brand_name)).first()).toBeVisible();
-    // ИТОГО line carries the 140.00 total.
+    // ИТОГО line carries the 30.00 total.
     await expect(receipt.getByText("ИТОГО")).toBeVisible();
-    await expect(receipt.getByText(/140\.00/).first()).toBeVisible();
+    await expect(receipt.getByText(/30\.00/).first()).toBeVisible();
     // Width selector persists per device/register.
     await page.getByLabel("Ширина чека").selectOption("58");
     await page.getByRole("button", { name: "Закрыть", exact: true }).click();
 
-    // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
+    // ---- Verify exactly one unit was spent from each batch ----
     await page.goto("/batches");
     await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeVisible();
     const batchCatalogPicker = page.getByPlaceholder("Найти товар…");
@@ -746,6 +753,10 @@ test.describe("POS sale (owner)", () => {
     const tbody = page.locator("table tbody");
     await expect(tbody.locator("text=FEFO-A")).toBeVisible({ timeout: 15_000 });
     await expect(tbody.locator("text=FEFO-B")).toBeVisible();
+    const earlierRow = tbody.getByRole("row").filter({ hasText: "FEFO-A" });
+    const laterRow = tbody.getByRole("row").filter({ hasText: "FEFO-B" });
+    await expect(earlierRow).toContainText(/0 из 1/);
+    await expect(laterRow).toContainText(/4 из 5/);
   });
 });
 
