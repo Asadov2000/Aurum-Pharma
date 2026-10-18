@@ -491,6 +491,11 @@ AUDIT_DISPATCH = AUDIT_ANCHOR + """
 PATCHES = (
     ("assert_physical_checkout(uuid,uuid,boolean)", ASSERT_ANCHOR, ASSERT_DISPATCH),
     ("trg_physical_stock_checkout_binding()", STOCK_ANCHOR, STOCK_DISPATCH),
+    (
+        "trg_physical_stock_checkout_binding()",
+        " IF current_user<>'aurum_app' OR public.is_support_session()",
+        " IF session_user<>'aurum_app' OR public.is_support_session()",
+    ),
     ("trg_unit_payment_binding_fence()", FENCE_ANCHOR, FENCE_DISPATCH),
     ("trg_unit_cart_payment_boundary()", BOUNDARY_ANCHOR, BOUNDARY_DISPATCH),
     (
@@ -582,7 +587,9 @@ def upgrade() -> None:
         """)
     for signature, old, new in PATCHES:
         _replace(signature, old, new, upgrade=True)
+    # The trigger calls private helpers; authenticate the session, not its owner.
     _sql("""
+      ALTER FUNCTION public.trg_physical_stock_checkout_binding() SECURITY DEFINER;
       CREATE TRIGGER a00_tenant_access BEFORE INSERT OR UPDATE OR DELETE
         ON public.pos_unit_payment_attempt_binding FOR EACH ROW
         EXECUTE FUNCTION public.trg_enforce_tenant_access('pos');
@@ -618,6 +625,7 @@ def downgrade() -> None:
     """)
     for signature, old, new in reversed(PATCHES):
         _replace(signature, old, new, upgrade=False)
+    _sql("ALTER FUNCTION public.trg_physical_stock_checkout_binding() SECURITY INVOKER;")
     _sql(f"DROP TABLE public.{TABLE};")
     for signature in reversed(FUNCTIONS):
         _sql(f"DROP FUNCTION public.{signature};")

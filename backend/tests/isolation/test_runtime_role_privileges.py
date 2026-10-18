@@ -1401,7 +1401,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in cash_functions.values()
     )
     assert {name for name, row in cash_functions.items() if row["is_security_definer"]} == (
-        cash_names - {"trg_physical_stock_checkout_binding", "trg_physical_checkout_guard"}
+        cash_names - {"trg_physical_checkout_guard"}
     )
     mixed_names = {
         "assert_mixed_checkout",

@@ -49,12 +49,27 @@ COLUMNS = text(
 )
 
 
+def _assert_stock_binding_identity(connection: Connection, *, definer: bool) -> None:
+    row = connection.execute(
+        text(
+            "SELECT prosecdef,pg_get_functiondef(oid) AS definition FROM pg_proc "
+            "WHERE oid='public.trg_physical_stock_checkout_binding()'::regprocedure"
+        )
+    ).one()
+    assert row.prosecdef is definer
+    identity = "session_user" if definer else "current_user"
+    previous_identity = "current_user" if definer else "session_user"
+    assert f"{identity}<>'aurum_app'" in row.definition
+    assert f"{previous_identity}<>'aurum_app'" not in row.definition
+
+
 async def test_electronic_checkout_roundtrip_preserves_security_and_all_old_guards(
     maintenance_engine: AsyncEngine,
 ) -> None:
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+        _assert_stock_binding_identity(connection, definer=True)
         queries = (FUNCTIONS, RELATIONS, POLICIES, COLUMNS)
         before = [connection.execute(query).all() for query in queries]
         with Operations.context(MigrationContext.configure(connection)):
@@ -65,6 +80,7 @@ async def test_electronic_checkout_roundtrip_preserves_security_and_all_old_guar
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
             else:
                 electronic_checkout_migration().downgrade()
+                _assert_stock_binding_identity(connection, definer=False)
                 relation = connection.scalar(
                     text("SELECT to_regclass('public.pos_unit_payment_attempt_binding')")
                 )
@@ -78,6 +94,7 @@ async def test_electronic_checkout_roundtrip_preserves_security_and_all_old_guar
                 )
                 assert nullable == "NO"
                 electronic_checkout_migration().upgrade()
+                _assert_stock_binding_identity(connection, definer=True)
         assert [connection.execute(query).all() for query in queries] == before
 
     async with maintenance_engine.connect() as connection:
