@@ -87,5 +87,17 @@ class PhysicalCashRefundRepository:
         await self.session.flush()
 
     async def validate_completion(self) -> None:
+        await self.session.execute(
+            text(
+                "SET CONSTRAINTS unit_refund_component_complete, "
+                "unit_refund_payment_components_complete IMMEDIATE"
+            )
+        )
+        await self.session.execute(
+            text(
+                "SET CONSTRAINTS unit_refund_component_complete, "
+                "unit_refund_payment_components_complete DEFERRED"
+            )
+        )
         await self.session.execute(text("SET CONSTRAINTS physical_cash_refund_complete IMMEDIATE"))
         await self.session.execute(text("SET CONSTRAINTS physical_cash_refund_complete DEFERRED"))

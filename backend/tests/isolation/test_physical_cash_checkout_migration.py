@@ -92,7 +92,19 @@ def payment_component_migration() -> ModuleType:
     return module
 
 
+def refund_payment_component_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0211_unit_refund_payment_components.py"
+    )
+    spec = importlib.util.spec_from_file_location("unit_refund_payment_components", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_refund_for_roundtrip() -> None:
+    refund_payment_component_migration().downgrade()
     payment_component_migration().downgrade()
     physical_disposition_migration().downgrade()
     mixed_quarantine_disposition_migration().downgrade()
@@ -118,6 +130,7 @@ def upgrade_refund_after_roundtrip() -> None:
     mixed_quarantine_disposition_migration().upgrade()
     physical_disposition_migration().upgrade()
     payment_component_migration().upgrade()
+    refund_payment_component_migration().upgrade()
 
 
 def physical_disposition_migration() -> ModuleType:

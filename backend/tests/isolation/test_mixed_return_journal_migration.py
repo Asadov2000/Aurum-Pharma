@@ -42,6 +42,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
     physical_disposition_migration,
+    refund_payment_component_migration,
 )
 
 db_session = receiving_session_fixture
@@ -453,6 +454,19 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 assert connection.execute(guards).all() == original_guards
                 return
+            if connection.scalar(
+                text(
+                    "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund "
+                    "WHERE payment_journal_version=2)"
+                )
+            ):
+                with pytest.raises(DBAPIError) as denied:
+                    with connection.begin_nested():
+                        refund_payment_component_migration().downgrade()
+                assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+                assert connection.execute(guards).all() == original_guards
+                return
+            refund_payment_component_migration().downgrade()
             # Keep physical history; suspend only the later audit insertion.
             physical = physical_disposition_migration()
             physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
@@ -471,6 +485,7 @@ async def test_migration_roundtrip_preserves_guards_acl_or_refuses_committed_his
             mixed_quarantine_read_migration().upgrade()
             mixed_quarantine_disposition_migration().upgrade()
             physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
+            refund_payment_component_migration().upgrade()
             assert connection.execute(guards).all() == original_guards
             for table in TABLES:
                 assert (

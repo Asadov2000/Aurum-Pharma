@@ -26,6 +26,8 @@ from app.domains.pos.physical_return_journal_service import (
     physical_return_fingerprint,
 )
 from app.domains.pos.unit_contracts import EXACT_CONTEXT
+from app.domains.pos.unit_refund_payment_repository import UnitRefundPaymentRepository
+from app.domains.pos.unit_refund_payment_service import UnitRefundPaymentService
 
 
 def _normalize_reason(
@@ -60,13 +62,22 @@ def _check_expected_amount(actual: Decimal, expected: Decimal | None) -> None:
         raise ConflictError("Refund amount changed; review the return again")
 
 
-def _replay(
-    existing: PhysicalCashRefund, fingerprint: str, expected: Decimal | None
+async def _replay(
+    repository: PhysicalCashRefundRepository,
+    existing: PhysicalCashRefund,
+    fingerprint: str,
+    expected: Decimal | None,
 ) -> PhysicalCashRefundResultV3:
     if existing.request_hash != fingerprint:
         raise ConflictError("Refund operation was used for a different request")
     result = PhysicalCashRefundResultV3.model_validate(existing.result_payload)
     _check_expected_amount(result.total_amount, expected)
+    await UnitRefundPaymentService(UnitRefundPaymentRepository(repository.session)).validate_saved(
+        existing.payment_journal_version, result
+    )
+    await PhysicalReturnJournalRepository(repository.session).assert_actor(
+        result.tenant_id, result.actor_id, result.branch_id
+    )
     return result
 
 
@@ -170,7 +181,7 @@ class PhysicalCashRefundService:
                 raise BusinessRuleError("Completed original physical sale required")
             existing = await self.repository.get(tenant_id, operation_id)
             if existing is not None:
-                return _replay(existing, fingerprint, expected_total_amount)
+                return await _replay(self.repository, existing, fingerprint, expected_total_amount)
             if await journal.get_command(tenant_id, operation_id) is not None:
                 raise ConflictError("Return operation already exists without a cash refund")
             shift = await self.repository.lock_shift(tenant_id, shift_id)
@@ -282,6 +293,7 @@ class PhysicalCashRefundService:
                     actor_id=actor_id,
                     payment_id=operation_id,
                     request_hash=fingerprint,
+                    payment_journal_version=2,
                     reason_code=reason_code,
                     comment=comment,
                     review_hash=expected_revision_hash,
@@ -297,10 +309,18 @@ class PhysicalCashRefundService:
                 payment_id=operation_id,
                 amount=received.total_amount,
             )
-            await self.repository.complete_sale(sale, receipt)
-            await self.repository.validate_completion()
-            await journal.assert_actor(tenant_id, actor_id, parent.branch_id)
+            await self._complete_payout(sale, result)
             return result
+
+    async def _complete_payout(self, sale: Sale, result: PhysicalCashRefundResultV3) -> None:
+        await UnitRefundPaymentService(
+            UnitRefundPaymentRepository(self.repository.session)
+        ).record_cash(result)
+        await self.repository.complete_sale(sale, result.receipt)
+        await self.repository.validate_completion()
+        await PhysicalReturnJournalRepository(self.repository.session).assert_actor(
+            result.tenant_id, result.actor_id, result.branch_id
+        )
 
     async def _receive_reviewed(
         self,

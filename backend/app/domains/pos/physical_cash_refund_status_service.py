@@ -20,6 +20,8 @@ from app.domains.pos.physical_cash_refund_status_schemas import (
 )
 from app.domains.pos.physical_return_journal_repository import PhysicalReturnJournalRepository
 from app.domains.pos.unit_cart_repository import UnitCartRepository
+from app.domains.pos.unit_refund_payment_repository import UnitRefundPaymentRepository
+from app.domains.pos.unit_refund_payment_service import UnitRefundPaymentService
 
 
 class PhysicalCashRefundStatusService:
@@ -89,6 +91,9 @@ class PhysicalCashRefundStatusService:
             or receipt != physical_cash_refund_snapshot(returned_sale)
         ):
             raise AurumError("Stored physical refund is inconsistent")
+        await UnitRefundPaymentService(
+            UnitRefundPaymentRepository(self.repository.session)
+        ).validate_saved(marker.payment_journal_version, result)
         await authority.assert_actor(tenant_id, actor_id, parent.branch_id)
         return PhysicalRefundOperationCompleted(
             operation_id=operation_id,

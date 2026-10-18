@@ -35,6 +35,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_quarantine_read_migration,
     mixed_zero_return_migration,
     physical_disposition_migration,
+    refund_payment_component_migration,
 )
 
 db_session = receiving_session_fixture
@@ -437,6 +438,19 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                         mixed_cash_refund_migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
             else:
+                if connection.scalar(
+                    text(
+                        "SELECT EXISTS(SELECT 1 FROM pos_physical_cash_refund "
+                        "WHERE payment_journal_version=2)"
+                    )
+                ):
+                    with pytest.raises(DBAPIError) as denied:
+                        with connection.begin_nested():
+                            refund_payment_component_migration().downgrade()
+                    assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+                    assert connection.execute(functions).all() == before
+                    return
+                refund_payment_component_migration().downgrade()
                 # Keep physical history; suspend only the later audit insertion.
                 physical = physical_disposition_migration()
                 physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
@@ -459,6 +473,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
                 physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
+                refund_payment_component_migration().upgrade()
             assert connection.execute(functions).all() == before
             assert connection.execute(relation).one() == original_relation
             assert connection.execute(policies).all() == original_policies

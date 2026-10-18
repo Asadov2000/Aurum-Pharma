@@ -26,6 +26,8 @@ from app.domains.pos.mixed_return_journal_schemas import MixedReturnJournalResul
 from app.domains.pos.mixed_return_journal_service import mixed_return_fingerprint
 from app.domains.pos.physical_return_allocation import PhysicalReturnSelection
 from app.domains.pos.unit_contracts import CheckoutPaymentV2
+from app.domains.pos.unit_refund_payment_repository import UnitRefundPaymentRepository
+from app.domains.pos.unit_refund_payment_service import UnitRefundPaymentService
 
 
 def _original(snapshot: MixedCashRefundStatusSnapshot) -> MixedCheckoutResultV4:
@@ -240,6 +242,9 @@ class MixedCashRefundStatusService:
             or not _receipt_lines_match(receipt, received, original)
         ):
             raise AurumError("Stored mixed refund is inconsistent")
+        await UnitRefundPaymentService(
+            UnitRefundPaymentRepository(self.repository.session)
+        ).validate_saved(marker.payment_journal_version, result)
         await authority.assert_actor(tenant_id, actor_id, parent.branch_id)
         return MixedRefundOperationCompleted(
             operation_id=operation_id,

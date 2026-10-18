@@ -41,6 +41,8 @@ from app.domains.pos.physical_cash_refund_service import (
     _validate_expected_amount,
 )
 from app.domains.pos.physical_return_allocation import PhysicalReturnSelection
+from app.domains.pos.unit_refund_payment_repository import UnitRefundPaymentRepository
+from app.domains.pos.unit_refund_payment_service import UnitRefundPaymentService
 
 
 def mixed_cash_refund_fingerprint(
@@ -78,13 +80,22 @@ def mixed_cash_refund_fingerprint(
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _replay(
-    existing: MixedCashRefund, fingerprint: str, expected: Decimal | None
+async def _replay(
+    repository: MixedCashRefundRepository,
+    existing: MixedCashRefund,
+    fingerprint: str,
+    expected: Decimal | None,
 ) -> MixedCashRefundResultV4:
     if existing.request_hash != fingerprint:
         raise ConflictError("Refund operation was used for a different request")
     result = MixedCashRefundResultV4.model_validate(existing.result_payload)
     _check_expected_amount(result.total_amount, expected)
+    await UnitRefundPaymentService(UnitRefundPaymentRepository(repository.session)).validate_saved(
+        existing.payment_journal_version, result
+    )
+    await MixedReturnJournalRepository(repository.session).assert_actor(
+        result.tenant_id, result.actor_id, result.branch_id
+    )
     return result
 
 
@@ -210,7 +221,7 @@ class MixedCashRefundService:
             existing = await self.repository.get(tenant_id, operation_id)
             if existing is not None:
                 await journal.assert_actor(tenant_id, actor_id, existing.branch_id)
-                return _replay(existing, fingerprint, expected_total_amount)
+                return await _replay(self.repository, existing, fingerprint, expected_total_amount)
             if await journal.get_command(tenant_id, operation_id) is not None:
                 raise ConflictError("Return operation already exists without a cash refund")
             checkout = await journal.get_checkout(tenant_id, parent_sale_id)
@@ -298,6 +309,7 @@ class MixedCashRefundService:
                     actor_id=actor_id,
                     payment_id=operation_id,
                     request_hash=fingerprint,
+                    payment_journal_version=2,
                     reason_code=reason_code,
                     comment=comment,
                     review_hash=expected_revision_hash,
@@ -314,6 +326,9 @@ class MixedCashRefundService:
                 payment_id=operation_id,
                 amount=received.total_amount,
             )
+            await UnitRefundPaymentService(
+                UnitRefundPaymentRepository(self.repository.session)
+            ).record_cash(result)
             await self.repository.complete_sale(sale, receipt)
             await self.repository.validate_completion()
             await journal.assert_actor(tenant_id, actor_id, parent.branch_id)
