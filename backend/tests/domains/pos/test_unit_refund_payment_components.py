@@ -459,8 +459,10 @@ async def test_partial_payouts_include_legacy_history_in_original_payment_limit(
             legacy.setattr(UnitRefundPaymentRepository, "insert", no_component)
         first = await partial(1, request.operation_id)
         await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        await db_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
     second = await partial(59, uuid4())
     await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    await db_session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
     original_amount = await db_session.scalar(
         text("SELECT amount FROM sale_payment WHERE sale_id=:id"),
         {"id": request.parent_sale_id},
