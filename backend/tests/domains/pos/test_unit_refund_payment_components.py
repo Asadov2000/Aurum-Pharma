@@ -111,7 +111,7 @@ async def read_status(
         actor_id=context.actor_id,
         allowed_branch_ids={context.stock.branch_id},
     )
-    assert isinstance(status, (PhysicalRefundOperationCompleted, MixedRefundOperationCompleted))
+    assert isinstance(status, PhysicalRefundOperationCompleted | MixedRefundOperationCompleted)
     return status
 
 
@@ -544,6 +544,6 @@ async def test_refund_only_actor_journals_and_recovers_another_cashiers_original
         actor_id=actor,
         allowed_branch_ids={context.stock.branch_id},
     )
-    assert isinstance(recovered, (PhysicalRefundOperationCompleted, MixedRefundOperationCompleted))
+    assert isinstance(recovered, PhysicalRefundOperationCompleted | MixedRefundOperationCompleted)
     assert recovered.receipt == result.receipt
     assert await journal(db_session) == before

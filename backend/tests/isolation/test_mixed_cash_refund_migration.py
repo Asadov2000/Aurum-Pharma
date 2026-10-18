@@ -400,6 +400,13 @@ async def test_mixed_cash_marker_rls_hides_other_branch_and_tenant_and_support_c
     assert await db_session.scalar(text("SELECT count(*) FROM pos_mixed_cash_refund")) == 0
 
 
+def _assert_refund_payment_downgrade_refuses_history(connection: Connection) -> None:
+    with pytest.raises(DBAPIError) as denied:
+        with connection.begin_nested():
+            refund_payment_component_migration().downgrade()
+    assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+
+
 async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuses_history(
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -444,10 +451,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                         "WHERE payment_journal_version=2)"
                     )
                 ):
-                    with pytest.raises(DBAPIError) as denied:
-                        with connection.begin_nested():
-                            refund_payment_component_migration().downgrade()
-                    assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+                    _assert_refund_payment_downgrade_refuses_history(connection)
                     assert connection.execute(functions).all() == before
                     return
                 refund_payment_component_migration().downgrade()
