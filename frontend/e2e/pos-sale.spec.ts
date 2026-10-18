@@ -564,7 +564,13 @@ test.describe("POS sale (owner)", () => {
         comment: null,
       });
 
-      const storedRefundAttempt = await api.get(`pos/refund-attempts/${refundAttempt.id}`);
+      // Retry only the final read on a connection reset, never a refund command.
+      const storedRefundAttempt = await api
+        .get(`pos/refund-attempts/${refundAttempt.id}`, { maxRetries: 1 })
+        .catch(() => {
+          // Transport errors can include authorization headers in their call log.
+          throw new Error("Refund attempt status read failed (ECONNRESET retry limit: 1)");
+        });
       expect(storedRefundAttempt.ok()).toBe(true);
       expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
 
