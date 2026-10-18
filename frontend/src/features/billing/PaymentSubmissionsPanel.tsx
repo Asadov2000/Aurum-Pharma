@@ -16,14 +16,11 @@ import {
   TR,
 } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 
 import { formatBillingDate, formatBillingDateTime, formatBillingMoney } from "./format";
-import { createOperationId } from "./operationId";
 import { usePaymentSubmissionsQuery, useWithdrawPaymentSubmission } from "./queries";
-import {
-  type TenantPaymentSubmission,
-  type TenantPaymentSubmissionStatus,
-} from "./types";
+import { type TenantPaymentSubmission, type TenantPaymentSubmissionStatus } from "./types";
 
 const PAGE_SIZE = 10;
 
@@ -142,11 +139,7 @@ export function PaymentSubmissionsPanel({
         </>
       ) : null}
 
-      <Modal
-        open={withdrawTarget !== null}
-        onClose={closeWithdraw}
-        title="Отозвать заявку"
-      >
+      <Modal open={withdrawTarget !== null} onClose={closeWithdraw} title="Отозвать заявку">
         {withdrawTarget ? (
           <div className="space-y-4">
             <p className="text-sm text-foreground-secondary">
@@ -164,11 +157,7 @@ export function PaymentSubmissionsPanel({
               </p>
             ) : null}
             <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-              <Button
-                variant="secondary"
-                disabled={mutation.isPending}
-                onClick={closeWithdraw}
-              >
+              <Button variant="secondary" disabled={mutation.isPending} onClick={closeWithdraw}>
                 Оставить заявку
               </Button>
               <Button
@@ -265,7 +254,8 @@ function SubmissionHistory({
                   {submission.invoice_number}
                 </p>
                 <p className="mt-1 text-xs text-foreground-muted">
-                  {formatBillingDate(submission.paid_at)} · {maskedReference(submission.reference_suffix)}
+                  {formatBillingDate(submission.paid_at)} ·{" "}
+                  {maskedReference(submission.reference_suffix)}
                 </p>
               </div>
               <SubmissionStatus submission={submission} />

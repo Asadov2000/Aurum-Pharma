@@ -6,8 +6,8 @@ import { z } from "zod";
 import { Button, FormError, Input, Label, Modal, Select, Textarea } from "@/components/ui";
 import { formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 
-import { createOperationId } from "./operationId";
 import { minimumPricingLocalInput, parsePricingLocalInput } from "./pricingTime";
 import {
   useActivatePlatformPricingPrice,

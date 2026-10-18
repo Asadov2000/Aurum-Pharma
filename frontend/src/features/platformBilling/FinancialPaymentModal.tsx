@@ -16,8 +16,8 @@ import {
 } from "@/components/ui";
 import { formatBillingDate, formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 
-import { createOperationId } from "./operationId";
 import {
   platformBillingKeys,
   useApprovePlatformBankPayment,
@@ -165,11 +165,7 @@ export function RegisterPaymentModal({
   });
 
   return (
-    <Modal
-      open={open}
-      onClose={close}
-      title="Регистрация банковского платежа"
-    >
+    <Modal open={open} onClose={close} title="Регистрация банковского платежа">
       <form className="space-y-4" noValidate onSubmit={submit}>
         <div className="rounded-lg border border-info/25 bg-info-subtle px-3 py-2 text-sm text-info-foreground">
           Система зарегистрирует заявление. Деньги будут учтены только после проверки другим
