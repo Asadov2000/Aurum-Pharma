@@ -445,6 +445,7 @@ async def test_reallocation_does_not_change_other_catalog_positions(
         movement_type="incoming",
         qty_delta=Decimal("5"),
     )
+    await db_session.refresh(batch)
     other_rows, _ = await original.service.add_item(
         sale_id=original.sale.id, catalog_id=other.id, qty=Decimal("1")
     )
@@ -541,6 +542,7 @@ async def test_shortage_allows_progressive_reduction_until_fefo_fits(
             movement_type="write_off",
             qty_delta=Decimal("-1"),
         )
+        await db_session.refresh(batch)
     before = await facts(db_session, original)
     untouched = [row for row in before["items"] if row["id"] != str(target.id)]
     if mutation == "delete":
@@ -601,6 +603,7 @@ async def test_zero_stock_draft_can_be_emptied_one_row_at_a_time(
             movement_type="write_off",
             qty_delta=-Decimal(quantity),
         )
+        await db_session.refresh(batch)
     before = await facts(db_session, original)
     for row in await original.service.repo.list_items(original.sale.id):
         await original.service.delete_item(sale_id=original.sale.id, item_id=row.id)
