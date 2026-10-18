@@ -23,6 +23,7 @@ from app.domains.pos.unit_payment_attempt_models import UnitPaymentAttemptBindin
 from app.domains.pos.unit_payment_intent_schemas import SaveUnitPaymentIntentRequest
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
+from tests.domains.inventory.test_unit_ledger_v2_dispensing import receive_source
 from tests.domains.pos.test_payment_configuration import _set_payment_settings
 from tests.domains.pos.test_physical_cart_api import cart_actor
 from tests.domains.pos.test_physical_cash_refund import close_shift
@@ -44,6 +45,7 @@ async def prepared(
     await _set_payment_settings(
         session, tenant_id=context.stock.tenant_id, methods=["cash", "card", "qr"], mixed=True
     )
+    await receive_source(session)
     request = await intent_request(session, mixed=mixed)
     total = request.request.expected_total_amount
     amounts = (
