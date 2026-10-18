@@ -40,7 +40,7 @@ GUARD_SQL = """
 CREATE FUNCTION public.trg_unit_electronic_refund_intent_guard() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE actor UUID; s public.sale%ROWTYPE; r JSONB; q JSONB; p JSONB;
- total NUMERIC:=0; amount NUMERIC; electronic BOOLEAN:=false;
+ total NUMERIC:=0; v_amount NUMERIC; electronic BOOLEAN:=false;
  seen TEXT[]:='{}'; identifier TEXT;
 BEGIN
  IF TG_OP<>'INSERT' THEN
@@ -98,22 +98,22 @@ BEGIN
     OR (p->>'amount') !~ '^[0-9]{1,12}[.][0-9]{2}$' THEN
    RAISE EXCEPTION 'unit_electronic_refund_intent_payment_invalid' USING ERRCODE='23514';
   END IF;
-  amount:=(p->>'amount')::NUMERIC;
-  IF amount<=0 OR NOT EXISTS(SELECT 1 FROM public.sale_payment payment
+  v_amount:=(p->>'amount')::NUMERIC;
+  IF v_amount<=0 OR NOT EXISTS(SELECT 1 FROM public.sale_payment payment
     JOIN public.pos_unit_checkout_payment_component component
       ON component.tenant_id=payment.tenant_id AND component.id=payment.id
     JOIN public.pos_physical_checkout checkout
       ON checkout.tenant_id=component.tenant_id AND checkout.id=component.physical_checkout_id
     WHERE payment.tenant_id=NEW.tenant_id AND payment.sale_id=s.id
       AND payment.id::TEXT=identifier AND payment.payment_method=p->>'method'
-      AND payment.currency='TJS' AND amount<=payment.amount
+      AND payment.currency='TJS' AND v_amount<=payment.amount
       AND component.sale_id=s.id AND component.method=payment.payment_method
       AND component.amount=payment.amount AND component.currency='TJS'
       AND component.mixed_checkout_id IS NULL AND checkout.sale_id=s.id
       AND checkout.payment_journal_version=3) THEN
    RAISE EXCEPTION 'unit_electronic_refund_intent_payment_invalid' USING ERRCODE='23514';
   END IF;
-  seen:=array_append(seen,identifier); total:=total+amount;
+  seen:=array_append(seen,identifier); total:=total+v_amount;
   electronic:=electronic OR p->>'method' IN ('card','qr');
  END LOOP;
  IF NOT electronic OR total<>(q->>'total_amount')::NUMERIC THEN
