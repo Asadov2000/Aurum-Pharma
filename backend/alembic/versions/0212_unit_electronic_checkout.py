@@ -455,9 +455,10 @@ BOUNDARY_DISPATCH = """BEGIN
  IF coalesce(public.unit_electronic_write_allowed(TG_TABLE_NAME,TG_OP,
    CASE WHEN TG_OP='DELETE' THEN NULL ELSE to_jsonb(NEW) END,
    CASE WHEN TG_OP='INSERT' THEN NULL ELSE to_jsonb(OLD) END),false) THEN
-  IF TG_TABLE_NAME<>'pos_payment_attempt' THEN
-   PERFORM public.assert_unit_electronic_checkout(NEW.tenant_id,
-     CASE WHEN TG_TABLE_NAME='sale' THEN NEW.id ELSE NEW.sale_id END,false);
+  IF TG_TABLE_NAME='sale' THEN
+   PERFORM public.assert_unit_electronic_checkout(NEW.tenant_id,NEW.id,false);
+  ELSIF TG_TABLE_NAME<>'pos_payment_attempt' THEN
+   PERFORM public.assert_unit_electronic_checkout(NEW.tenant_id,NEW.sale_id,false);
   END IF;
   RETURN NEW;
  END IF;
