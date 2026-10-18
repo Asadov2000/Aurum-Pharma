@@ -24,8 +24,8 @@ from app.domains.pos.unit_payment_intent_schemas import SaveUnitPaymentIntentReq
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.pos.test_payment_configuration import _set_payment_settings
-from tests.domains.pos.test_physical_cash_refund import close_shift
 from tests.domains.pos.test_physical_cart_api import cart_actor
+from tests.domains.pos.test_physical_cash_refund import close_shift
 from tests.domains.pos.test_unit_cart_quote import quote
 from tests.domains.pos.test_unit_checkout_payment_components import journal
 from tests.domains.pos.test_unit_payment_binding import binding

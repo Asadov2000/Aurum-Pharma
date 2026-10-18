@@ -404,9 +404,18 @@ async def test_mixed_cash_marker_rls_hides_other_branch_and_tenant_and_support_c
 def _assert_refund_payment_downgrade_refuses_history(connection: Connection) -> None:
     with pytest.raises(DBAPIError) as denied:
         with connection.begin_nested():
-            electronic_checkout_migration().downgrade()
-            refund_payment_component_migration().downgrade()
+            _downgrade_payment_journal_dependencies()
     assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+
+
+def _downgrade_payment_journal_dependencies() -> None:
+    electronic_checkout_migration().downgrade()
+    refund_payment_component_migration().downgrade()
+
+
+def _upgrade_payment_journal_dependencies() -> None:
+    refund_payment_component_migration().upgrade()
+    electronic_checkout_migration().upgrade()
 
 
 async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuses_history(
@@ -459,8 +468,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                     _assert_refund_payment_downgrade_refuses_history(connection)
                     assert connection.execute(functions).all() == before
                     return
-                electronic_checkout_migration().downgrade()
-                refund_payment_component_migration().downgrade()
+                _downgrade_payment_journal_dependencies()
                 # Keep physical history; suspend only the later audit insertion.
                 physical = physical_disposition_migration()
                 physical._redactor(physical.AUDIT_NEW, physical.AUDIT_OLD)
@@ -483,8 +491,7 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
                 mixed_quarantine_read_migration().upgrade()
                 mixed_quarantine_disposition_migration().upgrade()
                 physical._redactor(physical.AUDIT_OLD, physical.AUDIT_NEW)
-                refund_payment_component_migration().upgrade()
-                electronic_checkout_migration().upgrade()
+                _upgrade_payment_journal_dependencies()
             assert connection.execute(functions).all() == before
             assert connection.execute(relation).one() == original_relation
             assert connection.execute(policies).all() == original_policies

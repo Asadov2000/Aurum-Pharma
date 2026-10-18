@@ -25,17 +25,7 @@ async def prepare_electronic_physical_cart(
     """Caller holds the original sale lock; the persisted binding freezes rows."""
     if sale.status != "draft" or sale.is_test or sale.sale_type != "sale":
         raise BusinessRuleError("Electronic physical checkout requires a real sale draft")
-    shift = await cart.lock_shift(sale.tenant_id, sale.shift_id)
-    if shift is None or (
-        shift.status,
-        shift.branch_id,
-        shift.register_id,
-        shift.opened_by_user_id,
-        shift.currency,
-    ) != ("open", sale.branch_id, sale.register_id, sale.cashier_user_id, "TJS"):
-        raise BusinessRuleError("Electronic checkout requires the cashier's open shift")
-    if not await cart.active_register(sale.tenant_id, sale.branch_id, sale.register_id):
-        raise BusinessRuleError("Electronic checkout register is inactive")
+    await _require_open_register(cart, sale)
     quoted = tuple(
         line for line in saved.plan.quote.lines if isinstance(line, PhysicalUnitDraftQuoteLineV2)
     )
@@ -115,3 +105,17 @@ async def _require_prescriptions(cart: UnitCartRepository, sale: Sale, required:
     covered = {unit_id for _, unit_id in references if unit_id is not None}
     if required - covered:
         raise BusinessRuleError("Prescription details are required for all Rx physical positions")
+
+
+async def _require_open_register(cart: UnitCartRepository, sale: Sale) -> None:
+    shift = await cart.lock_shift(sale.tenant_id, sale.shift_id)
+    if shift is None or (
+        shift.status,
+        shift.branch_id,
+        shift.register_id,
+        shift.opened_by_user_id,
+        shift.currency,
+    ) != ("open", sale.branch_id, sale.register_id, sale.cashier_user_id, "TJS"):
+        raise BusinessRuleError("Electronic checkout requires the cashier's open shift")
+    if not await cart.active_register(sale.tenant_id, sale.branch_id, sale.register_id):
+        raise BusinessRuleError("Electronic checkout register is inactive")
