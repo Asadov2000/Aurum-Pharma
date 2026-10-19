@@ -109,6 +109,7 @@ class RefundComponentFact(_Fact):
     original_payment_id: UUID
     physical_refund_id: UUID | None
     mixed_refund_id: UUID | None
+    electronic_refund_id: UUID | None = None
     method: str
     amount: Money
     currency: str

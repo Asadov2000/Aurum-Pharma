@@ -64,7 +64,8 @@ SELECT jsonb_build_object(
   'refund_components',coalesce((SELECT jsonb_agg(jsonb_build_object(
     'id',c.id,'tenant_id',c.tenant_id,'parent_sale_id',c.parent_sale_id,'sale_id',c.sale_id,
     'original_payment_id',c.original_payment_id,'physical_refund_id',c.physical_refund_id,
-    'mixed_refund_id',c.mixed_refund_id,'method',c.method,'amount',c.amount::TEXT,
+    'mixed_refund_id',c.mixed_refund_id,'electronic_refund_id',c.electronic_refund_id,
+    'method',c.method,'amount',c.amount::TEXT,
     'currency',c.currency,'created_by',c.created_by) ORDER BY c.sale_id,c.id)
     FROM public.pos_unit_refund_payment_component c
     WHERE c.tenant_id=s.tenant_id AND c.parent_sale_id=s.id),'[]'::JSONB)

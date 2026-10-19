@@ -3,9 +3,14 @@
 from decimal import Decimal, localcontext
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from app.core.errors import AurumError, BusinessRuleError
 from app.domains.pos.physical_documents import PhysicalCheckoutResultV3, build_physical_receipt
 from app.domains.pos.unit_contracts import EXACT_CONTEXT
+from app.domains.pos.unit_electronic_refund_outcome_schemas import (
+    ElectronicRefundConfirmation,
+)
 from app.domains.pos.unit_electronic_refund_preview_schemas import ElectronicRefundHistory
 from app.domains.pos.unit_money import allocate_unit_amount
 
@@ -160,19 +165,22 @@ def returned_payments(
                 or payout.tenant_id != original.tenant_id
                 or payout.currency != "TJS"
                 or payout.payment_method != source.method
-                or payout.metadata is not None
+                or (payout.metadata is not None and component.electronic_refund_id is None)
                 or payout.payment_attempt_id is not None
                 or not payout.amount.is_finite()
                 or payout.amount <= 0
                 or (component.tenant_id, component.parent_sale_id, component.sale_id)
                 != (original.tenant_id, original.sale_id, sale.id)
-                or component.physical_refund_id is None
+                or (component.physical_refund_id is None)
+                == (component.electronic_refund_id is None)
                 or component.mixed_refund_id is not None
                 or (component.method, component.amount, component.currency)
                 != (source.method, payout.amount, "TJS")
                 or component.created_by != sale.cashier_user_id
             ):
                 raise AurumError("Stored refund payment facts are inconsistent")
+            if component.electronic_refund_id is not None:
+                _validate_electronic_payout_metadata(source.id, source.method, payout.metadata)
             returned[source.id] = returned.get(source.id, Decimal("0.00")) + payout.amount
             totals[sale.id] = totals.get(sale.id, Decimal("0.00")) + payout.amount
         if any(totals[sale.id] != sale.total_amount for sale in sales.values()):
@@ -203,3 +211,18 @@ def require_reconciled_history(
             payments.get(part.id, Decimal("0.00")) > part.amount for part in original.payments
         ) or goods_total != sum(payments.values(), Decimal("0.00")):
             raise AurumError("Stored goods and payment returns require reconciliation")
+
+
+def _validate_electronic_payout_metadata(payment_id: UUID, method: str, metadata: object) -> None:
+    if method == "cash":
+        if metadata is not None:
+            raise AurumError("Stored cash refund evidence is inconsistent")
+        return
+    try:
+        if not isinstance(metadata, dict) or set(metadata) != {"terminal_id", "document_number"}:
+            raise ValueError("Stored terminal metadata differs")
+        evidence = ElectronicRefundConfirmation(original_payment_id=payment_id, **metadata)
+        if evidence.model_dump(exclude={"original_payment_id"}) != metadata:
+            raise ValueError("Stored terminal metadata is not canonical")
+    except (ValueError, ValidationError):
+        raise AurumError("Stored electronic refund evidence is inconsistent") from None
