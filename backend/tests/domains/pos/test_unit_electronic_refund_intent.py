@@ -316,9 +316,4 @@ async def test_readonly_tenant_can_recover_but_cannot_insert_review(
             )
     finally:
         await db_session.rollback()
-        async with db_engine.begin() as support:
-            await support.execute(text("SELECT set_config('app.support_session','true',true)"))
-            await support.execute(
-                text("UPDATE tenant SET status='active' WHERE id=:id"),
-                {"id": context.stock.tenant_id},
-            )
+        # This fresh synthetic tenant stays readonly, as in the other POS fixtures.

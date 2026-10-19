@@ -86,12 +86,14 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
         assert "pos.refund" in actor_policy.qual
         assert "pos.refund" in actor_policy.with_check
         assert connection.scalar(
-            text(
-                "SELECT public.audit_redact_table_snapshot(:table,"
-                '\'{"request_payload":{"private":true},"result_payload":{},'
-                '"request_hash":"retained"}\'::jsonb)'
-            ),
-            {"table": TABLE},
+            text("SELECT public.audit_redact_table_snapshot(:table,CAST(:snapshot AS jsonb))"),
+            {
+                "table": TABLE,
+                "snapshot": (
+                    '{"request_payload":{"private":true},"result_payload":{},'
+                    '"request_hash":"retained"}'
+                ),
+            },
         ) == {"request_hash": "retained"}
         guard = connection.scalar(
             text(
