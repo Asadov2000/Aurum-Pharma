@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
+from tests.isolation.test_physical_cash_checkout_migration import (
+    electronic_refund_binding_migration,
+)
 
 db_session = receiving_session_fixture
 
@@ -45,9 +48,11 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
                     with connection.begin_nested():
                         migration().downgrade()
                 return
+            electronic_refund_binding_migration().downgrade()
             migration().downgrade()
             assert connection.scalar(text(f"SELECT to_regclass('public.{TABLE}')")) is None
             migration().upgrade()
+            electronic_refund_binding_migration().upgrade()
         assert connection.scalar(audit_sql) == before_audit
         assert connection.scalar(
             text(
