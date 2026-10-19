@@ -16,6 +16,7 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.isolation.test_physical_cash_checkout_migration import (
     electronic_refund_activation_migration,
     electronic_refund_binding_migration,
+    electronic_refund_outcome_migration,
 )
 
 db_session = receiving_session_fixture
@@ -49,6 +50,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
                     with connection.begin_nested():
                         migration().downgrade()
                 return
+            electronic_refund_outcome_migration().downgrade()
             electronic_refund_activation_migration().downgrade()
             electronic_refund_binding_migration().downgrade()
             migration().downgrade()
@@ -56,6 +58,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
             migration().upgrade()
             electronic_refund_binding_migration().upgrade()
             electronic_refund_activation_migration().upgrade()
+            electronic_refund_outcome_migration().upgrade()
         assert connection.scalar(audit_sql) == before_audit
         assert connection.scalar(
             text(
