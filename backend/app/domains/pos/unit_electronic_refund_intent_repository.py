@@ -12,6 +12,10 @@ class UnitElectronicRefundIntentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def is_read_committed(self) -> bool:
+        isolation: object = await self.session.scalar(text("SHOW transaction_isolation"))
+        return isinstance(isolation, str) and isolation == "read committed"
+
     async def lock_operation(self, tenant_id: UUID, operation_id: UUID) -> None:
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:identity,0))"),
