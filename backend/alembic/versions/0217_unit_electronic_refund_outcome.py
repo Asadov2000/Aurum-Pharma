@@ -99,6 +99,11 @@ BEGIN
   document:=NEW.document_number;
  END IF;
  IF NEW.terminal_id IS NULL OR document IS NULL THEN RETURN NEW; END IF;
+ -- A transaction-wide snapshot cannot see evidence committed while it waits.
+ -- All three journals must use fresh READ COMMITTED snapshots for this fence.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'unit_electronic_refund_outcome_isolation_required' USING ERRCODE='23514';
+ END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(
    NEW.tenant_id::TEXT||chr(31)||NEW.terminal_id||chr(31)||document,0));
  IF EXISTS(SELECT 1 FROM public.pos_unit_electronic_refund_outcome
