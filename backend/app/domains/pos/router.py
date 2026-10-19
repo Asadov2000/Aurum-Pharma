@@ -100,6 +100,9 @@ from app.domains.pos.unit_electronic_refund_activation_router import (
 from app.domains.pos.unit_electronic_refund_binding_router import (
     router as unit_electronic_refund_binding_router,
 )
+from app.domains.pos.unit_electronic_refund_outcome_router import (
+    router as unit_electronic_refund_outcome_router,
+)
 from app.domains.pos.unit_electronic_refund_review_router import (
     router as unit_electronic_refund_review_router,
 )
@@ -119,6 +122,7 @@ router.include_router(quarantine_report_router)
 router.include_router(profit_report_router)
 router.include_router(unit_electronic_refund_activation_router)
 router.include_router(unit_electronic_refund_binding_router)
+router.include_router(unit_electronic_refund_outcome_router)
 router.include_router(unit_electronic_refund_review_router)
 router.include_router(unit_payment_active_router)
 router.include_router(unit_payment_plan_router)
