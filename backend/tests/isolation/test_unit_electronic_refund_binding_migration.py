@@ -25,6 +25,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     electronic_refund_activation_migration,
     electronic_refund_binding_migration,
     electronic_refund_outcome_migration,
+    electronic_refund_posting_migration,
 )
 
 db_session = receiving_session_fixture
@@ -85,6 +86,7 @@ async def test_binding_roundtrip_preserves_security(maintenance_engine: AsyncEng
                     with connection.begin_nested():
                         electronic_refund_binding_migration().downgrade()
                 return
+            electronic_refund_posting_migration().downgrade()
             electronic_refund_outcome_migration().downgrade()
             electronic_refund_activation_migration().downgrade()
             electronic_refund_binding_migration().downgrade()
@@ -93,6 +95,7 @@ async def test_binding_roundtrip_preserves_security(maintenance_engine: AsyncEng
             electronic_refund_binding_migration().upgrade()
             electronic_refund_activation_migration().upgrade()
             electronic_refund_outcome_migration().upgrade()
+            electronic_refund_posting_migration().upgrade()
         assert connection.execute(snapshot).all() == before
         for table in TABLES:
             assert connection.scalar(
