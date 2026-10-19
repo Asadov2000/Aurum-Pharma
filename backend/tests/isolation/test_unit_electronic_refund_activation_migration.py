@@ -18,6 +18,7 @@ from tests.domains.pos.test_unit_electronic_refund_preview import facts
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     electronic_refund_activation_migration,
+    electronic_refund_outcome_migration,
 )
 from tests.isolation.test_unit_electronic_refund_binding_migration import (
     insert_history,
@@ -67,9 +68,11 @@ async def test_activation_roundtrip_restores_binding_guard(maintenance_engine: A
                     with connection.begin_nested():
                         electronic_refund_activation_migration().downgrade()
                 return
+            electronic_refund_outcome_migration().downgrade()
             electronic_refund_activation_migration().downgrade()
             assert "activation_cancel_denied" not in connection.scalar(function)
             electronic_refund_activation_migration().upgrade()
+            electronic_refund_outcome_migration().upgrade()
         assert connection.scalar(function) == before
         assert connection.execute(snapshot).one() == security
         assert security.relrowsecurity and security.relforcerowsecurity
