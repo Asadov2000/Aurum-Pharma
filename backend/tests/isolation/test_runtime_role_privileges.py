@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_unit_electronic_refund_intent",
     "pos_unit_payment_attempt_binding",
     "pos_unit_refund_payment_component",
     "pos_unit_checkout_payment_component",
@@ -249,6 +250,7 @@ RUNTIME_VIEWS = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_unit_electronic_refund_intent_guard",
     "unit_electronic_current_quote",
     "assert_unit_electronic_checkout",
     "assert_unit_electronic_payments",
@@ -1634,6 +1636,7 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_unit_electronic_refund_intent_guard",
         "unit_electronic_current_quote",
         "assert_unit_electronic_checkout",
         "assert_unit_electronic_payments",
