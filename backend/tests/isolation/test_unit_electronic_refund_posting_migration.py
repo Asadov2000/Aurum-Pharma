@@ -113,3 +113,38 @@ async def test_raw_marker_alone_cannot_commit_without_financial_posting(
         )
         == 0
     )
+
+
+async def test_plpgsql_if_case_requires_parentheses(maintenance_engine: AsyncEngine) -> None:
+    """Reproduce the old parser failure and verify the unchanged CASE truth table."""
+    async with maintenance_engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            assert str(await connection.scalar(text("SELECT current_database()"))).endswith("_test")
+            with pytest.raises(DBAPIError, match="syntax error at end of input") as original:
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            "DO $$ BEGIN IF false OR CASE WHEN true THEN false ELSE true END THEN "
+                            "NULL; END IF; END $$;"
+                        )
+                    )
+            assert getattr(original.value.orig, "sqlstate", None) == "42601"
+            await connection.execute(text("""
+                DO $$ DECLARE method TEXT; invalid BOOLEAN; expected BOOLEAN; BEGIN
+                  FOREACH method IN ARRAY ARRAY['cash','card','qr'] LOOP
+                    FOREACH invalid IN ARRAY ARRAY[false,true] LOOP
+                      expected:=false;
+                      IF false OR (CASE WHEN method='cash' THEN invalid ELSE NOT invalid END) THEN
+                        expected:=true;
+                      END IF;
+                      IF expected IS DISTINCT FROM
+                        (CASE WHEN method='cash' THEN invalid ELSE NOT invalid END) THEN
+                        RAISE EXCEPTION 'posting evidence CASE truth table changed';
+                      END IF;
+                    END LOOP;
+                  END LOOP;
+                END $$;
+            """))
+        finally:
+            await transaction.rollback()

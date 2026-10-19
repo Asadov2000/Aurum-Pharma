@@ -232,11 +232,11 @@ BEGIN
        WHERE p.tenant_id=p_tenant AND p.sale_id=m.parent_sale_id
          AND p.id=component.original_payment_id AND p.payment_method=component.method
          AND p.currency='TJS' AND p.amount>=amount)
-    OR CASE WHEN part->>'method'='cash' THEN payout.metadata IS NOT NULL ELSE
+    OR (CASE WHEN part->>'method'='cash' THEN payout.metadata IS NOT NULL ELSE
       evidence.id IS NULL OR payout.metadata IS DISTINCT FROM jsonb_build_object(
         'terminal_id',evidence.terminal_id,'document_number',evidence.document_number)
       OR (evidence.method,evidence.amount,evidence.currency) IS DISTINCT FROM
-        (component.method,amount,'TJS') END THEN
+        (component.method,amount,'TJS') END) THEN
    RAISE EXCEPTION 'unit_electronic_refund_posting_payment_invalid' USING ERRCODE='23514';
   END IF;
   SELECT coalesce(sum(x.amount),0) INTO refunded
