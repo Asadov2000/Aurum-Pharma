@@ -9,6 +9,10 @@ from app.domains.pos.unit_contracts import FrozenContract
 from app.domains.pos.unit_electronic_refund_intent_schemas import SavedElectronicRefundIntent
 
 
+class ActivateElectronicRefundRequest(FrozenContract):
+    shift_id: UUID
+
+
 class SavedElectronicRefundActivation(FrozenContract):
     state: Literal["activation_saved"] = "activation_saved"
     operation_id: UUID4
