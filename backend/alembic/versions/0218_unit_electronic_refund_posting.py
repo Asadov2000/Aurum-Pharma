@@ -176,7 +176,7 @@ DECLARE m public.pos_unit_electronic_refund_posting%ROWTYPE; s public.sale%ROWTY
  c public.pos_physical_return_command%ROWTYPE; i public.pos_unit_electronic_refund_intent%ROWTYPE;
  original public.pos_physical_checkout%ROWTYPE; r RECORD; part JSONB; source JSONB;
  expected_lines JSONB:='[]'; expected_payments JSONB:='[]'; expected JSONB;
- refunded NUMERIC; amount NUMERIC; component RECORD; payout public.sale_payment%ROWTYPE;
+ refunded NUMERIC; expected_amount NUMERIC; component RECORD; payout public.sale_payment%ROWTYPE;
  evidence public.pos_unit_electronic_refund_outcome%ROWTYPE;
 BEGIN
  IF current_setting('transaction_isolation')<>'read committed' THEN
@@ -219,38 +219,38 @@ BEGIN
   SELECT * INTO evidence FROM public.pos_unit_electronic_refund_outcome
    WHERE tenant_id=p_tenant AND operation_id=m.id
      AND original_payment_id=(part->>'original_payment_id')::UUID;
-  amount:=(part->>'amount')::NUMERIC;
+  expected_amount:=(part->>'amount')::NUMERIC;
   IF component.id IS NULL OR payout.id IS NULL OR
     (component.parent_sale_id,component.sale_id,component.method,component.amount,
      component.currency,component.created_by) IS DISTINCT FROM
-      (m.parent_sale_id,p_sale,part->>'method',amount,'TJS',m.actor_id)
+      (m.parent_sale_id,p_sale,part->>'method',expected_amount,'TJS',m.actor_id)
     OR component.physical_refund_id IS NOT NULL OR component.mixed_refund_id IS NOT NULL
     OR (payout.payment_method,payout.amount,payout.currency) IS DISTINCT FROM
-      (part->>'method',amount,'TJS') OR payout.payment_attempt_id IS NOT NULL
+      (part->>'method',expected_amount,'TJS') OR payout.payment_attempt_id IS NOT NULL
     OR payout.operation_id IS NOT NULL OR payout.operation_hash IS NOT NULL
     OR NOT EXISTS(SELECT 1 FROM public.sale_payment p
        WHERE p.tenant_id=p_tenant AND p.sale_id=m.parent_sale_id
          AND p.id=component.original_payment_id AND p.payment_method=component.method
-         AND p.currency='TJS' AND p.amount>=amount)
+         AND p.currency='TJS' AND p.amount>=expected_amount)
     OR (CASE WHEN part->>'method'='cash' THEN payout.metadata IS NOT NULL ELSE
       evidence.id IS NULL OR payout.metadata IS DISTINCT FROM jsonb_build_object(
         'terminal_id',evidence.terminal_id,'document_number',evidence.document_number)
       OR (evidence.method,evidence.amount,evidence.currency) IS DISTINCT FROM
-        (component.method,amount,'TJS') END) THEN
+        (component.method,expected_amount,'TJS') END) THEN
    RAISE EXCEPTION 'unit_electronic_refund_posting_payment_invalid' USING ERRCODE='23514';
   END IF;
   SELECT coalesce(sum(x.amount),0) INTO refunded
-   FROM public.pos_unit_refund_payment_component x JOIN public.sale r
-    ON r.tenant_id=x.tenant_id AND r.id=x.sale_id
+   FROM public.pos_unit_refund_payment_component x JOIN public.sale refunded_sale
+    ON refunded_sale.tenant_id=x.tenant_id AND refunded_sale.id=x.sale_id
    WHERE x.tenant_id=p_tenant AND x.original_payment_id=component.original_payment_id
-     AND r.status='completed';
+     AND refunded_sale.status='completed';
   IF refunded>(SELECT p.amount FROM public.sale_payment p
     WHERE p.tenant_id=p_tenant AND p.id=component.original_payment_id) THEN
    RAISE EXCEPTION 'unit_electronic_refund_posting_amount_exceeded' USING ERRCODE='23514';
   END IF;
   expected_payments:=expected_payments||jsonb_build_array(jsonb_build_object(
    'id',component.id,'original_payment_id',component.original_payment_id,
-   'method',component.method,'amount',to_char(amount,'FM999999999990.00'),'currency','TJS',
+   'method',component.method,'amount',to_char(expected_amount,'FM999999999990.00'),'currency','TJS',
    'terminal_id',CASE WHEN component.method='cash' THEN NULL ELSE evidence.terminal_id END,
    'document_number',CASE WHEN component.method='cash' THEN NULL
      ELSE evidence.document_number END));
@@ -342,14 +342,16 @@ PATCHES.append(("unit_electronic_refund_binding_active(uuid,uuid)", ACTIVE_OLD, 
 COMPONENT_DISPATCH = """ IF NEW.electronic_refund_id IS NOT NULL THEN
   IF TG_OP<>'INSERT' OR current_setting('transaction_isolation')<>'read committed'
     OR NEW.physical_refund_id IS NOT NULL OR NEW.mixed_refund_id IS NOT NULL
-    OR NOT EXISTS(SELECT 1 FROM public.pos_unit_electronic_refund_posting m
-      JOIN public.sale s ON s.tenant_id=m.tenant_id AND s.id=m.sale_id
-      WHERE m.tenant_id=NEW.tenant_id AND m.id=NEW.electronic_refund_id
-        AND m.sale_id=NEW.sale_id AND m.parent_sale_id=NEW.parent_sale_id
-        AND m.actor_id=public.current_app_user_id() AND session_user='aurum_app'
-        AND NOT public.is_support_session() AND s.status='draft'
-        AND m.tenant_id=public.current_tenant_id()
-        AND public.tenant_actor_has_scoped_permission(m.tenant_id,'pos.refund',m.branch_id)) THEN
+    OR NOT EXISTS(SELECT 1 FROM public.pos_unit_electronic_refund_posting posting_marker
+      JOIN public.sale posting_sale ON posting_sale.tenant_id=posting_marker.tenant_id
+        AND posting_sale.id=posting_marker.sale_id
+      WHERE posting_marker.tenant_id=NEW.tenant_id AND posting_marker.id=NEW.electronic_refund_id
+        AND posting_marker.sale_id=NEW.sale_id AND posting_marker.parent_sale_id=NEW.parent_sale_id
+        AND posting_marker.actor_id=public.current_app_user_id() AND session_user='aurum_app'
+        AND NOT public.is_support_session() AND posting_sale.status='draft'
+        AND posting_marker.tenant_id=public.current_tenant_id()
+        AND public.tenant_actor_has_scoped_permission(
+          posting_marker.tenant_id,'pos.refund',posting_marker.branch_id)) THEN
    RAISE EXCEPTION 'unit_electronic_refund_component_invalid' USING ERRCODE='23514';
   END IF;
   NEW.created_at:=clock_timestamp(); NEW.created_by:=public.current_app_user_id();
