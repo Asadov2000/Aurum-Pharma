@@ -6,13 +6,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AurumError, ConflictError, NotFoundError, PermissionDeniedError
 from app.domains.pos.physical_return_journal_repository import PhysicalReturnJournalRepository
+from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_electronic_refund_intent_models import UnitElectronicRefundIntent
 from app.domains.pos.unit_electronic_refund_intent_repository import (
     UnitElectronicRefundIntentRepository,
@@ -93,11 +94,13 @@ class Review:
         self.get = AsyncMock(return_value=None)
         self.insert = AsyncMock(side_effect=self.store)
         self.quote = AsyncMock(return_value=self.preview)
+        self.identity = AsyncMock()
         self.authority = AsyncMock()
         monkeypatch.setattr(UnitElectronicRefundIntentRepository, "get", self.get)
         monkeypatch.setattr(UnitElectronicRefundIntentRepository, "insert", self.insert)
         monkeypatch.setattr(UnitElectronicRefundIntentRepository, "lock_operation", AsyncMock())
         monkeypatch.setattr(UnitElectronicRefundPreviewService, "quote", self.quote)
+        monkeypatch.setattr(UnitCartRepository, "assert_actor", self.identity)
         monkeypatch.setattr(PhysicalReturnJournalRepository, "assert_actor", self.authority)
 
     async def store(self, intent: UnitElectronicRefundIntent) -> None:
@@ -226,3 +229,27 @@ async def test_corrupt_snapshot_is_rejected(review: Review, corruption: str) -> 
     with pytest.raises(AurumError):
         review.service._result(intent)
     assert review.insert.await_count == 1
+
+
+async def test_branch_refunder_does_not_need_tenant_wide_refund_access(review: Review) -> None:
+    async def branch_authority(tenant: UUID, actor: UUID, branch: UUID | None) -> None:
+        if (tenant, actor, branch) != (review.tenant, review.actor, review.branch):
+            raise PermissionDeniedError("Branch refund access denied")
+
+    review.authority.side_effect = branch_authority
+    saved = await review.save()
+    assert await review.save() == saved
+    assert await review.read() == saved
+    assert review.identity.await_count == 3
+    review.identity.assert_awaited_with(review.tenant, review.actor)
+
+
+async def test_identity_denial_prevents_reading_saved_reviews(review: Review) -> None:
+    await review.save()
+    review.identity.side_effect = PermissionDeniedError("Invalid identity")
+    review.get.reset_mock()
+    review.authority.reset_mock()
+    with pytest.raises(PermissionDeniedError):
+        await review.read()
+    review.get.assert_not_awaited()
+    review.authority.assert_not_awaited()

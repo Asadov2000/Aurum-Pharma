@@ -13,6 +13,7 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.domains.pos.physical_return_journal_repository import PhysicalReturnJournalRepository
+from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_contracts import EXACT_CONTEXT
 from app.domains.pos.unit_electronic_refund_intent_models import UnitElectronicRefundIntent
 from app.domains.pos.unit_electronic_refund_intent_repository import (
@@ -69,6 +70,7 @@ def _require_matching_preview(
 class UnitElectronicRefundIntentService:
     def __init__(self, repository: UnitElectronicRefundIntentRepository) -> None:
         self.repository = repository
+        self.identity = UnitCartRepository(repository.session)
         self.authority = PhysicalReturnJournalRepository(repository.session)
 
     @staticmethod
@@ -103,7 +105,7 @@ class UnitElectronicRefundIntentService:
         session = self.repository.session
         if session.new or session.dirty or session.deleted:
             raise ConflictError("Persist pending changes before saving a refund review")
-        await self.authority.assert_actor(tenant_id, actor_id, None)
+        await self.identity.assert_actor(tenant_id, actor_id)
         async with session.begin_nested():
             await self.repository.lock_operation(tenant_id, request.operation_id)
             intent = await self.repository.get(tenant_id, request.operation_id)
@@ -150,7 +152,7 @@ class UnitElectronicRefundIntentService:
             raise BusinessRuleError("Refund review identifiers must use UUIDs")
         # Recovery must not flush unrelated pending ORM edits or recalculate history.
         with self.repository.session.no_autoflush:
-            await self.authority.assert_actor(tenant_id, actor_id, None)
+            await self.identity.assert_actor(tenant_id, actor_id)
             intent = await self.repository.get(tenant_id, operation_id)
             if intent is None or intent.parent_sale_id != parent_sale_id:
                 raise NotFoundError("Saved electronic refund review not found")
