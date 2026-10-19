@@ -65,6 +65,7 @@ NO_DELETE_TABLES = {
 APPEND_ONLY_TABLES = {
     "pos_unit_electronic_refund_binding",
     "pos_unit_electronic_refund_binding_cancel",
+    "pos_unit_electronic_refund_activation",
     "pos_unit_electronic_refund_intent",
     "pos_unit_payment_attempt_binding",
     "pos_unit_refund_payment_component",
@@ -256,6 +257,7 @@ CUSTOM_FUNCTIONS = {
     "unit_electronic_refund_binding_active",
     "trg_unit_electronic_refund_binding_guard",
     "trg_unit_electronic_refund_binding_fence",
+    "trg_unit_electronic_refund_activation_guard",
     "unit_electronic_current_quote",
     "assert_unit_electronic_checkout",
     "assert_unit_electronic_payments",
@@ -1645,6 +1647,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         "unit_electronic_refund_binding_active",
         "trg_unit_electronic_refund_binding_guard",
         "trg_unit_electronic_refund_binding_fence",
+        "trg_unit_electronic_refund_activation_guard",
         "unit_electronic_current_quote",
         "assert_unit_electronic_checkout",
         "assert_unit_electronic_payments",

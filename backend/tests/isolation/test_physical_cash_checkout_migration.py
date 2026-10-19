@@ -147,8 +147,20 @@ def electronic_refund_binding_migration() -> ModuleType:
     return module
 
 
+def electronic_refund_activation_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0216_unit_electronic_refund_activation.py"
+    )
+    spec = importlib.util.spec_from_file_location("unit_electronic_refund_activation", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_electronic_for_roundtrip() -> None:
     # Unwind later FK dependencies and audit patches before historical function text.
+    electronic_refund_activation_migration().downgrade()
     electronic_refund_binding_migration().downgrade()
     electronic_refund_intent_migration().downgrade()
     electronic_refund_read_migration().downgrade()
@@ -160,6 +172,7 @@ def upgrade_electronic_after_roundtrip() -> None:
     electronic_refund_read_migration().upgrade()
     electronic_refund_intent_migration().upgrade()
     electronic_refund_binding_migration().upgrade()
+    electronic_refund_activation_migration().upgrade()
 
 
 def downgrade_refund_for_roundtrip() -> None:
