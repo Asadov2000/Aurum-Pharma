@@ -94,6 +94,9 @@ from app.domains.pos.schemas import (
 )
 from app.domains.pos.service import POSService
 from app.domains.pos.unit_cart_repository import UnitCartRepository
+from app.domains.pos.unit_electronic_refund_review_router import (
+    router as unit_electronic_refund_review_router,
+)
 from app.domains.pos.unit_payment_active_router import router as unit_payment_active_router
 from app.domains.pos.unit_payment_binding_router import router as unit_payment_binding_router
 from app.domains.pos.unit_payment_plan_router import router as unit_payment_plan_router
@@ -108,6 +111,7 @@ router.include_router(physical_cash_refund_router)
 router.include_router(physical_zero_return_router)
 router.include_router(quarantine_report_router)
 router.include_router(profit_report_router)
+router.include_router(unit_electronic_refund_review_router)
 router.include_router(unit_payment_active_router)
 router.include_router(unit_payment_plan_router)
 router.include_router(unit_payment_binding_router)
