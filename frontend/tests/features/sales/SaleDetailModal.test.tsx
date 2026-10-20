@@ -338,6 +338,26 @@ describe("electronic refund entrypoint", () => {
       details.data = {
         ...sale,
         physical_items: [physicalItem],
+        prepared_cart_items: [
+          {
+            id: "line",
+            tenant_id: sale.tenant_id,
+            branch_id: sale.branch_id,
+            sale_id: sale.id,
+            catalog_id: "catalog",
+            position: 1,
+            sale_format: "unit",
+            quantity: 4,
+            discount_amount: "0.00",
+            physical_packaging: {
+              version: 2,
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+            },
+          },
+        ],
         payments: [
           {
             id: "payment",

@@ -8,7 +8,8 @@ export function isElectronicRefundCandidate(sale: SaleDetails): boolean {
     !sale.is_test &&
     (sale.physical_items?.length ?? 0) > 0 &&
     !sale.mixed_items?.length &&
-    !sale.prepared_cart_items?.length &&
+    // Completed physical checkouts retain their original cart rows in this field.
+    // Receipt display + the authoritative electronic quote distinguish real v3 history.
     sale.payments.some(
       (p) =>
         (p.payment_method === "card" || p.payment_method === "qr") &&
