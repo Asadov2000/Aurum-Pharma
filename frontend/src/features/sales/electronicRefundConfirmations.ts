@@ -108,7 +108,31 @@ async function requestConfirmations(
     ? await api.post<unknown>(path, submitted, config)
     : await api.get<unknown>(path, config);
   requireActive();
-  const result = reconciliationSchema.parse(response.data);
+  return parseElectronicRefundConfirmations(
+    response.data,
+    validatedScope,
+    validated,
+    expected,
+    submitted,
+  );
+}
+
+export function parseElectronicRefundConfirmations(
+  data: unknown,
+  scope: ElectronicRefundActivationScope,
+  request: ElectronicRefundSaveRequest,
+  activation: SavedElectronicRefundActivation,
+  submitted?: ElectronicRefundConfirmation,
+): ReconciledElectronicRefund {
+  const validatedScope = scopeSchema.parse(scope);
+  const validated = electronicRefundSaveRequestSchema.parse(request);
+  const expected = parseSavedElectronicRefundActivation(activation, validatedScope, validated);
+  const payments = new Map(
+    expected.review.preview.payments
+      .filter((part) => part.method !== "cash")
+      .map((part) => [part.original_payment_id, part]),
+  );
+  const result = reconciliationSchema.parse(data);
   const marker = parseSavedElectronicRefundActivation(result.activation, validatedScope, validated);
   if (JSON.stringify(marker) !== JSON.stringify(expected))
     throw new Error("Подтверждения относятся к другому сохранённому маркеру активации.");
