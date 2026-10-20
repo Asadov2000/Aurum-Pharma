@@ -430,3 +430,117 @@ test("recovers card preparation after a lost binding response and cancels withou
     await anonymous.dispose();
   }
 });
+
+test("completes physical electronic checkout and recovers a lost completion with GET only", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const api = await apiContext(tokens.access_token);
+  try {
+    const branch = await seedBranch(api, uniqueName("Payment preparation branch"));
+    const register = await seedRegister(api, branch.id, uniqueName("Payment preparation register"));
+    const medicine = await seedCatalogItem(
+      api,
+      uniqueName("Payment preparation medicine"),
+      "10.00",
+    );
+    expect(
+      (
+        await api.patch(`catalog/${medicine.id}`, {
+          data: {
+            dispensing_type: "otc",
+            unit_sale_preparation: {
+              version: 1,
+              state: "prepared",
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+              unit_price: "0.50",
+            },
+          },
+        })
+      ).ok(),
+    ).toBe(true);
+    await receivePhysicalStock(api, branch.id, medicine.id);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await loginInBrowser(page, OWNER);
+    await page.goto("/pos");
+    await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену" }).click();
+    await expect(page.getByText("Смена открыта")).toBeVisible();
+    const saleId = await addPhysicalFormats(page, medicine.brand_name);
+
+    const preparation = page.getByRole("region", {
+      name: "Подготовка электронной оплаты",
+      exact: true,
+    });
+    await preparation.getByRole("button", { name: "Подготовка карты/QR", exact: true }).click();
+    await preparation.getByRole("button", { name: "Подготовить оплату", exact: true }).click();
+    await preparation.getByRole("button", { name: "Закрепить план", exact: true }).click();
+    const electronic = page.getByRole("region", { name: "Электронное проведение", exact: true });
+    await expect(electronic).toBeVisible();
+    await electronic
+      .getByRole("button", { name: "Подготовить полный набор попыток", exact: true })
+      .click();
+    await electronic.getByRole("button", { name: "Начать явную сверку card", exact: true }).click();
+    await electronic.getByLabel("Терминал", { exact: true }).fill("E2E-OPERATOR-TERMINAL");
+    await electronic
+      .getByLabel("Внешний номер подтверждения", { exact: true })
+      .fill("E2E-OPERATOR-REFERENCE");
+    await electronic
+      .getByRole("button", { name: "Подтвердить проверенную оплату card", exact: true })
+      .click();
+    const complete = electronic.getByRole("button", {
+      name: "Завершить продажу по сохранённому плану",
+      exact: true,
+    });
+    await expect(complete).toBeEnabled();
+    let completed: CheckoutResult | null = null;
+    const submitted: string[] = [];
+    const completePath = `**/api/v1/sales/${saleId}/unit-payment-plan/intents/*/complete`;
+    await page.route(completePath, async (route) => {
+      submitted.push(new URL(route.request().url()).pathname);
+      expect(route.request().postDataJSON()).toEqual({});
+      const response = await route.fetch();
+      expect(response.ok()).toBe(true);
+      completed = (await response.json()) as CheckoutResult;
+      await route.abort("failed");
+    });
+    await complete.click();
+    await expect.poll(() => completed !== null).toBe(true);
+    const original = completed as CheckoutResult | null;
+    if (!original) throw new Error("Saved electronic result not observed");
+    expect(original.payments).toHaveLength(1);
+    expect(original.payments[0]).toMatchObject({ method: "card", amount: "16.00" });
+    const postsAfterReload: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && new URL(req.url()).pathname.includes("unit-payment-plan"))
+        postsAfterReload.push(new URL(req.url()).pathname);
+    });
+    await page.unroute(completePath);
+    await page.reload();
+    await expect(
+      electronic.getByText(`Сохранённый чек ${original.receipt_number}: 16.00 TJS`, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(postsAfterReload).toEqual([]);
+    expect(submitted).toHaveLength(1);
+    await electronic.getByRole("button", { name: "Принять сохранённый чек", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Печать чека", exact: true })).toBeVisible();
+    expect(postsAfterReload).toEqual([]);
+    const final = await api.get(
+      `sales/${saleId}/unit-payment-plan/intents/${original.operation_id}/checkout`,
+    );
+    expect(final.ok()).toBe(true);
+    expect(await final.json()).toEqual(original);
+  } finally {
+    await api.dispose();
+    await anonymous.dispose();
+  }
+});

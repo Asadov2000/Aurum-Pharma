@@ -94,7 +94,7 @@ function lineBalances(line: RetailLine): boolean {
   );
 }
 const quoteLine = z.object(lineShape).strict().refine(lineBalances);
-const resultLine = z
+export const physicalResultLineSchema = z
   .object({ ...lineShape, name: printable(500) })
   .strict()
   .refine(lineBalances);
@@ -165,7 +165,7 @@ const resultSchema = z
     receipt_number: printable(100),
     receipt_sequence: z.number().int().positive(),
     is_test: z.boolean(),
-    lines: z.array(resultLine).min(1).max(200),
+    lines: z.array(physicalResultLineSchema).min(1).max(200),
     payments: z
       .array(
         z
@@ -341,7 +341,7 @@ export const cashCheckoutContracts = {
   timestamp,
   printable,
   quoteLine,
-  resultLine,
+  resultLine: physicalResultLineSchema,
   scopeShape,
   linesBalance,
   canonicalJson,

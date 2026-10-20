@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api } from "@/lib/api";
 import { PhysicalPaymentPreparationPanel } from "@/features/pos/PhysicalPaymentPreparationPanel";
 import {
   storeUnitPaymentMarker,
@@ -81,6 +82,37 @@ async function prepare() {
 }
 
 describe("physical payment preparation", () => {
+  it("checks an alternative active binding read-only while retaining an unknown local marker", async () => {
+    const { webcrypto } = await import("node:crypto");
+    vi.stubGlobal("crypto", webcrypto);
+    storeUnitPaymentMarker(saleId, scope, id(90));
+    network.active.mockResolvedValue({ intent: saved, binding: bound });
+    const get = vi
+      .spyOn(api, "get")
+      .mockRejectedValue({ isAxiosError: true, response: { status: 404 } });
+    const post = vi.spyOn(api, "post");
+    const p = {
+      ...props(),
+      physicalOnly: true,
+      branchId: quote.branch_id,
+      registerId: quote.register_id,
+      onElectronicCompleted: vi.fn(),
+    };
+    render(<PhysicalPaymentPreparationPanel {...p} />);
+    const cancel = await screen.findByRole("button", { name: "Отменить подготовку" });
+    await waitFor(() => expect(cancel).toBeEnabled());
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(post).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Подготовить полный набор попыток" })).toBeDisabled();
+    expect(loadUnitPaymentMarker(saleId, scope)).toBe(id(90));
+    network.active.mockResolvedValue({ intent: null, binding: null });
+    fireEvent.click(cancel);
+    await screen.findByText(/Результат сохранения пока неизвестен/);
+    expect(loadUnitPaymentMarker(saleId, scope)).toBe(id(90));
+    expect(network.binding).toHaveBeenCalledWith(saved, "cancel-binding", scope);
+    expect(p.onElectronicCompleted).not.toHaveBeenCalled();
+  });
+
   it("recovers another tab's binding without discarding an unknown local operation", async () => {
     storeUnitPaymentMarker(saleId, scope, id(90));
     network.active.mockResolvedValue({ intent: saved, binding: bound });
