@@ -4,10 +4,13 @@ import argparse
 import json
 import re
 import time
+import subprocess
+from http.client import HTTPMessage
+from pathlib import Path
+from typing import IO, Protocol
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
 from uuid import UUID
 
 REPOSITORY = "Asadov2000/Aurum-Pharma"
@@ -78,7 +81,15 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
         self.logs = logs
         self.count = 0
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         self.count += 1
         if self.count > 3:
             raise FeedbackError("redirect_limit")
@@ -121,20 +132,61 @@ class PublicJson:
                 if length is not None and int(length) != len(raw):
                     raise FeedbackError("incomplete_response")
                 return json.loads(raw)
+        except urllib.error.HTTPError as exc:
+            code = (
+                "http_rate_limited"
+                if exc.code == 429
+                or (exc.code == 403 and exc.headers.get("X-RateLimit-Remaining") == "0")
+                else f"http_status_{exc.code}"
+            )
+            raise FeedbackError(code) from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise FeedbackError("transport_or_json_error") from exc
 
 
-def mapping(value: object) -> dict:
+def mapping(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise FeedbackError("invalid_schema")
-    return value
+    if any(not isinstance(key, str) for key in value):
+        raise FeedbackError("invalid_schema")
+    return {str(key): item for key, item in value.items()}
 
 
-def sequence(value: object) -> list:
+def sequence(value: object) -> list[object]:
     if not isinstance(value, list):
         raise FeedbackError("invalid_schema")
     return value
+
+
+class Fetch(Protocol):
+    def __call__(self, url: str, *, logs: bool = False) -> object: ...
+
+
+def positive_integer(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise FeedbackError("invalid_integer")
+    return value
+
+
+def tracked_paths() -> frozenset[str]:
+    """Read local tracked names only; never fetch or execute a log-derived argument."""
+    root = Path(__file__).resolve().parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", "backend", "scripts"],
+            cwd=root,
+            capture_output=True,
+            timeout=5,
+            check=True,
+        )
+        if len(result.stdout) > MAX_BYTES:
+            raise FeedbackError("tracked_paths_limit")
+        names = result.stdout.decode("utf-8").split("\0")
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+        raise FeedbackError("tracked_paths_unavailable") from exc
+    return frozenset(
+        name.removeprefix("backend/") for name in names if name.endswith(".py")
+    )
 
 
 def identifiers(sha: str, workflow: str) -> None:
@@ -147,10 +199,12 @@ def identifiers(sha: str, workflow: str) -> None:
         raise FeedbackError("invalid_workflow") from exc
 
 
-def diagnostics(payload: object) -> list[dict]:
+def diagnostics(
+    payload: object, known_paths: frozenset[str]
+) -> list[dict[str, str | int]]:
     """Allowlisted categories/paths only: no source, SQL params, arbitrary messages or URLs."""
     entries = sequence(payload)
-    found = []
+    found: list[dict[str, str | int]] = []
     lines_count = 0
     nonempty = False
     for entry in entries:
@@ -210,10 +264,10 @@ def diagnostics(payload: object) -> list[dict]:
                 )
             match = re.match(rf"FAILED ({PATH})::([A-Za-z0-9_]+)", line)
             if match:
-                found.append({"kind": "pytest", "path": match[1], "test": match[2]})
+                found.append({"kind": "pytest", "path": match[1]})
     if not nonempty:
         raise FeedbackError("empty_log")
-    safe = [row for row in found if ".." not in row["path"].split("/")]
+    safe = [row for row in found if row["path"] in known_paths]
     unique = [
         dict(items) for items in dict.fromkeys(tuple(row.items()) for row in safe)
     ]
@@ -223,8 +277,13 @@ def diagnostics(payload: object) -> list[dict]:
 
 
 def inspect(
-    sha: str, workflow: str, job_name: str, step: str | None, fetch: Callable
-) -> dict:
+    sha: str,
+    workflow: str,
+    job_name: str,
+    step: str | None,
+    fetch: Fetch,
+    known_paths: frozenset[str],
+) -> dict[str, object]:
     identifiers(sha, workflow)
     if job_name not in {
         "backend",
@@ -273,11 +332,12 @@ def inspect(
         if mapping(row).get("name") == job_name
     ]
     if not candidates or any(
-        type(row.get("job_number")) is not int or row["job_number"] <= 0
+        type(row.get("job_number")) is not int
+        or positive_integer(row["job_number"]) <= 0
         for row in candidates
     ):
         raise FeedbackError("missing_job")
-    latest = max(candidates, key=lambda row: row["job_number"])
+    latest = max(candidates, key=lambda row: positive_integer(row["job_number"]))
     if latest.get("id") != match[1] or latest.get("project_slug") != PROJECT:
         raise FeedbackError("project_or_attempt_mismatch")
     number = latest["job_number"]
@@ -293,7 +353,7 @@ def inspect(
         or scope.get("job_name") != job_name
     ):
         raise FeedbackError("job_provenance_mismatch")
-    if job.get("status") not in TERMINAL:
+    if not isinstance(job.get("status"), str) or job.get("status") not in TERMINAL:
         raise FeedbackError("job_not_terminal")
     if latest.get("status") != job["status"] or contexts[0].get("state") not in {
         "success",
@@ -309,13 +369,15 @@ def inspect(
         and job["status"] == "success"
     ):
         raise FeedbackError("inconsistent_status")
-    parallel = job.get("parallel")
-    if type(parallel) is not int or not 1 <= parallel <= 16:
+    parallel = positive_integer(job.get("parallel"))
+    if parallel > 16:
         raise FeedbackError("invalid_parallelism")
-    selected = []
+    selected: list[dict[str, object]] = []
     for raw_step in sequence(job.get("steps")):
         current = mapping(raw_step)
         name = current.get("name")
+        if not isinstance(name, str):
+            raise FeedbackError("invalid_schema")
         actions = sequence(current.get("actions"))
         wanted = (
             name == step
@@ -331,10 +393,13 @@ def inspect(
                 raise FeedbackError("unsupported_or_incomplete_step")
             indexes = [mapping(action).get("index") for action in actions]
             if any(type(index) is not int for index in indexes) or sorted(
-                indexes
+                positive_integer(index + 1) - 1
+                for index in indexes
+                if isinstance(index, int)
             ) != list(range(parallel)):
                 raise FeedbackError("incomplete_nodes")
-            result = {"step": name, "nodes": []}
+            nodes: list[dict[str, object]] = []
+            result: dict[str, object] = {"step": name, "nodes": nodes}
             for raw_action in actions:
                 action = mapping(raw_action)
                 output = action.get("output_url")
@@ -343,8 +408,8 @@ def inspect(
                 if job["status"] == "success" and action["status"] != "success":
                     raise FeedbackError("inconsistent_action_status")
                 data = fetch(checked_url(output, logs=True), logs=True)
-                extracted = diagnostics(data)
-                result["nodes"].append(
+                extracted = diagnostics(data, known_paths)
+                nodes.append(
                     {
                         "index": action.get("index"),
                         "status": action["status"],
@@ -383,7 +448,9 @@ def main() -> int:
     parser.add_argument("--step", choices=sorted(STEPS))
     args = parser.parse_args()
     try:
-        result = inspect(args.sha, args.workflow, args.job, args.step, PublicJson())
+        result = inspect(
+            args.sha, args.workflow, args.job, args.step, PublicJson(), tracked_paths()
+        )
         print(json.dumps(result))
         return (
             0
