@@ -322,6 +322,20 @@ export function ElectronicRefundModal({
       }),
     });
   });
+  if (!active()) {
+    return (
+      <Modal open title="Электронный физический возврат" onClose={onClose} className="max-w-3xl">
+        <p role={mounted.current ? "alert" : "status"}>
+          {mounted.current
+            ? "Доступ изменился. Закройте форму и откройте её заново."
+            : "Проверяем доступ к возврату…"}
+        </p>
+        <Button variant="ghost" onClick={onClose}>
+          Закрыть
+        </Button>
+      </Modal>
+    );
+  }
   return (
     <Modal open title="Электронный физический возврат" onClose={onClose} className="max-w-3xl">
       <div className="space-y-4">
@@ -329,7 +343,6 @@ export function ElectronicRefundModal({
           Поддержку чека и сумму проверяет сервер. Aurum не обращается к банку и не повторяет
           внешнюю выплату.
         </p>
-        {!active() && <p role="alert">Доступ изменился. Закройте форму и откройте её заново.</p>}
         {error && (
           <p role="alert">{error} Сохранённый UUID не удалён. Не повторяйте внешнюю выплату.</p>
         )}

@@ -9,25 +9,31 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-const mocks = vi.hoisted(() => ({
-  options: vi.fn(),
-  quote: vi.fn(),
-  inspect: vi.fn(),
-  load: vi.fn(),
-  save: vi.fn(),
-  command: vi.fn(),
-  ack: vi.fn(),
-  shift: vi.fn(),
-  active: true,
-  user: {
-    id: "00000000-0000-4000-8000-000000000002",
-    active_tenant_id: "00000000-0000-4000-8000-000000000001",
-    is_developer: false,
-    permissions: ["pos.refund", "pos.refund_external_confirm"],
-    permission_scopes: { "pos.refund": null, "pos.refund_external_confirm": null },
-    support_access: null as { is_read_only: boolean } | null,
-  },
-}));
+const mocks = vi.hoisted(() => {
+  const permission_scopes: Record<string, string[] | null> = {
+    "pos.refund": null,
+    "pos.refund_external_confirm": null,
+  };
+  return {
+    options: vi.fn(),
+    quote: vi.fn(),
+    inspect: vi.fn(),
+    load: vi.fn(),
+    save: vi.fn(),
+    command: vi.fn(),
+    ack: vi.fn(),
+    shift: vi.fn(),
+    active: true,
+    user: {
+      id: "00000000-0000-4000-8000-000000000002",
+      active_tenant_id: "00000000-0000-4000-8000-000000000001",
+      is_developer: false,
+      permissions: ["pos.refund", "pos.refund_external_confirm"],
+      permission_scopes,
+      support_access: null as { is_read_only: boolean } | null,
+    },
+  };
+});
 vi.mock("@/features/auth/hooks", () => ({ useAuth: () => ({ user: mocks.user }) }));
 vi.mock("@/stores/auth", () => ({ useAuthStore: { getState: () => ({ user: mocks.user }) } }));
 vi.mock("@/features/pos/posStorageScope", () => ({
@@ -160,6 +166,7 @@ const open = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.active = true;
+  mocks.user.permission_scopes = { "pos.refund": null, "pos.refund_external_confirm": null };
   mocks.user.permissions = ["pos.refund", "pos.refund_external_confirm"];
   mocks.user.support_access = null;
   mocks.shift.mockReturnValue({
@@ -365,4 +372,40 @@ describe("evidence and posting UI", () => {
     expect(mocks.command).not.toHaveBeenCalled();
     expect(mocks.options).not.toHaveBeenCalled();
   });
+});
+
+describe("revoked live authority", () => {
+  it("suppresses saved UUID, payment parts and typed evidence on same-session branch loss", async () => {
+    const stored = { request: { operation_id: id(8) } };
+    mocks.load.mockReturnValue(stored);
+    mocks.inspect.mockResolvedValue(activated());
+    const view = open();
+    await screen.findByText(`Операция: ${id(8)}`);
+    fireEvent.change(screen.getByLabelText("Терминал 1"), { target: { value: "MANUAL-EVIDENCE" } });
+    mocks.user.permission_scopes["pos.refund"] = [id(99)];
+    view.rerender(<ElectronicRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Доступ изменился");
+    expect(screen.queryByText(`Операция: ${id(8)}`)).not.toBeInTheDocument();
+    expect(screen.queryByText("card: 2.00 TJS")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("MANUAL-EVIDENCE")).not.toBeInTheDocument();
+    expect(mocks.load()).toBe(stored);
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(mocks.ack).not.toHaveBeenCalled();
+  });
+  it.each(["branch", "session"])(
+    "hides loaded product options after %s authority loss",
+    async (kind) => {
+      const view = open();
+      await screen.findByLabelText("Количество: Лекарство");
+      if (kind === "branch") mocks.user.permission_scopes["pos.refund"] = [id(99)];
+      else mocks.active = false;
+      view.rerender(<ElectronicRefundModal sale={sale} onClose={vi.fn()} onRefunded={vi.fn()} />);
+      expect(screen.getByRole("alert")).toHaveTextContent("Доступ изменился");
+      expect(screen.queryByLabelText("Количество: Лекарство")).not.toBeInTheDocument();
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(mocks.save).not.toHaveBeenCalled();
+      expect(mocks.command).not.toHaveBeenCalled();
+    },
+  );
 });
