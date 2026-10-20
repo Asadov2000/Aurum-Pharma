@@ -5,6 +5,8 @@ import {
   evidenceSchema,
   executeElectronicCommand,
   loadElectronicCommand,
+  hasRejectedElectronicCommand,
+  releaseRejectedElectronicCommand,
   recoverElectronicCheckout,
   type ElectronicAttempt,
   type ElectronicCheckoutContext,
@@ -32,82 +34,94 @@ export function PhysicalElectronicCheckoutPanel(props: Props): JSX.Element {
     [error, setError] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<ElectronicAttempt[]>([]);
   const [result, setResult] = useState<ElectronicCheckoutResult | null>(null);
+  const [rejected, setRejected] = useState(false);
   const [pending, setPending] = useState<ElectronicCommand | null>(null);
   const form = useForm<{ terminal_id: string; external_reference: string }>({
     defaultValues: { terminal_id: "", external_reference: "" },
   });
-  const run = useCallback(async (command?: ElectronicCommand): Promise<void> => {
-    if (!active.current || running.current) return;
-    const version = epoch.current,
-      owner = latest.current;
-    const sameOwner = () =>
-      active.current &&
-      epoch.current === version &&
-      owner.context.isActive() &&
-      latest.current.context.scope.tenantId === owner.context.scope.tenantId &&
-      latest.current.context.scope.userId === owner.context.scope.userId &&
-      latest.current.context.registerId === owner.context.registerId &&
-      latest.current.context.branchId === owner.context.branchId &&
-      latest.current.context.intent.operation_id === owner.context.intent.operation_id;
-    const check = () => {
-      if (
-        !sameOwner() ||
-        (command !== undefined && (!latest.current.writable || !latest.current.online))
-      )
-        throw new Error("Касса, разрешение или сессия изменились. Данные сохранены.");
-    };
-    const current = () => {
+  const run = useCallback(
+    async (command?: ElectronicCommand, releaseRejected = false): Promise<void> => {
+      if (!active.current || running.current) return;
+      const version = epoch.current,
+        owner = latest.current;
+      const sameOwner = () =>
+        active.current &&
+        epoch.current === version &&
+        owner.context.isActive() &&
+        latest.current.context.scope.tenantId === owner.context.scope.tenantId &&
+        latest.current.context.scope.userId === owner.context.scope.userId &&
+        latest.current.context.registerId === owner.context.registerId &&
+        latest.current.context.branchId === owner.context.branchId &&
+        latest.current.context.intent.operation_id === owner.context.intent.operation_id;
+      const check = () => {
+        if (
+          !sameOwner() ||
+          ((command !== undefined || releaseRejected) &&
+            (!latest.current.writable || !latest.current.online))
+        )
+          throw new Error("Касса, разрешение или сессия изменились. Данные сохранены.");
+      };
+      const current = () => {
+        try {
+          check();
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const context = { ...owner.context, isActive: current };
+      running.current = true;
+      setBusy(true);
+      setError(null);
+      owner.onBarrierChange(true);
       try {
         check();
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    const context = { ...owner.context, isActive: current };
-    running.current = true;
-    setBusy(true);
-    setError(null);
-    owner.onBarrierChange(true);
-    try {
-      check();
-      if (!owner.online) throw new Error("Нужно соединение. Не принимайте деньги повторно.");
-      if (command) {
-        if (!owner.writable) throw new Error("Финансовые действия недоступны.");
-        await executeElectronicCommand(context, command);
+        if (!owner.online) throw new Error("Нужно соединение. Не принимайте деньги повторно.");
+        if (releaseRejected) {
+          if (!owner.writable) throw new Error("Исправление реквизитов недоступно.");
+          await releaseRejectedElectronicCommand(context);
+          check();
+        }
+        if (command) {
+          if (!owner.writable) throw new Error("Финансовые действия недоступны.");
+          await executeElectronicCommand(context, command);
+          check();
+        }
+        const state = await recoverElectronicCheckout(context);
         check();
-      }
-      const state = await recoverElectronicCheckout(context);
-      check();
-      const stored = loadElectronicCommand(context);
-      setPending(stored);
-      setAttempts(state.attempts);
-      setResult(state.result);
-      owner.onBarrierChange(
-        stored !== null ||
-          state.result !== null ||
-          state.attempts.some((a) => a.status !== "voided"),
-      );
-    } catch (cause) {
-      if (sameOwner()) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Результат неизвестен. Проверьте эту же операцию.",
+        const stored = loadElectronicCommand(context);
+        setPending(stored);
+        setRejected(hasRejectedElectronicCommand(context));
+        setAttempts(state.attempts);
+        setResult(state.result);
+        owner.onBarrierChange(
+          stored !== null ||
+            state.result !== null ||
+            state.attempts.some((a) => a.status !== "voided"),
         );
-        try {
-          setPending(loadElectronicCommand(context));
-        } catch {
-          /* Corrupt storage keeps the barrier. */
+      } catch (cause) {
+        if (sameOwner()) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Результат неизвестен. Проверьте эту же операцию.",
+          );
+          try {
+            setPending(loadElectronicCommand(context));
+            setRejected(hasRejectedElectronicCommand(context));
+          } catch {
+            /* Corrupt storage keeps the barrier. */
+          }
+        }
+      } finally {
+        if (sameOwner()) {
+          running.current = false;
+          setBusy(false);
         }
       }
-    } finally {
-      if (sameOwner()) {
-        running.current = false;
-        setBusy(false);
-      }
-    }
-  }, []);
+    },
+    [],
+  );
   useEffect(() => {
     active.current = true;
     epoch.current += 1;
@@ -115,6 +129,7 @@ export function PhysicalElectronicCheckoutPanel(props: Props): JSX.Element {
     setAttempts([]);
     setResult(null);
     setPending(null);
+    setRejected(false);
     void run();
     return () => {
       active.current = false;
@@ -282,7 +297,16 @@ export function PhysicalElectronicCheckoutPanel(props: Props): JSX.Element {
           </Button>
         </>
       )}
-      {pending && !result && (
+      {rejected && !result && (
+        <Button
+          type="button"
+          disabled={busy || !props.online || !props.writable}
+          onClick={() => void run(undefined, true)}
+        >
+          Исправить отклонённые реквизиты
+        </Button>
+      )}
+      {pending && !result && !rejected && (
         <Button
           type="button"
           disabled={busy || !props.online || !props.writable}

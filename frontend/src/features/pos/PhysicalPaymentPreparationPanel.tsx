@@ -3,7 +3,11 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { PhysicalElectronicCheckoutPanel } from "./PhysicalElectronicCheckoutPanel";
-import { type ElectronicCheckoutResult, clearElectronicCommand } from "./unitElectronicCheckout";
+import {
+  type ElectronicCheckoutResult,
+  acknowledgeElectronicCheckout,
+  cancelElectronicPreparation,
+} from "./unitElectronicCheckout";
 
 import { Button, Input, Label } from "@/components/ui";
 import { getAuthSessionGeneration } from "@/stores/auth";
@@ -288,10 +292,34 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
         throw new Error("Сначала проверьте электронные попытки.");
       if (!intent || !(latest.current.canCancel ?? latest.current.canPrepare))
         throw new Error("Отмена подготовки сейчас недоступна.");
-      const state = await unitPaymentBindingAction(intent, "cancel-binding", latest.current.scope);
-      check();
-      if (state?.state !== "cancelled") throw new Error("Отмена ещё не подтверждена.");
-      clearUnitPaymentMarker(latest.current.saleId, latest.current.scope, intent.operation_id);
+      const owner = latest.current;
+      if (owner.physicalOnly && owner.branchId && owner.registerId) {
+        await cancelElectronicPreparation(
+          {
+            intent,
+            scope: owner.scope,
+            branchId: owner.branchId,
+            registerId: owner.registerId,
+            isActive: () => {
+              check();
+              return (
+                latest.current.saleId === owner.saleId &&
+                latest.current.branchId === owner.branchId &&
+                latest.current.registerId === owner.registerId &&
+                latest.current.scope.tenantId === owner.scope.tenantId &&
+                latest.current.scope.userId === owner.scope.userId
+              );
+            },
+          },
+          () => unitPaymentBindingAction(intent, "cancel-binding", owner.scope),
+        );
+        check();
+      } else {
+        const state = await unitPaymentBindingAction(intent, "cancel-binding", owner.scope);
+        check();
+        if (state?.state !== "cancelled") throw new Error("Отмена ещё не подтверждена.");
+        clearUnitPaymentMarker(owner.saleId, owner.scope, intent.operation_id);
+      }
       setIntent(null);
       setBinding(null);
       setMarker(null);
@@ -424,24 +452,26 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
                 latest.current.scope.userId === owner.scope.userId &&
                 latest.current.branchId === result.branch_id &&
                 latest.current.registerId === result.register_id &&
-                currentIntent.current?.operation_id === result.operation_id &&
-                loadUnitPaymentMarker(result.sale_id, owner.scope) === result.operation_id;
-              if (
-                !same() ||
-                !owner.onElectronicCompleted ||
-                !(await owner.onElectronicCompleted(result)) ||
-                !same()
-              )
-                return false;
-              clearElectronicCommand({
-                intent,
-                binding,
-                scope: owner.scope,
-                branchId: result.branch_id,
-                registerId: result.register_id,
-                isActive: same,
-              });
-              clearUnitPaymentMarker(result.sale_id, owner.scope, result.operation_id);
+                currentIntent.current?.operation_id === result.operation_id;
+              if (!same() || !owner.onElectronicCompleted) return false;
+              const accept = owner.onElectronicCompleted;
+              const accepted = await acknowledgeElectronicCheckout(
+                {
+                  intent,
+                  binding,
+                  scope: owner.scope,
+                  branchId: result.branch_id,
+                  registerId: result.register_id,
+                  isActive: same,
+                },
+                result,
+                async (saved) => {
+                  if (!same()) return false;
+                  const confirmed = await accept(saved);
+                  return confirmed && same();
+                },
+              );
+              if (!accepted || !same()) return false;
               setMarker(null);
               setIntent(null);
               setBinding(null);

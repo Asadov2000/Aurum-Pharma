@@ -2,11 +2,14 @@ import { isAxiosError } from "axios";
 import { z } from "zod";
 
 import { api, withAuthSession } from "@/lib/api";
+import { hasCashRecovery, physicalCashRecoveryKey } from "./physicalCashRecoveryPresence";
+import { clearUnitPaymentMarker, loadUnitPaymentMarker } from "./unitPaymentPreparationStorage";
 import { physicalResultLineSchema } from "./physicalCashCheckout";
 import { capturePosSessionGuard, posStorageKey, type PosStorageScope } from "./posStorageScope";
 import {
   parseSavedUnitPaymentIntent,
   parseUnitPaymentBinding,
+  unitPaymentBindingAction,
   paymentCents,
   type SavedUnitPaymentIntent,
   type UnitPaymentBinding,
@@ -117,6 +120,10 @@ const pendingSchema = z
     registerId: uuid,
     planHash: z.string().regex(/^[a-f0-9]{64}$/),
     command: commandSchema,
+    rejection: z
+      .object({ kind: z.literal("duplicate_reference"), received_at: timestamp })
+      .strict()
+      .optional(),
   })
   .strict();
 const resultSchema = z
@@ -166,7 +173,8 @@ export interface ElectronicCheckoutContext {
 }
 const failure = () =>
   new Error("Данные электронной оплаты не соответствуют сохранённому плану. Касса заблокирована.");
-function owner(c: ElectronicCheckoutContext) {
+type ElectronicOwnerContext = Omit<ElectronicCheckoutContext, "binding">;
+function owner(c: ElectronicOwnerContext) {
   const q = c.intent.plan.quote;
   return {
     tenantId: c.scope.tenantId,
@@ -178,25 +186,40 @@ function owner(c: ElectronicCheckoutContext) {
     planHash: c.intent.plan.plan_hash,
   };
 }
-const key = (c: ElectronicCheckoutContext) =>
+const key = (c: ElectronicOwnerContext) =>
   posStorageKey("pos:unitElectronicCommand:", c.intent.plan.request.sale_id, c.scope);
-export function loadElectronicCommand(c: ElectronicCheckoutContext): ElectronicCommand | null {
+function pendingRecord(c: ElectronicOwnerContext): z.infer<typeof pendingSchema> | null {
   const raw = localStorage.getItem(key(c));
   if (raw === null) return null;
   const saved = pendingSchema.parse(JSON.parse(raw));
   if (Object.entries(owner(c)).some(([k, v]) => saved[k as keyof typeof saved] !== v))
     throw failure();
-  return saved.command;
+  return saved;
 }
+export function loadElectronicCommand(c: ElectronicOwnerContext): ElectronicCommand | null {
+  return pendingRecord(c)?.command ?? null;
+}
+export function hasRejectedElectronicCommand(c: ElectronicCheckoutContext): boolean {
+  return pendingRecord(c)?.rejection?.kind === "duplicate_reference";
+}
+class RejectedElectronicCommand extends Error {
+  constructor() {
+    super(
+      "Сервер отклонил занятый внешний номер. Проверьте сохранённые факты и явно исправьте реквизиты на той же попытке.",
+    );
+  }
+}
+
 function storeCommand(c: ElectronicCheckoutContext, command: ElectronicCommand): void {
   const value = pendingSchema.parse({ ...owner(c), command });
+  if (hasRejectedElectronicCommand(c)) throw new RejectedElectronicCommand();
   const previous = loadElectronicCommand(c);
   if (previous && JSON.stringify(previous) !== JSON.stringify(command)) throw failure();
   const raw = JSON.stringify(value);
   localStorage.setItem(key(c), raw);
   if (localStorage.getItem(key(c)) !== raw) throw failure();
 }
-export function clearElectronicCommand(c: ElectronicCheckoutContext): void {
+function clearElectronicCommand(c: ElectronicCheckoutContext): void {
   if (!capturePosSessionGuard(c.scope)() || !c.isActive()) throw failure();
   loadElectronicCommand(c);
   localStorage.removeItem(key(c));
@@ -371,7 +394,7 @@ function clearProvenCommand(c: ElectronicCheckoutContext, command: ElectronicCom
 }
 
 /** Read only: a missing response never prepares attempts or submits money commands. */
-export async function recoverElectronicCheckout(
+async function recoverUnlocked(
   c: ElectronicCheckoutContext,
 ): Promise<{ attempts: ElectronicAttempt[]; result: ElectronicCheckoutResult | null }> {
   const check = await checkedContext(c);
@@ -389,25 +412,68 @@ export async function recoverElectronicCheckout(
   }
   return { attempts, result };
 }
-export async function executeElectronicCommand(
+async function executeUnlocked(
   c: ElectronicCheckoutContext,
   input: ElectronicCommand,
 ): Promise<void> {
   const check = await checkedContext(c);
   check();
   const command = commandSchema.parse(input);
-  if (command.action === "attempts") validateIds(c, command.payload.attempt_ids);
+  if (hasCashRecovery(c.intent.plan.request.sale_id, c.scope)) throw failure();
+  if (command.action === "attempts") {
+    validateIds(c, command.payload.attempt_ids);
+    const existing = await get(c, "/attempts");
+    check();
+    if (existing !== null) {
+      const rows = parseElectronicAttempts(existing, c);
+      if (!commandProven(command, rows, null)) throw failure();
+    }
+  }
+  if (loadUnitPaymentMarker(c.intent.plan.request.sale_id, c.scope) !== c.intent.operation_id)
+    throw failure();
   storeCommand(c, command);
   check();
   const suffix =
     "attemptId" in command
       ? `/attempts/${command.attemptId}/${command.action}`
       : `/${command.action}`;
-  const { data } = await api.post<unknown>(
-    url(c) + suffix,
-    command.payload,
-    withAuthSession({ timeout: 8_000 }, true),
-  );
+  let data: unknown;
+  try {
+    data = (
+      await api.post<unknown>(
+        url(c) + suffix,
+        command.payload,
+        withAuthSession({ timeout: 8_000 }, true),
+      )
+    ).data;
+  } catch (error) {
+    check();
+    const definite =
+      command.action === "confirm" &&
+      isAxiosError<unknown>(error) &&
+      error.response?.status === 409 &&
+      z
+        .object({
+          error: z.object({
+            code: z.literal("conflict"),
+            message: z.literal("Terminal payment reference was already used"),
+          }),
+        })
+        .safeParse(error.response.data).success;
+    if (definite) {
+      const saved = pendingRecord(c);
+      if (!saved || JSON.stringify(saved.command) !== JSON.stringify(command)) throw failure();
+      const rejected = pendingSchema.parse({
+        ...saved,
+        rejection: { kind: "duplicate_reference", received_at: new Date().toISOString() },
+      });
+      const raw = JSON.stringify(rejected);
+      localStorage.setItem(key(c), raw);
+      if (localStorage.getItem(key(c)) !== raw) throw failure();
+      throw new RejectedElectronicCommand();
+    }
+    throw error;
+  }
   check();
   if (command.action === "attempts") {
     parseElectronicAttempts(data, c);
@@ -415,7 +481,7 @@ export async function executeElectronicCommand(
     clearProvenCommand(c, command);
     return;
   }
-  const state = await recoverElectronicCheckout(c);
+  const state = await recoverUnlocked(c);
   check();
   if (!commandProven(command, state.attempts, state.result)) throw failure();
   if (command.action === "complete") parseElectronicResult(data, c, state.attempts);
@@ -435,4 +501,134 @@ export async function executeElectronicCommand(
       throw failure();
   }
   check();
+}
+
+async function exclusively<T>(
+  c: ElectronicOwnerContext,
+  work: (check: () => void) => Promise<T>,
+): Promise<T> {
+  const guard = capturePosSessionGuard(c.scope),
+    snapshot = owner(c);
+  const check = () => {
+    if (
+      !guard() ||
+      !c.isActive() ||
+      JSON.stringify(owner(c)) !== JSON.stringify(snapshot) ||
+      c.branchId !== snapshot.branchId ||
+      c.registerId !== snapshot.registerId
+    )
+      throw failure();
+  };
+  check();
+  if (!navigator.locks?.request)
+    throw new Error("Для безопасной оплаты нужен браузер с межвкладочной блокировкой.");
+  return navigator.locks.request(physicalCashRecoveryKey(snapshot.saleId, c.scope), async () => {
+    check();
+    const value = await work(check);
+    check();
+    return value;
+  });
+}
+export async function recoverElectronicCheckout(
+  c: ElectronicCheckoutContext,
+): Promise<{ attempts: ElectronicAttempt[]; result: ElectronicCheckoutResult | null }> {
+  return exclusively(c, async (check) => {
+    check();
+    const state = await recoverUnlocked(c);
+    check();
+    return state;
+  });
+}
+export async function executeElectronicCommand(
+  c: ElectronicCheckoutContext,
+  input: ElectronicCommand,
+): Promise<void> {
+  return exclusively(c, async (check) => {
+    check();
+    await executeUnlocked(c, input);
+    check();
+  });
+}
+/** Only a persisted, recognized rollback plus fresh scoped non-applied facts allows explicit correction. */
+export async function releaseRejectedElectronicCommand(
+  c: ElectronicCheckoutContext,
+): Promise<void> {
+  return exclusively(c, async (check) => {
+    const rejected = pendingRecord(c);
+    if (!rejected?.rejection || rejected.command.action !== "confirm") throw failure();
+    const command = rejected.command;
+    const state = await recoverUnlocked(c);
+    check();
+    if (loadElectronicCommand(c) === null) return;
+    const row = state.attempts.find((a) => a.id === command.attemptId);
+    if (
+      state.result ||
+      !row ||
+      row.status !== "requires_reconciliation" ||
+      row.terminal_id !== null ||
+      row.external_reference !== null ||
+      row.confirmed_at !== null ||
+      row.consumed_at !== null ||
+      row.voided_at !== null ||
+      row.reconciliation_started_at === null
+    )
+      throw failure();
+    check();
+    clearProvenCommand(c, command);
+  });
+}
+/** Receipt acceptance and both marker cleanups share the same lock; no nested recovery lock. */
+export async function acknowledgeElectronicCheckout(
+  c: ElectronicCheckoutContext,
+  result: ElectronicCheckoutResult,
+  accept: (saved: ElectronicCheckoutResult) => Promise<boolean>,
+): Promise<boolean> {
+  return exclusively(c, async (check) => {
+    if (hasCashRecovery(c.intent.plan.request.sale_id, c.scope)) throw failure();
+    const state = await recoverUnlocked(c);
+    check();
+    if (
+      !state.result ||
+      JSON.stringify(state.result) !==
+        JSON.stringify(parseElectronicResult(result, c, state.attempts)) ||
+      loadUnitPaymentMarker(result.sale_id, c.scope) !== result.operation_id
+    )
+      throw failure();
+    if (!(await accept(state.result))) {
+      check();
+      return false;
+    }
+    check();
+    if (loadUnitPaymentMarker(result.sale_id, c.scope) !== result.operation_id) throw failure();
+    clearElectronicCommand(c);
+    clearUnitPaymentMarker(result.sale_id, c.scope, result.operation_id);
+    return true;
+  });
+}
+
+/** Cancellation must not race a different tab creating a financial command. */
+export async function cancelElectronicPreparation(
+  c: ElectronicOwnerContext,
+  cancel: () => Promise<UnitPaymentBinding | null>,
+): Promise<void> {
+  return exclusively(c, async (check) => {
+    if (hasCashRecovery(c.intent.plan.request.sale_id, c.scope)) throw failure();
+    const actual = await unitPaymentBindingAction(c.intent, "binding", c.scope);
+    check();
+    if (actual?.state === "bound") {
+      const state = await recoverUnlocked({ ...c, binding: actual });
+      check();
+      if (
+        state.result ||
+        loadElectronicCommand(c) !== null ||
+        state.attempts.some((a) => a.status !== "voided")
+      )
+        throw failure();
+    } else if (loadElectronicCommand(c) !== null) throw failure();
+    const cancelled = actual?.state === "cancelled" ? actual : await cancel();
+    check();
+    if (!cancelled || parseUnitPaymentBinding(cancelled, c.intent).state !== "cancelled")
+      throw failure();
+    clearUnitPaymentMarker(c.intent.plan.request.sale_id, c.scope, c.intent.operation_id);
+  });
 }

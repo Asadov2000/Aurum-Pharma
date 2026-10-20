@@ -1,3 +1,5 @@
+import { storeUnitPaymentMarker } from "@/features/pos/unitPaymentPreparationStorage";
+import { installElectronicLocks } from "./unitElectronicCheckoutFixture";
 import { webcrypto } from "node:crypto";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,9 +17,12 @@ const props = () => ({
   onCompleted: vi.fn().mockResolvedValue(true),
 });
 beforeEach(() => {
+  installElectronicLocks();
   localStorage.clear();
   vi.stubGlobal("crypto", webcrypto);
   authenticatePos(scope);
+  const c = context();
+  storeUnitPaymentMarker(c.intent.plan.request.sale_id, c.scope, c.intent.operation_id);
 });
 afterEach(() => {
   cleanup();
@@ -213,4 +218,61 @@ describe("physical electronic cashier feature", () => {
     );
     expect(post).toHaveBeenCalledTimes(1);
   });
+});
+
+it("explicitly releases a proven duplicate reference and corrects the same attempt UUID", async () => {
+  let reference: string | null = null;
+  vi.spyOn(api, "get").mockImplementation(async (url) => {
+    if (String(url).endsWith("/checkout")) throw notFound();
+    return {
+      data: [
+        {
+          ...attempt(reference ? "confirmed" : "requires_reconciliation"),
+          ...(reference ? { external_reference: reference } : {}),
+        },
+      ],
+    };
+  });
+  const post = vi
+    .spyOn(api, "post")
+    .mockRejectedValueOnce({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: {
+          error: { code: "conflict", message: "Terminal payment reference was already used" },
+        },
+      },
+    })
+    .mockImplementationOnce(async (_url, payload: unknown) => {
+      reference = (payload as { external_reference: string }).external_reference;
+      return { data: { ...attempt("confirmed"), external_reference: reference } };
+    });
+  render(<PhysicalElectronicCheckoutPanel {...props()} />);
+  const confirm = await screen.findByRole("button", {
+    name: "Подтвердить проверенную оплату card",
+  });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Терминал"), { target: { value: "T1" } });
+  fireEvent.change(screen.getByLabelText("Внешний номер подтверждения"), {
+    target: { value: "R1" },
+  });
+  fireEvent.click(confirm);
+  const repair = await screen.findByRole("button", { name: "Исправить отклонённые реквизиты" });
+  await waitFor(() => expect(repair).toBeEnabled());
+  expect(post).toHaveBeenCalledTimes(1);
+  fireEvent.click(repair);
+  await waitFor(() => expect(screen.getByLabelText("Внешний номер подтверждения")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Внешний номер подтверждения"), {
+    target: { value: "CORRECTED" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Подтвердить проверенную оплату card" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Завершить продажу по сохранённому плану" }),
+    ).toBeEnabled(),
+  );
+  expect(post).toHaveBeenCalledTimes(2);
+  expect(post.mock.calls[1]?.[0]).toBe(post.mock.calls[0]?.[0]);
+  expect(post.mock.calls[1]?.[1]).toEqual({ terminal_id: "T1", external_reference: "CORRECTED" });
 });

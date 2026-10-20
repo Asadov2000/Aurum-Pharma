@@ -58,3 +58,30 @@ export const result = () => ({
   total_amount: "1.99",
   currency: "TJS",
 });
+
+/** Models separate tabs sharing the browser's origin-wide exclusive lock manager. */
+export function installElectronicLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: {
+      request: async <T>(name: string, callback: () => Promise<T>): Promise<T> => {
+        const previous = tails.get(name) ?? Promise.resolve();
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        tails.set(
+          name,
+          previous.then(() => gate),
+        );
+        await previous;
+        try {
+          return await callback();
+        } finally {
+          release();
+        }
+      },
+    },
+  });
+}

@@ -1,3 +1,4 @@
+import { installElectronicLocks } from "./unitElectronicCheckoutFixture";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,6 +52,7 @@ const props = () => ({
   onBlockedChange: vi.fn(),
 });
 beforeEach(() => {
+  installElectronicLocks();
   vi.resetAllMocks();
   localStorage.clear();
   authenticatePos(scope);

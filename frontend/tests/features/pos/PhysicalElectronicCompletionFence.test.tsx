@@ -1,3 +1,7 @@
+import { webcrypto } from "node:crypto";
+import { api } from "@/lib/api";
+import { attempt } from "./unitElectronicCheckoutFixture";
+import { installElectronicLocks } from "./unitElectronicCheckoutFixture";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PhysicalPaymentPreparationPanel } from "@/features/pos/PhysicalPaymentPreparationPanel";
@@ -19,12 +23,19 @@ vi.mock("@/features/pos/PhysicalElectronicCheckoutPanel", () => ({
   PhysicalElectronicCheckoutPanel: (props: {
     onCompleted: (doc: ReturnType<typeof result>) => Promise<boolean>;
   }) => (
-    <button onClick={() => void props.onCompleted(result())}>Accept deferred saved result</button>
+    <button onClick={() => void props.onCompleted(result()).catch(() => undefined)}>
+      Accept deferred saved result
+    </button>
   ),
 }));
 beforeEach(() => {
+  installElectronicLocks();
   localStorage.clear();
   authenticatePos(scope);
+  vi.stubGlobal("crypto", webcrypto);
+  vi.spyOn(api, "get").mockImplementation(async (url) => ({
+    data: String(url).endsWith("/checkout") ? result() : [attempt("consumed")],
+  }));
   network.active.mockResolvedValue({ intent: saved, binding: bound });
   network.get.mockResolvedValue(saved);
   network.binding.mockResolvedValue(bound);
@@ -32,6 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 it("does not clear either sale marker when canonical receipt acceptance finishes after sale/register changed", async () => {
   let resolve: (value: boolean) => void = () => undefined;
