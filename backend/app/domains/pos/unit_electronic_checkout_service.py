@@ -179,10 +179,9 @@ class UnitElectronicCheckoutService:
             saved, sale = await self._source(
                 tenant_id, actor_id, allowed_branch_ids, sale_id, operation_id, lock=False
             )
-            if (
-                not await self.repository.bindings(tenant_id, operation_id)
-                and not await self.repository.attempts(tenant_id, sale_id, lock=False)
-            ):
+            if not await self.repository.bindings(
+                tenant_id, operation_id
+            ) and not await self.repository.attempts(tenant_id, sale_id, lock=False):
                 raise NotFoundError("Electronic payment attempts have not been prepared")
             rows = await self._attempts(saved, sale, status=None, lock=False)
             await self.cart.assert_actor(tenant_id, actor_id, sale.branch_id)
