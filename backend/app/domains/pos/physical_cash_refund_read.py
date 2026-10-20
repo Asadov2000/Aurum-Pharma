@@ -9,6 +9,7 @@ from app.domains.pos.models import Sale
 from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundReceiptV3
 from app.domains.pos.schemas import ReceiptLine
 from app.domains.pos.unit_documents import UNIT_LABELS
+from app.domains.pos.unit_electronic_refund_posting_schemas import PhysicalElectronicRefundReceiptV3
 
 
 def physical_cash_refund_snapshot(sale: Sale) -> PhysicalCashRefundReceiptV3 | None:
@@ -41,7 +42,9 @@ def physical_cash_refund_snapshot(sale: Sale) -> PhysicalCashRefundReceiptV3 | N
     return receipt
 
 
-def physical_cash_refund_lines(receipt: PhysicalCashRefundReceiptV3) -> list[ReceiptLine]:
+def physical_cash_refund_lines(
+    receipt: PhysicalCashRefundReceiptV3 | PhysicalElectronicRefundReceiptV3,
+) -> list[ReceiptLine]:
     """Display each exact allocation without inventing a rounded per-unit price.
 
     One line is one returned allocation. Its actual physical quantity and the
