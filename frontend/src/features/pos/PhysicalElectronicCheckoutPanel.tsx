@@ -146,7 +146,7 @@ export function PhysicalElectronicCheckoutPanel(props: Props): JSX.Element {
     run,
   ]);
   const disabled = busy || !props.online || !props.writable || pending !== null || error !== null;
-  const confirm = (row: ElectronicAttempt) =>
+  const confirmAttempt = (row: ElectronicAttempt) =>
     form.handleSubmit((fields) => {
       const parsed = evidenceSchema.safeParse(fields);
       if (!parsed.success) {
@@ -260,7 +260,7 @@ export function PhysicalElectronicCheckoutPanel(props: Props): JSX.Element {
                 )}
                 {row.status === "requires_reconciliation" && (
                   <>
-                    <Button type="button" disabled={disabled} onClick={() => void confirm(row)()}>
+                    <Button type="button" disabled={disabled} onClick={() => void confirmAttempt(row)()}>
                       Подтвердить проверенную оплату {row.payment_method}
                     </Button>
                     <Button
