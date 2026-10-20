@@ -1,5 +1,6 @@
-"""Internal physical electronic settlement; no terminal HTTP release or bank calls."""
+"""Physical electronic settlement and scoped operator commands; no bank calls."""
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -22,11 +23,15 @@ from app.domains.pos.physical_documents import (
 )
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from app.domains.pos.unit_cart_quote import PhysicalUnitDraftQuoteLineV2
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_checkout_payment_repository import UnitCheckoutPaymentRepository
 from app.domains.pos.unit_checkout_payment_service import UnitCheckoutPaymentService
 from app.domains.pos.unit_contracts import CheckoutPaymentV2
-from app.domains.pos.unit_electronic_checkout_preparation import prepare_electronic_physical_cart
+from app.domains.pos.unit_electronic_checkout_preparation import (
+    _require_open_register,
+    prepare_electronic_physical_cart,
+)
 from app.domains.pos.unit_electronic_checkout_repository import UnitElectronicCheckoutRepository
 from app.domains.pos.unit_payment_attempt_models import UnitPaymentAttemptBinding
 from app.domains.pos.unit_payment_binding_repository import UnitPaymentBindingRepository
@@ -72,6 +77,9 @@ class UnitElectronicCheckoutService:
         if sale is None:
             raise NotFoundError("Electronic checkout sale not found")
         quote = saved.plan.quote
+        physical_only = all(isinstance(line, PhysicalUnitDraftQuoteLineV2) for line in quote.lines)
+        if sale.is_test or not quote.lines or not physical_only:
+            raise BusinessRuleError("Electronic checkout requires real physical positions only")
         if (sale.branch_id, sale.register_id, sale.shift_id, sale.cashier_user_id) != (
             quote.branch_id,
             quote.register_id,
@@ -156,6 +164,97 @@ class UnitElectronicCheckoutService:
                 attempts = await self._attempts(saved, sale, status="pending", lock=True)
             await self.cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             return attempts
+
+    async def read_attempts(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+        sale_id: UUID,
+        operation_id: UUID,
+    ) -> tuple[POSPaymentAttempt, ...]:
+        """Recover the entire bound set without creating an attempt or rechecking prices."""
+        with self.repository.session.no_autoflush:
+            saved, sale = await self._source(
+                tenant_id, actor_id, allowed_branch_ids, sale_id, operation_id, lock=False
+            )
+            if not await self.repository.bindings(
+                tenant_id, operation_id
+            ) and not await self.repository.attempts(tenant_id, sale_id, lock=False):
+                raise NotFoundError("Electronic payment attempts have not been prepared")
+            rows = await self._attempts(saved, sale, status=None, lock=False)
+            await self.cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            return rows
+
+    async def update_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+        sale_id: UUID,
+        operation_id: UUID,
+        attempt_id: UUID,
+        action: Literal["reconcile", "confirm", "void"],
+        terminal_id: str | None = None,
+        external_reference: str | None = None,
+        reason: str | None = None,
+        operator_note: str | None = None,
+        allowed_manage_branch_ids: set[UUID] | None = None,
+        can_manage_tenant: bool = False,
+    ) -> POSPaymentAttempt:
+        """Explicit operator command, never a bank response or automatic retry."""
+        self._clean_session()
+        async with self.repository.session.begin_nested():
+            await self.bindings.lock_operation(tenant_id, operation_id)
+            saved, sale = await self._source(
+                tenant_id, actor_id, allowed_branch_ids, sale_id, operation_id, lock=True
+            )
+            rows = await self._attempts(saved, sale, status=None, lock=True)
+            if attempt_id not in {row.id for row in rows}:
+                raise NotFoundError("Attempt does not belong to the bound payment plan")
+            if action == "reconcile":
+                await prepare_electronic_physical_cart(self.cart, sale, saved)
+            else:
+                await _require_open_register(self.cart, sale)
+            service = POSService(POSRepository(self.repository.session))
+            scope = {sale.branch_id}
+            if action == "reconcile":
+                result = await service.begin_payment_attempt_reconciliation(
+                    tenant_id=tenant_id,
+                    attempt_id=attempt_id,
+                    actor_id=actor_id,
+                    allowed_branch_ids=scope,
+                )
+            elif action == "confirm":
+                if terminal_id is None or external_reference is None:
+                    raise BusinessRuleError("Payment confirmation requires terminal evidence")
+                result = await service.confirm_payment_attempt(
+                    tenant_id=tenant_id,
+                    attempt_id=attempt_id,
+                    actor_id=actor_id,
+                    allowed_branch_ids=scope,
+                    terminal_id=terminal_id,
+                    external_reference=external_reference,
+                )
+            else:
+                if reason is None:
+                    raise BusinessRuleError("Payment cancellation requires a reason")
+                result = await service.void_payment_attempt(
+                    tenant_id=tenant_id,
+                    attempt_id=attempt_id,
+                    actor_id=actor_id,
+                    allowed_branch_ids=scope,
+                    reason=reason,
+                    operator_note=operator_note,
+                    terminal_id=terminal_id,
+                    external_reference=external_reference,
+                    allowed_manage_branch_ids=allowed_manage_branch_ids,
+                    can_manage_tenant=can_manage_tenant,
+                )
+            await self.cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            return result
 
     async def _attempts(
         self,
