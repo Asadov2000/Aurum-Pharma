@@ -69,7 +69,20 @@ async function requestActivation(
       ? await api.get<unknown>(`${base}/activation`, config)
       : await api.post<unknown>(`${base}/activate`, { shift_id: shift }, config);
   requireActive();
-  const result = activationSchema.parse(response.data);
+  return parseSavedElectronicRefundActivation(response.data, validatedScope, validated, shift);
+}
+
+export function parseSavedElectronicRefundActivation(
+  data: unknown,
+  scope: ElectronicRefundActivationScope,
+  request: ElectronicRefundSaveRequest,
+  shift?: string,
+): SavedElectronicRefundActivation {
+  const validatedScope = scopeSchema.parse(scope);
+  const validated = electronicRefundSaveRequestSchema.parse(request);
+  if (validated.request.parent_sale_id !== validatedScope.parentSaleId)
+    throw new Error("Возврат относится к другой продаже.");
+  const result = activationSchema.parse(data);
   if (
     result.operation_id !== validated.operation_id ||
     result.parent_sale_id !== validatedScope.parentSaleId ||
