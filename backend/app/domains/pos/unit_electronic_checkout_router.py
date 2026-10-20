@@ -77,7 +77,7 @@ async def prepare_unit_electronic_attempts(
         allowed_branch_ids=branches,
         sale_id=sale_id,
         operation_id=operation_id,
-        attempt_ids={method: attempt_id for method, attempt_id in payload.attempt_ids.items()},
+        attempt_ids={str(method): attempt_id for method, attempt_id in payload.attempt_ids.items()},
     )
     return tuple(POSPaymentAttemptRead.model_validate(row) for row in rows)
 
