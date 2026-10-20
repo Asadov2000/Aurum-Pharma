@@ -132,7 +132,7 @@ function assertRequestScope(
   if (request.request.parent_sale_id !== scope.parentSaleId)
     throw new Error("Возврат относится к другой продаже.");
 }
-function parseSaved(
+export function parseSavedElectronicRefundReview(
   data: unknown,
   scope: ElectronicRefundReviewScope,
   request: ElectronicRefundSaveRequest,
@@ -193,7 +193,7 @@ export async function saveElectronicRefundReview(
     timeout: 8_000,
   });
   requireActive(active);
-  return parseSaved(data, validatedScope, validated);
+  return parseSavedElectronicRefundReview(data, validatedScope, validated);
 }
 export async function readElectronicRefundReview(
   scope: ElectronicRefundReviewScope,
@@ -209,5 +209,5 @@ export async function readElectronicRefundReview(
     { timeout: 8_000 },
   );
   requireActive(active);
-  return parseSaved(data, validatedScope, validated);
+  return parseSavedElectronicRefundReview(data, validatedScope, validated);
 }
