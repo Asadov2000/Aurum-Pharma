@@ -52,6 +52,7 @@ import {
   hasPhysicalCashRecovery,
 } from "./physicalCashRecoveryPresence";
 import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
+import { matchesElectronicCompletedSale } from "./electronicCheckoutReceipt";
 import { type CashCheckoutResult } from "./PhysicalCashPanel";
 import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
@@ -888,33 +889,7 @@ function ActiveWorkspace({
       const refreshed = await refetchSale({ throwOnError: true });
       if (!current()) return false;
       const completed = refreshed.data;
-      if (
-        !completed ||
-        completed.status !== "completed" ||
-        completed.is_test !== false ||
-        completed.id !== result.sale_id ||
-        completed.tenant_id !== result.tenant_id ||
-        completed.cashier_user_id !== result.cashier_id ||
-        completed.branch_id !== result.branch_id ||
-        completed.register_id !== result.register_id ||
-        completed.shift_id !== result.shift_id ||
-        completed.receipt_number !== result.receipt_number ||
-        completed.total_amount !== result.total_amount ||
-        completed.currency !== result.currency ||
-        completed.payments.length !== result.payments.length ||
-        result.payments.some(
-          (part) =>
-            !completed.payments.some(
-              (payment) =>
-                payment.id === part.id &&
-                payment.operation_id === part.id &&
-                payment.sale_id === result.sale_id &&
-                payment.payment_method === part.method &&
-                payment.amount === part.amount &&
-                payment.currency === part.currency,
-            ),
-        )
-      )
+      if (!completed || !matchesElectronicCompletedSale(completed, result))
         throw new Error("Не удалось подтвердить сохранённый электронный чек. Повторите проверку.");
       if (!persistCompletedReceipt(result.sale_id)) return false;
       void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });

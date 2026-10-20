@@ -20,9 +20,11 @@ RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=
         golang.org/x/text@v0.42.0 \
         golang.org/x/crypto@v0.57.0 \
         google.golang.org/grpc@v1.83.2 \
-    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto \
+        github.com/klauspost/compress@v1.18.7 \
+    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto github.com/klauspost/compress \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-        -o /out/restic github.com/restic/restic/cmd/restic
+        -o /out/restic github.com/restic/restic/cmd/restic \
+    && go version -m /out/restic | awk '$1 == "dep" && $2 == "github.com/klauspost/compress" { print $2, $3; ok = ($3 == "v1.18.7") } END { exit !ok }'
 
 WORKDIR /src/minio-client
 RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
@@ -36,9 +38,11 @@ RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=
         golang.org/x/text@v0.42.0 \
         golang.org/x/crypto@v0.57.0 \
         google.golang.org/grpc@v1.83.2 \
-    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto \
+        github.com/klauspost/compress@v1.18.7 \
+    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto github.com/klauspost/compress \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-        -o /out/mc github.com/minio/mc
+        -o /out/mc github.com/minio/mc \
+    && go version -m /out/mc | awk '$1 == "dep" && $2 == "github.com/klauspost/compress" { print $2, $3; ok = ($3 == "v1.18.7") } END { exit !ok }'
 
 FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 AS runtime
 

@@ -491,7 +491,7 @@ test("completes physical electronic checkout and recovers a lost completion with
     await electronic.getByLabel("Терминал", { exact: true }).fill("E2E-OPERATOR-TERMINAL");
     await electronic
       .getByLabel("Внешний номер подтверждения", { exact: true })
-      .fill("E2E-OPERATOR-REFERENCE");
+      .fill(uniqueName("E2E-OPERATOR-REFERENCE"));
     await electronic
       .getByRole("button", { name: "Подтвердить проверенную оплату card", exact: true })
       .click();
