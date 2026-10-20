@@ -224,3 +224,53 @@ CI запускает 300 строк как функциональную про�
 сценарий не заменяет отдельные замеры 15 000 и 50 000 строк или проверку staging.
 Семантика пакетов и границы гарантий описаны в
 [ADR-0037](adr/0037-batched-catalog-import.md).
+# Облачная разработка: ранние проверки и журналы CI
+
+Для короткого цикла используйте существующий runner, сохраняя обязательный полный CI:
+
+```powershell
+pwsh -NoProfile -File scripts/verify-change.ps1 -Mode Auto -PlanOnly
+pwsh -NoProfile -File scripts/verify-change.ps1 -Mode Preflight -BackendRuntime Poetry
+```
+
+Preflight проверяет выбранные scope проверки стиля/типов и сохраняет exit codes
+и локальный отчёт; он не заменяет pytest, Vitest, E2E и восемь обязательных
+контекстов CI. Не устанавливайте `CIRCLECI=true` для запуска CI-only wrappers.
+Для восстановления разрешены существующие версии Poetry 2.3.4/pnpm 9.12.0,
+`poetry check --lock`, `poetry install --no-root --with dev --sync` и
+`pnpm install --frozen-lockfile`, без regeneration lock-файлов. Используйте
+изолированный workspace и существующие proxy/TLS/CA; при policy deny не
+переключайте транспорт, зеркало или прокси. При повреждённой установке сначала
+сверьте RECORD и архив с хешем lock, затем восстановите тот же пакет.
+
+Штатный публичный reader не требует токенов и не запускает pipeline:
+
+```bash
+python scripts/read-circleci-feedback.py --sha <40-hex-head> --workflow <workflow-uuid> --job backend
+python scripts/read-circleci-feedback.py --sha <40-hex-head> --workflow <workflow-uuid> --step Black
+python scripts/test-circleci-feedback.py
+```
+
+Reader связывает repository/SHA и актуальный GitHub status target с workflow,
+последней попыткой job в этом workflow, project mapping и build metadata.
+Параллельные nodes должны присутствовать полностью. Он читает только GET с
+разрешённых HTTPS origins, проверяет каждый redirect, сохраняет стандартный
+proxy/TLS, ограничивает время, объём и число строк. API credentials и cookies
+не используются; подписанные URL остаются только в памяти. Неизвестный origin,
+pagination, пустой/усечённый ответ или несовпадение provenance не дают success.
+
+Вывод содержит статусы и ограниченные категории Ruff/Mypy/Black/pytest с
+относительными путями, без raw logs, SQL/параметров, кода, terminal evidence,
+произвольных сообщений или signed queries. Если безопасная диагностика не
+извлечена, узел явно помечен `diagnostics_unavailable`; журнал никогда не
+исполняется. Exit 0 означает проверенный успешный **job**, не весь CI gate;
+exit 1 — проверенный неуспех/ещё не зелёный context; exit 2 — неполные сведения,
+ошибка доступа или проверки. Running job с отсутствующим output URL требует
+ожидания, без автоматического rerun. Публичный API может быть недоступен или
+ограничен по частоте; reader не обещает постоянный доступ и не обходит отказ.
+
+Проверено 2026-10-20 в существующем Work scratch: обычные HTTPS GET к PyPI,
+npm и CircleCI, lock install, отдельный frontend typecheck/lint; это отличается
+от прежнего policy deny. Такой результат не доказывает привязку scratch к
+отдельной опубликованной managed VM и не меняет её конфигурацию. Не выводите
+готовность Work из одной только успешной установки зависимостей в CircleCI.
