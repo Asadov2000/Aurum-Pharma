@@ -123,6 +123,7 @@
 | Общие frontend-механизмы | `frontend/src/lib/`, `frontend/src/stores/` | `frontend/tests/lib/`, тесты фичи |
 | Browser flow | `frontend/e2e/*.spec.ts` | изолированный `scripts/e2e-isolated.ps1` |
 | Тестовая инфраструктура и быстрый цикл | `docs/testing.md`, `docs/e2e.md` | fixtures backend, Vitest environments, E2E guards |
+| Облачный feedback и безопасное чтение CI | `docs/testing.md`, `scripts/read-circleci-feedback.py` | существующий Preflight; exact-head/job provenance; без raw logs и credentials |
 | Архитектурное решение | `docs/adr/` | код и тесты имеют приоритет для текущего поведения |
 | Продуктовые границы | `docs/spec-v3.md` | сверять с реализацией |
 | Схема данных | `docs/db-schema-v2.md` | миграции являются текущей истиной |

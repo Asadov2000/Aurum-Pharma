@@ -406,6 +406,9 @@ jobs:
       - run:
           name: "Production build reuse safety"
           command: "python scripts/test-ci-build-reuse.py"
+      - run:
+          name: "Public CI feedback reader safety (offline)"
+          command: "python scripts/test-circleci-feedback.py"
   tooling-windows:
     machine:
       image: "windows-server-2022-gui:current"
