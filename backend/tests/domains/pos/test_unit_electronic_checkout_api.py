@@ -249,6 +249,15 @@ async def test_readonly_get_attempts_does_not_change_facts(
 ) -> None:
     request, ids = await prepared(db_session)
     await attempts(db_session, request, ids)
+    url = path(request)
+    # Administrative readonly is allowed only after external settlement is complete.
+    async with cart_actor(db_session):
+        await confirm_http_attempt(
+            client, db_session, url, str(ids["card"]), check_partial=False
+        )
+        posted = await client.post(f"{url}/complete", json={})
+        assert posted.status_code == 200, posted.text
+        saved = posted.json()
     await db_session.commit()
     context = runtime(db_session)
     async with db_engine.begin() as support:
@@ -258,10 +267,12 @@ async def test_readonly_get_attempts_does_not_change_facts(
             {"id": context.stock.tenant_id},
         )
     await set_receiving_context(db_session, context.stock, context.actor_id)
-    url = path(request)
     before = await financial_facts(db_session)
     async with cart_actor(db_session):
-        assert (await client.get(f"{url}/attempts")).status_code == 200
+        recovered = await client.get(f"{url}/attempts")
+        assert recovered.status_code == 200, recovered.text
+        assert all(row["status"] == "consumed" for row in recovered.json())
+        assert (await client.get(f"{url}/checkout")).json() == saved
         for command_url, body in (
             (f"{url}/attempts", {"attempt_ids": {"card": str(ids["card"])}}),
             (f"{url}/attempts/{ids['card']}/reconciliation", {}),
