@@ -2,6 +2,13 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { PhysicalElectronicCheckoutPanel } from "./PhysicalElectronicCheckoutPanel";
+import {
+  type ElectronicCheckoutResult,
+  acknowledgeElectronicCheckout,
+  cancelElectronicPreparation,
+} from "./unitElectronicCheckout";
+
 import { Button, Input, Label } from "@/components/ui";
 import { getAuthSessionGeneration } from "@/stores/auth";
 
@@ -28,6 +35,11 @@ import {
 
 interface Props {
   saleId: string;
+  branchId?: string;
+  registerId?: string;
+  physicalOnly?: boolean;
+  canResolveDecline?: boolean;
+  onElectronicCompleted?: (result: ElectronicCheckoutResult) => Promise<boolean>;
   scope: PosStorageScope;
   online: boolean;
   canPrepare: boolean;
@@ -54,17 +66,20 @@ type Form = { cash: string; card: string; qr: string; tendered: string };
 const emptyForm: Form = { cash: "0", card: "0", qr: "0", tendered: "0" };
 const labels = { cash: "Наличными, TJS", card: "Картой, TJS", qr: "Через QR, TJS" };
 
-/** Draft preparation only: no terminal confirmation or movement of money. */
+/** Preparation owner retains the common barrier through electronic recovery. */
 export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   const latest = useRef(props);
   latest.current = props;
   const mounted = useRef(false);
   const epoch = useRef(0);
   const running = useRef(false);
+  const [financialBarrier, setFinancialBarrier] = useState(true);
   const [busy, setBusy] = useState(true);
   const [opened, setOpened] = useState(false);
   const [marker, setMarker] = useState<string | null>(null);
   const [intent, setIntent] = useState<SavedUnitPaymentIntent | null>(null);
+  const currentIntent = useRef(intent);
+  currentIntent.current = intent;
   const [binding, setBinding] = useState<UnitPaymentBinding | null>(null);
   const [total, setTotal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -273,12 +288,38 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
     });
   const cancel = () =>
     void run(async (check) => {
+      if (latest.current.physicalOnly && financialBarrier && binding?.state === "bound")
+        throw new Error("Сначала проверьте электронные попытки.");
       if (!intent || !(latest.current.canCancel ?? latest.current.canPrepare))
         throw new Error("Отмена подготовки сейчас недоступна.");
-      const state = await unitPaymentBindingAction(intent, "cancel-binding", latest.current.scope);
-      check();
-      if (state?.state !== "cancelled") throw new Error("Отмена ещё не подтверждена.");
-      clearUnitPaymentMarker(latest.current.saleId, latest.current.scope, intent.operation_id);
+      const owner = latest.current;
+      if (owner.physicalOnly && owner.branchId && owner.registerId) {
+        await cancelElectronicPreparation(
+          {
+            intent,
+            scope: owner.scope,
+            branchId: owner.branchId,
+            registerId: owner.registerId,
+            isActive: () => {
+              check();
+              return (
+                latest.current.saleId === owner.saleId &&
+                latest.current.branchId === owner.branchId &&
+                latest.current.registerId === owner.registerId &&
+                latest.current.scope.tenantId === owner.scope.tenantId &&
+                latest.current.scope.userId === owner.scope.userId
+              );
+            },
+          },
+          () => unitPaymentBindingAction(intent, "cancel-binding", owner.scope),
+        );
+        check();
+      } else {
+        const state = await unitPaymentBindingAction(intent, "cancel-binding", owner.scope);
+        check();
+        if (state?.state !== "cancelled") throw new Error("Отмена ещё не подтверждена.");
+        clearUnitPaymentMarker(owner.saleId, owner.scope, intent.operation_id);
+      }
       setIntent(null);
       setBinding(null);
       setMarker(null);
@@ -288,7 +329,11 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   const disabled = busy || !props.online;
   return (
     <section aria-label="Подготовка электронной оплаты" className="space-y-3 rounded-lg border p-3">
-      <p className="text-sm">Деньги не приняты. Электронная оплата ещё недоступна.</p>
+      <p className="text-sm">
+        {props.physicalOnly && props.onElectronicCompleted
+          ? "Подготовка плана не принимает деньги. Подтверждение оператора выполняется отдельно."
+          : "Деньги не приняты. Электронная оплата ещё недоступна."}
+      </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {busy && <p role="status">Проверяем подготовку…</p>}
@@ -359,13 +404,81 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
           {binding?.state === "bound" && <p>План закреплён. Корзина защищена от изменений.</p>}
           <Button
             type="button"
-            disabled={disabled || !(props.canCancel ?? props.canPrepare)}
+            disabled={
+              disabled ||
+              (financialBarrier && binding?.state === "bound" && props.physicalOnly === true) ||
+              !(props.canCancel ?? props.canPrepare)
+            }
             onClick={cancel}
           >
             Отменить подготовку
           </Button>
         </div>
       )}
+      {intent &&
+        binding?.state === "bound" &&
+        props.physicalOnly &&
+        props.branchId &&
+        props.registerId &&
+        props.onElectronicCompleted && (
+          <PhysicalElectronicCheckoutPanel
+            context={{
+              intent,
+              binding,
+              scope: props.scope,
+              branchId: props.branchId,
+              registerId: props.registerId,
+              isActive: () =>
+                mounted.current &&
+                latest.current.sessionIsActive() &&
+                latest.current.saleId === intent.plan.request.sale_id &&
+                latest.current.branchId === intent.plan.quote.branch_id &&
+                latest.current.registerId === intent.plan.quote.register_id,
+            }}
+            writable={props.canPrepare && !busy && error === null && marker === intent.operation_id}
+            canAccept={marker === intent.operation_id}
+            canResolveDecline={props.canResolveDecline}
+            online={props.online}
+            onBarrierChange={setFinancialBarrier}
+            onCompleted={async (result) => {
+              const owner = latest.current,
+                version = epoch.current;
+              const same = () =>
+                mounted.current &&
+                epoch.current === version &&
+                owner.sessionIsActive() &&
+                latest.current.saleId === result.sale_id &&
+                latest.current.scope.tenantId === owner.scope.tenantId &&
+                latest.current.scope.userId === owner.scope.userId &&
+                latest.current.branchId === result.branch_id &&
+                latest.current.registerId === result.register_id &&
+                currentIntent.current?.operation_id === result.operation_id;
+              if (!same() || !owner.onElectronicCompleted) return false;
+              const accept = owner.onElectronicCompleted;
+              const accepted = await acknowledgeElectronicCheckout(
+                {
+                  intent,
+                  binding,
+                  scope: owner.scope,
+                  branchId: result.branch_id,
+                  registerId: result.register_id,
+                  isActive: same,
+                },
+                result,
+                async (saved) => {
+                  if (!same()) return false;
+                  const confirmed = await accept(saved);
+                  return confirmed && same();
+                },
+              );
+              if (!accepted || !same()) return false;
+              setMarker(null);
+              setIntent(null);
+              setBinding(null);
+              return true;
+            }}
+          />
+        )}
       <Button type="button" disabled={disabled} onClick={() => void run(recover)}>
         Проверить результат подготовки
       </Button>

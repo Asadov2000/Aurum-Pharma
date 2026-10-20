@@ -51,6 +51,8 @@ import {
   hasMixedCashRecovery,
   hasPhysicalCashRecovery,
 } from "./physicalCashRecoveryPresence";
+import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
+import { matchesElectronicCompletedSale } from "./electronicCheckoutReceipt";
 import { type CashCheckoutResult } from "./PhysicalCashPanel";
 import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
@@ -858,6 +860,46 @@ function ActiveWorkspace({
         throw new Error("Сессия кассира завершена.");
     } else setRequiresRx(false);
   };
+
+  const electronicAcceptanceOwner = useRef({
+    registerId,
+    branchId: branchId ?? sale?.branch_id,
+    saleId,
+    tenantId: storageScope.tenantId,
+    userId: storageScope.userId,
+  });
+  electronicAcceptanceOwner.current = {
+    registerId,
+    branchId: branchId ?? sale?.branch_id,
+    saleId,
+    tenantId: storageScope.tenantId,
+    userId: storageScope.userId,
+  };
+  const acceptPhysicalElectronic = useCallback(
+    async (result: ElectronicCheckoutResult): Promise<boolean> => {
+      const current = () =>
+        sessionIsActive() &&
+        saleIdRef.current === result.sale_id &&
+        electronicAcceptanceOwner.current.saleId === result.sale_id &&
+        electronicAcceptanceOwner.current.registerId === result.register_id &&
+        electronicAcceptanceOwner.current.branchId === result.branch_id &&
+        electronicAcceptanceOwner.current.tenantId === result.tenant_id &&
+        electronicAcceptanceOwner.current.userId === result.cashier_id;
+      if (!current()) return false;
+      const refreshed = await refetchSale({ throwOnError: true });
+      if (!current()) return false;
+      const completed = refreshed.data;
+      if (!completed || !matchesElectronicCompletedSale(completed, result))
+        throw new Error("Не удалось подтвердить сохранённый электронный чек. Повторите проверку.");
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
+      setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
+      return true;
+    },
+    [sessionIsActive, refetchSale, persistCompletedReceipt, queryClient],
+  );
 
   const acceptPhysicalCash = useCallback(
     async (result: CashCheckoutResult, openCashDrawer: boolean): Promise<boolean> => {
@@ -2484,6 +2526,7 @@ function ActiveWorkspace({
                     mixedPaymentEnabled={mixedPaymentEnabled}
                     canPrepare={physicalPaymentReady && !physicalCashBlocked}
                     canCancel={preparationWritable}
+                    canResolveDecline={canReconcileExternalPayment}
                     onPreparationBlockedChange={updatePhysicalPreparationBlocked}
                     kind={cashKind}
                     saleId={saleId}
@@ -2502,6 +2545,7 @@ function ActiveWorkspace({
                     beforeStart={preparePhysicalCash}
                     onBlockedChange={updatePhysicalCashBlocked}
                     onCompleted={acceptPhysicalCash}
+                    onElectronicCompleted={acceptPhysicalElectronic}
                   />
                 </Suspense>
               ) : (
