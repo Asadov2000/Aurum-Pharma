@@ -247,7 +247,7 @@ def saved_sale() -> Sale:
         ("schema_version", True),
         ("receipt_number", "Wrong"),
         ("receipt_sequence", 1),
-        ("parent_sale_id", str(uuid4())),
+        pytest.param("parent_sale_id", str(uuid4()), id="different-parent-sale"),
         ("completed_at", "2026-10-19T12:00:00Z"),
         ("is_test", True),
         ("currency", "USD"),
