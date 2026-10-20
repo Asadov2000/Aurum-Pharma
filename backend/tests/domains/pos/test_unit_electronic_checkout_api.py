@@ -252,9 +252,7 @@ async def test_readonly_get_attempts_does_not_change_facts(
     url = path(request)
     # Administrative readonly is allowed only after external settlement is complete.
     async with cart_actor(db_session):
-        await confirm_http_attempt(
-            client, db_session, url, str(ids["card"]), check_partial=False
-        )
+        await confirm_http_attempt(client, db_session, url, str(ids["card"]), check_partial=False)
         posted = await client.post(f"{url}/complete", json={})
         assert posted.status_code == 200, posted.text
         saved = posted.json()
