@@ -20,6 +20,9 @@ vi.mock("@/features/sales/RefundModal", () => ({
 vi.mock("@/features/sales/PhysicalRefundModal", () => ({
   PhysicalRefundModal: () => <div role="dialog" aria-label="Возврат поштучной продажи" />,
 }));
+vi.mock("@/features/sales/ElectronicRefundModal", () => ({
+  ElectronicRefundModal: () => <div role="dialog" aria-label="Электронный физический возврат" />,
+}));
 vi.mock("@/features/sales/MixedRefundModal", () => ({
   MixedRefundModal: ({ onRefunded }: { onRefunded: (id: string) => void }) => (
     <div role="dialog" aria-label="Возврат смешанной продажи">
@@ -326,4 +329,54 @@ describe("SaleDetailModal mixed receipt", () => {
       screen.queryByRole("dialog", { name: "Возврат смешанной продажи" }),
     ).not.toBeInTheDocument();
   });
+});
+
+describe("electronic refund entrypoint", () => {
+  it.each(["card", "qr"] as const)(
+    "opens electronic form for physical %s candidate",
+    async (method) => {
+      details.data = {
+        ...sale,
+        physical_items: [physicalItem],
+        prepared_cart_items: [
+          {
+            id: "line",
+            tenant_id: sale.tenant_id,
+            branch_id: sale.branch_id,
+            sale_id: sale.id,
+            catalog_id: "catalog",
+            position: 1,
+            sale_format: "unit",
+            quantity: 4,
+            discount_amount: "0.00",
+            physical_packaging: {
+              version: 2,
+              unit: "tablet",
+              units_per_pack: 20,
+              units_per_blister: 10,
+              dispense_step: 1,
+            },
+          },
+        ],
+        payments: [
+          {
+            id: "payment",
+            sale_id: sale.id,
+            operation_id: null,
+            payment_method: method,
+            amount: "20.00",
+            currency: "TJS",
+          },
+        ],
+      };
+      render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+      expect(
+        await screen.findByRole("dialog", { name: "Электронный физический возврат" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("dialog", { name: "Возврат поштучной продажи" }),
+      ).not.toBeInTheDocument();
+    },
+  );
 });
