@@ -26,6 +26,33 @@ def path(request: SaveUnitPaymentIntentRequest) -> str:
     )
 
 
+async def confirm_http_attempt(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    url: str,
+    attempt_id: str,
+    *,
+    check_partial: bool,
+) -> None:
+    attempt_url = f"{url}/attempts/{attempt_id}"
+    evidence = {"terminal_id": "TEST-TERMINAL", "external_reference": f"test-{attempt_id}"}
+    assert (await client.post(f"{attempt_url}/confirm", json=evidence)).status_code == 422
+    started = await client.post(f"{attempt_url}/reconciliation", json={})
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "requires_reconciliation"
+    confirmed = await client.post(f"{attempt_url}/confirm", json=evidence)
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
+    replayed = await client.post(f"{attempt_url}/confirm", json=evidence)
+    assert replayed.json() == confirmed.json()
+    if check_partial:
+        partial = await financial_facts(db_session)
+        assert (await client.post(f"{url}/complete", json={})).status_code == 422
+        assert await financial_facts(db_session) == partial
+    changed = {**evidence, "external_reference": "different-reference"}
+    assert (await client.post(f"{attempt_url}/confirm", json=changed)).status_code == 409
+
+
 @pytest.mark.parametrize("methods", [("card",), ("qr",), ("cash", "card", "qr")])
 async def test_http_full_lifecycle_exact_plan_and_get_only_recovery(
     client: AsyncClient, db_session: AsyncSession, methods: tuple[str, ...]
@@ -51,25 +78,14 @@ async def test_http_full_lifecycle_exact_plan_and_get_only_recovery(
         assert await financial_facts(db_session) == before
         assert (await client.get(f"{url}/checkout")).status_code == 404
         assert (await client.post(f"{url}/complete", json={})).status_code == 422
-        for row in rows:
-            attempt_url = f"{url}/attempts/{row['id']}"
-            evidence = {"terminal_id": "TEST-TERMINAL", "external_reference": f"test-{row['id']}"}
-            assert (await client.post(f"{attempt_url}/confirm", json=evidence)).status_code == 422
-            started = await client.post(f"{attempt_url}/reconciliation", json={})
-            assert started.status_code == 200, started.text
-            assert started.json()["status"] == "requires_reconciliation"
-            confirmed = await client.post(f"{attempt_url}/confirm", json=evidence)
-            assert confirmed.status_code == 200, confirmed.text
-            assert confirmed.json()["status"] == "confirmed"
-            assert (await client.post(f"{attempt_url}/confirm", json=evidence)).json() == (
-                confirmed.json()
+        for index, row in enumerate(rows):
+            await confirm_http_attempt(
+                client,
+                db_session,
+                url,
+                row["id"],
+                check_partial=len(rows) > 1 and index == 0,
             )
-            if len(rows) > 1 and row == rows[0]:
-                partial = await financial_facts(db_session)
-                assert (await client.post(f"{url}/complete", json={})).status_code == 422
-                assert await financial_facts(db_session) == partial
-            changed = {**evidence, "external_reference": "different-reference"}
-            assert (await client.post(f"{attempt_url}/confirm", json=changed)).status_code == 409
         posted = await client.post(f"{url}/complete", json={})
         assert posted.status_code == 200, posted.text
         result = posted.json()
