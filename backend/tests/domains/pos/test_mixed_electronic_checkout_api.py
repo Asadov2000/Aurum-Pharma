@@ -15,6 +15,7 @@ from tests.domains.pos.test_mixed_electronic_checkout import attempts, prepared
 from tests.domains.pos.test_mixed_electronic_checkout import facts as financial_facts
 from tests.domains.pos.test_physical_cart_api import cart_actor
 from tests.domains.pos.test_physical_cash_refund import close_shift
+from tests.domains.pos.test_unit_electronic_checkout import attempts as physical_attempts
 from tests.domains.pos.test_unit_electronic_checkout import prepared as physical_prepared
 from tests.domains.pos.test_unit_return import runtime
 
@@ -124,8 +125,9 @@ async def test_attempt_membership_and_scope_denials_have_no_effects(
 ) -> None:
     request, ids = await prepared(db_session)
     await attempts(db_session, request, ids)
-    other, other_ids = await prepared(db_session, ("qr",))
-    await attempts(db_session, other, other_ids)
+    # A real foreign attempt needs no second legacy batch competing with FEFO.
+    other, other_ids = await physical_prepared(db_session, ("qr",))
+    await physical_attempts(db_session, other, other_ids)
     url = path(request)
     before = await financial_facts(db_session)
     async with cart_actor(db_session) as actor:
