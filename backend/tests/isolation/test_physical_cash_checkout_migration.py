@@ -180,8 +180,20 @@ def electronic_refund_posting_migration() -> ModuleType:
     return module
 
 
+def mixed_electronic_checkout_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0219_mixed_electronic_checkout.py"
+    )
+    spec = importlib.util.spec_from_file_location("mixed_electronic_checkout", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def downgrade_electronic_for_roundtrip() -> None:
     # Unwind later FK dependencies and audit patches before historical function text.
+    mixed_electronic_checkout_migration().downgrade()
     electronic_refund_posting_migration().downgrade()
     electronic_refund_outcome_migration().downgrade()
     electronic_refund_activation_migration().downgrade()
@@ -199,6 +211,7 @@ def upgrade_electronic_after_roundtrip() -> None:
     electronic_refund_activation_migration().upgrade()
     electronic_refund_outcome_migration().upgrade()
     electronic_refund_posting_migration().upgrade()
+    mixed_electronic_checkout_migration().upgrade()
 
 
 def downgrade_refund_for_roundtrip() -> None:

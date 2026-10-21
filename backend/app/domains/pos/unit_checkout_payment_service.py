@@ -37,16 +37,17 @@ class UnitCheckoutPaymentService:
             )
         )
 
-    async def record_electronic(self, result: PhysicalCheckoutResultV3) -> None:
+    async def record_electronic(self, result: Checkout) -> None:
         if not any(payment.method != "cash" for payment in result.payments):
             raise AurumError("Electronic checkout requires an electronic payment component")
+        mixed = isinstance(result, MixedCheckoutResultV4)
         for payment in result.payments:
             await self.repository.insert(
                 UnitCheckoutPaymentComponent(
                     tenant_id=result.tenant_id,
                     id=payment.id,
-                    physical_checkout_id=result.operation_id,
-                    mixed_checkout_id=None,
+                    physical_checkout_id=None if mixed else result.operation_id,
+                    mixed_checkout_id=result.operation_id if mixed else None,
                     sale_id=result.sale_id,
                     method=payment.method,
                     amount=payment.amount,
@@ -60,7 +61,7 @@ class UnitCheckoutPaymentService:
         if version == 1:
             # Historical checkouts predate the journal; recovery never backfills it.
             return
-        if version not in (2, 3) or (version == 3 and isinstance(result, MixedCheckoutResultV4)):
+        if version not in (2, 3):
             raise AurumError("Stored checkout payment journal version is unsupported")
         mixed = isinstance(result, MixedCheckoutResultV4)
         components = await self.repository.for_checkout(

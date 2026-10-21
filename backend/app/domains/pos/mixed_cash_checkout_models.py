@@ -23,7 +23,10 @@ class MixedCashCheckout(Base):
     register_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     shift_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     cashier_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    cash_intent_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    cash_intent_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    payment_plan_intent_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
     stock_command_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     payment_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     payment_journal_version: Mapped[int] = mapped_column(
