@@ -103,7 +103,10 @@ async def test_http_full_lifecycle_exact_plan_and_get_only_recovery(
         await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
         after = await financial_facts(db_session)
         assert (await client.post(f"{url}/complete", json={})).json() == result
+        assert await financial_facts(db_session) == after
         await close_shift(db_session, UUID(result["shift_id"]))
+        # Closing the shift is an audited command, separate from checkout recovery.
+        after = await financial_facts(db_session)
         for suffix in ("checkout", "attempts"):
             recovered = await client.get(f"{url}/{suffix}")
             assert recovered.status_code == 200, recovered.text
