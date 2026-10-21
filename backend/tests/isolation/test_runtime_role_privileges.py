@@ -1771,11 +1771,14 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         database_privileges = database_result.mappings().one()
         view_security_result = await conn.execute(text(RUNTIME_VIEW_SECURITY_SQL))
         view_security = list(view_security_result.mappings())
-        private_view_result = await conn.execute(
-            text(PRIVATE_VIEW_PRIVILEGES_SQL),
-            {"views": sorted(PRIVATE_VIEWS), "roles": sorted(PRIVATE_VIEW_ROLES)},
+        private_view_privileges = list(
+            (
+                await conn.execute(
+                    text(PRIVATE_VIEW_PRIVILEGES_SQL),
+                    {"views": sorted(PRIVATE_VIEWS), "roles": sorted(PRIVATE_VIEW_ROLES)},
+                )
+            ).mappings()
         )
-        private_view_privileges = list(private_view_result.mappings())
         function_result = await conn.execute(text(CUSTOM_FUNCTION_PRIVILEGES_SQL))
         function_privileges = list(function_result.mappings())
         definer_result = await conn.execute(text(APP_EXECUTABLE_SECURITY_DEFINERS_SQL))
