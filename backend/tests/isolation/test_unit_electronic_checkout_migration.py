@@ -18,7 +18,10 @@ from tests.domains.pos.test_unit_electronic_checkout import (
     prepared,
 )
 from tests.domains.pos.test_unit_return import runtime
-from tests.isolation.test_physical_cash_checkout_migration import electronic_checkout_migration
+from tests.isolation.test_physical_cash_checkout_migration import (
+    electronic_checkout_migration,
+    mixed_electronic_checkout_migration,
+)
 
 db_session = receiving_session_fixture
 HISTORY = text(
@@ -76,9 +79,11 @@ async def test_electronic_checkout_roundtrip_preserves_security_and_all_old_guar
             if connection.scalar(HISTORY):
                 with pytest.raises(DBAPIError) as denied:
                     with connection.begin_nested():
+                        mixed_electronic_checkout_migration().downgrade()
                         electronic_checkout_migration().downgrade()
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
             else:
+                mixed_electronic_checkout_migration().downgrade()
                 electronic_checkout_migration().downgrade()
                 _assert_stock_binding_identity(connection, definer=False)
                 relation = connection.scalar(
@@ -94,6 +99,7 @@ async def test_electronic_checkout_roundtrip_preserves_security_and_all_old_guar
                 )
                 assert nullable == "NO"
                 electronic_checkout_migration().upgrade()
+                mixed_electronic_checkout_migration().upgrade()
                 _assert_stock_binding_identity(connection, definer=True)
         assert [connection.execute(query).all() for query in queries] == before
 
@@ -124,6 +130,7 @@ async def test_attempt_or_completed_electronic_history_prevents_destructive_down
         with Operations.context(MigrationContext.configure(connection)):
             with pytest.raises(DBAPIError) as denied:
                 with connection.begin_nested():
+                    mixed_electronic_checkout_migration().downgrade()
                     electronic_checkout_migration().downgrade()
             assert getattr(denied.value.orig, "sqlstate", None) == "55000"
 

@@ -56,6 +56,16 @@ class UnitElectronicCheckoutService:
         if session.new or session.dirty or session.deleted:
             raise ConflictError("Persist pending changes before electronic checkout")
 
+    @staticmethod
+    def _require_quote_kind(saved: SavedUnitPaymentIntent) -> None:
+        if not saved.plan.quote.lines or not all(
+            isinstance(line, PhysicalUnitDraftQuoteLineV2) for line in saved.plan.quote.lines
+        ):
+            raise BusinessRuleError("Electronic checkout requires real physical positions only")
+
+    async def _prepare_source(self, sale: Sale, saved: SavedUnitPaymentIntent) -> None:
+        await prepare_electronic_physical_cart(self.cart, sale, saved)
+
     async def _source(
         self,
         tenant_id: UUID,
@@ -77,8 +87,8 @@ class UnitElectronicCheckoutService:
         if sale is None:
             raise NotFoundError("Electronic checkout sale not found")
         quote = saved.plan.quote
-        physical_only = all(isinstance(line, PhysicalUnitDraftQuoteLineV2) for line in quote.lines)
-        if sale.is_test or not quote.lines or not physical_only:
+        self._require_quote_kind(saved)
+        if sale.is_test:
             raise BusinessRuleError("Electronic checkout requires real physical positions only")
         if (sale.branch_id, sale.register_id, sale.shift_id, sale.cashier_user_id) != (
             quote.branch_id,
@@ -132,7 +142,7 @@ class UnitElectronicCheckoutService:
                 await self.repository.require_unused_attempt_ids(
                     tenant_id, set(attempt_ids.values())
                 )
-                await prepare_electronic_physical_cart(self.cart, sale, saved)
+                await self._prepare_source(sale, saved)
                 if await self.repository.attempts(tenant_id, sale_id, lock=True):
                     raise ConflictError("Electronic checkout has unrelated payment attempts")
                 for part in sorted(saved.plan.request.payments, key=lambda part: part.method):
@@ -215,7 +225,7 @@ class UnitElectronicCheckoutService:
             if attempt_id not in {row.id for row in rows}:
                 raise NotFoundError("Attempt does not belong to the bound payment plan")
             if action == "reconcile":
-                await prepare_electronic_physical_cart(self.cart, sale, saved)
+                await self._prepare_source(sale, saved)
             else:
                 await _require_open_register(self.cart, sale)
             service = POSService(POSRepository(self.repository.session))

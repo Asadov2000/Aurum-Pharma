@@ -288,7 +288,9 @@ async def test_corrupt_component_rejects_entire_electronic_checkout(
     assert await financial_facts(db_session) == before
 
 
-async def test_mixed_cart_has_no_internal_electronic_writer(db_session: AsyncSession) -> None:
+async def test_physical_electronic_service_still_rejects_mixed_cart(
+    db_session: AsyncSession,
+) -> None:
     request, ids = await prepared(db_session, mixed=True)
     before = await financial_facts(db_session)
     with pytest.raises(BusinessRuleError):
