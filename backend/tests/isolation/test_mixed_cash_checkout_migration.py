@@ -151,6 +151,7 @@ async def test_mixed_guard_functions_keep_owner_safe_search_path_and_private_acl
         "trg_mixed_checkout_cart_frozen",
         "trg_mixed_checkout_movement_frozen",
         "trg_mixed_checkout_return_boundary",
+        "trg_mixed_stock_checkout_binding",
     }
     for function in functions:
         assert function.owner == "aurum_schema_owner"
