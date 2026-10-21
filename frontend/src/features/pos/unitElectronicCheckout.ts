@@ -5,6 +5,7 @@ import { api, withAuthSession } from "@/lib/api";
 import { hasCashRecovery, physicalCashRecoveryKey } from "./physicalCashRecoveryPresence";
 import { clearUnitPaymentMarker, loadUnitPaymentMarker } from "./unitPaymentPreparationStorage";
 import { physicalResultLineSchema } from "./physicalCashCheckout";
+import { mixedLegacyResultLineSchema } from "./mixedCashCheckout";
 import { capturePosSessionGuard, posStorageKey, type PosStorageScope } from "./posStorageScope";
 import {
   parseSavedUnitPaymentIntent,
@@ -126,7 +127,7 @@ const pendingSchema = z
       .optional(),
   })
   .strict();
-const resultSchema = z
+const physicalResultSchema = z
   .object({
     schema_version: z.literal(3),
     document_kind: z.literal("physical_checkout"),
@@ -162,6 +163,15 @@ const resultSchema = z
     currency: z.literal("TJS"),
   })
   .strict();
+const mixedResultSchema = physicalResultSchema.extend({
+  schema_version: z.literal(4),
+  document_kind: z.literal("mixed_checkout"),
+  lines: z
+    .array(z.union([mixedLegacyResultLineSchema, physicalResultLineSchema]))
+    .min(2)
+    .max(200),
+});
+const resultSchema = z.union([physicalResultSchema, mixedResultSchema]);
 export type ElectronicCheckoutResult = z.infer<typeof resultSchema>;
 export interface ElectronicCheckoutContext {
   intent: SavedUnitPaymentIntent;
@@ -284,6 +294,7 @@ export function parseElectronicResult(
   const ids = [r.operation_id, r.event_id, r.stock_command_id];
   if (attempts.length === 0 || attempts.some((a) => a.status !== "consumed")) throw failure();
   if (
+    r.document_kind !== (isMixedPlan(c) ? "mixed_checkout" : "physical_checkout") ||
     ids.some((id) => id !== c.intent.operation_id) ||
     r.tenant_id !== c.scope.tenantId ||
     r.cashier_id !== c.scope.userId ||
@@ -336,15 +347,15 @@ async function checkedContext(c: ElectronicCheckoutContext): Promise<() => void>
     c.intent.operation_id,
   );
   check();
-  if (
-    intent.plan.quote.lines.some((l) => l.inventory_kind !== "physical_unit") ||
-    parseUnitPaymentBinding(c.binding, intent).state !== "bound"
-  )
-    throw failure();
+  if (parseUnitPaymentBinding(c.binding, intent).state !== "bound") throw failure();
   return check;
 }
+function isMixedPlan(c: ElectronicOwnerContext): boolean {
+  return c.intent.plan.quote.lines.some((line) => line.inventory_kind === "legacy_pack");
+}
 function url(c: ElectronicCheckoutContext): string {
-  return `/sales/${uuid.parse(c.intent.plan.request.sale_id)}/unit-payment-plan/intents/${uuid4.parse(c.intent.operation_id)}`;
+  const prefix = `/sales/${uuid.parse(c.intent.plan.request.sale_id)}/unit-payment-plan/intents/${uuid4.parse(c.intent.operation_id)}`;
+  return isMixedPlan(c) ? `${prefix}/mixed-checkout` : prefix;
 }
 async function get(c: ElectronicCheckoutContext, suffix: string): Promise<unknown | null> {
   try {

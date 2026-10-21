@@ -288,12 +288,20 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
     });
   const cancel = () =>
     void run(async (check) => {
-      if (latest.current.physicalOnly && financialBarrier && binding?.state === "bound")
+      if (
+        (latest.current.physicalOnly || latest.current.onElectronicCompleted) &&
+        financialBarrier &&
+        binding?.state === "bound"
+      )
         throw new Error("Сначала проверьте электронные попытки.");
       if (!intent || !(latest.current.canCancel ?? latest.current.canPrepare))
         throw new Error("Отмена подготовки сейчас недоступна.");
       const owner = latest.current;
-      if (owner.physicalOnly && owner.branchId && owner.registerId) {
+      if (
+        (owner.physicalOnly || owner.onElectronicCompleted) &&
+        owner.branchId &&
+        owner.registerId
+      ) {
         await cancelElectronicPreparation(
           {
             intent,
@@ -330,7 +338,7 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   return (
     <section aria-label="Подготовка электронной оплаты" className="space-y-3 rounded-lg border p-3">
       <p className="text-sm">
-        {props.physicalOnly && props.onElectronicCompleted
+        {props.onElectronicCompleted
           ? "Подготовка плана не принимает деньги. Подтверждение оператора выполняется отдельно."
           : "Деньги не приняты. Электронная оплата ещё недоступна."}
       </p>
@@ -406,7 +414,9 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
             type="button"
             disabled={
               disabled ||
-              (financialBarrier && binding?.state === "bound" && props.physicalOnly === true) ||
+              (financialBarrier &&
+                binding?.state === "bound" &&
+                (props.physicalOnly === true || props.onElectronicCompleted !== undefined)) ||
               !(props.canCancel ?? props.canPrepare)
             }
             onClick={cancel}
@@ -417,7 +427,6 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       )}
       {intent &&
         binding?.state === "bound" &&
-        props.physicalOnly &&
         props.branchId &&
         props.registerId &&
         props.onElectronicCompleted && (

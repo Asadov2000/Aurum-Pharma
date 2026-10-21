@@ -63,7 +63,7 @@ function legacyBalances(line: LegacyLine): boolean {
   );
 }
 const legacyQuoteLine = z.object(legacyShape).strict().refine(legacyBalances);
-const legacyResultLine = z
+export const mixedLegacyResultLineSchema = z
   .object({ ...legacyShape, name: printable(500) })
   .strict()
   .refine(legacyBalances);
@@ -128,7 +128,7 @@ const resultSchema = z
     receipt_sequence: z.number().int().positive().safe(),
     is_test: z.literal(false),
     lines: z
-      .array(z.union([legacyResultLine, resultLine]))
+      .array(z.union([mixedLegacyResultLineSchema, resultLine]))
       .min(2)
       .max(200),
     payments: z
