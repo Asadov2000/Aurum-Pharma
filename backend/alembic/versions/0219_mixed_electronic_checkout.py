@@ -90,14 +90,14 @@ STOCK_OLD = """  IF (p_new->>'id',p_new->>'branch_id',p_new->>'actor_id',p_new->
 STOCK_NEW = """  IF (p_new->>'id',p_new->>'branch_id',p_new->>'actor_id',p_new->>'currency',
       p_new->>'retail_version') IS DISTINCT FROM
      (i.id::TEXT,i.branch_id::TEXT,i.cashier_user_id::TEXT,'TJS','1')
-    OR CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(i.quote_payload->'lines') line
+    OR (CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(i.quote_payload->'lines') line
          WHERE line->>'inventory_kind'='legacy_pack') THEN
        p_new->>'mixed_checkout_sale_id' IS DISTINCT FROM i.sale_id::TEXT
        OR p_new->>'checkout_sale_id' IS NOT NULL
        OR NOT EXISTS(SELECT 1 FROM public.sale_item item WHERE item.sale_id=v_sale)
      ELSE p_new->>'checkout_sale_id' IS DISTINCT FROM i.sale_id::TEXT
        OR p_new->>'mixed_checkout_sale_id' IS NOT NULL
-       OR EXISTS(SELECT 1 FROM public.sale_item item WHERE item.sale_id=v_sale) END
+       OR EXISTS(SELECT 1 FROM public.sale_item item WHERE item.sale_id=v_sale) END)
     OR EXISTS(SELECT 1 FROM public.sale_payment p WHERE p.sale_id=v_sale)"""
 KIND_OLD = """    AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(q->'lines') p
       WHERE p->>'inventory_kind' IS DISTINCT FROM 'physical_unit');"""
