@@ -31,6 +31,9 @@ from app.domains.audit.service import AuditService
 from app.domains.catalog.schemas import CatalogItemRead
 from app.domains.pos.mixed_cash_checkout_router import router as mixed_cash_checkout_router
 from app.domains.pos.mixed_cash_refund_router import router as mixed_cash_refund_router
+from app.domains.pos.mixed_electronic_checkout_router import (
+    router as mixed_electronic_checkout_router,
+)
 from app.domains.pos.mixed_zero_return_router import router as mixed_zero_return_router
 from app.domains.pos.physical_cart_router import router as physical_cart_router
 from app.domains.pos.physical_cash_checkout_router import router as physical_cash_checkout_router
@@ -126,6 +129,7 @@ router.include_router(physical_cash_refund_router)
 router.include_router(physical_zero_return_router)
 router.include_router(quarantine_report_router)
 router.include_router(profit_report_router)
+router.include_router(mixed_electronic_checkout_router)
 router.include_router(unit_electronic_checkout_router)
 router.include_router(unit_electronic_refund_activation_router)
 router.include_router(unit_electronic_refund_binding_router)
