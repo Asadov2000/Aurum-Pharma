@@ -254,6 +254,18 @@ RUNTIME_VIEWS = {
     "v_batch_with_expiry_status",
 }
 
+PRIVATE_VIEWS = {"unit_electronic_checkout_marker"}
+PRIVATE_VIEW_ROLES = {
+    "aurum_app",
+    "aurum_support",
+    "aurum_worker",
+    "aurum_catalog_worker",
+    "aurum_billing_worker",
+    "aurum_mailer",
+    "aurum_edge_cash_executor",
+    "aurum_edge_cash_owner",
+}
+
 CUSTOM_FUNCTIONS = {
     "trg_unit_electronic_refund_intent_guard",
     "unit_electronic_refund_binding_active",
@@ -266,6 +278,8 @@ CUSTOM_FUNCTIONS = {
     "assert_unit_electronic_refund_posting",
     "trg_unit_electronic_refund_posting_guard",
     "trg_unit_electronic_refund_posting_complete",
+    "assert_mixed_electronic_checkout",
+    "assert_unit_electronic_checkout_source",
     "unit_electronic_current_quote",
     "assert_unit_electronic_checkout",
     "assert_unit_electronic_payments",
@@ -967,6 +981,25 @@ WHERE schemas.nspname = 'public'
 ORDER BY relations.relname
 """
 
+PRIVATE_VIEW_PRIVILEGES_SQL = """
+SELECT
+  relations.relname,
+  roles.rolname,
+  pg_catalog.has_table_privilege(
+    roles.oid, relations.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+  ) AS has_table_privilege,
+  pg_catalog.has_any_column_privilege(
+    roles.oid, relations.oid, 'SELECT,INSERT,UPDATE,REFERENCES'
+  ) AS has_column_privilege
+FROM pg_catalog.pg_class AS relations
+JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+CROSS JOIN pg_catalog.pg_roles AS roles
+WHERE schemas.nspname = 'public' AND relations.relkind = 'v'
+  AND relations.relname::TEXT = ANY(CAST(:views AS TEXT[]))
+  AND roles.rolname::TEXT = ANY(CAST(:roles AS TEXT[]))
+ORDER BY relations.relname, roles.rolname
+"""
+
 CUSTOM_FUNCTION_PRIVILEGES_SQL = """
 SELECT
   routines.proname,
@@ -1438,7 +1471,7 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
         for row in mixed_functions.values()
     )
     assert {name for name, row in mixed_functions.items() if row["is_security_definer"]} == (
-        mixed_names - {"trg_mixed_stock_checkout_binding", "trg_mixed_checkout_guard"}
+        mixed_names - {"trg_mixed_checkout_guard"}
     )
     physical_names = {
         "unit_pack_v2_remaining",
@@ -1638,7 +1671,7 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
         **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
         **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
         **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
-        **{table: set() for table in NO_ACCESS_TABLES},
+        **{table: set() for table in NO_ACCESS_TABLES | PRIVATE_VIEWS},
     }
     actual: dict[str, set[str]] = {relation: set() for relation in expected}
     for row in rows:
@@ -1662,6 +1695,8 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         "assert_unit_electronic_refund_posting",
         "trg_unit_electronic_refund_posting_guard",
         "trg_unit_electronic_refund_posting_complete",
+        "assert_mixed_electronic_checkout",
+        "assert_unit_electronic_checkout_source",
         "unit_electronic_current_quote",
         "assert_unit_electronic_checkout",
         "assert_unit_electronic_payments",
@@ -1736,6 +1771,11 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         database_privileges = database_result.mappings().one()
         view_security_result = await conn.execute(text(RUNTIME_VIEW_SECURITY_SQL))
         view_security = list(view_security_result.mappings())
+        private_view_result = await conn.execute(
+            text(PRIVATE_VIEW_PRIVILEGES_SQL),
+            {"views": sorted(PRIVATE_VIEWS), "roles": sorted(PRIVATE_VIEW_ROLES)},
+        )
+        private_view_privileges = list(private_view_result.mappings())
         function_result = await conn.execute(text(CUSTOM_FUNCTION_PRIVILEGES_SQL))
         function_privileges = list(function_result.mappings())
         definer_result = await conn.execute(text(APP_EXECUTABLE_SECURITY_DEFINERS_SQL))
@@ -1760,13 +1800,29 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         "app_can_create_temp": False,
         "public_has_privileges": False,
     }
-    assert {row["relname"] for row in view_security} == RUNTIME_VIEWS
+    assert {row["relname"] for row in view_security} == RUNTIME_VIEWS | PRIVATE_VIEWS
     assert all(row["owner"] == "aurum_schema_owner" for row in view_security)
     assert {
         row["attname"] for row in sync_outbox_column_privileges if row["can_insert"]
     } == SYNC_OUTBOX_INSERT_COLUMNS
     assert not any(row["can_update"] for row in sync_outbox_column_privileges)
-    assert all("security_invoker=true" in row["options"] for row in view_security)
+    assert all(
+        "security_invoker=true" in row["options"]
+        for row in view_security
+        if row["relname"] in RUNTIME_VIEWS
+    )
+    assert all(
+        row["options"] == ["security_barrier=true"]
+        for row in view_security
+        if row["relname"] in PRIVATE_VIEWS
+    )
+    assert {(row["relname"], row["rolname"]) for row in private_view_privileges} == {
+        (view, role) for view in PRIVATE_VIEWS for role in PRIVATE_VIEW_ROLES
+    }
+    assert all(
+        not row["has_table_privilege"] and not row["has_column_privilege"]
+        for row in private_view_privileges
+    )
     assert {row["proname"] for row in function_privileges} == CUSTOM_FUNCTIONS
     assert {
         row["proname"] for row in function_privileges if row["app_can_execute"]
