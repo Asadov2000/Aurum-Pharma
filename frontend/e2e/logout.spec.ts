@@ -142,8 +142,19 @@ test.describe("Durable browser logout", () => {
     await openBootstrappedSession(otherPage);
 
     let refreshRequests = 0;
+    let phase = "before-click";
+    const refreshPhases: Record<string, number> = {};
+    const unauthorizedPhases: Record<string, number> = {};
+    page.context().on("response", (response) => {
+      if (response.status() === 401) {
+        unauthorizedPhases[phase] = (unauthorizedPhases[phase] ?? 0) + 1;
+      }
+    });
     page.context().on("request", (request) => {
-      if (new URL(request.url()).pathname === refreshPath) refreshRequests += 1;
+      if (new URL(request.url()).pathname === refreshPath) {
+        refreshRequests += 1;
+        refreshPhases[phase] = (refreshPhases[phase] ?? 0) + 1;
+      }
     });
     let releaseLogout!: () => void;
     const logoutGate = new Promise<void>((resolve) => {
@@ -154,18 +165,24 @@ test.describe("Durable browser logout", () => {
       await route.continue();
     });
     try {
+      phase = "click-and-signout";
       await logoutInBrowser(page);
       await expectSignedOut(page);
       await expectSignedOut(otherPage);
       expect(await hasRefreshCookie(page.context())).toBe(true);
     } finally {
+      phase = "release-logout";
       releaseLogout();
     }
     await expect.poll(() => hasRefreshCookie(page.context())).toBe(false);
 
+    phase = "reload-other-tab";
     await otherPage.reload({ waitUntil: "domcontentloaded" });
     await expectSignedOut(otherPage);
-    expect(refreshRequests).toBe(0);
+    expect(
+      refreshRequests,
+      JSON.stringify({ refreshPhases, unauthorizedResponsePhases: unauthorizedPhases }),
+    ).toBe(0);
     await otherPage.close();
   });
 
