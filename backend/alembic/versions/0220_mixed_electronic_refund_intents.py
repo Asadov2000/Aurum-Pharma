@@ -153,6 +153,26 @@ END $$;
 
 def upgrade() -> None:
     _sql("""
+      CREATE POLICY mixed_electronic_refund_read
+        ON public.pos_unit_checkout_payment_component FOR SELECT TO aurum_app USING(
+          tenant_id=public.current_tenant_id()
+          AND current_user='aurum_app' AND session_user='aurum_app'
+          AND NOT public.is_tenant_support_session()
+          AND physical_checkout_id IS NULL
+          AND EXISTS(SELECT 1 FROM public.app_user actor
+            WHERE actor.id=public.current_app_user_id() AND actor.status='active')
+          AND EXISTS(SELECT 1 FROM public.pos_mixed_checkout checkout
+            JOIN public.sale original ON original.tenant_id=checkout.tenant_id
+              AND original.id=checkout.sale_id AND original.branch_id=checkout.branch_id
+            WHERE checkout.tenant_id=pos_unit_checkout_payment_component.tenant_id
+              AND checkout.id=pos_unit_checkout_payment_component.mixed_checkout_id
+              AND checkout.sale_id=pos_unit_checkout_payment_component.sale_id
+              AND checkout.payment_journal_version=3
+              AND original.sale_type='sale' AND original.status='completed'
+              AND original.parent_sale_id IS NULL AND NOT original.is_test
+              AND original.currency='TJS'
+              AND public.tenant_actor_has_scoped_permission(
+                checkout.tenant_id,'pos.refund',checkout.branch_id)));
       CREATE TEMP TABLE electronic_refund_intent_grants AS
         SELECT oid::regclass::TEXT AS relation,
           has_table_privilege('aurum_schema_owner',oid,'REFERENCES') AS granted
@@ -233,6 +253,7 @@ def downgrade() -> None:
         END IF;
       END $$;
       DROP TABLE public.pos_mixed_electronic_refund_intent;
+      DROP POLICY mixed_electronic_refund_read ON public.pos_unit_checkout_payment_component;
     """)
     _history("0205_physical_writeoff_cancellation.py")._patch(
         "public.audit_redact_table_snapshot(text,jsonb)", AUDIT_NEW, AUDIT_OLD

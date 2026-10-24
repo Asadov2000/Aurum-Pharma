@@ -1,5 +1,6 @@
 """Persisted electronic reviews do not create payment, return, or stock facts."""
 
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -101,12 +102,14 @@ async def test_saved_review_replay_and_read_preserve_time_and_financial_facts(
     assert await review_facts(db_session) == before
 
 
+@pytest.mark.parametrize("methods", [("card",), ("qr",), ("cash", "card", "qr")])
 async def test_refund_actor_can_save_review_of_another_cashiers_sale(
     db_session: AsyncSession,
     db_engine: AsyncEngine,
     maintenance_engine: AsyncEngine,
+    methods: tuple[str, ...],
 ) -> None:
-    source = await original(db_session, ("card",))
+    source = await original(db_session, methods)
     context = runtime(db_session)
     await db_session.commit()
     actor = await seed_receiving_actor(
@@ -114,6 +117,15 @@ async def test_refund_actor_can_save_review_of_another_cashiers_sale(
     )
     assert actor != source.cashier_id
     await set_receiving_context(db_session, context.stock, actor)
+    component_ids = set(
+        (
+            await db_session.execute(
+                text("SELECT id FROM pos_unit_checkout_payment_component WHERE sale_id=:sale"),
+                {"sale": source.sale_id},
+            )
+        ).scalars()
+    )
+    assert component_ids == {payment.id for payment in source.payments}
     quote = await preview(db_session, source, actor=actor)
     request = SaveMixedElectronicRefundIntentRequest.model_validate(
         {
@@ -136,6 +148,55 @@ async def test_refund_actor_can_save_review_of_another_cashiers_sale(
     )
     assert saved.preview == quote
     assert await review_facts(db_session) == before
+
+
+@pytest.mark.parametrize("denial", ["no_permission", "foreign_tenant", "foreign_branch", "blocked"])
+async def test_mixed_refund_component_raw_select_is_scoped(
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+    denial: str,
+) -> None:
+    source = await original(db_session, ("cash", "card", "qr"))
+    context = runtime(db_session)
+    await db_session.commit()
+    stock = context.stock
+    if denial == "foreign_branch":
+        branch_id = uuid4()
+        async with maintenance_engine.begin() as owner:
+            assert str(await owner.scalar(text("SELECT current_database()"))).endswith("_test")
+            await owner.execute(
+                text(
+                    "INSERT INTO branch(id,tenant_id,name) "
+                    "VALUES (:id,:tenant,'Other test branch')"
+                ),
+                {"id": branch_id, "tenant": stock.tenant_id},
+            )
+        stock = replace(stock, branch_id=branch_id)
+    actor = await seed_receiving_actor(
+        db_engine,
+        maintenance_engine,
+        stock,
+        permissions=() if denial == "no_permission" else ("pos.refund",),
+    )
+    if denial == "blocked":
+        async with maintenance_engine.begin() as owner:
+            assert str(await owner.scalar(text("SELECT current_database()"))).endswith("_test")
+            await owner.execute(
+                text("UPDATE app_user SET status='blocked' WHERE id=:id"), {"id": actor}
+            )
+    await set_receiving_context(db_session, stock, actor)
+    if denial == "foreign_tenant":
+        await db_session.execute(
+            text("SELECT set_config('app.tenant_id',:tenant,true)"), {"tenant": str(uuid4())}
+        )
+    assert (
+        await db_session.scalar(
+            text("SELECT count(*) FROM pos_unit_checkout_payment_component WHERE sale_id=:sale"),
+            {"sale": source.sale_id},
+        )
+        == 0
+    )
 
 
 async def test_blocked_actor_cannot_recover_previously_saved_review(

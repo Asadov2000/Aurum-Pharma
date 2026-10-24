@@ -47,6 +47,16 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
                 return
             migration().downgrade()
             assert connection.scalar(text(f"SELECT to_regclass('public.{TABLE}')")) is None
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_policies WHERE schemaname='public' "
+                        "AND tablename='pos_unit_checkout_payment_component' "
+                        "AND policyname='mixed_electronic_refund_read'"
+                    )
+                )
+                == 0
+            )
             migration().upgrade()
         assert connection.scalar(audit_sql) == before_audit
         assert connection.scalar(
@@ -85,6 +95,28 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
         assert "actor_id = current_app_user_id()" in actor_policy.qual
         assert "pos.refund" in actor_policy.qual
         assert "pos.refund" in actor_policy.with_check
+        component_policy = connection.execute(
+            text(
+                "SELECT cmd,roles,qual,with_check FROM pg_policies "
+                "WHERE schemaname='public' AND tablename='pos_unit_checkout_payment_component' "
+                "AND policyname='mixed_electronic_refund_read'"
+            )
+        ).one()
+        assert component_policy.cmd == "SELECT"
+        assert list(component_policy.roles) == ["aurum_app"]
+        assert component_policy.with_check is None
+        for predicate in (
+            "current_tenant_id()",
+            "current_app_user_id()",
+            "pos.refund",
+            "physical_checkout_id IS NULL",
+            "mixed_checkout_id",
+            "payment_journal_version = 3",
+            "completed",
+            "is_test",
+            "TJS",
+        ):
+            assert predicate in component_policy.qual
         assert connection.scalar(
             text("SELECT public.audit_redact_table_snapshot(:table,CAST(:snapshot AS jsonb))"),
             {
