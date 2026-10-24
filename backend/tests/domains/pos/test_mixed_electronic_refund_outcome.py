@@ -411,7 +411,7 @@ async def seed_legacy_refund_reference(
                 "jsonb_build_array(jsonb_build_object('payment_method','card','amount','10.00')),"
                 "10,10 FROM sale WHERE tenant_id=:tenant AND id=:sale RETURNING id"
             ),
-            {"tenant": tenant_id, "sale": sale_id, "operation": uuid4(), "item": uuid4()},
+            {"tenant": tenant_id, "sale": sale_id, "operation": uuid4(), "item": str(uuid4())},
         )
         assert isinstance(attempt_id, UUID)
         reference_id = await support.scalar(
