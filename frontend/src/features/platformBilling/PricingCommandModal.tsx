@@ -821,10 +821,12 @@ function handleCommandError(
   setTopError(describeApiError(error, fallback));
 }
 
-function applyIssues<T extends z.ZodTypeAny>(
-  parsed: z.SafeParseReturnType<unknown, z.infer<T>>,
+function applyIssues<T>(
+  parsed:
+    | { success: true; data: T }
+    | { success: false; error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] } },
   setError: (name: never, error: { message: string }) => void,
-): parsed is z.SafeParseSuccess<z.infer<T>> {
+): parsed is { success: true; data: T } {
   if (parsed.success) return true;
   for (const issue of parsed.error.issues) {
     const field = issue.path[0];

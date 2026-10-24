@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import { useAuthStore } from "@/stores/auth";
 
-import { fetchMe, listActiveSessions, revokeActiveSession, revokeOtherSessions } from "./api";
+import { fetchMe, listActiveSessions } from "./api";
 
 export const meQueryKey = ["auth", "me"] as const;
 export const activeSessionsQueryKey = ["auth", "sessions"] as const;
@@ -24,25 +24,5 @@ export function useActiveSessionsQuery() {
     queryFn: listActiveSessions,
     enabled: accessToken !== null,
     staleTime: 15_000,
-  });
-}
-
-export function useRevokeActiveSession() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (sessionId: string) => revokeActiveSession(sessionId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: activeSessionsQueryKey });
-    },
-  });
-}
-
-export function useRevokeOtherSessions() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: revokeOtherSessions,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: activeSessionsQueryKey });
-    },
   });
 }

@@ -9,6 +9,8 @@ const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const entryKey = Object.keys(manifest).find((key) => manifest[key].isEntry);
 if (!entryKey) throw new Error("Production entry was not found in the Vite manifest");
 
+const authenticatedShellSource = resolveAuthenticatedShell();
+
 const routeBudgets = [
   {
     label: "Login /login",
@@ -24,6 +26,7 @@ const routeBudgets = [
   {
     label: "Dashboard /",
     source: "src/features/dashboard/DashboardPage.tsx",
+    startupSources: [authenticatedShellSource],
     // Keep the full offline profile menu and owner-scoped sidebar storage eager.
     // The save engine remains lazy; the startup request cap stays fixed.
     maxRawBytes: 440 * 1024,
@@ -33,6 +36,7 @@ const routeBudgets = [
   {
     label: "POS /pos",
     source: "src/features/pos/POSPage.tsx",
+    startupSources: [authenticatedShellSource],
     // Public activation and the capability-gated billing workspace add small
     // shared router metadata while both page implementations remain lazy.
     maxRawBytes: 612 * 1024,
@@ -42,6 +46,7 @@ const routeBudgets = [
 ];
 
 for (const requiredSource of [
+  authenticatedShellSource,
   "src/features/auth/LoginPage.tsx",
   "src/features/auth/MfaStepUpDialog.tsx",
   "src/features/dashboard/SupportProfile.tsx",
@@ -55,7 +60,9 @@ const entryResources = collectStaticResources([entryKey]);
 assertResourcesExclude(entryResources, ["vendor-forms", "LoginPage", "MfaStepUpDialog"], "entry");
 
 const routeResults = routeBudgets.map((budget) => {
-  const resources = collectStaticResources([entryKey, budget.source]);
+  // Protected routes render this lazy shell immediately: count it and all its
+  // static dependencies rather than hiding startup bytes behind dynamic import.
+  const resources = collectStaticResources([entryKey, budget.source, ...(budget.startupSources ?? [])]);
   const result = measureResources(resources);
   const failures = [];
 
@@ -81,7 +88,7 @@ assertResourcesExclude(
   "Dashboard",
 );
 assertResourcesExclude(pos.resources, ["LoginPage", "MfaStepUpDialog"], "POS");
-assertResourcesExclude(login.resources, ["MfaStepUpDialog"], "Login");
+assertResourcesExclude(login.resources, ["MfaStepUpDialog", "AuthenticatedShell", "vendor-validation"], "Login");
 
 const report = routeResults
   .map(
@@ -101,6 +108,24 @@ if (failedRoutes.length > 0) {
 }
 
 rmSync(manifestPath);
+
+function resolveAuthenticatedShell() {
+  const source = "src/components/layout/AuthenticatedShell.tsx";
+  const candidates = Object.entries(manifest).filter(([key, chunk]) =>
+    chunk.isDynamicEntry && (
+      key === source || chunk.src === source || chunk.name === "AuthenticatedShell" ||
+      /^assets\/AuthenticatedShell-[^/]+\.js$/.test(chunk.file ?? "")
+    ),
+  );
+  if (candidates.length !== 1) {
+    throw new Error(`Expected one lazy AuthenticatedShell entry; found ${candidates.length}`);
+  }
+  const key = candidates[0][0];
+  if (!(manifest[entryKey].dynamicImports ?? []).includes(key)) {
+    throw new Error("AuthenticatedShell must be a dynamic import of the production entry");
+  }
+  return key;
+}
 
 function collectStaticResources(initialKeys) {
   const resources = new Set();

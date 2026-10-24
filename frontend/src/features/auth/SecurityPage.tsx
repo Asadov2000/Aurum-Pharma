@@ -17,7 +17,8 @@ import {
 import { describeApiError } from "@/lib/errorMessages";
 import { OwnershipTransferPanel } from "@/features/roles/OwnershipTransferPanel";
 
-import { useActiveSessionsQuery, useRevokeActiveSession, useRevokeOtherSessions } from "./queries";
+import { useActiveSessionsQuery } from "./queries";
+import { useRevokeActiveSession, useRevokeOtherSessions } from "./sessionMutationQueries";
 import { type ActiveSession } from "./types";
 import { MfaSettingsPanel } from "./MfaSettingsPanel";
 import { AccountIdentityPanel } from "./AccountIdentityPanel";

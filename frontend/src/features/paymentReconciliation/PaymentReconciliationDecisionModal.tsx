@@ -31,7 +31,7 @@ const formSchema = z.object({
   external_reference: safeText("номер операции или документа", 128),
   operator_note: z.string().trim().max(160, "Не более 160 символов"),
   confirmed: z.literal(true, {
-    errorMap: () => ({ message: "Подтвердите результат сверки" }),
+    error: "Подтвердите результат сверки",
   }),
 });
 

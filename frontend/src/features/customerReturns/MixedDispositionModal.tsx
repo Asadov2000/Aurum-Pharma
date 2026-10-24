@@ -30,7 +30,7 @@ const formSchema = z.object({
   reason_code: z.enum(["damaged", "quality_issue", "wrong_item", "expired", "other"]),
   comment: z.string().refine((value) => Array.from(value).length <= 2000, "Не более 2000 символов"),
   confirmed: z.literal(true, {
-    errorMap: () => ({ message: "Подтвердите фактическое выполнение" }),
+    error: "Подтвердите фактическое выполнение",
   }),
 });
 interface FormValues {

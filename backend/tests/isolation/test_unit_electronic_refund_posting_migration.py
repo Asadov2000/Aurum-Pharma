@@ -13,6 +13,8 @@ from tests.domains.pos.test_unit_electronic_refund_posting import reconciled
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     electronic_refund_posting_migration,
+    mixed_electronic_checkout_migration,
+    mixed_electronic_refund_intent_migration,
 )
 
 db_session = receiving_session_fixture
@@ -27,7 +29,7 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
         migration = electronic_refund_posting_migration()
         signatures = [item[0] for item in migration.PATCHES]
         query = text("SELECT pg_get_functiondef(CAST(:signature AS regprocedure))")
-        before = {
+        head_before = {
             sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
         }
         with Operations.context(MigrationContext.configure(connection)):
@@ -36,16 +38,57 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
                     with connection.begin_nested():
                         migration.downgrade()
                 return
+            later_history = connection.scalar(
+                text(
+                    "SELECT EXISTS(SELECT 1 FROM public.pos_mixed_electronic_refund_intent) "
+                    "OR EXISTS(SELECT 1 FROM public.pos_mixed_checkout "
+                    "WHERE payment_journal_version=3) OR EXISTS("
+                    "SELECT 1 FROM public.pos_unit_payment_attempt_binding b "
+                    "JOIN public.pos_unit_payment_plan_intent i "
+                    "ON i.tenant_id=b.tenant_id AND i.id=b.intent_id "
+                    "WHERE EXISTS(SELECT 1 FROM "
+                    "jsonb_array_elements(i.quote_payload->'lines') line "
+                    "WHERE line->>'inventory_kind'='legacy_pack'))"
+                )
+            )
+            if later_history:
+                with pytest.raises(
+                    DBAPIError,
+                    match=(
+                        "mixed_electronic_(refund_intent|checkout)"
+                        "_downgrade_requires_empty_history"
+                    ),
+                ) as error:
+                    with connection.begin_nested():
+                        mixed_electronic_refund_intent_migration().downgrade()
+                        mixed_electronic_checkout_migration().downgrade()
+                assert getattr(error.value.orig, "sqlstate", None) == "55000"
+                assert {
+                    sig: connection.scalar(query, {"signature": f"public.{sig}"})
+                    for sig in signatures
+                } == head_before
+                return
+            # Unwind later audit patches and dependencies before historical 0218 text.
+            mixed_electronic_refund_intent_migration().downgrade()
+            mixed_electronic_checkout_migration().downgrade()
+            before0218 = {
+                sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
+            }
             migration.downgrade()
             assert connection.scalar(text("SELECT to_regclass(:name)"), {"name": TABLE}) is None
             downgraded = {
                 sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
             }
-            assert all(before[sig] != downgraded[sig] for sig in signatures)
+            assert all(before0218[sig] != downgraded[sig] for sig in signatures)
             migration.upgrade()
+            assert {
+                sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
+            } == before0218
+            mixed_electronic_checkout_migration().upgrade()
+            mixed_electronic_refund_intent_migration().upgrade()
         assert {
             sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
-        } == before
+        } == head_before
         for role, allowed in (("aurum_app", {"SELECT", "INSERT"}), ("aurum_support", {"SELECT"})):
             for privilege in (
                 "SELECT",

@@ -8,7 +8,7 @@ import type { MixedCustomerReturnItem } from "./types";
 export interface MixedDispositionScope extends PosStorageScope {
   branchId: string;
 }
-const uuid = z.string().uuid();
+const uuid = z.string().guid();
 const targetIdentity = { intake_operation_id: uuid, line_id: uuid };
 const legacyTargetSchema = z
   .object({ inventory_kind: z.literal("legacy_pack"), ...targetIdentity, batch_id: uuid })

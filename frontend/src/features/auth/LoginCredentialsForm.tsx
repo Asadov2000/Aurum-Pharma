@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { z } from "zod";
+import * as z from "zod/mini";
 
 import { Button, FormError, Input, Label } from "@/components/ui";
 import { describeIdentityError } from "./identityErrors";
@@ -24,7 +24,7 @@ const PasswordResetForm = lazy(async () => {
 
 const credentialsSchema = z.object({
   email: emailIdentitySchema,
-  password: z.string().min(1, "Введите пароль").max(128, "Не более 128 символов"),
+  password: z.string().check(z.minLength(1, "Введите пароль"), z.maxLength(128, "Не более 128 символов")),
 });
 
 type Fields = { email: string; phone: string; password: string; code: string };

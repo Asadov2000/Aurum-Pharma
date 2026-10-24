@@ -506,14 +506,14 @@ interface ResolveForm {
 }
 const resolveSchema = z.object({
   disposition_type: z.enum(["disposed", "supplier_claim", "regulatory_transfer"], {
-    required_error: "Выберите выполненное действие",
+    error: (issue) => issue.input === undefined ? "Выберите выполненное действие" : undefined,
   }),
   reason_code: z.enum(["damaged", "quality_issue", "wrong_item", "expired", "other"], {
-    required_error: "Выберите причину",
+    error: (issue) => issue.input === undefined ? "Выберите причину" : undefined,
   }),
   comment: z.string().trim().max(2000, "Не более 2000 символов"),
   confirmed: z.literal(true, {
-    errorMap: () => ({ message: "Подтвердите фактическое выполнение" }),
+    error: "Подтвердите фактическое выполнение",
   }),
 });
 

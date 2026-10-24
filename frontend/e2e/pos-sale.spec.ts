@@ -463,6 +463,9 @@ test.describe("POS sale (owner)", () => {
           response.ok(),
       );
       await refundDialog.getByLabel("Причина").selectOption("quality_issue");
+      // This scenario must remain valid when tenant policy requires reason text.
+      const refundComment = "Проверка возврата по терминалу";
+      await refundDialog.getByLabel("Комментарий").fill(refundComment);
       await refundDialog.getByRole("button", { name: "Зафиксировать сумму возврата" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
@@ -561,7 +564,7 @@ test.describe("POS sale (owner)", () => {
       expect(returnedSale.refund_attempt_id).toBe(refundAttempt.id);
       expect((await refundRequest).postDataJSON()).toMatchObject({
         reason: "quality_issue",
-        comment: null,
+        comment: refundComment,
       });
 
       // Retry only the final read on a connection reset, never a refund command.
