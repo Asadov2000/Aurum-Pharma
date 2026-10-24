@@ -18,6 +18,75 @@ from tests.isolation.test_physical_cash_checkout_migration import (
 db_session = receiving_session_fixture
 
 
+FENCE_TRIGGERS = text(
+    "SELECT c.relname,t.tgname,pg_get_triggerdef(t.oid) FROM pg_trigger t "
+    "JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_proc p ON p.oid=t.tgfoid "
+    "WHERE c.relnamespace='public'::regnamespace "
+    "AND p.pronamespace='public'::regnamespace "
+    "AND p.proname='trg_mixed_electronic_refund_binding_fence' "
+    "AND NOT t.tgisinternal ORDER BY c.relname,t.tgname"
+)
+
+
+def fence_trigger_snapshot(connection: Connection) -> list[tuple[str, str, str]]:
+    rows = connection.execute(FENCE_TRIGGERS).all()
+    assert len(rows) == 4
+    assert {row[0]: row[1] for row in rows} == {
+        "sale": "a01_mixed_electronic_refund_binding_fence",
+        "pos_physical_return_command": "a01_mixed_electronic_refund_binding_fence",
+        "pos_mixed_return_command": "a11_mixed_electronic_refund_binding_fence",
+        "pos_refund_attempt": "a01_mixed_electronic_refund_binding_fence",
+    }
+    mixed_before_insert = (
+        connection.execute(
+            text(
+                "SELECT tgname FROM pg_trigger "
+                "WHERE tgrelid='public.pos_mixed_return_command'::regclass "
+                "AND NOT tgisinternal AND (tgtype & 2)=2 AND (tgtype & 4)=4 "
+                "AND tgname IN ('a10_mixed_return_guard',"
+                "'a11_mixed_electronic_refund_binding_fence') ORDER BY tgname"
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert mixed_before_insert == [
+        "a10_mixed_return_guard",
+        "a11_mixed_electronic_refund_binding_fence",
+    ]
+    return [(row[0], row[1], row[2]) for row in rows]
+
+
+def test_fence_upgrade_and_downgrade_share_exact_ordered_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = mixed_electronic_refund_preparation_migration()
+    statements: list[str] = []
+    monkeypatch.setattr(migration, "_sql", statements.append)
+    migration.upgrade()
+    creates = list(statements)
+    statements.clear()
+    migration.downgrade()
+    expected = {
+        "sale": "a01_mixed_electronic_refund_binding_fence",
+        "pos_physical_return_command": "a01_mixed_electronic_refund_binding_fence",
+        "pos_mixed_return_command": "a11_mixed_electronic_refund_binding_fence",
+        "pos_refund_attempt": "a01_mixed_electronic_refund_binding_fence",
+    }
+    assert set(migration.FENCED) == set(expected)
+    for table, trigger in expected.items():
+        assert (
+            sum(
+                f"CREATE TRIGGER {trigger} BEFORE INSERT OR UPDATE OR DELETE" in statement
+                and f"ON public.{table} FOR EACH ROW" in statement
+                for statement in creates
+            )
+            == 1
+        )
+        assert statements.count(f"DROP TRIGGER {trigger} ON public.{table};") == 1
+    assert "a10_mixed_return_guard" < expected["pos_mixed_return_command"]
+
+
 async def test_preparation_roundtrip_preserves_exact_security_and_historical_guards(
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -31,11 +100,13 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
         )
         parameters = {"tables": list(migration.TABLES)}
         before_security = connection.execute(security, parameters).all()
+        before_fences = fence_trigger_snapshot(connection)
         historical = text(
             "SELECT proname,pg_get_functiondef(oid),proowner,proacl::text,prosecdef "
             "FROM pg_proc WHERE pronamespace='public'::regnamespace "
             "AND proname IN ('trg_guard_sale_immutability','audit_redact_table_snapshot',"
-            "'trg_unit_electronic_refund_binding_guard') ORDER BY proname,oid"
+            "'trg_unit_electronic_refund_binding_guard','trg_mixed_return_guard') "
+            "ORDER BY proname,oid"
         )
         before_historical = connection.execute(historical).all()
         definitions = text(
@@ -66,7 +137,9 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
                     is None
                 )
             assert connection.execute(historical).all() == before_historical
+            assert connection.execute(FENCE_TRIGGERS).all() == []
             migration.upgrade()
+        assert fence_trigger_snapshot(connection) == before_fences
         assert connection.execute(security, parameters).all() == before_security
         assert connection.execute(historical).all() == before_historical
         assert {

@@ -214,6 +214,12 @@ END $$;
 """
 
 
+def _fence_trigger_name(table: str) -> str:
+    # The existing mixed-return guard owns its isolation error and operation lock.
+    prefix = "a11" if table == "pos_mixed_return_command" else "a01"
+    return f"{prefix}_mixed_electronic_refund_binding_fence"
+
+
 def upgrade() -> None:
     _sql("""
       CREATE TEMP TABLE electronic_refund_binding_reference_grants AS
@@ -333,7 +339,7 @@ def upgrade() -> None:
         """)
     for table in FENCED:
         _sql(f"""
-          CREATE TRIGGER a01_mixed_electronic_refund_binding_fence BEFORE INSERT OR UPDATE OR DELETE
+          CREATE TRIGGER {_fence_trigger_name(table)} BEFORE INSERT OR UPDATE OR DELETE
             ON public.{table} FOR EACH ROW
             EXECUTE FUNCTION public.trg_mixed_electronic_refund_binding_fence();
         """)
@@ -366,7 +372,7 @@ def downgrade() -> None:
       END $$;
     """)
     for table in FENCED:
-        _sql(f"DROP TRIGGER a01_mixed_electronic_refund_binding_fence ON public.{table};")
+        _sql(f"DROP TRIGGER {_fence_trigger_name(table)} ON public.{table};")
     for table in reversed(TABLES):
         _sql(f"DROP TABLE public.{table};")
     for signature in reversed(FUNCTIONS):
