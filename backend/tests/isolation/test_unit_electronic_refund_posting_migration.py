@@ -15,6 +15,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     electronic_refund_posting_migration,
     mixed_electronic_checkout_migration,
     mixed_electronic_refund_intent_migration,
+    mixed_electronic_refund_preparation_migration,
 )
 
 db_session = receiving_session_fixture
@@ -55,11 +56,12 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
                 with pytest.raises(
                     DBAPIError,
                     match=(
-                        "mixed_electronic_(refund_intent|checkout)"
+                        "mixed_electronic_(refund_preparation|refund_intent|checkout)"
                         "_downgrade_requires_empty_history"
                     ),
                 ) as error:
                     with connection.begin_nested():
+                        mixed_electronic_refund_preparation_migration().downgrade()
                         mixed_electronic_refund_intent_migration().downgrade()
                         mixed_electronic_checkout_migration().downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
@@ -69,6 +71,7 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
                 } == head_before
                 return
             # Unwind later audit patches and dependencies before historical 0218 text.
+            mixed_electronic_refund_preparation_migration().downgrade()
             mixed_electronic_refund_intent_migration().downgrade()
             mixed_electronic_checkout_migration().downgrade()
             before0218 = {
@@ -86,6 +89,7 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
             } == before0218
             mixed_electronic_checkout_migration().upgrade()
             mixed_electronic_refund_intent_migration().upgrade()
+            mixed_electronic_refund_preparation_migration().upgrade()
         assert {
             sig: connection.scalar(query, {"signature": f"public.{sig}"}) for sig in signatures
         } == head_before
