@@ -14,6 +14,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_preparation_migration,
 )
 
@@ -48,6 +49,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
                     with connection.begin_nested():
                         migration().downgrade()
                 return
+            mixed_electronic_refund_outcome_migration().downgrade()
             mixed_electronic_refund_preparation_migration().downgrade()
             migration().downgrade()
             assert connection.scalar(text(f"SELECT to_regclass('public.{TABLE}')")) is None
@@ -63,6 +65,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
             )
             migration().upgrade()
             mixed_electronic_refund_preparation_migration().upgrade()
+            mixed_electronic_refund_outcome_migration().upgrade()
         assert connection.scalar(audit_sql) == before_audit
         assert connection.scalar(
             text(
