@@ -213,8 +213,40 @@ def mixed_electronic_refund_preparation_migration() -> ModuleType:
     return module
 
 
+def mixed_electronic_refund_outcome_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0222_mixed_electronic_refund_outcome.py"
+    )
+    spec = importlib.util.spec_from_file_location("mixed_electronic_refund_outcome", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def downgrade_mixed_refund_evidence_for_roundtrip(connection: Connection) -> bool:
+    """A protected nonempty descendant is an asserted refusal, never a silent skip."""
+    assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+    assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    migration = mixed_electronic_refund_outcome_migration()
+    count = text("SELECT count(*) FROM public.pos_mixed_electronic_refund_outcome")
+    before = connection.scalar(count)
+    if before:
+        with pytest.raises(
+            DBAPIError, match="mixed_electronic_refund_outcome_downgrade_requires_empty_history"
+        ) as denied:
+            with connection.begin_nested():
+                migration.downgrade()
+        assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+        assert connection.scalar(count) == before
+        return False
+    migration.downgrade()
+    return True
+
+
 def downgrade_electronic_for_roundtrip() -> None:
     # Unwind later FK dependencies and audit patches before historical function text.
+    mixed_electronic_refund_outcome_migration().downgrade()
     mixed_electronic_refund_preparation_migration().downgrade()
     mixed_electronic_refund_intent_migration().downgrade()
     mixed_electronic_checkout_migration().downgrade()
@@ -238,6 +270,7 @@ def upgrade_electronic_after_roundtrip() -> None:
     mixed_electronic_checkout_migration().upgrade()
     mixed_electronic_refund_intent_migration().upgrade()
     mixed_electronic_refund_preparation_migration().upgrade()
+    mixed_electronic_refund_outcome_migration().upgrade()
 
 
 def downgrade_refund_for_roundtrip() -> None:

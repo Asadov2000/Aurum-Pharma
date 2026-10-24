@@ -10,11 +10,17 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
-from tests.domains.pos.test_unit_electronic_refund_outcome import activated, confirmation, outcome
+from tests.domains.pos.test_unit_electronic_refund_outcome import (
+    activated,
+    confirmation,
+    outcome,
+)
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_mixed_refund_evidence_for_roundtrip,
     electronic_refund_outcome_migration,
     electronic_refund_posting_migration,
+    mixed_electronic_refund_outcome_migration,
 )
 
 db_session = receiving_session_fixture
@@ -38,11 +44,14 @@ async def test_outcome_schema_roundtrip_security_and_legacy_triggers(
                     with connection.begin_nested():
                         electronic_refund_outcome_migration().downgrade()
                 return
+            if not downgrade_mixed_refund_evidence_for_roundtrip(connection):
+                return
             electronic_refund_posting_migration().downgrade()
             electronic_refund_outcome_migration().downgrade()
             assert connection.scalar(text("SELECT to_regclass(:name)"), {"name": TABLE}) is None
             electronic_refund_outcome_migration().upgrade()
             electronic_refund_posting_migration().upgrade()
+            mixed_electronic_refund_outcome_migration().upgrade()
         assert connection.execute(snapshot).one() == security
         assert security.relrowsecurity and security.relforcerowsecurity
         for role, allowed in (("aurum_app", {"SELECT", "INSERT"}), ("aurum_support", {"SELECT"})):

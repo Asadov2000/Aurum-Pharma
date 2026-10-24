@@ -12,6 +12,7 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.domains.pos.test_mixed_electronic_refund_activation import activate
 from tests.domains.pos.test_mixed_electronic_refund_binding import binding, persist_review
 from tests.isolation.test_physical_cash_checkout_migration import (
+    mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_preparation_migration,
 )
 
@@ -128,6 +129,7 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
                         migration.downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 return
+            mixed_electronic_refund_outcome_migration().downgrade()
             migration.downgrade()
             for table in migration.TABLES:
                 assert (
@@ -139,6 +141,7 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
             assert connection.execute(historical).all() == before_historical
             assert connection.execute(FENCE_TRIGGERS).all() == []
             migration.upgrade()
+            mixed_electronic_refund_outcome_migration().upgrade()
         assert fence_trigger_snapshot(connection) == before_fences
         assert connection.execute(security, parameters).all() == before_security
         assert connection.execute(historical).all() == before_historical
