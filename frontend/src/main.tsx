@@ -6,7 +6,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { bootstrapAuth } from "@/features/auth/bootstrap";
 import { ConnectivityProvider } from "@/lib/connectivity";
 import { applyDensity, getDensityPreference } from "@/lib/density";
-import { notifyDesktopReady } from "@/lib/desktopBridge";
+import { notifyDesktopReady } from "@/lib/desktopRuntime";
 import { registerPwaServiceWorker } from "@/lib/pwa";
 import { queryClient } from "@/lib/query";
 import { applyRuntimeSurfaceAttribute } from "@/lib/runtime";

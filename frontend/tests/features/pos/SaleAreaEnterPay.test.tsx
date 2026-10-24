@@ -76,7 +76,7 @@ vi.mock("@/features/catalog/api", () => ({
   findByBarcode: (...args: unknown[]) => findByBarcode(...args),
 }));
 
-vi.mock("@/lib/desktopBridge", () => ({
+vi.mock("@/lib/desktopRuntime", () => ({
   DESKTOP_BARCODE_SCANNED_EVENT: "aurum-desktop-barcode-scanned",
   normalizeDesktopBarcode: (rawCode: string) => rawCode.trim() || null,
   requestDesktopCashDrawerOpen: (...args: unknown[]) => requestDesktopCashDrawerOpen(...args),

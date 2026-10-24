@@ -98,7 +98,7 @@ vi.mock("@/features/pos/PrescriptionModal", () => ({
     </>
   ),
 }));
-vi.mock("@/lib/desktopBridge", () => ({
+vi.mock("@/lib/desktopRuntime", () => ({
   DESKTOP_BARCODE_SCANNED_EVENT: "aurum-desktop-barcode-scanned",
   normalizeDesktopBarcode: (raw: string) => raw.trim() || null,
   requestDesktopCashDrawerOpen: calls.drawer,

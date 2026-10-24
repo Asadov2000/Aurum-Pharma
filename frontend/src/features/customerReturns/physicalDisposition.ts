@@ -8,7 +8,7 @@ import type { PhysicalCustomerReturnItem } from "./types";
 export interface PhysicalDispositionScope extends PosStorageScope {
   branchId: string;
 }
-const uuid = z.string().uuid();
+const uuid = z.string().guid();
 const targetIdentity = { intake_operation_id: uuid, line_id: uuid };
 const physicalTargetSchema = z
   .object({ inventory_kind: z.literal("physical_unit"), ...targetIdentity, lot_id: uuid })

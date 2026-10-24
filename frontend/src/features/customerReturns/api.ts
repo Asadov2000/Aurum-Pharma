@@ -35,7 +35,7 @@ export async function resolveCustomerReturn(
   return data;
 }
 
-const physicalReturnItemSchema = z
+const physicalReturnItemBaseSchema = z
   .object({
     operation_id: z.string().uuid(),
     line_id: z.string().uuid(),
@@ -69,12 +69,12 @@ const physicalReturnItemSchema = z
     intake_kind: z.enum(["cash_refund", "zero_return"]),
     status: z.literal("pending"),
   })
-  .strict()
-  .refine((item) =>
-    item.intake_kind === "zero_return"
-      ? item.return_sale_id === null && item.return_receipt_number === null
-      : true,
-  );
+  .strict();
+const physicalReturnItemSchema = physicalReturnItemBaseSchema.refine((item) =>
+  item.intake_kind === "zero_return"
+    ? item.return_sale_id === null && item.return_receipt_number === null
+    : true,
+);
 const physicalReturnListSchema = z
   .object({
     items: z.array(physicalReturnItemSchema),
@@ -98,8 +98,7 @@ export async function listPhysicalCustomerReturns(
   return physicalReturnListSchema.parse(data);
 }
 
-const mixedReturnBaseSchema = physicalReturnItemSchema
-  .innerType()
+const mixedReturnBaseSchema = physicalReturnItemBaseSchema
   .omit({ lot_id: true, base_units: true, unit_label: true })
   .extend({
     catalog_name: z.string().min(1).max(500),

@@ -32,7 +32,7 @@ const schema = z.object({
     .regex(quantityPattern, "До 11 цифр и не более 3 знаков после запятой")
     .refine((value) => Number(value.replace(",", ".")) > 0, "Количество должно быть больше 0"),
   reason: z.enum(["expired", "damaged", "spoiled", "theft", "other"], {
-    required_error: "Выберите причину",
+    error: (issue) => issue.input === undefined ? "Выберите причину" : undefined,
   }),
   comment: z.string().max(2000, "Не более 2000 символов").optional(),
 });

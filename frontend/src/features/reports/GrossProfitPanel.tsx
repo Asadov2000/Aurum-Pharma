@@ -37,7 +37,7 @@ const filters = z
   })
   .superRefine((values, ctx) => {
     const period = grossProfitPeriodSchema.safeParse(values);
-    if (!period.success) for (const issue of period.error.issues) ctx.addIssue(issue);
+    if (!period.success) for (const issue of period.error.issues) ctx.addIssue({ ...issue });
   });
 type Filters = z.infer<typeof filters>;
 function parameters(values: Filters, page = 1): GrossProfitReportParams {

@@ -20,7 +20,9 @@ const coreRuntimePackages = new Set([
   "use-sync-external-store",
   "zustand",
 ]);
-const formPackages = new Set(["react-hook-form", "zod"]);
+// Let Zod core/mini and lazy classic schemas follow their actual import graph.
+// Grouping all Zod modules with RHF eagerly loads validators for lazy forms.
+const formPackages = new Set(["react-hook-form"]);
 
 function packageNameFromModuleId(id: string): string | undefined {
   const normalizedId = id.replaceAll("\\", "/");
@@ -66,8 +68,45 @@ function splitRuntimeDependencies(id: string): string | undefined {
   ) {
     return "ui-controls";
   }
-  if (/\/src\/components\/ui\/(Modal|ConfirmDialog)\.tsx$/.test(normalizedId)) {
-    return "ui-dialogs";
+  if (/\/src\/components\/ui\/(Modal|ConfirmDialog|Table)\.tsx$/.test(normalizedId)) {
+    return "ui-controls";
+  }
+  // These modules are already shared by Login, Dashboard and POS. Keep them
+  // with the core runtime instead of emitting a request for each tiny helper.
+  if (
+    /\/src\/(components\/ui\/Button\.tsx|components\/layout\/routeAccess\.ts|features\/auth\/tenantContext\.ts|lib\/(utils|errorMessages)\.ts)$/.test(normalizedId)
+  ) return "vendor-core";
+  // Group only the measured protected shell dependencies, not whole feature
+  // directories: lazy forms and their classic validators must remain separate.
+  if (
+    /\/src\/components\/layout\/(AuthenticatedShell|AppLayout|AppHeader|HeaderMenuContent|HeaderProfileExtras|PwaInstallButton|RuntimeSurfaceBadge|icons|Sidebar|BrandMark|RouteAccessGuard|ConnectivityStatusBanner|PwaUpdateBanner|nav)\.tsx$/.test(normalizedId) ||
+    /\/src\/components\/layout\/sidebarPreferences\.ts$/.test(normalizedId) ||
+    /\/src\/components\/(AccessDeniedCard|ui\/(Card|PageHeader|Skeleton|Badge))\.tsx$/.test(normalizedId) ||
+    /\/src\/(lib\/bodyScrollLock|features\/auth\/(hooks|permissions)|features\/settings\/(preferenceQueueStorage|workspacePreferences|useSidebarPreferences|queries|api))\.ts$/.test(normalizedId)
+  ) return "AuthenticatedShell";
+  // Mini and shared core have no classic schema convenience methods. Sharing
+  // their chunk with RHF avoids fragmenting auth without loading lazy schemas.
+  if (/\/node_modules\/zod\/v4\/(core|mini)\//.test(normalizedId) ||
+      /\/node_modules\/zod\/v4\/locales\/en\.js$/.test(normalizedId) ||
+      /\/src\/features\/auth\/(identityForms|identityQueries|identityApi|accountSecurityErrors)\.ts$/.test(normalizedId) ||
+      /\/src\/features\/auth\/LoginMethodSwitch\.tsx$/.test(normalizedId)) {
+    return "vendor-forms";
+  }
+  if (/\/node_modules\/zod\/v4\/classic\//.test(normalizedId)) {
+    return "vendor-validation";
+  }
+  // Session revocation is used by the lazy security page. QueryClient still
+  // needs MutationCache/Mutation in core; only the hook/observer are optional.
+  if (
+    /\/node_modules\/@tanstack\/react-query\/build\/modern\/useMutation\.js$/.test(normalizedId) ||
+    /\/node_modules\/@tanstack\/query-core\/build\/modern\/mutationObserver\.js$/.test(normalizedId)
+  ) {
+    return "query-mutations";
+  }
+  // React's CommonJS proxies share this Rollup helper. Keep it with them,
+  // rather than creating a vendor-core -> entry -> vendor-core cycle.
+  if (normalizedId === "\0commonjsHelpers.js") {
+    return "vendor-core";
   }
   const packageName = packageNameFromModuleId(id);
   if (!packageName) return undefined;

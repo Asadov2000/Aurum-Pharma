@@ -15,7 +15,7 @@ import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode, getCatalogItem } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
-import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
+import { requestDesktopCashDrawerOpen } from "@/lib/desktopRuntime";
 import { describeApiError } from "@/lib/errorMessages";
 import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";

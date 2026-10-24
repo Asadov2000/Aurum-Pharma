@@ -1,4 +1,4 @@
-import { hasDesktopBridge, type DesktopBridgeTarget } from "@/lib/desktopBridge";
+import { hasDesktopBridge, type DesktopBridgeTarget } from "@/lib/desktopRuntime";
 
 export const DESKTOP_USER_AGENT_TOKEN = "AurumPharmaDesktop";
 

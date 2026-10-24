@@ -21,7 +21,7 @@ const fieldsSchema = z.object({
     .string()
     .max(2000)
     .refine((value) => !value.includes("\0")),
-  quantities: z.record(quantity),
+  quantities: z.record(z.string(), quantity),
 });
 type Fields = z.input<typeof fieldsSchema>;
 type Available = { packId: string; number: number | null; units: number };

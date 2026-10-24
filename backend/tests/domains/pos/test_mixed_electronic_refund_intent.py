@@ -163,9 +163,10 @@ async def test_mixed_refund_component_raw_select_is_scoped(
     stock = context.stock
     if denial == "foreign_branch":
         branch_id = uuid4()
-        async with maintenance_engine.begin() as owner:
-            assert str(await owner.scalar(text("SELECT current_database()"))).endswith("_test")
-            await owner.execute(
+        async with db_engine.begin() as support:
+            assert str(await support.scalar(text("SELECT current_database()"))).endswith("_test")
+            await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+            await support.execute(
                 text(
                     "INSERT INTO branch(id,tenant_id,name) "
                     "VALUES (:id,:tenant,'Other test branch')"

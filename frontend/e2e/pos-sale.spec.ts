@@ -463,6 +463,8 @@ test.describe("POS sale (owner)", () => {
           response.ok(),
       );
       await refundDialog.getByLabel("Причина").selectOption("quality_issue");
+      // This scenario must remain valid when tenant policy requires reason text.
+      await refundDialog.getByLabel("Комментарий").fill("Проверка возврата по терминалу");
       await refundDialog.getByRole("button", { name: "Зафиксировать сумму возврата" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
