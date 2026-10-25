@@ -83,7 +83,7 @@
       "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job"
     }
   },
-  "remaining_step": "Need exact public Microsoft download URL and safe HTTP409 response/redirect details to distinguish origin/CDN/policy/transient failure; generic installer line1443 does not prove missing SDK. Wait current E2E result before any new full matrix. Do not change SDK/dependencies/limits/protection, guess fix or merge.",
+  "remaining_step": "Prepared exact same-SDK explicit-version official-feed candidate in coordination artifacts only. Wait actual installer DryRun and YAML/PowerShell QA plus current E2E result; do not publish or rerun full CI before both. SDK10.0.403/channel10.0 retained; no dependency or security weakening.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -170,11 +170,31 @@
     "bytes": 8602
   },
   "windows_installer_analysis": {
-    "official_source": "dotnet/install-scripts/src/dotnet-install.ps1",
-    "reviewed_source_blob": "0942202517385e2c756d3b32087291c48d078713",
-    "line1443": "Generic terminal error after DownloadSucceeded=false; not evidence of SDK version absence",
-    "known": "HTTP409 on Microsoft download; tests did not start; one failure",
-    "unknown": "Actual failed URL, redirect destination and safe response error metadata",
-    "changes_made": false
+    "official_source": "dot.net/v1/dotnet-install.ps1",
+    "coordinator_verified_script_sha256": "e8b873e18a81e5c4cd8ab69d84dac8fead291d50b3c44633cd7fddad709a13d6",
+    "bytes": 76676,
+    "failed_url": "https://dotnetorigin.blob.core.windows.net/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
+    "failed_head_status": 409,
+    "official_same_artifact": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
+    "coordinator_verified_head_status": 200,
+    "content_length": 300745255,
+    "official_migration_announcement": "https://github.com/dotnet/core/issues/10262",
+    "azure_feed_alone_does_not_bypass_aka_ms": true,
+    "explicit_version": "10.0.403",
+    "channel": "10.0",
+    "product_config_published": false
+  },
+  "sdk_feed_candidate": {
+    "artifact_path": ".development-handoff/artifacts/pr422-windows-sdk-feed-candidate.yml",
+    "product_path": ".circleci/config.yml",
+    "base_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
+    "base_blob": "fe9cf2f3b02547e52f1683bd3437ca8eb63460d2",
+    "change": "One existing Windows installer command: add -Version10.0.403 and -AzureFeed official builds CDN; same observed SDK/channel/install dir, no tests/resources/TLS changes.",
+    "qa": "PENDING root actual-installer DryRun/YAML/PS AST; independent static review pending",
+    "publish_preconditions": [
+      "Current E2E result available",
+      "Exact candidate QA PASS"
+    ],
+    "published": false
   }
 }
