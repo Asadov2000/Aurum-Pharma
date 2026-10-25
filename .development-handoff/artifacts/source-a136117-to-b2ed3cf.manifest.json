@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "artifact": "git-bundle-incremental",
+  "bundle_file": "aurum-a136117-to-b2ed3cf.bundle",
+  "bundle_sha256": "a187b232953aa3214ddab7e49bd3b60fb81816fa0a2ee92152359c70bd92ce50",
+  "bundle_bytes": 13507,
+  "bundle_base64_blob": "02c00edafdc0a56466fb0c3e86a4eb989839b88b",
+  "bundle_base64_path": ".development-handoff/artifacts/source-a136117-to-b2ed3cf.bundle.b64",
+  "base_sha": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
+  "head_sha": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
+  "tree_sha": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
+  "bundle_ref": "refs/heads/codex/handoff-main-b2ed3cf",
+  "expected_new_commits": 1,
+  "expected_changed_paths": 10,
+  "tracked_git_objects_only": true,
+  "dependencies_changed": false,
+  "runtime_or_database_files_included": false,
+  "restore": "Verify SHA256 and base first. Fetch bundle in new isolated copy/worktree; never reset existing dirty checkout. Verify HEAD/tree/clean and full strict fsck before product grant."
+}
