@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.core.errors import AurumError
 from app.domains.pos.mixed_cash_refund_schemas import MixedCashRefundReceiptV4
+from app.domains.pos.mixed_electronic_refund_posting_schemas import MixedElectronicRefundReceiptV4
 from app.domains.pos.models import Sale
 from app.domains.pos.physical_documents import _printable
 from app.domains.pos.schemas import ReceiptLine
@@ -44,7 +45,9 @@ def mixed_cash_refund_snapshot(sale: Sale) -> MixedCashRefundReceiptV4 | None:
     return receipt
 
 
-def mixed_cash_refund_lines(receipt: MixedCashRefundReceiptV4) -> list[ReceiptLine]:
+def mixed_cash_refund_lines(
+    receipt: MixedCashRefundReceiptV4 | MixedElectronicRefundReceiptV4,
+) -> list[ReceiptLine]:
     """Keep exact allocated money and describe the actual returned quantities.
 
     One display line is one allocation: dividing its historical gross by a
