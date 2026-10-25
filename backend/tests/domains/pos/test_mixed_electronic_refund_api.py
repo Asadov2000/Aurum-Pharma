@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid1, uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI, Request
@@ -311,7 +311,11 @@ async def test_payloads_reject_client_owned_money_and_parent_mismatch(mixed_api:
     assert not any(call.await_count for call in api.calls.values())
 
 
-@pytest.mark.parametrize("invalid_id", ["not-a-uuid", str(uuid1())])
+@pytest.mark.parametrize(
+    "invalid_id",
+    ["not-a-uuid", "00000000-0000-1000-8000-000000000001"],
+    ids=["malformed", "version-1"],
+)
 async def test_recovery_operation_requires_uuid4(mixed_api: Api, invalid_id: str) -> None:
     api = mixed_api
     for case in api.cases:
