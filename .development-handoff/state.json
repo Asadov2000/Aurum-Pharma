@@ -3,7 +3,7 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-RECEIPT-READ-01",
   "generation": 3,
   "owner": "cloud",
-  "phase": "implementation",
+  "phase": "blocked",
   "run_id": "cloud-2026-10-25-receipt-read-01",
   "branch": "codex/mixed-electronic-refund-receipt-read",
   "base_sha": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
@@ -14,7 +14,7 @@
   "cloud_task": "01a17264-0a59-7568-8b47-414664d6006b",
   "cloud_replacement_conversation": "6addcbc6-9480-83eb-aa33-fa44c5d23b8b",
   "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_active_turn": false,
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
@@ -71,9 +71,17 @@
       "cause": "No usable execution environment is available; platform reports 409 environment_offline / Environment is not connected",
       "probe": "pwd",
       "repeated": false
+    },
+    "ci_tooling_windows": {
+      "consecutive": 1,
+      "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
+      "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
+      "job": "82652945-c87f-449b-895a-9abc490a35d1",
+      "cause": "Unknown: GitHub tooling-windows failure has description null; verified safe job log required",
+      "reruns": 0
     }
   },
-  "remaining_step": "Exact cloud logout candidate published after independent PC static QA; await full eight-context CI on final head, then fresh main/head/control and guarded merge. Cloud shell remains offline; no retry or installation.",
+  "remaining_step": "Obtain authorized sanitized tooling-windows diagnostic for workflow69ec8f5c/job82652945 on e5605ef; no guessing, blind rerun, merge, dependency or network changes. Exact logout candidate has been published after PC static QA. Other jobs remain in the same full CI attempt.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -111,18 +119,38 @@
     "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
     "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
     "attempt": 2,
-    "result": "pending",
+    "result": "tooling-windows failure; other jobs pending or success; merge blocked",
     "statuses": [
       {
+        "context": "ci/circleci: tooling-windows",
+        "state": "failure"
+      },
+      {
         "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
         "state": "pending"
       },
       {
-        "context": "ci/circleci: tooling-windows",
+        "context": "ci/circleci: frontend",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: backend",
         "state": "pending"
       }
     ],
-    "diagnostics": "Root may provide verified safe public logs; cloud MCP unavailable; no third Create"
+    "diagnostics": "Root can provide safe public logs; cloud logs unavailable; no third MCP Create"
   },
   "e2e_fix_candidate": {
     "path": ".development-handoff/artifacts/pr422-logout-observation-candidate.ts",
