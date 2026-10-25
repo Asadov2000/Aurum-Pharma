@@ -77,7 +77,7 @@
       "repeated": false
     },
     "ci_tooling_windows": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
       "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
       "job": "82652945-c87f-449b-895a-9abc490a35d1",
@@ -86,7 +86,9 @@
       "build": 3265,
       "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job",
       "fix_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-      "fix": "Same actual SDK10.0.403, explicit Version plus official builds CDN; exact candidate PC QA PASS; waiting CI, counter remains1"
+      "fix": "Same actual SDK10.0.403, explicit Version plus official builds CDN; exact candidate PC QA PASS; waiting CI, counter remains1",
+      "history": "One Windows installer HTTP409 from anonymous origin before tests on e560; same SDK10.0.403 explicit official-CDN fix0eef passed complete Windows tooling in final workflow9473c0a6",
+      "resolved_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868"
     },
     "sdk_dynamic_candidate": {
       "consecutive": 0,
@@ -135,15 +137,35 @@
     "head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
     "workflow": "9473c0a6-8fce-4fae-9bdb-5b8d34f21907",
     "attempt": 3,
-    "result": "pending",
+    "result": "pending; tooling-linux, tooling-windows and audit success",
     "statuses": [
       {
-        "context": "ci/circleci: tooling-windows",
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
         "state": "pending"
       },
       {
-        "context": "ci/circleci: tooling-linux",
+        "context": "ci/circleci: frontend",
         "state": "pending"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
       }
     ],
     "logs_access": "Root bounded public metadata/log diagnostics if needed; cloud MCP remains unavailable; no third Create"
