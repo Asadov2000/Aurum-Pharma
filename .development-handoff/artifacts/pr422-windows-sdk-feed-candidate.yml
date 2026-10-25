@@ -420,7 +420,180 @@ jobs:
           name: "Install .NET 10 SDK"
           command: |
             Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile .circleci/dotnet-install.ps1
-            & .circleci/dotnet-install.ps1 -Channel 10.0 -Version 10.0.403 -AzureFeed https://builds.dotnet.microsoft.com/dotnet -InstallDir "$env:USERPROFILE/dotnet"
+            $sdkFeed = "https://builds.dotnet.microsoft.com/dotnet"
+            $sdkVersion = ([string](Invoke-WebRequest "$sdkFeed/Sdk/10.0/latest.version" -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop).Content).Trim()
+            if ($sdkVersion -notmatch '^10[.]0[.][0-9]+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-verification-tools"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-verification-tools.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-pilot-readiness"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-pilot-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-production-host-preflight"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-production-host-preflight.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-demo-cors-origins"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-cors-origins.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-demo-broker-rollout"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-broker-rollout.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-windows-tpm-readiness"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-tpm-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "pwsh: test-manage-edge-cash-identity"
+          command: |
+            & pwsh.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-manage-edge-cash-identity.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-verification-tools"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-verification-tools.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-pilot-readiness"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-pilot-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-demo-cors-origins"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-cors-origins.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-demo-broker-rollout"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-demo-broker-rollout.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-windows-tpm-readiness"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-windows-tpm-readiness.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "powershell: test-manage-edge-cash-identity"
+          command: |
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-manage-edge-cash-identity.ps1
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Backend shard report validation"
+          command: |
+            python scripts/test-backend-shards.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Disposable database safety guards"
+          command: |
+            python scripts/test-disposable-ci-guards.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "CI download cache and gate safety contract"
+          command: |
+            python scripts/test-circleci-cache-contract.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Parallel backend runner and evidence safety"
+          command: |
+            python scripts/test-circleci-backend-parallel.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Production build reuse safety"
+          command: |
+            python scripts/test-ci-build-reuse.py
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore desktop tests"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --runtime win-x64 --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Test desktop core"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet test desktop/AurumPharma.Desktop.Core.Tests/AurumPharma.Desktop.Core.Tests.csproj --configuration Release --runtime win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore read-only TPM probe"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --runtime win-x64 --locked-mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Build read-only TPM probe"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet build desktop/AurumPharma.Desktop.TpmProbe/AurumPharma.Desktop.TpmProbe.csproj --configuration Release --runtime win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Restore Windows host"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet restore desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --runtime win-x64 --locked-mode -p:PublishReadyToRun=true
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: "Build packaged Windows host"
+          command: |
+            $env:PATH="$env:USERPROFILE\dotnet;$env:PATH"
+            dotnet build desktop/AurumPharma.Desktop/AurumPharma.Desktop.csproj --configuration Release --runtime win-x64 --no-restore -p:Platform=x64 -p:PublishReadyToRun=true
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  ci-gate:
+    docker:
+      - image: "cimg/python:3.12"
+    resource_class: "small"
+    steps:
+      - "checkout"
+      - attach_workspace:
+          at: "."
+      - run:
+          name: "Validate complete backend test evidence"
+          command: "python .circleci/scripts/verify-backend-evidence.py"
+workflows:
+  full-ci:
+    jobs:
+      - backend:
+          requires:
+            - "tooling-linux"
+      - frontend:
+          requires:
+            - "tooling-linux"
+      - dependency-audit:
+          requires:
+            - "tooling-linux"
+      - e2e:
+          requires:
+            - "tooling-linux"
+      - production-containers:
+          requires:
+            - "tooling-linux"
+      - "tooling-linux"
+      - "tooling-windows"
+      - ci-gate:
+          requires:
+            - "backend"
+            - "frontend"
+            - "dependency-audit"
+            - "e2e"
+            - "production-containers"
+            - "tooling-linux"
+            - "tooling-windows"
+) {
+              throw "Official .NET SDK metadata does not match channel 10.0"
+            }
+            & .circleci/dotnet-install.ps1 -Channel 10.0 -Version $sdkVersion -AzureFeed $sdkFeed -InstallDir "$env:USERPROFILE/dotnet"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
           name: "pwsh: test-verification-tools"

@@ -83,7 +83,7 @@
       "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job"
     }
   },
-  "remaining_step": "Prepared exact same-SDK explicit-version official-feed candidate in coordination artifacts only. Wait actual installer DryRun and YAML/PowerShell QA plus current E2E result; do not publish or rerun full CI before both. SDK10.0.403/channel10.0 retained; no dependency or security weakening.",
+  "remaining_step": "Root QA exact dynamic official-feed candidate (YAML/PS AST, metadata validation, actual installer DryRun without install) and wait current E2E result before product publication/new full CI. No SDK/dependency/resource/security changes.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -182,19 +182,22 @@
     "azure_feed_alone_does_not_bypass_aka_ms": true,
     "explicit_version": "10.0.403",
     "channel": "10.0",
-    "product_config_published": false
+    "product_config_published": false,
+    "policy": "Original channel10.0 latest preserved; exact resolved value observed10.0.403, no project dependency/version edit"
   },
   "sdk_feed_candidate": {
     "artifact_path": ".development-handoff/artifacts/pr422-windows-sdk-feed-candidate.yml",
     "product_path": ".circleci/config.yml",
     "base_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
     "base_blob": "fe9cf2f3b02547e52f1683bd3437ca8eb63460d2",
-    "change": "One existing Windows installer command: add -Version10.0.403 and -AzureFeed official builds CDN; same observed SDK/channel/install dir, no tests/resources/TLS changes.",
-    "qa": "PENDING root actual-installer DryRun/YAML/PS AST; independent static review pending",
+    "change": "Preserve channel10.0 latest: bounded official CDN latest.version GET with trim and strict ^10[.]0[.][0-9]+$ validation; pass explicit validated Version and official AzureFeed so installer skips aka.ms; same install dir/jobs/resources/TLS.",
+    "qa": "PENDING YAML/PS AST and DryRun of this exact dynamic candidate; prior pinned-version dryrun PASS on actual official installer",
     "publish_preconditions": [
       "Current E2E result available",
       "Exact candidate QA PASS"
     ],
-    "published": false
+    "published": false,
+    "previous_pinned_candidate_blob": "fa8a113296818b99fcf52112964cc4faad357219",
+    "current_resolved_version": "10.0.403"
   }
 }
