@@ -81,9 +81,16 @@
       "reruns": 0,
       "build": 3265,
       "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job"
+    },
+    "sdk_dynamic_candidate": {
+      "consecutive": 0,
+      "total": 1,
+      "cause": "JS String.replace replacement metasequence $' expanded source suffix and malformed unpublished dynamic artifact",
+      "resolution": "Rejected by independent review; superseded with separately QA-approved exact pinned blobfa8, transferred by SHA without content transformation",
+      "published_to_product": false
     }
   },
-  "remaining_step": "Root QA exact dynamic official-feed candidate (YAML/PS AST, metadata validation, actual installer DryRun without install) and wait current E2E result before product publication/new full CI. No SDK/dependency/resource/security changes.",
+  "remaining_step": "Exact pinned SDK-delivery candidate fa8 independently QA-approved and selected. Wait current E2E result before publishing same PR via expected SHA; do not rerun prematurely. Discard malformed dynamic candidate af8. Same SDK10.0.403/channel10.0; no tests/resources/TLS changes.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -183,21 +190,23 @@
     "explicit_version": "10.0.403",
     "channel": "10.0",
     "product_config_published": false,
-    "policy": "Original channel10.0 latest preserved; exact resolved value observed10.0.403, no project dependency/version edit"
+    "policy": "Selected explicit same resolved SDK10.0.403; no upgrade/dependency change, future latest auto-selection intentionally frozen under latest user authorization."
   },
   "sdk_feed_candidate": {
     "artifact_path": ".development-handoff/artifacts/pr422-windows-sdk-feed-candidate.yml",
     "product_path": ".circleci/config.yml",
     "base_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
     "base_blob": "fe9cf2f3b02547e52f1683bd3437ca8eb63460d2",
-    "change": "Preserve channel10.0 latest: bounded official CDN latest.version GET with trim and strict ^10[.]0[.][0-9]+$ validation; pass explicit validated Version and official AzureFeed so installer skips aka.ms; same install dir/jobs/resources/TLS.",
-    "qa": "PENDING YAML/PS AST and DryRun of this exact dynamic candidate; prior pinned-version dryrun PASS on actual official installer",
-    "publish_preconditions": [
-      "Current E2E result available",
-      "Exact candidate QA PASS"
-    ],
+    "selected_blob": "fa8a113296818b99fcf52112964cc4faad357219",
+    "sha256": "d9637317e8cced07a5b29b958936b8a89bd5e6db317a64bc4129ef5f6a164422",
+    "bytes": 26041,
+    "change": "One exact installer-command replacement: -Version10.0.403 and official AzureFeed; same observed SDK10.0.403 and channel10.0, install dir/jobs/resources/TLS unchanged. Explicit version freezes currently resolved SDK rather than future channel-latest updates; user explicitly authorized this tested pinned candidate.",
+    "qa": "Root exact candidate PASS: byte assertion single scalar replacement, PowerShell AST, actual installer exact-args DryRun/NoPath, official same-version CDN HEAD200. YAML parser absent, no installations/archives; full tooling CI required.",
+    "independent_review": "Pinned command static PASS; dynamic candidate af8 rejected and not used",
     "published": false,
-    "previous_pinned_candidate_blob": "fa8a113296818b99fcf52112964cc4faad357219",
-    "current_resolved_version": "10.0.403"
+    "publish_preconditions": [
+      "Current E2E result available"
+    ],
+    "rejected_dynamic_blob": "af8c11a196ed38cb2c4fc878cdcd8fd3ec62e558"
   }
 }
