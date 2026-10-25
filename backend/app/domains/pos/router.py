@@ -34,6 +34,21 @@ from app.domains.pos.mixed_cash_refund_router import router as mixed_cash_refund
 from app.domains.pos.mixed_electronic_checkout_router import (
     router as mixed_electronic_checkout_router,
 )
+from app.domains.pos.mixed_electronic_refund_activation_router import (
+    router as mixed_electronic_refund_activation_router,
+)
+from app.domains.pos.mixed_electronic_refund_binding_router import (
+    router as mixed_electronic_refund_binding_router,
+)
+from app.domains.pos.mixed_electronic_refund_outcome_router import (
+    router as mixed_electronic_refund_outcome_router,
+)
+from app.domains.pos.mixed_electronic_refund_posting_router import (
+    router as mixed_electronic_refund_posting_router,
+)
+from app.domains.pos.mixed_electronic_refund_review_router import (
+    router as mixed_electronic_refund_review_router,
+)
 from app.domains.pos.mixed_zero_return_router import router as mixed_zero_return_router
 from app.domains.pos.physical_cart_router import router as physical_cart_router
 from app.domains.pos.physical_cash_checkout_router import router as physical_cash_checkout_router
@@ -122,6 +137,11 @@ from app.domains.pos.unit_payment_plan_router import router as unit_payment_plan
 router = APIRouter(prefix="/api/v1", tags=["pos"])
 router.include_router(mixed_cash_checkout_router)
 router.include_router(mixed_cash_refund_router)
+router.include_router(mixed_electronic_refund_activation_router)
+router.include_router(mixed_electronic_refund_binding_router)
+router.include_router(mixed_electronic_refund_outcome_router)
+router.include_router(mixed_electronic_refund_posting_router)
+router.include_router(mixed_electronic_refund_review_router)
 router.include_router(mixed_zero_return_router)
 router.include_router(physical_cart_router)
 router.include_router(physical_cash_checkout_router)
