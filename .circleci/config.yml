@@ -420,7 +420,7 @@ jobs:
           name: "Install .NET 10 SDK"
           command: |
             Invoke-WebRequest https://dot.net/v1/dotnet-install.ps1 -OutFile .circleci/dotnet-install.ps1
-            & .circleci/dotnet-install.ps1 -Channel 10.0 -InstallDir "$env:USERPROFILE/dotnet"
+            & .circleci/dotnet-install.ps1 -Channel 10.0 -Version 10.0.403 -AzureFeed https://builds.dotnet.microsoft.com/dotnet -InstallDir "$env:USERPROFILE/dotnet"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
           name: "pwsh: test-verification-tools"

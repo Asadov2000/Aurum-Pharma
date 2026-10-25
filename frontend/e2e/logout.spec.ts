@@ -145,17 +145,6 @@ test.describe("Durable browser logout", () => {
     let phase = "before-click";
     const refreshPhases: Record<string, number> = {};
     const unauthorizedPhases: Record<string, number> = {};
-    page.context().on("response", (response) => {
-      if (response.status() === 401) {
-        unauthorizedPhases[phase] = (unauthorizedPhases[phase] ?? 0) + 1;
-      }
-    });
-    page.context().on("request", (request) => {
-      if (new URL(request.url()).pathname === refreshPath) {
-        refreshRequests += 1;
-        refreshPhases[phase] = (refreshPhases[phase] ?? 0) + 1;
-      }
-    });
     let releaseLogout!: () => void;
     const logoutGate = new Promise<void>((resolve) => {
       releaseLogout = resolve;
@@ -166,6 +155,18 @@ test.describe("Durable browser logout", () => {
     });
     try {
       phase = "click-and-signout";
+      // Observe from logout intent, after asynchronous route setup is complete.
+      page.context().on("response", (response) => {
+        if (response.status() === 401) {
+          unauthorizedPhases[phase] = (unauthorizedPhases[phase] ?? 0) + 1;
+        }
+      });
+      page.context().on("request", (request) => {
+        if (new URL(request.url()).pathname === refreshPath) {
+          refreshRequests += 1;
+          refreshPhases[phase] = (refreshPhases[phase] ?? 0) + 1;
+        }
+      });
       await logoutInBrowser(page);
       await expectSignedOut(page);
       await expectSignedOut(otherPage);
