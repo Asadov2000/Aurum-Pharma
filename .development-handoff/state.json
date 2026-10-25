@@ -7,8 +7,8 @@
   "run_id": "local-2026-10-25-api-01",
   "branch": "codex/mixed-electronic-refund-api",
   "base_sha": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
-  "expected_head": "c9e8638a16bd891ea92801969399fd8541e93a90",
-  "source_tree": "4370135c6876b548885461d3d6db41be1ae0be65",
+  "expected_head": "b5bc19d81e52a410bbb524c7be04e417f380133e",
+  "source_tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
   "validated_sha": null,
   "source_manifest_blob": null,
   "cloud_task": "01a17264-0a59-7568-8b47-414664d6006b",
@@ -17,7 +17,7 @@
   "cloud_active_turn": false,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
-  "remaining_step": "Wait final-head full CircleCI workflow acc75b08-b417-48fd-98bf-5a4f4b80871b; fix any failure once diagnosed; guarded merge only after all8 success",
+  "remaining_step": "Full final-head CircleCI attempt2 be0ed671-e64b-4143-97ee-3908d7bf8466; guarded merge only after all8 success",
   "cloud_environment_status": "Backend and frontend locked QA tools installed and persistent; full continuation BLOCKED by CircleCI connector settings rejection.",
   "safety": [
     "No takeover based on offline PC or elapsed time",
@@ -33,6 +33,13 @@
     "ruff_PLR0915": {
       "consecutive": 0,
       "history": "Two failures; explicit user exception approved; corrected typed helper split; original50 limit unchanged; full Ruff PASS"
+    },
+    "ci_gate_collection": {
+      "consecutive": 1,
+      "cause": "One random uuid1 parametrized ID differed across shard collections",
+      "fix_head": "b5bc19d81e52a410bbb524c7be04e417f380133e",
+      "local_fix_verification": "Independent28 collections equal, disjoint19+9;19HTTP testsPASS;noDBRedis",
+      "resolved_in_full_ci": false
     }
   },
   "cloud_previous_task": "01a150ce-f818-77ed-ab0c-e9b2d4366042",
@@ -61,9 +68,10 @@
   "merged_main_sha": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
   "merged_main_tree": "ff253dff47967847003cf555bebc7f979c483844",
   "ci": {
-    "workflow": "acc75b08-b417-48fd-98bf-5a4f4b80871b",
-    "head": "c9e8638a16bd891ea92801969399fd8541e93a90",
-    "result": "pending"
+    "workflow": "be0ed671-e64b-4143-97ee-3908d7bf8466",
+    "head": "b5bc19d81e52a410bbb524c7be04e417f380133e",
+    "result": "pending",
+    "attempt": 2
   },
   "prepared_main_source_archive": {
     "revision": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
