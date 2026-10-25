@@ -249,5 +249,21 @@
     "readback": "PASS"
   },
   "next_stage_started": false,
-  "progress": "Осталось4/7 (N не зафиксирован)"
+  "progress": "Осталось4/7 (N не зафиксирован)",
+  "next_plan": {
+    "path": ".development-handoff/plans/block4-remaining-three-packages.json",
+    "next_work_item": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
+    "remaining_packages": 3,
+    "product_grant": false
+  },
+  "environment_repair": {
+    "date": "2026-10-26",
+    "status": "blocked_execution_stop",
+    "failure_count": 2,
+    "last_error": "No usable execution environment is available; previous and current same-task probes failed",
+    "commands_stopped": true,
+    "product_changes": false,
+    "native_cursor": "f1708cd8-4d73-485e-b1b1-88ae8af0f62e:14",
+    "next": "Root investigating supported existing-environment UI; no third command probe or product grant before real repair evidence/authorized exception"
+  }
 }

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "created_date": "2026-10-26",
+  "baseline_main": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
+  "baseline_tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
+  "counter": {
+    "open_blocks": 4,
+    "total_blocks": 7,
+    "remaining_packages_to_3_of_7": 3,
+    "unit": "accepted package, not PR or request"
+  },
+  "scope": "Existing block4 only; no new requirements, training simulation, Edge, pilot or bank integrations",
+  "packages": [
+    {
+      "id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
+      "number": 1,
+      "status": "not_started",
+      "goal": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
+      "acceptance": [
+        "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
+        "Mixed legacy qty/offset fixed3dec and physical whole units; money fixed2dec via bigint; posted physical_cost_amount; receipt V4 mixed_electronic_refund_receipt",
+        "No fallback to physical-only or mixed-cash routes; current tenant/user/branch/register/sale/session checks across every await",
+        "Persist only minimal safe operation identity/request/stage before sending; no tokens, receipt, cost or terminal evidence",
+        "GET-only reopen/recovery, retained pending operation on lost response/errors, no new UUID/automatic POST, explicit verified completion/cancel before clearing",
+        "Cross-tab Web Locks, atomic safe operation state updates; storage/lock/corruption failure closes writes safely",
+        "Targeted positive/negative/recovery/session-change/concurrency Vitest and preserved physical-client regressions; unchanged lint/type/budgets; full final-head CI before guarded merge"
+      ],
+      "excluded": [
+        "Cashier UI/entrypoints/reference pages",
+        "Backend or migrations",
+        "Dependency or stack changes",
+        "Runtime deployment, shared database access"
+      ],
+      "suggested_branch": "codex/mixed-electronic-refund-client-recovery"
+    },
+    {
+      "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
+      "number": 2,
+      "status": "not_started",
+      "goal": "Cashier form/entrypoint using package1, explicit operator stages, existing permissions/MFA, recovery and receipt",
+      "acceptance": [
+        "Mixed electronic refund selectable from supported completed sale",
+        "Existing quote/review/bind/activate/evidence/post/cancel rules and current scope permissions preserved",
+        "Reload/reopen/lost response uses existing saved operation; completed result opens canonical receipt"
+      ],
+      "depends_on": 1
+    },
+    {
+      "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
+      "number": 3,
+      "status": "not_started",
+      "goal": "Final existing block4 acceptance across physical/mixed card/QR/split sales and refunds",
+      "acceptance": [
+        "Browser flows verify card/QR/combined payments/refunds, lost response, reload, closed shift, current permissions and readonly",
+        "No duplicate payout/payment/stock movement; existing cash and physical regressions remain green",
+        "All mandatory CI on final head; evidence against fixed block4 criteria; then remaining block counter changes to3/7"
+      ],
+      "depends_on": 2
+    }
+  ],
+  "execution": {
+    "product_writer": "cloud only after explicit fresh grant",
+    "local_role": "read-only review / isolated QA only",
+    "new_stage_grant_issued": false,
+    "old_schedulers": "remain PAUSED; no new schedule",
+    "constraints": [
+      "Included account limits only; no purchases/paid APIs/credits/VMs",
+      "No runtime services, shared DB, secrets, dependency install/version or network-policy changes",
+      "Two identical failures STOP; standing exception only Ruff E501",
+      "Check actual main/open/recent merged PRs and exact source/tools before grant; head-guarded publication/merge; verify tested tree in main"
+    ]
+  }
+}
