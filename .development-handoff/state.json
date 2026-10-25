@@ -59,12 +59,21 @@
       "consecutive": 1,
       "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
       "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
-      "cause": "Unknown: GitHub E2E status failure with description null; logs unavailable",
+      "cause": "Verified coordinator diagnostic: logout.spec.ts two-tab case counted refreshPhases before-click=1, with zero refresh after logout intent; 160 passed and one flaky under fail-on-flaky.",
       "reruns": 0,
-      "diagnostic_access_blocked": true
+      "diagnostic_access_blocked": false,
+      "diagnostic_source": "Root bounded public CircleCI metadata/log read matched exact head/workflow/job; no cloud network bypass",
+      "build": 3254,
+      "job": "39d94897-fcbb-4a8d-a125-cb9b9651eaee"
+    },
+    "execution_environment": {
+      "consecutive": 1,
+      "cause": "No usable execution environment is available; platform reports 409 environment_offline / Environment is not connected",
+      "probe": "pwd",
+      "repeated": false
     }
   },
-  "remaining_step": "PR422 E2E failed on exact head; GitHub status has no diagnostic description and CircleCI logs are unavailable. Obtain authorized sanitized failure details before any fix/rerun. Backend was pending and ci-gate not yet reported. Do not merge, weaken checks, retry MCP Create or begin another stage.",
+  "remaining_step": "Restore the existing execution environment through supported platform recovery, or obtain authorized targeted QA evidence for the prepared exact candidate. Review candidate moves context listeners after async route setup and before logoutInBrowser. Do not publish untested correction, rerun CI blindly, merge or create another environment. Same PR422/work item; no auth changes justified.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -101,18 +110,10 @@
   "ci": {
     "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
     "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
-    "result": "e2e failure; backend pending; merge blocked",
+    "result": "Six neighbor contexts success; E2E failure caused by one flaky logout observation; ci-gate not_run",
     "statuses": [
       {
         "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "pending"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
         "state": "success"
       },
       {
@@ -120,7 +121,15 @@
         "state": "success"
       },
       {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
         "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
         "state": "success"
       },
       {
@@ -132,6 +141,17 @@
         "state": "failure"
       }
     ],
-    "logs_access": "not available; no third CircleCI MCP Create"
+    "logs_access": "Verified sanitized E2E diagnostic supplied by coordinator; cloud CircleCI MCP remains unavailable; no third Create"
+  },
+  "e2e_fix_candidate": {
+    "path": ".development-handoff/artifacts/pr422-logout-observation-candidate.ts",
+    "source_head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
+    "source_path": "frontend/e2e/logout.spec.ts",
+    "source_blob": "706562c4080ba79f297c99aed30807e2295cd575",
+    "published_to_product": false,
+    "change": "Move both context listener registrations into try, after phase=click-and-signout and before await logoutInBrowser(page); route/gate setup remains before observation.",
+    "independent_qa": "Static review PASS; helper opens profile before actual logout so conservative early observation remains; targeted execution still required.",
+    "security_review": "PASS: zero refresh assertion and cross-tab/signout/release/cookie/reload coverage unchanged; no auth implementation change.",
+    "execution": "NOT RUN: environment offline"
   }
 }
