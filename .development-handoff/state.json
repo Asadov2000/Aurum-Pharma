@@ -18,7 +18,7 @@
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
   "remaining_step": "This work item is merged and complete; do not repeat. Next stage requires fresh actual main/openPR/code criteria and a new work-item grant. No deployment or automatic cloud takeover.",
-  "cloud_environment_status": "102 exact lock packages, pip check, PowerShell7.6.5 and14-step PlanOnly PASS; full continuation BLOCKED.",
+  "cloud_environment_status": "QA tools and exact current main source verified; full product continuation BLOCKED.",
   "safety": [
     "No takeover based on offline PC or elapsed time",
     "No deployment or shared database access",
@@ -43,7 +43,6 @@
   "cloud_handoff_ready": false,
   "cloud_continuation_automation_ready": false,
   "cloud_readiness_blockers": [
-    "Cloud QA source snapshot d86 predates current PR head471c8cf",
     "Frontend dependencies/store missing; installed pnpm11.25.0 differs from required9.12.0",
     "CircleCI logs unavailable: no connector; one native web summary request denied",
     "GitHub connector write schemas available, but rights/publication not verified",
@@ -74,6 +73,9 @@
     "revision": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
     "sha256": "f0d2e5747bee893e35c747e0ff09a2163600b71983f989b8f7c6f097f1279f69",
     "bytes": 8381772,
-    "status": "prepared locally; cloud QA refresh pending"
-  }
+    "status": "Uploaded and independently verified as cloud QA copy, no product ownership transfer"
+  },
+  "cloud_qa_snapshot_head": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
+  "cloud_qa_snapshot_tree": "ff253dff47967847003cf555bebc7f979c483844",
+  "cloud_qa_verification": "Archive outer/inner SHA256,2430 tracked files,clean,fsck--full--strict,one shallow commit,Poetry lock and persistent tools PASS in replacement task"
 }
