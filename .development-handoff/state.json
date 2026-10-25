@@ -77,11 +77,13 @@
       "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
       "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
       "job": "82652945-c87f-449b-895a-9abc490a35d1",
-      "cause": "Unknown: GitHub tooling-windows failure has description null; verified safe job log required",
-      "reruns": 0
+      "cause": "Verified coordinator log: Install .NET10 SDK failed before tests; official dotnet-install encountered HTTP409 downloading Microsoft payload, then generic Could not find SDK10.0.403 at line1443. Exact URL/HTTP response/redirect cause not yet supplied.",
+      "reruns": 0,
+      "build": 3265,
+      "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job"
     }
   },
-  "remaining_step": "Obtain authorized sanitized tooling-windows diagnostic for workflow69ec8f5c/job82652945 on e5605ef; no guessing, blind rerun, merge, dependency or network changes. Exact logout candidate has been published after PC static QA. Other jobs remain in the same full CI attempt.",
+  "remaining_step": "Need exact public Microsoft download URL and safe HTTP409 response/redirect details to distinguish origin/CDN/policy/transient failure; generic installer line1443 does not prove missing SDK. Wait current E2E result before any new full matrix. Do not change SDK/dependencies/limits/protection, guess fix or merge.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -119,7 +121,7 @@
     "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
     "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
     "attempt": 2,
-    "result": "tooling-windows failure; other jobs pending or success; merge blocked",
+    "result": "Windows installer HTTP409 before tests; tooling-linux and dependency-audit success; remaining jobs pending at latest read",
     "statuses": [
       {
         "context": "ci/circleci: tooling-windows",
@@ -128,10 +130,6 @@
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "pending"
       },
       {
         "context": "ci/circleci: frontend",
@@ -148,6 +146,10 @@
       {
         "context": "ci/circleci: backend",
         "state": "pending"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
       }
     ],
     "diagnostics": "Root can provide safe public logs; cloud logs unavailable; no third MCP Create"
@@ -166,5 +168,13 @@
     "exact_blob": "91b09d91aad4d34eede5dfaaaa2fa2f55ce5abc5",
     "sha256": "1ab0459bb97c212c8bac4dba557a231679059aac11eb6cf17d47ff216af47fa4",
     "bytes": 8602
+  },
+  "windows_installer_analysis": {
+    "official_source": "dotnet/install-scripts/src/dotnet-install.ps1",
+    "reviewed_source_blob": "0942202517385e2c756d3b32087291c48d078713",
+    "line1443": "Generic terminal error after DownloadSucceeded=false; not evidence of SDK version absence",
+    "known": "HTTP409 on Microsoft download; tests did not start; one failure",
+    "unknown": "Actual failed URL, redirect destination and safe response error metadata",
+    "changes_made": false
   }
 }
