@@ -7,22 +7,26 @@
   "run_id": "local-2026-10-25-01",
   "branch": "codex/cloud-mixed-electronic-refund-posting",
   "base_sha": "e68407c71f80c832e4217d40ae093d59b0af88ca",
-  "expected_head": "e68407c71f80c832e4217d40ae093d59b0af88ca",
-  "source_tree": "1c6564425b215efe8df8e77fe82b95d4977b5779",
-  "validated_sha": null,
-  "source_manifest_blob": "c1e7b6276e531b82ead169d95963d7f7f433e77e",
+  "expected_head": "d86aac11fdc8d5fc92bf284822ce2dc4d1a11aaf",
+  "source_tree": "529f710b8377620a3cc1697e6bccb2058d1d99f9",
+  "validated_sha": "d86aac11fdc8d5fc92bf284822ce2dc4d1a11aaf (early QA only; full CI pending)",
+  "source_manifest_blob": null,
   "cloud_task": "01a150ce-f818-77ed-ab0c-e9b2d4366042",
   "cloud_automation": "6ad52c4458008190953c410e988a8de4",
   "cloud_schedule_paused_verified": "2026-10-25 via existing task UI Resume button",
   "cloud_active_turn": false,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
-  "remaining_step": "Recover saved candidate, independent QA, existing locked tools, full final-head CI and protected merge.",
-  "cloud_environment_status": "repair-only allowed while local owns product; never product writes",
+  "remaining_step": "Wait for complete normal final-head CircleCI; diagnose first failure; protected merge only after all eight success.",
+  "cloud_environment_status": "New replacement executes commands; isolated locked-tool restoration in progress, no product write grant",
   "safety": [
     "No takeover based on offline PC or elapsed time",
     "No deployment or shared database access",
     "No new project dependency versions or paid resources",
     "Preserve failure counts; only standing Ruff E501 exception applies"
-  ]
+  ],
+  "original_draft_manifest_blob": "c1e7b6276e531b82ead169d95963d7f7f433e77e",
+  "pr": 420,
+  "cloud_replacement_thread": "01a17264-0a59-7568-8b47-414664d6006b",
+  "cloud_replacement_conversation": "6addcbc6-9480-83eb-aa33-fa44c5d23b8b"
 }
