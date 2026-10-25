@@ -3,7 +3,7 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
   "generation": 4,
   "owner": "cloud",
-  "phase": "active",
+  "phase": "blocked",
   "run_id": "cloud-2026-10-26-client-recovery-01",
   "branch": "codex/mixed-electronic-refund-client-recovery",
   "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
@@ -13,7 +13,7 @@
   "pr": null,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
-  "cloud_product_grant": true,
+  "cloud_product_grant": false,
   "cloud_active_turn": false,
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -37,7 +37,7 @@
     "Dependency or stack changes",
     "Runtime deployment, shared database access"
   ],
-  "remaining_step": "Cloud ACK fresh generation4/source/tools, create only this branch from current main, implement package1 strict mixed refund clients + safe scoped recovery + tests/docs; targeted QA then full8 final-head CI and guarded merge/main verification. Packages2 and3 are not granted.",
+  "remaining_step": "STOP2: await explicit human decision before any source/test correction, rerun or product publication. Preserve snapshot; then fix exact callback test/schema bindings and original selection-order issue, independent review, all required QA/CI, root APPROVE before merge.",
   "cloud_environment": {
     "id": "ccarenv_b64_Y2NhcmVudl81MDlhYzI1ZWY4ZDQ4MTkxOWRlNTk0MjRkZGY5ODBjOQ",
     "mode": "existing published Aurum VM resumed",
@@ -55,8 +55,8 @@
   },
   "failure_counters": {
     "current_stage": {
-      "consecutive": 0,
-      "cause": null
+      "consecutive": 2,
+      "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third"
     },
     "historical_restore": {
       "proper_vm_proxy": 1,
@@ -101,5 +101,38 @@
   ],
   "runtime_changes": false,
   "shared_db_access": false,
-  "paid_resources_created": 0
+  "paid_resources_created": 0,
+  "blocker": {
+    "kind": "STOP2",
+    "command": "NODE_ENV=test /workspace/aurum-env-repair-qa/frontend-check pnpm exec vitest run tests/features/sales/mixedElectronicRefund --reporter=dot --maxWorkers=2",
+    "test": "frontend/tests/features/sales/mixedElectronicRefundRecovery.test.ts:344",
+    "test_name": "uses four-field scopes for review/binding and five-field scopes for later clients",
+    "expected": "Scope object/key list without contextCheck",
+    "actual": "Same scope plus RAM-only contextCheck function",
+    "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third",
+    "consecutive": 2,
+    "attempts": [
+      {
+        "run": "second",
+        "result": "266 passed, 21 failed",
+        "line": 330,
+        "cause": "Expected scope key list omitted RAM contextCheck; received key list includes it",
+        "log": "mixed-target-second.log"
+      },
+      {
+        "run": "third",
+        "result": "286 passed, 1 failed",
+        "line": 344,
+        "cause": "Later-client expected scope object omitted RAM contextCheck; received object includes function",
+        "log": "mixed-target-third.log"
+      }
+    ],
+    "candidate_tree": "7d0f93f74525b1253f9136a80bcc8fc7390150c8",
+    "manifest_path": ".development-handoff/artifacts/gen4-client-recovery-stop2/manifest.json",
+    "review_findings": [
+      "Activation/Confirmations/Posting strict scope schemas do not yet accept RAM contextCheck callback",
+      "Preserve original quoted selection order rather than reconstructing from server-sorted preview.lines; backend revision binds request order"
+    ]
+  },
+  "grant_suspended_reason": "STOP2; no blanket waiver. Human decision required."
 }

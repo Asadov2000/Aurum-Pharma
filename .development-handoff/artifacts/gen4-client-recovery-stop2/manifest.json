@@ -1,0 +1,57 @@
+{
+  "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
+  "generation": 4,
+  "run_id": "cloud-2026-10-26-client-recovery-01",
+  "phase": "STOP2",
+  "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
+  "branch": "codex/mixed-electronic-refund-client-recovery",
+  "published": false,
+  "pr": null,
+  "ci_started": false,
+  "failure": {
+    "command": "NODE_ENV=test /workspace/aurum-env-repair-qa/frontend-check pnpm exec vitest run tests/features/sales/mixedElectronicRefund --reporter=dot --maxWorkers=2",
+    "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third",
+    "consecutive": 2,
+    "latest": "286 passed, 1 failed, 7 files"
+  },
+  "review_findings_pending": [
+    "Activation/Confirmations/Posting strict scope schemas do not yet accept RAM contextCheck callback",
+    "Preserve original quoted selection order rather than reconstructing from server-sorted preview.lines; backend revision binds request order"
+  ],
+  "files_sha256": {
+    "frontend/src/features/sales/mixedElectronicRefundReview.ts": "300ea884877aa2d9cb77f55c336906ab3f8e97d67f4d6ead120a4768374a3a07",
+    "frontend/src/features/sales/mixedElectronicRefundConfirmations.ts": "3e5e8eae6d13febcb141cc615f20ac0ca5d709cd192d3f8aeaba0751c87e8067",
+    "frontend/src/features/sales/mixedElectronicRefundBinding.ts": "3172d30505bf11b70f960f45eb537080857fe77c1ca1b72e3519575c8a6c16af",
+    "frontend/src/features/sales/mixedElectronicRefundAccess.ts": "992c68fafaac988ce77ac6aeaf08f0c6e464ae6a75c1cb1a37b48a92064ac314",
+    "frontend/src/features/sales/mixedElectronicRefundPosting.ts": "0d71a96d62b5fa199611237cb6bde62f0d0db91012a29b17e6ab084376c67368",
+    "frontend/src/features/sales/mixedElectronicRefundActivation.ts": "a1bec38f80c7dd02ed629f8a821819fa16de70ce6e8d9939545a443cb5fbc354",
+    "frontend/src/features/sales/mixedElectronicRefundRecovery.ts": "c569612b940403632527f391451b231a543b1c33c3716dc78bd32bb0a7cf077f",
+    "frontend/tests/features/sales/mixedElectronicRefundActivation.test.ts": "72a2282f7537aa7453b4e9e926167aa3f9729374be71909bb7e1617bf91dbed3",
+    "frontend/tests/features/sales/mixedElectronicRefundConfirmations.test.ts": "0535b6df50cb9ad9018b351226c340b5f6b8925e0660df553f87a28083e51311",
+    "frontend/tests/features/sales/mixedElectronicRefundContracts.test.ts": "b34ec77d8e7f360f439780625e29d4ecc9c52a5d76529d15dbfad3b8f57c77d8",
+    "frontend/tests/features/sales/mixedElectronicRefundBinding.test.ts": "acdbca2e57bf3abfc521f4696565278fb30f3be8dc9008c8bee276b4d92f8102",
+    "frontend/tests/features/sales/mixedElectronicRefundReview.test.ts": "b91a7bf902f1124b2cb6fc1e7c29988f47e6efc98f6fb8392f124842257bd74e",
+    "frontend/tests/features/sales/mixedElectronicRefundPosting.test.ts": "056e4445b386bc8379d026981f82c4edd8343d43175bba16397e7e9f828a1aa1",
+    "frontend/tests/features/sales/mixedElectronicRefundRecovery.test.ts": "1c16364a2e2e3aa558f93a6d5c3d75e3f1f48e1ed37bb375ef2c3b971fee2156"
+  },
+  "logs": "/workspace/aurum-env-repair-qa/runtime/logs/mixed-target-{second,third}.log",
+  "candidate_tree": "7d0f93f74525b1253f9136a80bcc8fc7390150c8",
+  "failed_test": "frontend/tests/features/sales/mixedElectronicRefundRecovery.test.ts:344",
+  "failed_test_name": "uses four-field scopes for review/binding and five-field scopes for later clients",
+  "attempts": [
+    {
+      "run": "second",
+      "result": "266 passed, 21 failed",
+      "line": 330,
+      "cause": "Expected scope key list omitted RAM contextCheck; received key list includes it",
+      "log": "mixed-target-second.log"
+    },
+    {
+      "run": "third",
+      "result": "286 passed, 1 failed",
+      "line": 344,
+      "cause": "Later-client expected scope object omitted RAM contextCheck; received object includes function",
+      "log": "mixed-target-third.log"
+    }
+  ]
+}
