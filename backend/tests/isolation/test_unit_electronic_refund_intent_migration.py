@@ -14,12 +14,16 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.isolation.test_physical_cash_checkout_migration import (
-    downgrade_mixed_refund_evidence_for_roundtrip,
+    downgrade_mixed_for_physical_refund_roundtrip,
     electronic_refund_activation_migration,
     electronic_refund_binding_migration,
     electronic_refund_outcome_migration,
     electronic_refund_posting_migration,
+    mixed_electronic_checkout_migration,
+    mixed_electronic_refund_intent_migration,
     mixed_electronic_refund_outcome_migration,
+    mixed_electronic_refund_posting_migration,
+    mixed_electronic_refund_preparation_migration,
 )
 
 db_session = receiving_session_fixture
@@ -53,7 +57,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
                     with connection.begin_nested():
                         migration().downgrade()
                 return
-            if not downgrade_mixed_refund_evidence_for_roundtrip(connection):
+            if not downgrade_mixed_for_physical_refund_roundtrip(connection):
                 return
             electronic_refund_posting_migration().downgrade()
             electronic_refund_outcome_migration().downgrade()
@@ -66,7 +70,11 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
             electronic_refund_activation_migration().upgrade()
             electronic_refund_outcome_migration().upgrade()
             electronic_refund_posting_migration().upgrade()
+            mixed_electronic_checkout_migration().upgrade()
+            mixed_electronic_refund_intent_migration().upgrade()
+            mixed_electronic_refund_preparation_migration().upgrade()
             mixed_electronic_refund_outcome_migration().upgrade()
+            mixed_electronic_refund_posting_migration().upgrade()
         assert connection.scalar(audit_sql) == before_audit
         assert connection.scalar(
             text(

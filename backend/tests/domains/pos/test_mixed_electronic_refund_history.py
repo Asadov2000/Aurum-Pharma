@@ -15,10 +15,12 @@ from app.domains.pos.mixed_electronic_refund_history import (
 )
 from app.domains.pos.mixed_electronic_refund_history_schemas import (
     MixedElectronicRefundHistory,
+    MixedRefundComponentFact,
     MixedReturnLineFact,
 )
 from app.domains.pos.mixed_return_allocation import LegacyReturnSelection
 from app.domains.pos.physical_return_allocation import PhysicalReturnSelection
+from app.domains.pos.unit_electronic_refund_preview_schemas import RefundComponentFact
 from app.domains.pos.unit_payment_refund_allocation import plan_mixed_payment_refund
 from tests.domains.pos.test_mixed_return_allocation import checkout
 
@@ -379,3 +381,107 @@ def test_reconciled_partial_mixed_history_leaves_each_original_payment_balance()
         "card": Decimal("9.00"),
         "qr": Decimal("10.00"),
     }
+
+
+def mixed_posting_history(method: str) -> MixedElectronicRefundHistory:
+    h = history()
+    original = h.checkout.result_payload
+    source = next(part for part in original.payments if part.method == method)
+    operation, sale_id, payment_id = uuid4(), uuid4(), uuid4()
+    data = h.model_dump()
+    data.update(
+        refund_sales=[
+            {
+                "id": sale_id,
+                "tenant_id": original.tenant_id,
+                "branch_id": original.branch_id,
+                "parent_sale_id": original.sale_id,
+                "status": "completed",
+                "sale_type": "return",
+                "currency": "TJS",
+                "is_test": False,
+                "total_amount": "0.01",
+                "cashier_user_id": original.cashier_id,
+            }
+        ],
+        payouts=[
+            {
+                "id": payment_id,
+                "tenant_id": original.tenant_id,
+                "sale_id": sale_id,
+                "payment_method": method,
+                "amount": "0.01",
+                "currency": "TJS",
+                "operation_id": None,
+                "operation_hash": None,
+                "payment_attempt_id": None,
+                "metadata": (
+                    None
+                    if method == "cash"
+                    else {
+                        "terminal_id": "synthetic-terminal",
+                        "document_number": "synthetic-document",
+                    }
+                ),
+            }
+        ],
+        refund_components=[
+            {
+                "id": payment_id,
+                "tenant_id": original.tenant_id,
+                "parent_sale_id": original.sale_id,
+                "sale_id": sale_id,
+                "original_payment_id": source.id,
+                "physical_refund_id": None,
+                "mixed_refund_id": None,
+                "electronic_refund_id": None,
+                "mixed_electronic_refund_id": operation,
+                "method": method,
+                "amount": "0.01",
+                "currency": "TJS",
+                "created_by": original.cashier_id,
+            }
+        ],
+    )
+    return MixedElectronicRefundHistory.model_validate(data)
+
+
+@pytest.mark.parametrize("method", ["cash", "card", "qr"])
+@pytest.mark.parametrize("mutation", ["valid", "ambiguous", "missing", "physical", "metadata"])
+def test_mixed_posting_payment_parent_and_evidence_remain_strict(
+    method: str,
+    mutation: str,
+) -> None:
+    h = mixed_posting_history(method)
+    component = h.refund_components[0]
+    if mutation in {"ambiguous", "missing", "physical"}:
+        changes = {
+            "ambiguous": {"mixed_refund_id": uuid4()},
+            "missing": {"mixed_electronic_refund_id": None},
+            "physical": {"physical_refund_id": uuid4()},
+        }[mutation]
+        h = h.model_copy(update={"refund_components": (component.model_copy(update=changes),)})
+    elif mutation == "metadata":
+        payout = h.payouts[0].model_copy(
+            update={"metadata": {"unexpected": "data"} if method == "cash" else None}
+        )
+        h = h.model_copy(update={"payouts": (payout,)})
+    if mutation != "valid":
+        with pytest.raises(AurumError):
+            returned_payments(h, h.checkout.result_payload)
+    else:
+        assert returned_payments(h, h.checkout.result_payload) == {
+            component.original_payment_id: Decimal("0.01")
+        }
+
+
+def test_absent_new_parent_preserves_existing_physical_and_mixed_history_serialization() -> None:
+    data = mixed_posting_history("cash").refund_components[0].model_dump()
+    data.pop("mixed_electronic_refund_id")
+    data["mixed_refund_id"] = uuid4()
+    original = RefundComponentFact.model_validate(data)
+    extended = MixedRefundComponentFact.model_validate(data)
+    assert extended.mixed_electronic_refund_id is None
+    assert extended.model_dump() == original.model_dump()
+    assert extended.model_dump(mode="json") == original.model_dump(mode="json")
+    assert extended.model_dump_json() == original.model_dump_json()

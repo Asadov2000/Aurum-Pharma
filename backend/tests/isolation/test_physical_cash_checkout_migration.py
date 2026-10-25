@@ -224,10 +224,43 @@ def mixed_electronic_refund_outcome_migration() -> ModuleType:
     return module
 
 
+def mixed_electronic_refund_posting_migration() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / (
+        "alembic/versions/0223_mixed_electronic_refund_posting.py"
+    )
+    spec = importlib.util.spec_from_file_location("mixed_electronic_refund_posting", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def downgrade_mixed_refund_posting_for_roundtrip(connection: Connection) -> bool:
+    """Assert protected history before unwinding the latest posting patches."""
+    assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+    assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    migration = mixed_electronic_refund_posting_migration()
+    count = text("SELECT count(*) FROM public.pos_mixed_electronic_refund_posting")
+    before = connection.scalar(count)
+    if before:
+        with pytest.raises(
+            DBAPIError, match="mixed_electronic_refund_posting_downgrade_requires_empty_history"
+        ) as denied:
+            with connection.begin_nested():
+                migration.downgrade()
+        assert getattr(denied.value.orig, "sqlstate", None) == "55000"
+        assert connection.scalar(count) == before
+        return False
+    migration.downgrade()
+    return True
+
+
 def downgrade_mixed_refund_evidence_for_roundtrip(connection: Connection) -> bool:
     """A protected nonempty descendant is an asserted refusal, never a silent skip."""
     assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
     assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    if not downgrade_mixed_refund_posting_for_roundtrip(connection):
+        return False
     migration = mixed_electronic_refund_outcome_migration()
     count = text("SELECT count(*) FROM public.pos_mixed_electronic_refund_outcome")
     before = connection.scalar(count)
@@ -244,8 +277,45 @@ def downgrade_mixed_refund_evidence_for_roundtrip(connection: Connection) -> boo
     return True
 
 
+def downgrade_mixed_for_physical_refund_roundtrip(connection: Connection) -> bool:
+    """Unwind exactly the mixed descendants; assert protected refusals and rollback."""
+    assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+    assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    snapshot = text(
+        "SELECT proname,pg_get_functiondef(oid),proowner,proacl::text,proconfig "
+        "FROM pg_proc WHERE pronamespace='public'::regnamespace "
+        "AND proname IN ('audit_redact_table_snapshot','trg_guard_sale_immutability',"
+        "'trg_unit_refund_payment_component_guard') ORDER BY proname,oid"
+    )
+    before = connection.execute(snapshot).all()
+    with connection.begin_nested() as descendants:
+        if not downgrade_mixed_refund_evidence_for_roundtrip(connection):
+            descendants.rollback()
+            assert connection.execute(snapshot).all() == before
+            return False
+        try:
+            mixed_electronic_refund_preparation_migration().downgrade()
+            mixed_electronic_refund_intent_migration().downgrade()
+            mixed_electronic_checkout_migration().downgrade()
+        except DBAPIError as denied:
+            assert getattr(denied.orig, "sqlstate", None) == "55000"
+            assert any(
+                message in str(denied.orig)
+                for message in (
+                    "mixed_electronic_refund_preparation_downgrade_requires_empty_history",
+                    "mixed_electronic_refund_intent_downgrade_requires_empty_history",
+                    "mixed_electronic_checkout_downgrade_requires_empty_history",
+                )
+            )
+            descendants.rollback()
+            assert connection.execute(snapshot).all() == before
+            return False
+    return True
+
+
 def downgrade_electronic_for_roundtrip() -> None:
     # Unwind later FK dependencies and audit patches before historical function text.
+    mixed_electronic_refund_posting_migration().downgrade()
     mixed_electronic_refund_outcome_migration().downgrade()
     mixed_electronic_refund_preparation_migration().downgrade()
     mixed_electronic_refund_intent_migration().downgrade()
@@ -271,6 +341,7 @@ def upgrade_electronic_after_roundtrip() -> None:
     mixed_electronic_refund_intent_migration().upgrade()
     mixed_electronic_refund_preparation_migration().upgrade()
     mixed_electronic_refund_outcome_migration().upgrade()
+    mixed_electronic_refund_posting_migration().upgrade()
 
 
 def downgrade_refund_for_roundtrip() -> None:

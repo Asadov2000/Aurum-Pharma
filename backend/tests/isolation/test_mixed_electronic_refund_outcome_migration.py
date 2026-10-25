@@ -17,7 +17,9 @@ from tests.domains.pos.test_mixed_electronic_refund_outcome import (
 )
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_mixed_refund_posting_for_roundtrip,
     mixed_electronic_refund_outcome_migration,
+    mixed_electronic_refund_posting_migration,
 )
 
 db_session = receiving_session_fixture
@@ -112,7 +114,7 @@ async def test_outcome_schema_roundtrip_security_and_legacy_triggers(
             "FROM pg_proc WHERE oid="
             "'public.audit_redact_table_snapshot(text,jsonb)'::regprocedure"
         )
-        audit_before = connection.execute(audit_sql).one()
+        head_audit_before = connection.execute(audit_sql).one()
         assert_reciprocal_trigger_order(connection)
         cross_before = connection.execute(CROSS_TRIGGER_SNAPSHOT).all()
         with Operations.context(MigrationContext.configure(connection)):
@@ -121,6 +123,9 @@ async def test_outcome_schema_roundtrip_security_and_legacy_triggers(
                     with connection.begin_nested():
                         mixed_electronic_refund_outcome_migration().downgrade()
                 return
+            if not downgrade_mixed_refund_posting_for_roundtrip(connection):
+                return
+            audit_before = connection.execute(audit_sql).one()
             mixed_electronic_refund_outcome_migration().downgrade()
             assert connection.scalar(text("SELECT to_regclass(:name)"), {"name": TABLE}) is None
             assert audit_before[0].count(mixed_electronic_refund_outcome_migration().AUDIT_NEW) == 1
@@ -133,10 +138,12 @@ async def test_outcome_schema_roundtrip_security_and_legacy_triggers(
             assert audit_base[1:] == audit_before[1:]
             assert connection.execute(CROSS_TRIGGER_SNAPSHOT).all() == []
             mixed_electronic_refund_outcome_migration().upgrade()
+            assert connection.execute(audit_sql).one() == audit_before
+            mixed_electronic_refund_posting_migration().upgrade()
         assert_reciprocal_trigger_order(connection)
         assert connection.execute(CROSS_TRIGGER_SNAPSHOT).all() == cross_before
         assert connection.execute(snapshot).one() == security
-        assert connection.execute(audit_sql).one() == audit_before
+        assert connection.execute(audit_sql).one() == head_audit_before
         assert security.relrowsecurity and security.relforcerowsecurity
         for role, allowed in (("aurum_app", {"SELECT", "INSERT"}), ("aurum_support", {"SELECT"})):
             for privilege in (

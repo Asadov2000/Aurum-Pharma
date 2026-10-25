@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SerializerFunctionWrapHandler, model_serializer
 
 from app.domains.inventory.unit_stock_v2 import SaleFormatV2
 from app.domains.pos.mixed_documents import MixedCheckoutResultV4, MixedReceiptDocumentV4
@@ -80,6 +80,18 @@ class MixedReturnLineFact(_Fact):
     gross_amount: Money
 
 
+class MixedRefundComponentFact(RefundComponentFact):
+    mixed_electronic_refund_id: UUID | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_history(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # An absent new parent must not change hashes of already saved reviews.
+        result: dict[str, object] = handler(self)
+        if self.mixed_electronic_refund_id is None:
+            result.pop("mixed_electronic_refund_id", None)
+        return result
+
+
 class MixedElectronicRefundHistory(_Fact):
     sale: SaleFact
     checkout: CheckoutFact
@@ -88,4 +100,4 @@ class MixedElectronicRefundHistory(_Fact):
     return_lines: tuple[MixedReturnLineFact, ...]
     refund_sales: tuple[RefundSaleFact, ...]
     payouts: tuple[PaymentFact, ...]
-    refund_components: tuple[RefundComponentFact, ...]
+    refund_components: tuple[MixedRefundComponentFact, ...]
