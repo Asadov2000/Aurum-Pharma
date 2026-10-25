@@ -3,7 +3,7 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-RECEIPT-READ-01",
   "generation": 3,
   "owner": "cloud",
-  "phase": "implementation",
+  "phase": "blocked",
   "run_id": "cloud-2026-10-25-receipt-read-01",
   "branch": "codex/mixed-electronic-refund-receipt-read",
   "base_sha": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
@@ -14,7 +14,7 @@
   "cloud_task": "01a17264-0a59-7568-8b47-414664d6006b",
   "cloud_replacement_conversation": "6addcbc6-9480-83eb-aa33-fa44c5d23b8b",
   "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_active_turn": false,
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
@@ -54,9 +54,17 @@
     "commit_metadata_reconciliation": {
       "consecutive": 0,
       "history": "One local canonical commit reconstruction mismatch; REST normalized timezone; exact SHA recovered offline without changing source/tree"
+    },
+    "ci_e2e": {
+      "consecutive": 1,
+      "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
+      "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
+      "cause": "Unknown: GitHub E2E status failure with description null; logs unavailable",
+      "reruns": 0,
+      "diagnostic_access_blocked": true
     }
   },
-  "remaining_step": "PR422 published; await all eight required CircleCI contexts on exact head, then fresh main/control/head and guarded merge. No new stage.",
+  "remaining_step": "PR422 E2E failed on exact head; GitHub status has no diagnostic description and CircleCI logs are unavailable. Obtain authorized sanitized failure details before any fix/rerun. Backend was pending and ci-gate not yet reported. Do not merge, weaken checks, retry MCP Create or begin another stage.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -93,6 +101,37 @@
   "ci": {
     "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
     "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
-    "result": "pending"
+    "result": "e2e failure; backend pending; merge blocked",
+    "statuses": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "failure"
+      }
+    ],
+    "logs_access": "not available; no third CircleCI MCP Create"
   }
 }
