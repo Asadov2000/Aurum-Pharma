@@ -1,269 +1,105 @@
 {
   "version": 1,
-  "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-RECEIPT-READ-01",
-  "generation": 3,
+  "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
+  "generation": 4,
   "owner": "cloud",
-  "phase": "complete",
-  "run_id": "cloud-2026-10-25-receipt-read-01",
-  "branch": "codex/mixed-electronic-refund-receipt-read",
-  "base_sha": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-  "expected_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
+  "phase": "active",
+  "run_id": "cloud-2026-10-26-client-recovery-01",
+  "branch": "codex/mixed-electronic-refund-client-recovery",
+  "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
+  "expected_head": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
   "source_tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
-  "validated_sha": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-  "pr": 422,
-  "cloud_task": "01a17264-0a59-7568-8b47-414664d6006b",
-  "cloud_replacement_conversation": "6addcbc6-9480-83eb-aa33-fa44c5d23b8b",
-  "cloud_product_grant": false,
+  "validated_sha": null,
+  "pr": null,
+  "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
+  "cloud_host": "durable",
+  "cloud_product_grant": true,
   "cloud_active_turn": false,
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
-  "source_path": "/workspace/scratch/425751d699c6/aurum-handoff-main-b2ed3cf/source",
-  "cloud_qa_snapshot_head": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-  "cloud_qa_snapshot_tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
-  "cloud_qa_snapshot_current": false,
-  "cloud_qa_verification": "2437trackedfiles, clean, bundle SHA256/bytes,1commit10paths and fsck--full--strict PASS; root independently imported in isolated shallowbase repo",
+  "source_path": "/workspace/Aurum-Pharma",
+  "plan_path": ".development-handoff/plans/block4-remaining-three-packages.json",
+  "counter": "4/7 (3)",
+  "scope": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
   "acceptance": [
-    "General sale details/receipt/PDF read saved mixed electronic refund history with scope binding",
-    "Reject corrupt/mismatched snapshots without legacy fallback",
-    "Preserve tenant/branch/current permissions and private journal boundaries",
-    "Read-only recovery never posts/refunds or changes stock",
-    "Physical electronic and mixed cash reader regressions and full final-head CI before guarded merge"
+    "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
+    "Mixed legacy qty/offset fixed3dec and physical whole units; money fixed2dec via bigint; posted physical_cost_amount; receipt V4 mixed_electronic_refund_receipt",
+    "No fallback to physical-only or mixed-cash routes; current tenant/user/branch/register/sale/session checks across every await",
+    "Persist only minimal safe operation identity/request/stage before sending; no tokens, receipt, cost or terminal evidence",
+    "GET-only reopen/recovery, retained pending operation on lost response/errors, no new UUID/automatic POST, explicit verified completion/cancel before clearing",
+    "Cross-tab Web Locks, atomic safe operation state updates; storage/lock/corruption failure closes writes safely",
+    "Targeted positive/negative/recovery/session-change/concurrency Vitest and preserved physical-client regressions; unchanged lint/type/budgets; full final-head CI before guarded merge"
   ],
-  "scope": "Existing saved receipt reader/adapters and related tests/docs only; no new product requirements, UI reference changes, dependencies, migration, deployment or shared DB User explicitly authorized the minimal existing logout E2E observation-boundary correction required for PR422 CI; no auth implementation, retry/timeout or security assertion changes.",
-  "transfer": {
-    "id": "handoff-local-cloud-2026-10-25-b2ed3cf-01",
-    "from_generation": 2,
-    "from_owner": "local",
-    "cloud_source_ack": true,
-    "bundle_manifest_blob": "5e4bd93f5b2b3a616d5aa0310c8fa9467eb25596",
-    "bundle_sha256": "a187b232953aa3214ddab7e49bd3b60fb81816fa0a2ee92152359c70bd92ce50",
-    "bundle_bytes": 13507,
-    "independent_qa": "PASS fresh isolated bare base; target absent before bundle, exact head/tree/parent, fsck strict",
-    "local_product_writer_stopped": true
-  },
-  "previous_completed": {
-    "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-API-01",
-    "pr": 421,
-    "validated_head": "b5bc19d81e52a410bbb524c7be04e417f380133e",
-    "main": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-    "tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
-    "ci": "all8 success; merged exact tested tree verified"
+  "excluded": [
+    "Cashier UI/entrypoints/reference pages",
+    "Backend or migrations",
+    "Dependency or stack changes",
+    "Runtime deployment, shared database access"
+  ],
+  "remaining_step": "Cloud ACK fresh generation4/source/tools, create only this branch from current main, implement package1 strict mixed refund clients + safe scoped recovery + tests/docs; targeted QA then full8 final-head CI and guarded merge/main verification. Packages2 and3 are not granted.",
+  "cloud_environment": {
+    "id": "ccarenv_b64_Y2NhcmVudl81MDlhYzI1ZWY4ZDQ4MTkxOWRlNTk0MjRkZGY5ODBjOQ",
+    "mode": "existing published Aurum VM resumed",
+    "execution": "confirmed connected/running Linux; old scratch channel stopped",
+    "baseline_ready": true,
+    "tools_ready": true,
+    "source_binding_ready": true,
+    "frontend_launcher": "/workspace/aurum-env-repair-qa/frontend-check",
+    "backend_launcher": "/workspace/aurum-env-repair-qa/backend-check",
+    "qa_runner": "/workspace/aurum-env-repair-qa/qa-run",
+    "proof": "Source139/tree5dff clean/2439tracked hashes; 102lockedPython+362frontend, pipcheck, PWsh7.6.5, nativeimports PASS;2821Vitest/230files/type/lint/buildPASS; post-bindingButton2/2 writercheckout",
+    "git_shell_network": "proxy unavailable; do not retry/bypass. Use existing GitHub connector for actual refs/publication",
+    "circleci_logs": "Root can provide sanitized bounded public metadata/logs if needed; no third custom MCP Create",
+    "scheduler": "no new schedule; prior hosted automation paused, fresh UI verified2026-10-26"
   },
   "failure_counters": {
-    "commit_metadata_reconciliation": {
+    "current_stage": {
       "consecutive": 0,
-      "history": "One local canonical commit reconstruction mismatch; REST normalized timezone; exact SHA recovered offline without changing source/tree"
+      "cause": null
     },
-    "ci_e2e": {
-      "consecutive": 0,
-      "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
-      "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
-      "cause": "Verified coordinator diagnostic: logout.spec.ts two-tab case counted refreshPhases before-click=1, with zero refresh after logout intent; 160 passed and one flaky under fail-on-flaky.",
-      "reruns": 0,
-      "diagnostic_access_blocked": false,
-      "diagnostic_source": "Root bounded public CircleCI metadata/log read matched exact head/workflow/job; no cloud network bypass",
-      "build": 3254,
-      "job": "39d94897-fcbb-4a8d-a125-cb9b9651eaee",
-      "history": "First run counted setup before-click refresh; exact observation-boundary fix e560 verified by root public metadata/log:161 passed,no flaky,two-tab first try2.0s; current final-head E2E must pass again.",
-      "resolved_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
-      "resolved_workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
-      "resolved_build": 3260,
-      "final_verified_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868"
-    },
-    "execution_environment": {
-      "consecutive": 1,
-      "cause": "No usable execution environment is available; platform reports 409 environment_offline / Environment is not connected",
-      "probe": "pwd",
-      "repeated": false
-    },
-    "ci_tooling_windows": {
-      "consecutive": 0,
-      "head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
-      "workflow": "69ec8f5c-6802-4ac3-960b-bcc294992c5a",
-      "job": "82652945-c87f-449b-895a-9abc490a35d1",
-      "cause": "Verified coordinator log: Install .NET10 SDK failed before tests; official dotnet-install encountered HTTP409 downloading Microsoft payload, then generic Could not find SDK10.0.403 at line1443. Exact URL/HTTP response/redirect cause not yet supplied.",
-      "reruns": 0,
-      "build": 3265,
-      "diagnostic_source": "Root public metadata/log bound to exact head/workflow/job",
-      "fix_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-      "fix": "Same actual SDK10.0.403, explicit Version plus official builds CDN; exact candidate PC QA PASS; waiting CI, counter remains1",
-      "history": "One Windows installer HTTP409 from anonymous origin before tests on e560; same SDK10.0.403 explicit official-CDN fix0eef passed complete Windows tooling in final workflow9473c0a6",
-      "resolved_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-      "final_verified_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868"
-    },
-    "sdk_dynamic_candidate": {
-      "consecutive": 0,
-      "total": 1,
-      "cause": "JS String.replace replacement metasequence $' expanded source suffix and malformed unpublished dynamic artifact",
-      "resolution": "Rejected by independent review; superseded with separately QA-approved exact pinned blobfa8, transferred by SHA without content transformation",
-      "published_to_product": false
-    },
-    "ci_job_inspection": {
-      "consecutive": 0,
-      "total": 1,
-      "cause": "Premerge inspection regex initially excluded digit in e2e job name; inspection corrected to alphanumeric names, exact eight jobs verified; no source/CI config change"
+    "historical_restore": {
+      "proper_vm_proxy": 1,
+      "oversize_transport": 1,
+      "resolved_by": "offline verified inputs within per-file limits; source and tools READY",
+      "old_scratch_execution_offline": 2,
+      "old_scratch_stop": true
     }
   },
-  "remaining_step": "PR422 merged and complete. Actual main equals merge139c40ee, exact tested tree5dff0a33 verified, prior main is direct squash parent. Do not repeat or begin next result without fresh criteria and a new explicit grant. No deployment, runtime restart or shared DB access.",
-  "constraints": [
-    "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
-    "No UI-reference changes or new product requirements",
-    "No network-policy bypass, force-push or protection bypass",
-    "Current AGENTS applies; only standing RuffE501 exception is global",
-    "CI statuses available via GitHub; logs not confirmed, stop if safe diagnosis required and unavailable"
-  ],
-  "cloud_environment": {
-    "backend_frontend_tools": "Already restored exact locked tools; unchanged lock files",
-    "circleci_logs": "Custom MCP creation rejected twice; STOP; OpenAI specialist reply pending; no third Create",
-    "continuation_scheduler": "This explicit existing-task run only; preserved old-task automation remains paused; no replacement scheduler configured",
-    "old_task": "01a150ce-f818-77ed-ab0c-e9b2d4366042",
-    "old_automation": "6ad52c4458008190953c410e988a8de4",
-    "execution_server": "Offline; no command retries. Explicit user authorization permits connector publication after independent PC QA of exact candidate; full CI required."
+  "old_actors": {
+    "scratch": {
+      "id": "01a17264-0a59-7568-8b47-414664d6006b",
+      "status": "idle STOP2 no productgrant"
+    },
+    "editor": {
+      "id": "01a174eb-69b0-76f4-a331-4a0df896806a",
+      "status": "readonly complete unpublished draft preserved, no productgrant"
+    },
+    "old_automation": "6ad52c4458008190953c410e988a8de4 PAUSED"
   },
+  "previous_completed": {
+    "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-RECEIPT-READ-01",
+    "pr": 422,
+    "validated_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
+    "main": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
+    "tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
+    "ci": "all8success before guarded squash; exact main tree verified",
+    "older": {
+      "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-API-01",
+      "pr": 421,
+      "validated_head": "b5bc19d81e52a410bbb524c7be04e417f380133e",
+      "main": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
+      "tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
+      "ci": "all8 success; merged exact tested tree verified"
+    }
+  },
+  "constraints": [
+    "Included account limits only; no purchases/paid APIs/credits/VMs",
+    "No runtime services, shared DB, secrets, dependency install/version or network-policy changes",
+    "Two identical failures STOP; standing exception only Ruff E501",
+    "Check actual main/open/recent merged PRs and exact source/tools before grant; head-guarded publication/merge; verify tested tree in main"
+  ],
   "runtime_changes": false,
   "shared_db_access": false,
-  "paid_resources_created": 0,
-  "local_qa": {
-    "guarded_pure_tests": 64,
-    "db_cases_deferred_to_ci": 23,
-    "new_test_nodeids": 32,
-    "collections_equal": true,
-    "ruff": "PASS",
-    "black": "PASS",
-    "mypy_app": "PASS",
-    "independent_review": "PASS",
-    "plan_only": [
-      "Preflight",
-      "Auto"
-    ],
-    "app_source": "/workspace/scratch/425751d699c6/aurum-handoff-main-b2ed3cf/source/backend",
-    "connection_guard": "all socket connections denied"
-  },
-  "ci": {
-    "workflow": "9473c0a6-8fce-4fae-9bdb-5b8d34f21907",
-    "head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-    "attempt": 3,
-    "result": "all8 success",
-    "statuses": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success"
-      }
-    ],
-    "required_contexts_verified_from_current_config": true,
-    "guarded_merge_expected_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-    "merge_method": "squash"
-  },
-  "e2e_fix_candidate": {
-    "path": ".development-handoff/artifacts/pr422-logout-observation-candidate.ts",
-    "source_head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
-    "source_path": "frontend/e2e/logout.spec.ts",
-    "source_blob": "706562c4080ba79f297c99aed30807e2295cd575",
-    "published_to_product": true,
-    "change": "Move both context listener registrations into try, after phase=click-and-signout and before await logoutInBrowser(page); route/gate setup remains before observation.",
-    "independent_qa": "Static review PASS; helper opens profile before actual logout so conservative early observation remains; targeted execution still required.",
-    "security_review": "PASS: zero refresh assertion and cross-tab/signout/release/cookie/reload coverage unchanged; no auth implementation change.",
-    "execution": "Independent detached PC QA PASS for exact candidate: Prettier, targeted ESLint --max-warnings0, strict targeted tsc, Playwright --list 3 scenarios (no global setup), diff check. No actual E2E/DB/Docker execution; full CI required.",
-    "published_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
-    "exact_blob": "91b09d91aad4d34eede5dfaaaa2fa2f55ce5abc5",
-    "sha256": "1ab0459bb97c212c8bac4dba557a231679059aac11eb6cf17d47ff216af47fa4",
-    "bytes": 8602
-  },
-  "windows_installer_analysis": {
-    "official_source": "dot.net/v1/dotnet-install.ps1",
-    "coordinator_verified_script_sha256": "e8b873e18a81e5c4cd8ab69d84dac8fead291d50b3c44633cd7fddad709a13d6",
-    "bytes": 76676,
-    "failed_url": "https://dotnetorigin.blob.core.windows.net/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
-    "failed_head_status": 409,
-    "official_same_artifact": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
-    "coordinator_verified_head_status": 200,
-    "content_length": 300745255,
-    "official_migration_announcement": "https://github.com/dotnet/core/issues/10262",
-    "azure_feed_alone_does_not_bypass_aka_ms": true,
-    "explicit_version": "10.0.403",
-    "channel": "10.0",
-    "product_config_published": false,
-    "policy": "Selected explicit same resolved SDK10.0.403; no upgrade/dependency change, future latest auto-selection intentionally frozen under latest user authorization."
-  },
-  "sdk_feed_candidate": {
-    "artifact_path": ".development-handoff/artifacts/pr422-windows-sdk-feed-candidate.yml",
-    "product_path": ".circleci/config.yml",
-    "base_head": "e5605ef52b7b881871f1889d4ac5e4c4f5518abb",
-    "base_blob": "fe9cf2f3b02547e52f1683bd3437ca8eb63460d2",
-    "selected_blob": "fa8a113296818b99fcf52112964cc4faad357219",
-    "sha256": "d9637317e8cced07a5b29b958936b8a89bd5e6db317a64bc4129ef5f6a164422",
-    "bytes": 26041,
-    "change": "One exact installer-command replacement: -Version10.0.403 and official AzureFeed; same observed SDK10.0.403 and channel10.0, install dir/jobs/resources/TLS unchanged. Explicit version freezes currently resolved SDK rather than future channel-latest updates; user explicitly authorized this tested pinned candidate.",
-    "qa": "Root exact candidate PASS: byte assertion single scalar replacement, PowerShell AST, actual installer exact-args DryRun/NoPath, official same-version CDN HEAD200. YAML parser absent, no installations/archives; full tooling CI required.",
-    "independent_review": "Pinned command static PASS; dynamic candidate af8 rejected and not used",
-    "published": true,
-    "publish_preconditions": [
-      "Current E2E result available"
-    ],
-    "rejected_dynamic_blob": "af8c11a196ed38cb2c4fc878cdcd8fd3ec62e558",
-    "published_head": "0eef12eb1ee9fc0a1702183d91fedc6faaa36868",
-    "published_blob": "fa8a113296818b99fcf52112964cc4faad357219"
-  },
-  "merged_main_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
-  "merged_main_tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
-  "merged_main_parent": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-  "cloud_qa_snapshot_note": "Cloud execution environment is offline; no command retry or false local freshness claim. Final product source/merge verified through connector and full CI; future stage requires fresh source/tool/grant checks.",
-  "merge_verification": {
-    "pr": 422,
-    "merged": true,
-    "merge_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
-    "actual_main": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
-    "tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
-    "prior_main_is_direct_parent": true,
-    "exact_tested_tree": true,
-    "squash_note": "CI head need not be ancestor under squash; main equals merge commit and tree matches CI head exactly",
-    "readback": "PASS"
-  },
-  "next_stage_started": false,
-  "progress": "Осталось4/7 (N не зафиксирован)",
-  "next_plan": {
-    "path": ".development-handoff/plans/block4-remaining-three-packages.json",
-    "next_work_item": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
-    "remaining_packages": 3,
-    "product_grant": false
-  },
-  "environment_repair": {
-    "date": "2026-10-26",
-    "status": "blocked_execution_stop",
-    "failure_count": 2,
-    "last_error": "No usable execution environment is available; previous and current same-task probes failed",
-    "commands_stopped": true,
-    "product_changes": false,
-    "native_cursor": "f1708cd8-4d73-485e-b1b1-88ae8af0f62e:14",
-    "next": "Root investigating supported existing-environment UI; no third command probe or product grant before real repair evidence/authorized exception"
-  }
+  "paid_resources_created": 0
 }

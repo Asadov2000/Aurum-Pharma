@@ -14,7 +14,7 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
       "number": 1,
-      "status": "not_started",
+      "status": "in_progress",
       "goal": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
       "acceptance": [
         "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
@@ -61,13 +61,14 @@
   "execution": {
     "product_writer": "cloud only after explicit fresh grant",
     "local_role": "read-only review / isolated QA only",
-    "new_stage_grant_issued": false,
+    "new_stage_grant_issued": true,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
       "No runtime services, shared DB, secrets, dependency install/version or network-policy changes",
       "Two identical failures STOP; standing exception only Ruff E501",
       "Check actual main/open/recent merged PRs and exact source/tools before grant; head-guarded publication/merge; verify tested tree in main"
-    ]
+    ],
+    "product_writer_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062"
   }
 }
