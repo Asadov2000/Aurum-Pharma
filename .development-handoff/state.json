@@ -18,7 +18,7 @@
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
   "remaining_step": "This work item is merged and complete; do not repeat. Next stage requires fresh actual main/openPR/code criteria and a new work-item grant. No deployment or automatic cloud takeover.",
-  "cloud_environment_status": "QA tools and exact current main source verified; full product continuation BLOCKED.",
+  "cloud_environment_status": "Backend and frontend locked QA tools installed and persistent; full continuation BLOCKED by CircleCI connector settings rejection.",
   "safety": [
     "No takeover based on offline PC or elapsed time",
     "No deployment or shared database access",
@@ -43,9 +43,7 @@
   "cloud_handoff_ready": false,
   "cloud_continuation_automation_ready": false,
   "cloud_readiness_blockers": [
-    "Frontend dependencies/store missing; installed pnpm11.25.0 differs from required9.12.0",
-    "CircleCI logs unavailable: no connector; one native web summary request denied",
-    "GitHub connector write schemas available, but rights/publication not verified",
+    "CircleCI custom MCP creation rejected twice by ChatGPT; no read access issued; no further Create retries or egress/credential workaround",
     "Existing paused automation belongs to preserved old task; replacement has no scheduler"
   ],
   "cloud_verified_tools": {
@@ -59,7 +57,10 @@
     "pydantic": "2.10.6",
     "powershell": "7.6.5",
     "plan_only_steps": 14,
-    "persists_between_turns": true
+    "persists_between_turns": true,
+    "pnpm": "9.12.0",
+    "node": "24.22.1",
+    "frontend_locked_packages": 362
   },
   "merged_main_sha": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
   "merged_main_tree": "ff253dff47967847003cf555bebc7f979c483844",
@@ -77,5 +78,41 @@
   },
   "cloud_qa_snapshot_head": "a13611745edec57b5c7cc2a1b257c1a64d416c3e",
   "cloud_qa_snapshot_tree": "ff253dff47967847003cf555bebc7f979c483844",
-  "cloud_qa_verification": "Archive outer/inner SHA256,2430 tracked files,clean,fsck--full--strict,one shallow commit,Poetry lock and persistent tools PASS in replacement task"
+  "cloud_qa_verification": "Archive outer/inner SHA256,2430 tracked files,clean,fsck--full--strict,one shallow commit,Poetry lock and persistent tools PASS in replacement task",
+  "cloud_frontend_runtime": "/workspace/scratch/425751d699c6/aurum-frontend-offline-2026-10-25/runtime/bin/pnpm",
+  "cloud_frontend_proof": "/workspace/scratch/425751d699c6/aurum-frontend-offline-2026-10-25/runtime/proof.json",
+  "cloud_frontend_proof_sha256": "cf5fff6a2f21503db29510f6fac77766d252cd92dd270aa4cd2da671792e1e30",
+  "cloud_frontend_qa": {
+    "targeted_tests": "2/2",
+    "vitest": "2821/2821 in230files",
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "production_build": "PASS with unchanged budgets",
+    "tracked_source_files": 2430,
+    "source_unchanged": true,
+    "persistence": "PASS across messages",
+    "build_env": "NODE_ENVproduction via exact workspace launcher",
+    "downloads": 0,
+    "lifecycle_scripts": false
+  },
+  "environment_repair": {
+    "work_item_id": "ENV-CLOUD-FRONTEND-CI-ACCESS-01",
+    "phase": "frontend-restored-ci-access-blocked",
+    "product_grant": false,
+    "owner": "local",
+    "frontend": "PASS locked install, full QA and persistence",
+    "circleci": {
+      "official_server": "https://mcp.circleci.com/v1/mcp",
+      "user_approved": "Read only90days; noWrite/Admin",
+      "created": false,
+      "read_access_issued": false,
+      "consecutive_creation_failures": 2,
+      "next_action": "STOP; exact platform rejection cause unavailable; supported compatibility/configuration change required before retry",
+      "diagnosis": "Optional OIDC disabled after incomplete discovery metadata; same generic app settings rejection remains; callback incompatibility is only a hypothesis"
+    },
+    "github_write": "Validate by this one coordination-only commit and nonforce expected-SHA ref update; root must read back before claiming success",
+    "runtime_changes": false,
+    "shared_db_access": false,
+    "paid_resources_created": 0
+  }
 }
