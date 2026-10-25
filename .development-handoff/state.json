@@ -7,14 +7,14 @@
   "run_id": "cloud-2026-10-25-receipt-read-01",
   "branch": "codex/mixed-electronic-refund-receipt-read",
   "base_sha": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-  "expected_head": "b2ed3cfe60969a6c486457e44c2cbdc4b28aa179",
-  "source_tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
+  "expected_head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
+  "source_tree": "e500a84d04101b21aa9a3ea0b199b749e6ce69c4",
   "validated_sha": null,
-  "pr": null,
+  "pr": 422,
   "cloud_task": "01a17264-0a59-7568-8b47-414664d6006b",
   "cloud_replacement_conversation": "6addcbc6-9480-83eb-aa33-fa44c5d23b8b",
   "cloud_product_grant": true,
-  "cloud_active_turn": false,
+  "cloud_active_turn": true,
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": null,
@@ -50,8 +50,13 @@
     "tree": "74dd4ef69040edd2080b741500b7ef1e656af5a0",
     "ci": "all8 success; merged exact tested tree verified"
   },
-  "failure_counters": {},
-  "remaining_step": "Cloud accepts generation3, verifies fresh main/PR/code and performs scoped receipt-read stage through full final-head CI and guarded merge. No local product authoring in parallel. Stop on required approval, limits, denied policy, duplicate work, unexpected branch movement or two identical check failures.",
+  "failure_counters": {
+    "commit_metadata_reconciliation": {
+      "consecutive": 0,
+      "history": "One local canonical commit reconstruction mismatch; REST normalized timezone; exact SHA recovered offline without changing source/tree"
+    }
+  },
+  "remaining_step": "PR422 published; await all eight required CircleCI contexts on exact head, then fresh main/control/head and guarded merge. No new stage.",
   "constraints": [
     "No shared DB, runtime services, deployment, new dependencies/versions, paid API/credits/resources",
     "No UI-reference changes or new product requirements",
@@ -68,5 +73,26 @@
   },
   "runtime_changes": false,
   "shared_db_access": false,
-  "paid_resources_created": 0
+  "paid_resources_created": 0,
+  "local_qa": {
+    "guarded_pure_tests": 64,
+    "db_cases_deferred_to_ci": 23,
+    "new_test_nodeids": 32,
+    "collections_equal": true,
+    "ruff": "PASS",
+    "black": "PASS",
+    "mypy_app": "PASS",
+    "independent_review": "PASS",
+    "plan_only": [
+      "Preflight",
+      "Auto"
+    ],
+    "app_source": "/workspace/scratch/425751d699c6/aurum-handoff-main-b2ed3cf/source/backend",
+    "connection_guard": "all socket connections denied"
+  },
+  "ci": {
+    "workflow": "fec76ba2-7834-4321-a89f-70036d570094",
+    "head": "27ed7512529a9f35e4b1ebaefb1f209b149bbe15",
+    "result": "pending"
+  }
 }
