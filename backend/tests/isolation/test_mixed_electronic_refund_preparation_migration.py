@@ -12,7 +12,9 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.domains.pos.test_mixed_electronic_refund_activation import activate
 from tests.domains.pos.test_mixed_electronic_refund_binding import binding, persist_review
 from tests.isolation.test_physical_cash_checkout_migration import (
+    downgrade_mixed_refund_evidence_for_roundtrip,
     mixed_electronic_refund_outcome_migration,
+    mixed_electronic_refund_posting_migration,
     mixed_electronic_refund_preparation_migration,
 )
 
@@ -88,6 +90,75 @@ def test_fence_upgrade_and_downgrade_share_exact_ordered_names(
     assert "a10_mixed_return_guard" < expected["pos_mixed_return_command"]
 
 
+def assert_preparation_catalog(
+    connection: Connection, tables: tuple[str, ...], functions: tuple[str, ...]
+) -> None:
+    for table in tables:
+        assert connection.scalar(
+            text(
+                "SELECT relrowsecurity AND relforcerowsecurity "
+                "AND relowner='aurum_schema_owner'::regrole FROM pg_class "
+                "WHERE oid=CAST(:table AS regclass)"
+            ),
+            {"table": f"public.{table}"},
+        )
+        for role, allowed in (
+            ("aurum_app", {"SELECT", "INSERT"}),
+            ("aurum_support", {"SELECT"}),
+        ):
+            for privilege in (
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ):
+                assert connection.scalar(
+                    text("SELECT has_table_privilege(:role,:table,:privilege)"),
+                    {"role": role, "table": f"public.{table}", "privilege": privilege},
+                ) is (privilege in allowed)
+        policies = connection.execute(
+            text(
+                "SELECT policyname,qual,with_check FROM pg_policies "
+                "WHERE schemaname='public' AND tablename=:table ORDER BY policyname"
+            ),
+            {"table": table},
+        ).all()
+        assert [row.policyname for row in policies] == [
+            "schema_owner",
+            "support",
+            "tenant_actor",
+        ]
+        assert "actor_id = current_app_user_id()" in policies[2].qual
+        assert "pos.refund" in policies[2].qual and "pos.refund" in policies[2].with_check
+    for signature in functions:
+        definition = connection.scalar(
+            text("SELECT pg_get_functiondef(CAST(:signature AS regprocedure))"),
+            {"signature": f"public.{signature}"},
+        )
+        assert isinstance(definition, str)
+        assert "SECURITY DEFINER" in definition
+        assert "SET search_path TO 'pg_catalog', 'pg_temp'" in definition
+        for role in ("aurum_app", "aurum_support", "public"):
+            if role == "public":
+                assert not connection.scalar(
+                    text(
+                        "SELECT EXISTS(SELECT 1 FROM pg_proc p, "
+                        "LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a "
+                        "WHERE p.oid=CAST(:signature AS regprocedure) "
+                        "AND a.grantee=0 AND a.privilege_type='EXECUTE')"
+                    ),
+                    {"signature": f"public.{signature}"},
+                )
+            else:
+                assert not connection.scalar(
+                    text("SELECT has_function_privilege(:role,:signature,'EXECUTE')"),
+                    {"role": role, "signature": f"public.{signature}"},
+                )
+
+
 async def test_preparation_roundtrip_preserves_exact_security_and_historical_guards(
     maintenance_engine: AsyncEngine,
 ) -> None:
@@ -109,13 +180,13 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
             "'trg_unit_electronic_refund_binding_guard','trg_mixed_return_guard') "
             "ORDER BY proname,oid"
         )
-        before_historical = connection.execute(historical).all()
+        head_historical = connection.execute(historical).all()
         definitions = text(
             "SELECT pg_get_functiondef(CAST(:signature AS regprocedure)),"
             "proowner,proacl::text,prosecdef,proconfig FROM pg_proc "
             "WHERE oid=CAST(:signature AS regprocedure)"
         )
-        before_functions = {
+        head_functions = {
             signature: connection.execute(definitions, {"signature": f"public.{signature}"}).one()
             for signature in migration.FUNCTIONS
         }
@@ -129,7 +200,15 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
                         migration.downgrade()
                 assert getattr(error.value.orig, "sqlstate", None) == "55000"
                 return
-            mixed_electronic_refund_outcome_migration().downgrade()
+            if not downgrade_mixed_refund_evidence_for_roundtrip(connection):
+                return
+            before_historical = connection.execute(historical).all()
+            before_functions = {
+                signature: connection.execute(
+                    definitions, {"signature": f"public.{signature}"}
+                ).one()
+                for signature in migration.FUNCTIONS
+            }
             migration.downgrade()
             for table in migration.TABLES:
                 assert (
@@ -141,74 +220,23 @@ async def test_preparation_roundtrip_preserves_exact_security_and_historical_gua
             assert connection.execute(historical).all() == before_historical
             assert connection.execute(FENCE_TRIGGERS).all() == []
             migration.upgrade()
+            assert connection.execute(historical).all() == before_historical
+            assert {
+                signature: connection.execute(
+                    definitions, {"signature": f"public.{signature}"}
+                ).one()
+                for signature in migration.FUNCTIONS
+            } == before_functions
             mixed_electronic_refund_outcome_migration().upgrade()
+            mixed_electronic_refund_posting_migration().upgrade()
         assert fence_trigger_snapshot(connection) == before_fences
         assert connection.execute(security, parameters).all() == before_security
-        assert connection.execute(historical).all() == before_historical
+        assert connection.execute(historical).all() == head_historical
         assert {
             signature: connection.execute(definitions, {"signature": f"public.{signature}"}).one()
             for signature in migration.FUNCTIONS
-        } == before_functions
-        for table in migration.TABLES:
-            assert connection.scalar(
-                text(
-                    "SELECT relrowsecurity AND relforcerowsecurity "
-                    "AND relowner='aurum_schema_owner'::regrole FROM pg_class "
-                    "WHERE oid=CAST(:table AS regclass)"
-                ),
-                {"table": f"public.{table}"},
-            )
-            for role, allowed in (
-                ("aurum_app", {"SELECT", "INSERT"}),
-                ("aurum_support", {"SELECT"}),
-            ):
-                for privilege in (
-                    "SELECT",
-                    "INSERT",
-                    "UPDATE",
-                    "DELETE",
-                    "TRUNCATE",
-                    "REFERENCES",
-                    "TRIGGER",
-                ):
-                    assert connection.scalar(
-                        text("SELECT has_table_privilege(:role,:table,:privilege)"),
-                        {"role": role, "table": f"public.{table}", "privilege": privilege},
-                    ) is (privilege in allowed)
-            policies = connection.execute(
-                text(
-                    "SELECT policyname,qual,with_check FROM pg_policies "
-                    "WHERE schemaname='public' AND tablename=:table ORDER BY policyname"
-                ),
-                {"table": table},
-            ).all()
-            assert [row.policyname for row in policies] == [
-                "schema_owner",
-                "support",
-                "tenant_actor",
-            ]
-            assert "actor_id = current_app_user_id()" in policies[2].qual
-            assert "pos.refund" in policies[2].qual and "pos.refund" in policies[2].with_check
-        for signature in migration.FUNCTIONS:
-            definition = before_functions[signature][0]
-            assert "SECURITY DEFINER" in definition
-            assert "SET search_path TO 'pg_catalog', 'pg_temp'" in definition
-            for role in ("aurum_app", "aurum_support", "public"):
-                if role == "public":
-                    assert not connection.scalar(
-                        text(
-                            "SELECT EXISTS(SELECT 1 FROM pg_proc p, "
-                            "LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a "
-                            "WHERE p.oid=CAST(:signature AS regprocedure) "
-                            "AND a.grantee=0 AND a.privilege_type='EXECUTE')"
-                        ),
-                        {"signature": f"public.{signature}"},
-                    )
-                else:
-                    assert not connection.scalar(
-                        text("SELECT has_function_privilege(:role,:signature,'EXECUTE')"),
-                        {"role": role, "signature": f"public.{signature}"},
-                    )
+        } == head_functions
+        assert_preparation_catalog(connection, migration.TABLES, migration.FUNCTIONS)
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()

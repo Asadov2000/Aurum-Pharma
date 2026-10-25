@@ -24,6 +24,7 @@ class UnitRefundPaymentComponent(Base):
     physical_refund_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     mixed_refund_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     electronic_refund_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    mixed_electronic_refund_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     method: Mapped[str] = mapped_column(Text, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False)

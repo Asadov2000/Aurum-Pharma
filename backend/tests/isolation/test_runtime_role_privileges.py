@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_mixed_electronic_refund_posting",
     "pos_mixed_electronic_refund_outcome",
     "pos_mixed_electronic_refund_binding",
     "pos_mixed_electronic_refund_binding_cancel",
@@ -272,6 +273,10 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "mixed_electronic_refund_posting_write_allowed",
+    "assert_mixed_electronic_refund_posting",
+    "trg_mixed_electronic_refund_posting_guard",
+    "trg_mixed_electronic_refund_posting_complete",
     "trg_mixed_electronic_refund_outcome_guard",
     "trg_guard_mixed_refund_outcome_cross_type",
     "mixed_electronic_refund_binding_active",
@@ -1696,6 +1701,10 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "mixed_electronic_refund_posting_write_allowed",
+        "assert_mixed_electronic_refund_posting",
+        "trg_mixed_electronic_refund_posting_guard",
+        "trg_mixed_electronic_refund_posting_complete",
         "trg_mixed_electronic_refund_outcome_guard",
         "trg_guard_mixed_refund_outcome_cross_type",
         "mixed_electronic_refund_binding_active",

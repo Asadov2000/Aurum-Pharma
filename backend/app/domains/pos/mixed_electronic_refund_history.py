@@ -143,13 +143,25 @@ def returned_payments(
                 or payout.tenant_id != original.tenant_id
                 or payout.currency != "TJS"
                 or payout.payment_method != source.method
-                or (payout.metadata is not None and component.electronic_refund_id is None)
+                or (
+                    payout.metadata is not None
+                    and component.electronic_refund_id is None
+                    and component.mixed_electronic_refund_id is None
+                )
                 or payout.payment_attempt_id is not None
                 or not payout.amount.is_finite()
                 or payout.amount <= 0
                 or (component.tenant_id, component.parent_sale_id, component.sale_id)
                 != (original.tenant_id, original.sale_id, sale.id)
-                or (component.mixed_refund_id is None) == (component.electronic_refund_id is None)
+                or sum(
+                    parent is not None
+                    for parent in (
+                        component.mixed_refund_id,
+                        component.electronic_refund_id,
+                        component.mixed_electronic_refund_id,
+                    )
+                )
+                != 1
                 or component.physical_refund_id is not None
                 or (component.mixed_refund_id is not None and source.method != "cash")
                 or (component.method, component.amount, component.currency)
@@ -157,7 +169,10 @@ def returned_payments(
                 or component.created_by != sale.cashier_user_id
             ):
                 raise AurumError("Stored refund payment facts are inconsistent")
-            if component.electronic_refund_id is not None:
+            if (
+                component.electronic_refund_id is not None
+                or component.mixed_electronic_refund_id is not None
+            ):
                 _validate_electronic_payout_metadata(source.id, source.method, payout.metadata)
             returned[source.id] = returned.get(source.id, Decimal("0.00")) + payout.amount
             totals[sale.id] = totals.get(sale.id, Decimal("0.00")) + payout.amount

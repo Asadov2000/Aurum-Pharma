@@ -29,12 +29,16 @@ from tests.domains.pos.test_unit_electronic_refund_intent import save_review
 from tests.domains.pos.test_unit_electronic_refund_preview import facts
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
-    downgrade_mixed_refund_evidence_for_roundtrip,
+    downgrade_mixed_for_physical_refund_roundtrip,
     electronic_refund_activation_migration,
     electronic_refund_binding_migration,
     electronic_refund_outcome_migration,
     electronic_refund_posting_migration,
+    mixed_electronic_checkout_migration,
+    mixed_electronic_refund_intent_migration,
     mixed_electronic_refund_outcome_migration,
+    mixed_electronic_refund_posting_migration,
+    mixed_electronic_refund_preparation_migration,
 )
 
 db_session = receiving_session_fixture
@@ -95,7 +99,7 @@ async def test_binding_roundtrip_preserves_security(maintenance_engine: AsyncEng
                     with connection.begin_nested():
                         electronic_refund_binding_migration().downgrade()
                 return
-            if not downgrade_mixed_refund_evidence_for_roundtrip(connection):
+            if not downgrade_mixed_for_physical_refund_roundtrip(connection):
                 return
             electronic_refund_posting_migration().downgrade()
             electronic_refund_outcome_migration().downgrade()
@@ -107,7 +111,11 @@ async def test_binding_roundtrip_preserves_security(maintenance_engine: AsyncEng
             electronic_refund_activation_migration().upgrade()
             electronic_refund_outcome_migration().upgrade()
             electronic_refund_posting_migration().upgrade()
+            mixed_electronic_checkout_migration().upgrade()
+            mixed_electronic_refund_intent_migration().upgrade()
+            mixed_electronic_refund_preparation_migration().upgrade()
             mixed_electronic_refund_outcome_migration().upgrade()
+            mixed_electronic_refund_posting_migration().upgrade()
         assert connection.execute(snapshot).all() == before
         for table in TABLES:
             assert connection.scalar(
