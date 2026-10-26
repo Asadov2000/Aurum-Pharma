@@ -4,9 +4,9 @@
   "baseline_main": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
   "baseline_tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
   "counter": {
-    "open_blocks": 4,
+    "open_blocks": 3,
     "total_blocks": 7,
-    "remaining_packages_to_3_of_7": 1,
+    "remaining_packages_to_3_of_7": 0,
     "unit": "accepted package, not PR or request"
   },
   "scope": "Existing block4 only; no new requirements, training simulation, Edge, pilot or bank integrations",
@@ -59,7 +59,7 @@
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
       "number": 3,
-      "status": "awaiting_ci",
+      "status": "completed",
       "goal": "Final existing block4 acceptance across physical/mixed card/QR/split sales and refunds",
       "acceptance": [
         "Browser flows verify card/QR/combined payments/refunds, lost response, reload, closed shift, current permissions and readonly",
@@ -69,13 +69,16 @@
       "depends_on": 2,
       "branch": "codex/unit-payment-block4-acceptance",
       "pr": 425,
-      "head": "29f99d50852261ed6703a9b41ced4dc2075a6028"
+      "head": "29f99d50852261ed6703a9b41ced4dc2075a6028",
+      "validated_head": "29f99d50852261ed6703a9b41ced4dc2075a6028",
+      "merge_commit": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055",
+      "validated_tree": "82b7c05a503071a5b0b8765990f8fd4cc1234c13"
     }
   ],
   "execution": {
-    "product_writer": "local only, generation7; cloud standby without grant",
+    "product_writer": "none; accepted package completed, no next-stage grant",
     "local_role": "acceptance implementation / independent review / isolated QA / full CI",
-    "new_stage_grant_issued": true,
+    "new_stage_grant_issued": false,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
@@ -85,9 +88,9 @@
     ],
     "product_writer_task": null,
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
-    "product_writer_run": "local-2026-10-26-block4-acceptance-01",
+    "product_writer_run": null,
     "current_generation": 7,
-    "current_stage_grant_active": true
+    "current_stage_grant_active": false
   },
-  "verified_main": "52b0a7582725f775888c6ff7f87d591bd0f0dba3"
+  "verified_main": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055"
 }
