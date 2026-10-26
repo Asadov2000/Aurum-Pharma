@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "base_commit": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
+  "target_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "target_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+  "sha256": "271da24dd7887e3258a0b0f6fe65f684b5a891e53f35becd3d9ff6dce126d77e",
+  "bytes": 131719,
+  "encoding": "concatenate ordered UTF8 base64 chunks, then strict decode",
+  "refs": "refs/remotes/origin/main",
+  "chunks": [
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-00.b64",
+      "blob_sha": "fc3e3ea153ed76c7dbb3060f2772680bb0d1d244"
+    },
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-01.b64",
+      "blob_sha": "b7b66d7b84bd5f819aafa5dae0e3c40fd538a292"
+    },
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-02.b64",
+      "blob_sha": "12f35cd60d74a4dab7869de9777eaefebdaac4bf"
+    },
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-03.b64",
+      "blob_sha": "c7741bd01bed014e98ef79430cabc7c04bb1f928"
+    },
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-04.b64",
+      "blob_sha": "32c4fa19d8b4b1e2f0f7b54658ba3ca62681a97d"
+    },
+    {
+      "path": ".development-handoff/artifacts/gen10-source-139c40ee-to-358f5af/part-05.b64",
+      "blob_sha": "4fe7bd3161b0583a37044c62d9976956b234885d"
+    }
+  ],
+  "verification": "Local git bundle verify PASS; old dirty cloud files must be preserved"
+}

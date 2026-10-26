@@ -1,319 +1,57 @@
 {
   "version": 1,
-  "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
-  "generation": 9,
-  "owner": "local",
-  "phase": "merged",
-  "run_id": "local-2026-10-26-unit-training-saved-01",
-  "branch": "codex/unit-training-checkout",
-  "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "06b19247d7f968786d7a955353b70f48a9617eef",
-  "validated_sha": "06b19247d7f968786d7a955353b70f48a9617eef",
-  "pr": 427,
-  "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
+  "generation": 10,
+  "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
+  "owner": "cloud",
+  "phase": "source_recovery",
+  "run_id": "cloud-2026-10-27-training-cashier-01",
+  "branch": "codex/unit-training-cashier-acceptance",
+  "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "expected_head": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+  "validated_sha": null,
+  "pr": null,
+  "source_path": null,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
-  "cloud_product_grant": false,
+  "cloud_product_grant": true,
   "cloud_active_turn": false,
+  "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
-  "pending_transfer": false,
+  "old_schedulers": "PAUSED; no new schedules",
+  "pending_transfer": true,
   "plan_path": ".development-handoff/plans/block5-training-three-packages.json",
   "counter": "3/7 (1)",
-  "scope": "Separate immutable training journal, atomic completion of physical/mixed saved is_test sale and current-authority GET recovery; use existing internal receipt allocator, explicit TEST document, no real payments/stock movements",
+  "scope": "Existing physical/mixed cashier training UI using saved is_test training API, idempotent saved recovery and TEST receipt; final acceptance, no new requirements",
   "acceptance": [
-    "One immutable test-only result and canonical receipt per operation/sale; same request replay and readonly/closed-shift GET without recalculating live quote or stock",
-    "Saved is_test and current actor/tenant/branch/pos.sell, existing Rx/catalog/discount/payment settings rules; no real sale fallback",
-    "Existing internal receipt identity preserved per ADR0010; no actual SalePayment, stock commands/movements/quarantine or financial report effects",
-    "New table RLS/audit redaction/immutability/deferred consistency; no weakening0197/real stock/payment guards; downgrade rejects history",
-    "Local pure contracts/style/types and independent QA; complete CI incl migration/SQL/HTTP/recovery on disposable environment; guarded merge/exact tested-main tree"
+    "Existing training mode completes physical/mixed test sale and clearly identifies test receipt",
+    "Reload/lost response recovers same result with no real stock/payment effects",
+    "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "excluded": [
-    "Cashier UI and frontend integration (package3)",
-    "Training returns, new product requirements, dependencies/stack",
-    "Runtime deployment/restarts, shared DB access/migrations",
-    "Edge, bank integration and pilot"
-  ],
-  "remaining_step": "Package3 UNIT-TRAINING-CASHIER-ACCEPTANCE-01: cashier training UI, saved recovery/TEST receipt and final physical/mixed browser acceptance. Not started; no local/cloud product grant. No deployment, runtime restart or shared DB migration.",
+  "remaining_step": "Recover clean cloud writer from verified bundle, implement package3, independent QA, complete final-head CI and guarded merge with tested-tree proof",
   "failure_counters": {
     "current_stage": {
-      "step": "Training HTTP commit-failure test",
       "consecutive": 0,
-      "cause": "Access to expired source.sale.id after savepoint rollback causes implicit async ORM IO/MissingGreenlet",
-      "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "fix": "Plain sale UUID saved before rollback; assertions retained; local style/collection and independent QA PASS, final CI pending",
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved"
-    },
-    "backend_roundtrip": {
-      "step": "Verify cluster-safe migration roundtrip",
-      "cause": null,
-      "consecutive": 0,
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "approved_retry": true,
-      "evidence": "backend3391 both parallel actions advanced to Pytest",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved",
-      "approval_consumed": true
-    },
-    "edge_fixture": {
-      "step": "Pytest Edge ledger audit fixture",
-      "consecutive": 0,
-      "cause": "Fixture restores Sale triggers before pending training_checkout_complete events are checked",
-      "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain",
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved"
-    },
-    "foundation_policy": {
-      "step": "Foundation RLS metadata contract",
-      "consecutive": 0,
-      "cause": "New policy references legacy is_support_session helper; all tenant branch isolation assertions passed; global policy helper reference count expected0 actual1",
-      "affected_heads": [
-        "6c1db235cfbcb4b997a171f83b0894747b1144d8",
-        "57c0984cff4a8d5349e49cf8eac8811117c5d7e2",
-        "71ad98f372bc1434123bec466d6e279038dd1879"
-      ],
-      "fix": "Canonical scoped-support predicate substituted; user approved retry; exact final-head CI pending",
-      "approved_retry": true,
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "evidence": "backend3429 Pytest shard1 success; strict foundation metadata and branch isolation assertions retained",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved",
-      "approval_consumed": true
-    },
-    "metadata_cursor": {
-      "step": "Training schema privilege metadata test",
-      "consecutive": 0,
-      "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
-      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
-      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions",
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved"
-    },
-    "raw_quote_shape": {
-      "step": "Raw journal extra quote-line rejection",
-      "consecutive": 0,
-      "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
-      "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
-      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes",
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved"
-    },
-    "collection_ids": {
-      "step": "CI gate full collection evidence",
-      "consecutive": 0,
-      "head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
-      "cause": "Two random UUID string parameters produce different pytest nodeids across shard collection processes; all7main jobs including backend passed",
-      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes",
-      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
-      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "status": "resolved"
+      "cause": null
     }
   },
-  "runtime_changes": false,
-  "shared_db_access": false,
-  "paid_resources_created": 0,
-  "blocker": null,
+  "blocker": "Normal fetch fails: cloud proxy unavailable; verified Git bundle recovery granted. CircleCI logs tool/network unavailable; statuses readable; stop on inaccessible failure evidence, no blind retries.",
   "previous_completed": {
-    "work_item_id": "UNIT-TRAINING-SIMULATION-CORE-01",
-    "pr": 426,
-    "main": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-    "validated_head": "036182463bb74a1014b76862170ec146bfd3a3e8",
-    "tree": "d2cb594ab43b65fe29803f8528dc120e5af5ffb9",
+    "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
+    "pr": 427,
+    "head": "06b19247d7f968786d7a955353b70f48a9617eef",
+    "main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
     "ci": "all8success"
   },
-  "agents": {
-    "backend": "Training contracts/repository/service/receipt adapter + 2 domain tests",
-    "database": "Model/registry/migration0224 + migration isolation tests",
-    "root": "Router+HTTP tests/docs/control/verification/publication/merge",
-    "qa": "Independent review after writers stop"
-  },
-  "old_schedulers": "PAUSED; no new schedule",
   "constraints": [
-    "Included limits only, no purchases, paid APIs or installs",
-    "No runtime services/shared DB/dependency/stack changes",
-    "One root writer with explicitly partitioned agent files; cloud standby",
-    "Two identical failures STOP; only standing Ruff E501 exception",
-    "Actual GitHub main/head/control check before publication/merge, expected SHA guards, exact tested-tree verification"
-  ],
-  "local_checks": {
-    "pure_contracts": "26 passed",
-    "migration_hooks_no_db": "4 passed: hooks,CASE boundary,atomic upgrade/downgrade",
-    "ruff": "PASS17file scope (15 Python)",
-    "black": "PASS15 Python",
-    "mypy": "PASS505app sources",
-    "converter_move": "AST exactly preserved; compatibility export typed via __all__",
-    "independent_qa": "APPROVE, findings resolved",
-    "db_execution": "not run locally; mandatory isolated CI",
-    "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565",
-    "new_cases_expected": 115,
-    "last_fix": "30 no-DB tests, Ruff/Black/diff PASS; independent ACL APPROVE",
-    "revision_contract": "PASS: one Alembic head0224 and role-contract224; one-line diff only, no grants changed",
-    "json_grouping": "30 no-DB regressions, Ruff/Black/diff PASS; independent full SQL operator review APPROVE",
-    "rollback_test_fix": "Ruff/Black/whitespace PASS; immutable sale UUID captured before rollback; 500/effects/journal assertions retained; QA cause confirmed; collect-only PASS, QA APPROVE",
-    "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE",
-    "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES",
-    "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged",
-    "metadata_cursor": "30 no-DB regressions, Ruff/Black/diff PASS; SQLAlchemy result materialization fix independently approved, ACL/type assertions retained",
-    "raw_quote_shape": "30 no-DB regressions+Ruff/Black/diff PASS; QA APPROVE; 1 extra DB test case; independent SQL binding review APPROVE",
-    "collection_stability": "PASS two separate complete collect-only processes:6960 identical IDs,3480+3480,0overlap/omissions; random data retained and strict gate untouched",
-    "stable_ids": "30 no-DB tests+Ruff/Black/diff PASS, independent QA APPROVE"
-  },
-  "source_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
-  "ci_attempt": 14,
-  "ci_error_history": [
-    {
-      "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
-      "workflow": "e567f18d-c3e5-4e7b-b036-e845ffca86b8",
-      "cause": "Unparenthesized CASE inside PL/pgSQL IF condition terminated at internal THEN; migration0224 syntax end-of-input",
-      "checks": [
-        "backend",
-        "e2e",
-        "production-containers"
-      ],
-      "fix": "2 parentheses; parser-boundary regression",
-      "resolved": "Parser CASE parentheses compiled in attempt2"
-    },
-    {
-      "head": "d8dfef8cbe82c9cd75f18218174e77656002a549",
-      "workflow": "c4e365d9-3544-4356-ae26-316a46348f03",
-      "cause": "Tagged pg_get_functiondef split by legacy $$-only batch executor",
-      "fix": "Execute complete definition once with existing colon escaping; bidirectional compiled-SQL regression",
-      "consecutive": 1
-    },
-    {
-      "head": "941c6b9b1283302fa29f926d52aaa5b394253997",
-      "workflow": "151e129c-eb46-4a43-ad5f-20c457777297",
-      "cause": "Missing EXECUTE for invoker trigger calling narrowly scoped training checkout predicate",
-      "consecutive": 1,
-      "fix": "Grant only read-only predicate to existing app/support/Edge sale writers; expanded real ACL matrix"
-    },
-    {
-      "head": "228a150f6555160efb028a95a157b1ef7e92e18d",
-      "workflow": "bb398962-9f65-4486-abc2-e27767e9ae8e",
-      "cause": "Backend migration roundtrip exits on role-contract ceiling223 vs Alembic224 before SQL",
-      "fix": "One-line registration224; user followup authorized retry",
-      "consecutive": 5
-    },
-    {
-      "head": "57aed2b68995eb113da387a2a864e4427ed1cd2e",
-      "workflow": "1a052309-054d-440f-a93d-65c194485969",
-      "cause": "JSONB extraction before key subtraction lacks parentheses; literal simulation implicitly cast to JSONB",
-      "consecutive": 1,
-      "fix": "One-line parentheses around extracted simulation before key subtraction"
-    },
-    {
-      "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "workflow": "87f3bef7-5bdc-4c2a-8ffe-07c8507c425c",
-      "cause": "Access to expired source.sale.id after savepoint rollback causes implicit async ORM IO/MissingGreenlet",
-      "fix": "Keep immutable sale_id scalar before rollback; same500/no-effect/no-journal assertions",
-      "consecutive": 1
-    },
-    {
-      "step": "Pytest Edge ledger audit fixture",
-      "consecutive": 1,
-      "cause": "Fixture restores Sale triggers before pending training_checkout_complete events are checked",
-      "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain",
-      "workflow": "87f3bef7-5bdc-4c2a-8ffe-07c8507c425c"
-    },
-    {
-      "step": "Foundation RLS metadata contract",
-      "consecutive": 3,
-      "cause": "New policy references legacy is_support_session helper; all tenant branch isolation assertions passed; global policy helper reference count expected0 actual1",
-      "affected_heads": [
-        "6c1db235cfbcb4b997a171f83b0894747b1144d8",
-        "57c0984cff4a8d5349e49cf8eac8811117c5d7e2",
-        "71ad98f372bc1434123bec466d6e279038dd1879"
-      ],
-      "fix": "Use canonical NOT is_tenant_support_session in new policy; assertions/production foundation policies unchanged",
-      "approved_retry": true,
-      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
-      "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
-    },
-    {
-      "step": "Training schema privilege metadata test",
-      "consecutive": 1,
-      "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
-      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
-      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions",
-      "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
-    },
-    {
-      "step": "Raw journal extra quote-line rejection",
-      "consecutive": 1,
-      "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
-      "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
-      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes",
-      "workflow": "56348b2f-75ba-4ced-9a6b-90c65f79a2d0"
-    },
-    {
-      "step": "CI gate full collection evidence",
-      "consecutive": 1,
-      "head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
-      "cause": "Two random UUID string parameters produce different pytest nodeids across shard collection processes; all7main jobs including backend passed",
-      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes",
-      "workflow": "806a0cf8-bfe1-46d2-b314-843eb6f7df96"
-    }
-  ],
-  "ci_workflow": "f47b1b69-9738-463b-a5a7-0242e932b92d",
-  "control_commit": "ad4bb169b20192320eeb6f3528ed70f2ede47550",
-  "review_fix": {
-    "cause": "New journal must be included in existing selective migration and global privilege inventories",
-    "fix": "5+18 registration lines only; no production grant/guard changes",
-    "ci_failure_count": 0,
-    "head": "71ad98f372bc1434123bec466d6e279038dd1879"
-  },
-  "approvals": {
-    "migration_ceiling_retry": {
-      "source": "Explicit user answer: Да, исправить и продолжить этот этап",
-      "scope": "Only align role-contract223->224 and rerun same PR stage; no runtime/shared DB/dependency changes",
-      "completed_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "future_exception": false
-    },
-    "foundation_policy_retry": {
-      "source": "Explicit user answer Да, исправить и продолжить этот этап",
-      "scope": "Replace new policy legacy helper with canonical scoped-support helper; same PR full CI and main; no shared DB/runtime/dependencies",
-      "completed_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-      "future_exception": false
-    }
-  },
-  "validated_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
-  "merge_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "verified_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "final_ci": {
-    "head": "06b19247d7f968786d7a955353b70f48a9617eef",
-    "workflow": "f47b1b69-9738-463b-a5a7-0242e932b92d",
-    "contexts": "all8success",
-    "backend": {
-      "tests": 6960,
-      "shards": 2,
-      "complete_evidence": true
-    },
-    "frontend": {
-      "tests": 3203,
-      "files": 239
-    },
-    "browser": 165,
-    "new_stage_cases": 115,
-    "strict_gate_unchanged": true
-  },
-  "final_proof": {
-    "merge_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-    "main_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
-    "tested_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
-    "identical": true,
-    "isolated_tracking_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-    "isolated_diff": "empty",
-    "primary_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
-    "primary_unchanged": true,
-    "shared_db_access": false,
-    "runtime_changes": false,
-    "paid_resources_created": 0
-  }
+    "Included limits only; no purchases/credits/paid resources or new installations/dependency changes",
+    "Cloud sole product writer; local stopped; old schedules paused",
+    "No running Aurum/shared DB/deploy/restarts; isolated CI only",
+    "AGENTS two-identical-failures STOP; standing exception only Ruff E501",
+    "Protected UI references unchanged; no real payments or stock effects",
+    "All required final-head contexts success; expected head guarded merge; verify actual main tree",
+    "This grant only package3; checkpoint and stop after completion, do not invent further stages"
+  ]
 }

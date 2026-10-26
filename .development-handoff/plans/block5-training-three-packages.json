@@ -50,23 +50,25 @@
     {
       "number": 3,
       "id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
-      "status": "not_started",
+      "status": "cloud_source_recovery",
       "goal": "Existing setup/training cashier UI, saved recovery/test receipt and final physical/mixed acceptance",
       "acceptance": [
         "Existing training mode completes physical/mixed test sale and clearly identifies test receipt",
         "Reload/lost response recovers same result with no real stock/payment effects",
         "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
       ],
-      "depends_on": 2
+      "depends_on": 2,
+      "branch": "codex/unit-training-cashier-acceptance"
     }
   ],
   "execution": {
-    "product_writer": "none: package2 complete; local and cloud product grants closed",
+    "product_writer": "cloud",
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
-    "cloud_product_grant": false,
+    "cloud_product_grant": true,
     "old_schedulers": "PAUSED",
-    "current_stage_grant_active": false,
-    "current_generation": 9
+    "current_stage_grant_active": true,
+    "current_generation": 10,
+    "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout."
   },
   "verified_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501"
 }
