@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
+  "expected_head": "06b19247d7f968786d7a955353b70f48a9617eef",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Full final-head CI incl independent hash and line-shape rejection cases, then fresh refs, guarded merge and exact tested-main tree. No runtime/shared DB.",
+  "remaining_step": "All8 final-head CI after deterministic test IDs; all7main jobs passed previous head. Fresh refs, guarded merge and exact tested-main tree required. No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
@@ -85,6 +85,13 @@
       "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
       "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
       "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes"
+    },
+    "collection_ids": {
+      "step": "CI gate full collection evidence",
+      "consecutive": 1,
+      "head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
+      "cause": "Two random UUID string parameters produce different pytest nodeids across shard collection processes; all7main jobs including backend passed",
+      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes"
     }
   },
   "runtime_changes": false,
@@ -132,10 +139,12 @@
     "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES",
     "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged",
     "metadata_cursor": "30 no-DB regressions, Ruff/Black/diff PASS; SQLAlchemy result materialization fix independently approved, ACL/type assertions retained",
-    "raw_quote_shape": "30 no-DB regressions+Ruff/Black/diff PASS; QA APPROVE; 1 extra DB test case; independent SQL binding review APPROVE"
+    "raw_quote_shape": "30 no-DB regressions+Ruff/Black/diff PASS; QA APPROVE; 1 extra DB test case; independent SQL binding review APPROVE",
+    "collection_stability": "PASS two separate complete collect-only processes:6960 identical IDs,3480+3480,0overlap/omissions; random data retained and strict gate untouched",
+    "stable_ids": "30 no-DB tests+Ruff/Black/diff PASS, independent QA APPROVE"
   },
-  "source_tree": "39c7ea3bff3d266617f70596a3c1c736f2110dfe",
-  "ci_attempt": 13,
+  "source_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+  "ci_attempt": 14,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -221,10 +230,18 @@
       "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
       "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes",
       "workflow": "56348b2f-75ba-4ced-9a6b-90c65f79a2d0"
+    },
+    {
+      "step": "CI gate full collection evidence",
+      "consecutive": 1,
+      "head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
+      "cause": "Two random UUID string parameters produce different pytest nodeids across shard collection processes; all7main jobs including backend passed",
+      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes",
+      "workflow": "806a0cf8-bfe1-46d2-b314-843eb6f7df96"
     }
   ],
-  "ci_workflow": "806a0cf8-bfe1-46d2-b314-843eb6f7df96",
-  "control_commit": "3b710e81d144b2569bf46d61bdf172e3cf0ea423",
+  "ci_workflow": "f47b1b69-9738-463b-a5a7-0242e932b92d",
+  "control_commit": "0cbd57404e71c59c3504228d7de2960a3cf34d10",
   "review_fix": {
     "cause": "New journal must be included in existing selective migration and global privilege inventories",
     "fix": "5+18 registration lines only; no production grant/guard changes",
