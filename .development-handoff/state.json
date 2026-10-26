@@ -1,10 +1,10 @@
 {
   "version": 1,
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
-  "generation": 4,
-  "owner": "cloud",
-  "phase": "blocked",
-  "run_id": "cloud-2026-10-26-client-recovery-01",
+  "generation": 5,
+  "owner": "local",
+  "phase": "active",
+  "run_id": "local-2026-10-26-client-recovery-01",
   "branch": "codex/mixed-electronic-refund-client-recovery",
   "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
   "expected_head": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
@@ -15,10 +15,10 @@
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
-  "pending_transfer": null,
-  "source_path": "/workspace/Aurum-Pharma",
+  "pending_transfer": false,
+  "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "plan_path": ".development-handoff/plans/block4-remaining-three-packages.json",
   "counter": "4/7 (3)",
   "scope": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
@@ -37,7 +37,7 @@
     "Dependency or stack changes",
     "Runtime deployment, shared database access"
   ],
-  "remaining_step": "STOP2: await explicit human decision before any source/test correction, rerun or product publication. Preserve snapshot; then fix exact callback test/schema bindings and original selection-order issue, independent review, all required QA/CI, root APPROVE before merge.",
+  "remaining_step": "Import verified exact snapshot, implement same three fixes locally, independent review, targeted and complete CI on finalhead, guarded merge. Do not touch runtime checkout or shared DB.",
   "cloud_environment": {
     "id": "ccarenv_b64_Y2NhcmVudl81MDlhYzI1ZWY4ZDQ4MTkxOWRlNTk0MjRkZGY5ODBjOQ",
     "mode": "existing published Aurum VM resumed",
@@ -102,7 +102,9 @@
   "runtime_changes": false,
   "shared_db_access": false,
   "paid_resources_created": 0,
-  "blocker": {
+  "blocker": null,
+  "grant_suspended_reason": null,
+  "previous_blocker": {
     "kind": "STOP2",
     "command": "NODE_ENV=test /workspace/aurum-env-repair-qa/frontend-check pnpm exec vitest run tests/features/sales/mixedElectronicRefund --reporter=dot --maxWorkers=2",
     "test": "frontend/tests/features/sales/mixedElectronicRefundRecovery.test.ts:344",
@@ -134,5 +136,16 @@
       "Preserve original quoted selection order rather than reconstructing from server-sorted preview.lines; backend revision binds request order"
     ]
   },
-  "grant_suspended_reason": "STOP2; no blanket waiver. Human decision required."
+  "human_exception": {
+    "scope": "Current package only: fix contextCheck runtime strict schemas and test expectations, preserve original quoted selection order and regression checks. Existing rules/limits unchanged. Historical failures remain recorded.",
+    "authorization": "2026-10-26 user: «тогда продолжай разработку проекта тут», after exact fix/STOP2 request and synchronization discussion",
+    "previous_consecutive": 2
+  },
+  "transfer": {
+    "from": "cloud",
+    "to": "local",
+    "cloud_ack": "All product/subagent writes stopped; exact14files snapshot7d0f93f preserved, no changes aftersnapshot; standby; no PR/CI/control/automation writes.",
+    "candidate_tree": "7d0f93f74525b1253f9136a80bcc8fc7390150c8",
+    "control_before": "fda9db8def60f1f9ae7218d46ad499df3aa05310"
+  }
 }
