@@ -222,7 +222,7 @@ async def test_training_schema_uses_least_privilege_and_private_function_ownersh
                         FROM pg_attribute WHERE attrelid='public.pos_training_checkout'::regclass
                           AND attname IN ('total_amount','created_at','receipt_seq')
                           AND NOT attisdropped
-                    """))).tuples())
+                    """))).tuples().all())
         assert columns == {
             "total_amount": "numeric(14,2)",
             "created_at": "timestamp with time zone",
