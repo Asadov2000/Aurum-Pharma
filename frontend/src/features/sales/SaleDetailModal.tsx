@@ -9,7 +9,10 @@ import { type PaymentMethodRead } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { useSaleDetailsQuery } from "./queries";
-import { isElectronicRefundCandidate } from "./electronicRefundEligibility";
+import {
+  isElectronicRefundCandidate,
+  isMixedElectronicRefundCandidate,
+} from "./electronicRefundEligibility";
 import { RefundModal } from "./RefundModal";
 import { type SaleListItem } from "./types";
 
@@ -25,6 +28,10 @@ const ElectronicRefundModal = lazy(async () => {
   const module = await import("./ElectronicRefundModal");
   return { default: module.ElectronicRefundModal };
 });
+const MixedElectronicRefundModal = lazy(async () => {
+  const module = await import("./MixedElectronicRefundModal");
+  return { default: module.MixedElectronicRefundModal };
+});
 
 export function SaleDetailModal({
   row,
@@ -39,7 +46,7 @@ export function SaleDetailModal({
   // the parent sale (when viewing a return), so navigation stays in-modal.
   const [currentId, setCurrentId] = useState(row.id);
   const [refundOpen, setRefundOpen] = useState<
-    "legacy" | "physical" | "mixed" | "electronic" | null
+    "legacy" | "physical" | "mixed" | "electronic" | "mixed-electronic" | null
   >(null);
   const [printOpen, setPrintOpen] = useState(false);
   const details = useSaleDetailsQuery(currentId);
@@ -57,13 +64,15 @@ export function SaleDetailModal({
   const isRefund = data ? data.sale_type === "return" : row.is_refund;
   const isMixed = (data?.mixed_items?.length ?? 0) > 0;
   const refundKind =
-    data && isElectronicRefundCandidate(data)
-      ? "electronic"
-      : isMixed
-        ? "mixed"
-        : (data?.physical_items?.length ?? 0) > 0
-          ? "physical"
-          : "legacy";
+    data && isMixedElectronicRefundCandidate(data)
+      ? "mixed-electronic"
+      : data && isElectronicRefundCandidate(data)
+        ? "electronic"
+        : isMixed
+          ? "mixed"
+          : (data?.physical_items?.length ?? 0) > 0
+            ? "physical"
+            : "legacy";
   const hasRefundableItems =
     data?.items.some((item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005) ??
     false;
@@ -232,7 +241,19 @@ export function SaleDetailModal({
         data &&
         data.sale_type === "sale" &&
         data.status === "completed" &&
-        (refundKind === "electronic" ? (
+        (refundKind === "mixed-electronic" ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <MixedElectronicRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(saleId) => {
+                setRefundOpen(null);
+                setCurrentId(saleId);
+              }}
+            />
+          </Suspense>
+        ) : refundKind === "electronic" ? (
           <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
             <ElectronicRefundModal
               key={data.id}

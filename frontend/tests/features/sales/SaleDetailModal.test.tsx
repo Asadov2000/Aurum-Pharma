@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type SaleDetails } from "@/features/pos/types";
 import { SaleDetailModal } from "@/features/sales/SaleDetailModal";
+import { isMixedElectronicRefundCandidate } from "@/features/sales/electronicRefundEligibility";
 import { type SaleListItem } from "@/features/sales/types";
 
 const details = vi.hoisted(() => ({ data: undefined as SaleDetails | undefined }));
@@ -22,6 +23,15 @@ vi.mock("@/features/sales/PhysicalRefundModal", () => ({
 }));
 vi.mock("@/features/sales/ElectronicRefundModal", () => ({
   ElectronicRefundModal: () => <div role="dialog" aria-label="Электронный физический возврат" />,
+}));
+vi.mock("@/features/sales/MixedElectronicRefundModal", () => ({
+  MixedElectronicRefundModal: ({ onRefunded }: { onRefunded: (id: string) => void }) => (
+    <div role="dialog" aria-label="Электронный смешанный возврат">
+      <button onClick={() => onRefunded("mixed-electronic-return-1")}>
+        Открыть электронный возврат
+      </button>
+    </div>
+  ),
 }));
 vi.mock("@/features/sales/MixedRefundModal", () => ({
   MixedRefundModal: ({ onRefunded }: { onRefunded: (id: string) => void }) => (
@@ -379,4 +389,123 @@ describe("electronic refund entrypoint", () => {
       ).not.toBeInTheDocument();
     },
   );
+});
+
+describe("mixed electronic refund entrypoint", () => {
+  const candidate = (method: "card" | "qr" = "card"): SaleDetails => ({
+    ...sale,
+    mixed_items: mixedItems,
+    physical_items: [physicalItem],
+    payments: [
+      {
+        id: "electronic-payment",
+        sale_id: sale.id,
+        operation_id: null,
+        payment_method: method,
+        amount: "28.00",
+        currency: "TJS",
+      },
+    ],
+  });
+  beforeEach(() => {
+    auth.permissions = ["pos.refund"];
+    details.data = candidate();
+  });
+  it.each(["card", "qr"] as const)(
+    "opens the mixed %s form without a cash or physical fallback",
+    async (method) => {
+      details.data = candidate(method);
+      render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+      expect(
+        await screen.findByRole("dialog", { name: "Электронный смешанный возврат" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("dialog", { name: "Возврат смешанной продажи" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("dialog", { name: "Электронный физический возврат" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+  it("recognizes electronic and cash components together", () => {
+    const mixed = candidate();
+    mixed.payments[0]!.amount = "27.00";
+    mixed.payments.push({
+      ...mixed.payments[0]!,
+      id: "cash-payment",
+      payment_method: "cash",
+      amount: "1.00",
+    });
+    expect(isMixedElectronicRefundCandidate(mixed)).toBe(true);
+  });
+  it.each([
+    { sale_type: "return" as const },
+    { status: "draft" as const },
+    { is_test: true },
+    { mixed_items: [] },
+    { payments: [] },
+  ])("does not treat an unsupported sale as a mixed electronic candidate: %j", (change) => {
+    expect(isMixedElectronicRefundCandidate({ ...candidate(), ...change })).toBe(false);
+  });
+  it.each(["0.00", "-1.00", "1.000", "NaN", "1e2"])(
+    "rejects a zero or malformed electronic amount %s",
+    (amount) => {
+      const mixed = candidate();
+      mixed.payments[0]!.amount = amount;
+      expect(isMixedElectronicRefundCandidate(mixed)).toBe(false);
+    },
+  );
+  it("keeps the mixed cash route for an entirely cash sale", async () => {
+    const mixed = candidate();
+    mixed.payments[0]!.payment_method = "cash";
+    details.data = mixed;
+    render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Возврат смешанной продажи" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).not.toBeInTheDocument();
+  });
+  it("unmounts the electronic form if refund access is revoked", async () => {
+    const view = render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).toBeInTheDocument();
+    auth.permissions = [];
+    view.rerender(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    expect(
+      screen.queryByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).not.toBeInTheDocument();
+  });
+  it("closes the old form when refreshed details change the refund route", async () => {
+    const view = render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).toBeInTheDocument();
+    details.data = { ...candidate(), payments: [] };
+    view.rerender(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    expect(
+      screen.queryByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Возврат смешанной продажи" }),
+    ).not.toBeInTheDocument();
+  });
+  it("opens the verified mixed refund through the existing receipt flow", async () => {
+    render(<SaleDetailModal row={row} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Оформить возврат" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть электронный возврат" }));
+    fireEvent.click(screen.getByRole("button", { name: "Печать чека" }));
+    expect(screen.getByRole("dialog", { name: "Печать" })).toHaveTextContent(
+      "mixed-electronic-return-1 / register-1",
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Электронный смешанный возврат" }),
+    ).not.toBeInTheDocument();
+  });
 });

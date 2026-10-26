@@ -21,6 +21,7 @@ from app.domains.pos import mixed_electronic_refund_binding_router as binding
 from app.domains.pos import mixed_electronic_refund_outcome_router as outcome
 from app.domains.pos import mixed_electronic_refund_posting_router as posting
 from app.domains.pos import mixed_electronic_refund_review_router as review
+from app.domains.pos.mixed_cash_refund_api_schemas import MixedRefundOptions
 from app.domains.pos.mixed_electronic_refund_activation_schemas import (
     SavedMixedElectronicRefundActivation,
 )
@@ -31,6 +32,7 @@ from app.domains.pos.mixed_electronic_refund_outcome_schemas import (
 )
 from tests.domains.pos.test_mixed_electronic_refund_intent_service import Review
 from tests.domains.pos.test_mixed_electronic_refund_posting_contracts import posted
+from tests.domains.pos.test_physical_documents import packaging
 
 
 @dataclass
@@ -95,8 +97,40 @@ async def mixed_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Api]:
         }
     )
     calls: dict[str, AsyncMock] = {}
+    options = MixedRefundOptions.model_validate(
+        {
+            "parent_sale_id": facts.parent,
+            "branch_id": facts.branch,
+            "register_id": active.register_id,
+            "original_receipt_number": "TEST-1",
+            "reason_mode": "required",
+            "lines": [
+                {
+                    "inventory_kind": "legacy_pack",
+                    "line_id": uuid4(),
+                    "name": "Synthetic legacy medicine",
+                    "sold_quantity": "0.125",
+                    "returned_quantity": "0.000",
+                    "remaining_quantity": "0.125",
+                    "original_retail_unit_price": "1.00",
+                },
+                {
+                    "inventory_kind": "physical_unit",
+                    "line_id": facts.request.request.selection.items[0].line_id,
+                    "name": "Synthetic physical medicine",
+                    "unit_label": "табл.",
+                    "packaging": packaging(),
+                    "sold_base_units": 2,
+                    "returned_base_units": 0,
+                    "remaining_base_units": 2,
+                    "original_sale_format": "unit",
+                    "original_retail_unit_price": "1.00",
+                },
+            ],
+        }
+    )
     for service, methods in (
-        (review.MixedElectronicRefundPreviewService, {"quote": facts.preview}),
+        (review.MixedElectronicRefundPreviewService, {"options": options, "quote": facts.preview}),
         (review.MixedElectronicRefundIntentService, {"save": saved, "read": saved}),
         (
             binding.MixedElectronicRefundBindingService,
@@ -144,6 +178,7 @@ async def mixed_api(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Api]:
     base = f"/api/v1/sales/{facts.parent}/mixed-electronic-refunds"
     operation = f"{base}/reviews/{saved.operation_id}"
     cases = (
+        Case("GET", f"{base}/options", None, "MixedElectronicRefundPreviewService.options"),
         Case(
             "POST",
             f"{base}/quote",
@@ -214,6 +249,7 @@ async def test_every_adapter_preserves_scope_and_only_calls_its_service(mixed_ap
         if not case.call.endswith(".save"):
             assert arguments["parent_sale_id"] == api.parent
         if case.call not in {
+            "MixedElectronicRefundPreviewService.options",
             "MixedElectronicRefundPreviewService.quote",
             "MixedElectronicRefundIntentService.save",
         }:
@@ -244,6 +280,31 @@ async def test_readonly_keeps_quote_and_get_recovery_without_commands(mixed_api:
         readonly = case.method == "GET" or case.path.endswith("/quote")
         assert response.status_code == (200 if readonly else 422), response.text
         assert api.calls[case.call].await_count == int(readonly)
+    api.session.flush.assert_not_called()
+    api.session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize("proof", ["missing", "stale", "future"])
+async def test_options_remain_readable_without_recent_mfa_or_external_permission(
+    mixed_api: Api, proof: str
+) -> None:
+    api = mixed_api
+    api.actor.permissions.remove("pos.refund_external_confirm")
+    api.actor.password_verified_at = (
+        None
+        if proof == "missing"
+        else datetime.now(UTC) + timedelta(days=-2 if proof == "stale" else 2)
+    )
+    api.session.get.return_value.status = "readonly"
+    case = next(case for case in api.cases if case.call.endswith("PreviewService.options"))
+    response = await api.client.get(case.path)
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "private, no-store"
+    assert {line["inventory_kind"] for line in response.json()["lines"]} == {
+        "legacy_pack",
+        "physical_unit",
+    }
+    api.calls[case.call].assert_awaited_once()
     api.session.flush.assert_not_called()
     api.session.commit.assert_not_called()
 

@@ -1,13 +1,16 @@
 """One statement snapshot of original payments and their mixed return history."""
 
+from typing import cast
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AurumError
+from app.domains.foundation.models import TenantSettings
 from app.domains.pos.mixed_electronic_refund_history_schemas import MixedElectronicRefundHistory
+from app.domains.pos.physical_cash_refund_api_schemas import RefundReasonMode
 
 _PAYMENT = """jsonb_build_object(
     'id',p.id,'tenant_id',p.tenant_id,'sale_id',p.sale_id,
@@ -85,6 +88,20 @@ WHERE s.tenant_id=:tenant_id AND s.id=:parent_sale_id
 class MixedElectronicRefundPreviewRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def read_reason_mode(self, tenant_id: UUID) -> RefundReasonMode | None:
+        # A scalar projection neither refreshes an existing settings entity nor
+        # overwrites its pending edits. It also cannot trigger an ORM flush.
+        mode: str | None = await self.session.scalar(
+            select(TenantSettings.refund_reason_mode)
+            .where(TenantSettings.tenant_id == tenant_id)
+            .execution_options(autoflush=False)
+        )
+        if mode is None:
+            return None
+        if mode not in {"off", "optional", "required", "required_with_text"}:
+            raise AurumError("Stored refund reason policy is inconsistent")
+        return cast(RefundReasonMode, mode)
 
     async def read(
         self, tenant_id: UUID, parent_sale_id: UUID
