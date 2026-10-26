@@ -6,7 +6,7 @@
   "counter": {
     "open_blocks": 4,
     "total_blocks": 7,
-    "remaining_packages_to_3_of_7": 2,
+    "remaining_packages_to_3_of_7": 1,
     "unit": "accepted package, not PR or request"
   },
   "scope": "Existing block4 only; no new requirements, training simulation, Edge, pilot or bank integrations",
@@ -41,7 +41,7 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
       "number": 2,
-      "status": "awaiting_ci",
+      "status": "completed",
       "goal": "Cashier form/entrypoint using package1, explicit operator stages, existing permissions/MFA, recovery and receipt",
       "acceptance": [
         "Mixed electronic refund selectable from supported completed sale",
@@ -51,7 +51,10 @@
       "depends_on": 1,
       "branch": "codex/mixed-electronic-refund-cashier-ui",
       "pr": 424,
-      "head": "bd4efbe16ba039931fe251ab53c69467acb78a24"
+      "head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
+      "validated_head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
+      "merge_commit": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
+      "validated_tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f"
     },
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
@@ -67,9 +70,9 @@
     }
   ],
   "execution": {
-    "product_writer": "local only, generation6; cloud standby without product grant",
-    "local_role": "implementation / isolated QA / independent review / CI publication",
-    "new_stage_grant_issued": true,
+    "product_writer": "none; package2 merged, next acceptance package requires fresh single-writer grant",
+    "local_role": "preferred next developer; standby after completed package2",
+    "new_stage_grant_issued": false,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
@@ -81,7 +84,7 @@
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
     "product_writer_run": "local-2026-10-26-mixed-refund-cashier-ui-01",
     "current_generation": 6,
-    "current_stage_grant_active": true
+    "current_stage_grant_active": false
   },
-  "verified_main": "a19bc74b029b424f804727469faccaba24e0022c"
+  "verified_main": "52b0a7582725f775888c6ff7f87d591bd0f0dba3"
 }

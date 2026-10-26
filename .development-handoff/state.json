@@ -3,24 +3,24 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
   "generation": 6,
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "merged",
   "run_id": "local-2026-10-26-mixed-refund-cashier-ui-01",
   "branch": "codex/mixed-electronic-refund-cashier-ui",
   "base_sha": "a19bc74b029b424f804727469faccaba24e0022c",
   "expected_head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
   "source_tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f",
-  "validated_sha": null,
+  "validated_sha": "bd4efbe16ba039931fe251ab53c69467acb78a24",
   "pr": 424,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": false,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "plan_path": ".development-handoff/plans/block4-remaining-three-packages.json",
-  "counter": "4/7 (2)",
+  "counter": "4/7 (1)",
   "scope": "Cashier mixed electronic refund entry/form and existing lifecycle/recovery/receipt; necessary read-only option discovery from existing immutable electronic history, no schema changes",
   "acceptance": [
     "Mixed electronic refund selectable from supported completed sale",
@@ -34,7 +34,7 @@
     "UI reference page redesign",
     "Runtime/deployment/shared database access"
   ],
-  "remaining_step": "Wait full8 CI finalhead, diagnose any failure within rules, fresh actual main/head/owner, guarded merge, verify exact main tree; then counter4/7(1). No deployment/shared DB.",
+  "remaining_step": "Package2 complete. Next UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01: fixed existing block4 card/QR/split physical/mixed sales/refunds, lost response/reload/closed shift/current rights/readonly, no duplicate payment/payout/stock movement, full finalhead CI. Fresh actual main/PR/owner check required before any next grant. No new requirements, bank integrations, deployment or shared DB.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -129,5 +129,19 @@
     "playwright_list": "6cases including mixed refund extension; no setup/execution locally",
     "whitespace": "PASS",
     "independent_review": "APPROVE"
-  }
+  },
+  "ci_workflow": "0aca0f18-a655-4c88-b19c-f81f9d6e69a8",
+  "main_sha": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
+  "main_tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f",
+  "merged_at": "2026-10-26T13:19:36Z",
+  "next_work_item_id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
+  "next_stage_grant_issued": false,
+  "ci_final": {
+    "workflow": "0aca0f18-a655-4c88-b19c-f81f9d6e69a8",
+    "head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
+    "all8success": true,
+    "frontend_tests": 3203,
+    "e2e": 161
+  },
+  "cloud_checkout_note": "Cloud remains historical standby with no product grant. Packages1/2 merged in PR423/424; future cloud continuation must read actual main52b0a758 and control, synchronize safely, never replay old snapshots."
 }
