@@ -679,9 +679,11 @@ BEGIN
 END $$;
 """
 
-ALLOW = """ IF coalesce(public.training_checkout_sale_write_allowed(
-  TG_TABLE_NAME,TG_OP,CASE WHEN TG_OP='DELETE' THEN NULL ELSE to_jsonb(NEW) END,
-  CASE WHEN TG_OP='INSERT' THEN NULL ELSE to_jsonb(OLD) END),false) THEN RETURN NEW; END IF;
+ALLOW = """ IF session_user='aurum_app' THEN
+  IF coalesce(public.training_checkout_sale_write_allowed(
+   TG_TABLE_NAME,TG_OP,CASE WHEN TG_OP='DELETE' THEN NULL ELSE to_jsonb(NEW) END,
+   CASE WHEN TG_OP='INSERT' THEN NULL ELSE to_jsonb(OLD) END),false) THEN RETURN NEW; END IF;
+ END IF;
 """
 AUDIT_ANCHOR = "IF v_result IS NULL THEN RETURN NULL; END IF;"
 PATCHES = [
@@ -758,12 +760,12 @@ def upgrade() -> None:
          ALTER FUNCTION public.{signature} OWNER TO aurum_schema_owner;
          REVOKE ALL ON FUNCTION public.{signature} FROM PUBLIC,aurum_app,aurum_support;
         """)
-    # The old sale immutability trigger is SECURITY INVOKER. Its existing
-    # app/support/Edge writers must evaluate this read-only predicate; other
-    # helpers stay private, and the predicate rejects non-app sessions early.
+    # The old sale trigger is SECURITY INVOKER. Only app sessions enter ALLOW;
+    # support/Edge/migration sessions skip the predicate through PL/pgSQL control
+    # flow, so bootstrap ACL normalization cannot break their existing writes.
     _sql("""
       GRANT EXECUTE ON FUNCTION public.training_checkout_sale_write_allowed(text,text,jsonb,jsonb)
-       TO aurum_app,aurum_support,aurum_edge_cash_owner;
+       TO aurum_app;
     """)
     for signature, old, new in PATCHES:
         _patch(signature, old, new, upgrade=True)
