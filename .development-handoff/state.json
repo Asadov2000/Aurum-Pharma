@@ -3,23 +3,23 @@
   "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
   "generation": 9,
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "merged",
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
   "expected_head": "06b19247d7f968786d7a955353b70f48a9617eef",
-  "validated_sha": null,
+  "validated_sha": "06b19247d7f968786d7a955353b70f48a9617eef",
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": false,
   "plan_path": ".development-handoff/plans/block5-training-three-packages.json",
-  "counter": "3/7 (2)",
+  "counter": "3/7 (1)",
   "scope": "Separate immutable training journal, atomic completion of physical/mixed saved is_test sale and current-authority GET recovery; use existing internal receipt allocator, explicit TEST document, no real payments/stock movements",
   "acceptance": [
     "One immutable test-only result and canonical receipt per operation/sale; same request replay and readonly/closed-shift GET without recalculating live quote or stock",
@@ -34,29 +34,38 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "All8 final-head CI after deterministic test IDs; all7main jobs passed previous head. Fresh refs, guarded merge and exact tested-main tree required. No runtime/shared DB.",
+  "remaining_step": "Package3 UNIT-TRAINING-CASHIER-ACCEPTANCE-01: cashier training UI, saved recovery/TEST receipt and final physical/mixed browser acceptance. Not started; no local/cloud product grant. No deployment, runtime restart or shared DB migration.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Access to expired source.sale.id after savepoint rollback causes implicit async ORM IO/MissingGreenlet",
       "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "fix": "Plain sale UUID saved before rollback; assertions retained; local style/collection and independent QA PASS, final CI pending"
+      "fix": "Plain sale UUID saved before rollback; assertions retained; local style/collection and independent QA PASS, final CI pending",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved"
     },
     "backend_roundtrip": {
       "step": "Verify cluster-safe migration roundtrip",
       "cause": null,
       "consecutive": 0,
-      "resolved_on": "57aed2b68995eb113da387a2a864e4427ed1cd2e",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
       "approved_retry": true,
-      "evidence": "backend3391 both parallel actions advanced to Pytest"
+      "evidence": "backend3391 both parallel actions advanced to Pytest",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved",
+      "approval_consumed": true
     },
     "edge_fixture": {
       "step": "Pytest Edge ledger audit fixture",
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Fixture restores Sale triggers before pending training_checkout_complete events are checked",
       "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
-      "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain"
+      "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved"
     },
     "foundation_policy": {
       "step": "Foundation RLS metadata contract",
@@ -69,29 +78,41 @@
       ],
       "fix": "Canonical scoped-support predicate substituted; user approved retry; exact final-head CI pending",
       "approved_retry": true,
-      "resolved_on": "f574b81a2750dcfa4a0e45d5e4b4c610cca30b84",
-      "evidence": "backend3429 Pytest shard1 success; strict foundation metadata and branch isolation assertions retained"
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "evidence": "backend3429 Pytest shard1 success; strict foundation metadata and branch isolation assertions retained",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved",
+      "approval_consumed": true
     },
     "metadata_cursor": {
       "step": "Training schema privilege metadata test",
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
       "head": "71ad98f372bc1434123bec466d6e279038dd1879",
-      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions"
+      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved"
     },
     "raw_quote_shape": {
       "step": "Raw journal extra quote-line rejection",
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
       "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
-      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes"
+      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved"
     },
     "collection_ids": {
       "step": "CI gate full collection evidence",
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
       "cause": "Two random UUID string parameters produce different pytest nodeids across shard collection processes; all7main jobs including backend passed",
-      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes"
+      "fix": "Explicit stable pytest IDs on two parameter rows; keep random test values and strict gate; compare full collections in two processes",
+      "resolved_on": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "resolved_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "status": "resolved"
     }
   },
   "runtime_changes": false,
@@ -241,7 +262,7 @@
     }
   ],
   "ci_workflow": "f47b1b69-9738-463b-a5a7-0242e932b92d",
-  "control_commit": "0cbd57404e71c59c3504228d7de2960a3cf34d10",
+  "control_commit": "ad4bb169b20192320eeb6f3528ed70f2ede47550",
   "review_fix": {
     "cause": "New journal must be included in existing selective migration and global privilege inventories",
     "fix": "5+18 registration lines only; no production grant/guard changes",
@@ -251,11 +272,48 @@
   "approvals": {
     "migration_ceiling_retry": {
       "source": "Explicit user answer: Да, исправить и продолжить этот этап",
-      "scope": "Only align role-contract223->224 and rerun same PR stage; no runtime/shared DB/dependency changes"
+      "scope": "Only align role-contract223->224 and rerun same PR stage; no runtime/shared DB/dependency changes",
+      "completed_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "future_exception": false
     },
     "foundation_policy_retry": {
       "source": "Explicit user answer Да, исправить и продолжить этот этап",
-      "scope": "Replace new policy legacy helper with canonical scoped-support helper; same PR full CI and main; no shared DB/runtime/dependencies"
+      "scope": "Replace new policy legacy helper with canonical scoped-support helper; same PR full CI and main; no shared DB/runtime/dependencies",
+      "completed_in_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "future_exception": false
     }
+  },
+  "validated_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+  "merge_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "verified_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "final_ci": {
+    "head": "06b19247d7f968786d7a955353b70f48a9617eef",
+    "workflow": "f47b1b69-9738-463b-a5a7-0242e932b92d",
+    "contexts": "all8success",
+    "backend": {
+      "tests": 6960,
+      "shards": 2,
+      "complete_evidence": true
+    },
+    "frontend": {
+      "tests": 3203,
+      "files": 239
+    },
+    "browser": 165,
+    "new_stage_cases": 115,
+    "strict_gate_unchanged": true
+  },
+  "final_proof": {
+    "merge_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "main_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+    "tested_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+    "identical": true,
+    "isolated_tracking_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "isolated_diff": "empty",
+    "primary_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_unchanged": true,
+    "shared_db_access": false,
+    "runtime_changes": false,
+    "paid_resources_created": 0
   }
 }

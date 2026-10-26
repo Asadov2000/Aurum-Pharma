@@ -5,7 +5,7 @@
   "counter": {
     "open_blocks": 3,
     "total_blocks": 7,
-    "remaining_packages_to_2_of_7": 2,
+    "remaining_packages_to_2_of_7": 1,
     "unit": "accepted functional package, not request or PR"
   },
   "scope": "Existing block5 training physical and mixed sale only; no new requirements",
@@ -31,7 +31,7 @@
     {
       "number": 2,
       "id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
-      "status": "awaiting_ci",
+      "status": "completed",
       "goal": "Separate server completion and recovery of immutable clearly test-marked document, no real payments/stock movements/report effects",
       "acceptance": [
         "Persisted sale.is_test and current tenant/branch/actor authority checked",
@@ -41,7 +41,11 @@
       "depends_on": 1,
       "branch": "codex/unit-training-checkout",
       "pr": 427,
-      "head": "06b19247d7f968786d7a955353b70f48a9617eef"
+      "head": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "validated_head": "06b19247d7f968786d7a955353b70f48a9617eef",
+      "validated_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+      "merge_commit": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "ci": "all8success"
     },
     {
       "number": 3,
@@ -57,12 +61,12 @@
     }
   ],
   "execution": {
-    "product_writer": "local root generation9 with explicitly partitioned backend and DB agents; cloud standby",
+    "product_writer": "none: package2 complete; local and cloud product grants closed",
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
     "cloud_product_grant": false,
     "old_schedulers": "PAUSED",
-    "current_stage_grant_active": true,
+    "current_stage_grant_active": false,
     "current_generation": 9
   },
-  "verified_main": "574248d3a1fa1daaec3aecc1cbb67a4a33233636"
+  "verified_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501"
 }
