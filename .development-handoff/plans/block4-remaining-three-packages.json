@@ -14,7 +14,7 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
       "number": 1,
-      "status": "in_progress",
+      "status": "awaiting_ci",
       "goal": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
       "acceptance": [
         "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
@@ -31,7 +31,9 @@
         "Dependency or stack changes",
         "Runtime deployment, shared database access"
       ],
-      "suggested_branch": "codex/mixed-electronic-refund-client-recovery"
+      "suggested_branch": "codex/mixed-electronic-refund-client-recovery",
+      "pr": 423,
+      "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e"
     },
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
@@ -59,8 +61,8 @@
     }
   ],
   "execution": {
-    "product_writer": "cloud only after explicit fresh grant",
-    "local_role": "read-only review / isolated QA only",
+    "product_writer": "local only, generation5; cloud standby without product grant",
+    "local_role": "implementation / independent review / isolated QA / CI publication",
     "new_stage_grant_issued": true,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
@@ -69,6 +71,9 @@
       "Two identical failures STOP; standing exception only Ruff E501",
       "Check actual main/open/recent merged PRs and exact source/tools before grant; head-guarded publication/merge; verify tested tree in main"
     ],
-    "product_writer_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062"
+    "product_writer_task": null,
+    "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
+    "product_writer_run": "local-2026-10-26-client-recovery-01",
+    "current_generation": 5
   }
 }
