@@ -54,7 +54,10 @@ def _patch(signature: str, old: str, new: str, *, upgrade: bool) -> None:
     source, target = (old, new) if upgrade else (new, old)
     if not isinstance(definition, str) or definition.count(source) != 1:
         raise RuntimeError("Training checkout migration anchor changed")
-    _sql(definition.replace(source, target, 1))
+    # pg_get_functiondef uses tagged $function$ bodies: this is one statement,
+    # not a batch for the historical $$-only SQL splitter.
+    updated = definition.replace(source, target, 1)
+    op.execute(text(updated.replace(":", r"\:")))
 
 
 SQL = """

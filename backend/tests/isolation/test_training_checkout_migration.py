@@ -9,9 +9,11 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import insert, text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.sql.elements import TextClause
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -107,6 +109,50 @@ def test_physical_if_case_does_not_end_plpgsql_condition_at_an_inner_then() -> N
             terminators += 1
     assert depth == 0
     assert terminators == 1
+
+
+@pytest.mark.parametrize("upgrade", [True, False], ids=["upgrade", "downgrade"])
+def test_function_patch_executes_one_intact_tagged_definition(
+    monkeypatch: pytest.MonkeyPatch, upgrade: bool
+) -> None:
+    module = migration()
+    original = """CREATE OR REPLACE FUNCTION public.training_patch_probe()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO pg_catalog,pg_temp
+AS $function$
+DECLARE marker TEXT;
+BEGIN
+  marker := ':named'::TEXT;
+  PERFORM 1;
+  RAISE NOTICE '12:34; semicolon';
+  RETURN NEW;
+END;
+$function$
+"""
+    anchor = "  PERFORM 1;"
+    replacement = anchor + "\n  PERFORM 2;"
+    upgraded = original.replace(anchor, replacement, 1)
+    definition = original if upgrade else upgraded
+    statements: list[TextClause] = []
+
+    class FakeBind:
+        def scalar(self, statement: TextClause, parameters: dict[str, str]) -> str:
+            assert str(statement) == "SELECT pg_get_functiondef(CAST(:signature AS regprocedure))"
+            assert parameters == {"signature": "public.training_patch_probe()"}
+            return definition
+
+    def reject_batch_splitter(_statement: str) -> None:
+        raise AssertionError("a complete pg_get_functiondef must never use the batch splitter")
+
+    monkeypatch.setattr(module.op, "get_bind", FakeBind)
+    monkeypatch.setattr(module.op, "execute", statements.append)
+    monkeypatch.setattr(module, "_sql", reject_batch_splitter)
+    module._patch("training_patch_probe()", anchor, replacement, upgrade=upgrade)
+    assert len(statements) == 1
+    assert isinstance(statements[0], TextClause)
+    compiled = statements[0].compile(dialect=postgresql.dialect())
+    assert compiled.params == {}
+    assert str(compiled) == (upgraded if upgrade else original)
 
 
 async def test_training_schema_uses_least_privilege_and_private_function_ownership(
