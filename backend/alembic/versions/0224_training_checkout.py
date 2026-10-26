@@ -424,11 +424,11 @@ BEGIN
      OR coalesce(line->>'base_units','') !~ '^[1-9][0-9]{0,10}$'
      OR receipt_line->>'quantity' IS DISTINCT FROM line->>'quantity'
      OR receipt_line->>'base_units' IS DISTINCT FROM line->>'base_units'
-     OR receipt_line->>'unit_label' IS DISTINCT FROM CASE line->>'sale_format'
+     OR receipt_line->>'unit_label' IS DISTINCT FROM (CASE line->>'sale_format'
        WHEN 'pack' THEN 'уп.' WHEN 'blister' THEN 'блист.'
        ELSE CASE line->'packaging'->>'unit'
          WHEN 'tablet' THEN 'табл.' WHEN 'capsule' THEN 'капс.' WHEN 'ampoule' THEN 'амп.'
-         WHEN 'sachet' THEN 'саше' WHEN 'suppository' THEN 'супп.' END END
+         WHEN 'sachet' THEN 'саше' WHEN 'suppository' THEN 'супп.' END END)
      OR net<=0
      OR (receipt_line->'packaging')::TEXT IS DISTINCT FROM (line->'packaging')::TEXT
      OR receipt_line->'base_units' IS DISTINCT FROM line->'base_units'

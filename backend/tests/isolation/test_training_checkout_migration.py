@@ -1,6 +1,7 @@
 """Training journal schema, private guards and safe reversible empty-history upgrade."""
 
 import importlib.util
+import re
 from pathlib import Path
 from types import ModuleType
 from typing import cast
@@ -84,6 +85,28 @@ def test_training_migration_hooks_are_private_bounded_and_reversible(
     assert drops.index("downgrade_requires_empty_history") < drops.index("DROP TRIGGER")
     assert drops.index("DROP FUNCTION") < drops.index("DROP TABLE")
     assert "a02_training_checkout_return_boundary ON public.sale" in drops
+
+
+def test_physical_if_case_does_not_end_plpgsql_condition_at_an_inner_then() -> None:
+    sql = migration().SQL
+    comparison = sql.index("receipt_line->>'unit_label' IS DISTINCT FROM")
+    start = sql.rfind("\n   IF ", 0, comparison)
+    end = sql.index("\n    RAISE EXCEPTION 'training_checkout_physical_source_invalid'", comparison)
+    assert 0 <= start < comparison < end
+    # PostgreSQL read_sql_construct stops at THEN outside ()/[], without
+    # tracking CASE nesting. Exercise that boundary rather than exact SQL text.
+    condition = sql[start:end]
+    depth = 0
+    terminators = 0
+    for token in re.findall(r"'(?:''|[^'])*'|[()[\]]|\bTHEN\b", condition):
+        if token in {"(", "["}:
+            depth += 1
+        elif token in {")", "]"}:
+            depth -= 1
+        elif token == "THEN" and depth == 0:
+            terminators += 1
+    assert depth == 0
+    assert terminators == 1
 
 
 async def test_training_schema_uses_least_privilege_and_private_function_ownership(
