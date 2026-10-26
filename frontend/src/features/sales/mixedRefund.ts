@@ -108,7 +108,7 @@ const physicalOption = z
     original_sale_format: format,
   })
   .strict();
-const optionsSchema = z
+export const optionsSchema = z
   .object({
     parent_sale_id: uuid,
     branch_id: uuid,

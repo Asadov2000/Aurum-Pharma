@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_branch_permission, require_writable_tenant
 from app.core.errors import BusinessRuleError
-from app.domains.pos.mixed_cash_refund_api_schemas import MixedRefundQuoteRequest
+from app.domains.pos.mixed_cash_refund_api_schemas import (
+    MixedRefundOptions,
+    MixedRefundQuoteRequest,
+)
 from app.domains.pos.mixed_electronic_refund_intent_repository import (
     MixedElectronicRefundIntentRepository,
 )
@@ -39,6 +42,24 @@ def _tenant(user: CurrentUser) -> UUID:
     if user.tenant_id is None:
         raise BusinessRuleError("Mixed electronic refund review requires a tenant")
     return user.tenant_id
+
+
+@router.get("/options", response_model=MixedRefundOptions)
+async def read_mixed_electronic_refund_options(
+    parent_sale_id: UUID,
+    user: ReviewUser,
+    db: ReviewSession,
+    response: Response,
+) -> MixedRefundOptions:
+    response.headers["Cache-Control"] = "private, no-store"
+    return await MixedElectronicRefundPreviewService(
+        MixedElectronicRefundPreviewRepository(db)
+    ).options(
+        tenant_id=_tenant(user),
+        parent_sale_id=parent_sale_id,
+        actor_id=user.user_id,
+        allowed_branch_ids=user.branch_scope_for("pos.refund"),
+    )
 
 
 @router.post("/quote", response_model=MixedElectronicRefundPreview)

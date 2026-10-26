@@ -1,6 +1,7 @@
 import { request, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
+import { verifyMixedElectronicRefundRecovery } from "./mixedElectronicRefundFlow";
 import {
   addPosItemToCart,
   apiContext,
@@ -438,10 +439,10 @@ test("recovers card preparation after a lost binding response and cancels withou
 });
 
 for (const kind of ["physical", "mixed"] as const) {
-  test(`completes ${kind} electronic checkout and recovers a lost completion with GET only`, async ({
+  test(`completes ${kind} electronic checkout, recovers a lost completion${kind === "mixed" ? " and mixed electronic refund" : ""} with GET only`, async ({
     page,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(kind === "mixed" ? 180_000 : 120_000);
     clearLoginRateLimit(OWNER.email);
     const anonymous = await request.newContext();
     const tokens = await apiLogin(anonymous, OWNER);
@@ -588,6 +589,14 @@ for (const kind of ["physical", "mixed"] as const) {
       );
       expect(final.ok()).toBe(true);
       expect(await final.json()).toEqual(original);
+      if (kind === "mixed" && legacy)
+        await verifyMixedElectronicRefundRecovery(
+          page,
+          api,
+          original,
+          legacy.brand_name,
+          medicine.brand_name,
+        );
     } finally {
       await api.dispose();
       await anonymous.dispose();
