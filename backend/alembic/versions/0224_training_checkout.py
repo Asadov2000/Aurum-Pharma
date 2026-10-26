@@ -744,7 +744,7 @@ def upgrade() -> None:
       CREATE POLICY support ON public.pos_training_checkout FOR SELECT TO aurum_support
        USING(true);
       CREATE POLICY tenant_actor ON public.pos_training_checkout TO aurum_app
-       USING(session_user='aurum_app' AND NOT public.is_support_session()
+       USING(session_user='aurum_app' AND NOT public.is_tenant_support_session()
         AND tenant_id=public.current_tenant_id()
         AND cashier_user_id=public.current_app_user_id()
         AND EXISTS(SELECT 1 FROM public.app_user
