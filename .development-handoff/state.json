@@ -3,7 +3,7 @@
   "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
   "generation": 9,
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "blocked",
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
@@ -34,18 +34,24 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Full final-head CI; confirm app-only predicate control flow preserves support/Edge/bootstrap, then fresh refs/guarded merge/exact tested-main tree.",
+  "remaining_step": "With user approval only: role-contract revision ceiling223->224; exact source tests/style; same PR final CI and guarded merge. No runtime/shared DB changes.",
   "failure_counters": {
     "current_stage": {
       "step": "CI disposable DB seed",
       "consecutive": 1,
       "cause": "Missing EXECUTE for invoker trigger calling narrowly scoped training checkout predicate; least-privilege EXECUTE fixed, final CI recheck pending"
+    },
+    "backend_roundtrip": {
+      "step": "Verify cluster-safe migration roundtrip",
+      "cause": "actual_head_number224 != role_contract_head223 at backend-10.sh line14",
+      "consecutive": 4,
+      "confirmed_by": "Same unchanged role-contract line864 across attempts1-4; backend action exits before SQL"
     }
   },
   "runtime_changes": false,
   "shared_db_access": false,
   "paid_resources_created": 0,
-  "blocker": null,
+  "blocker": "Awaiting user exception to two-identical-failures rule: backend-10 compares migration head224 to role-contract max223; repeated attempts retained same mismatch.",
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-SIMULATION-CORE-01",
     "pr": 426,
@@ -112,7 +118,7 @@
     }
   ],
   "ci_workflow": "bb398962-9f65-4486-abc2-e27767e9ae8e",
-  "control_commit": "25409e206a6c7a64c6e1f0400734712738777a1c",
+  "control_commit": "c3827961ac869ffe9f49e164b2f99822f39ce9fa",
   "review_fix": {
     "cause": "Bootstrap normalizes Edge routine ACL, so non-app invoker must skip app-only training predicate",
     "fix": "Explicit nested PL/pgSQL IF; EXECUTE only aurum_app; other functions private",
