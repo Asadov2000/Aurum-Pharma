@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
+  "expected_head": "d8dfef8cbe82c9cd75f18218174e77656002a549",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -37,8 +37,9 @@
   "remaining_step": "Full final-head CI incl migration/RLS/HTTP/rollback; diagnose failures per persisted two-failure rule; fresh main/head/control then guarded merge/exact tested-main tree. After accepted,3/7(1). No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
-      "consecutive": 0,
-      "cause": null
+      "step": "CI schema migration",
+      "consecutive": 1,
+      "cause": "0224 unparenthesized CASE in IF; fixed, actual PostgreSQL recheck pending"
     }
   },
   "runtime_changes": false,
@@ -69,15 +70,27 @@
   ],
   "local_checks": {
     "pure_contracts": "26 passed",
-    "migration_hooks_no_db": "1 passed",
-    "new_cases_collected": 111,
+    "migration_hooks_no_db": "2 passed incl parser-boundary regression",
     "ruff": "PASS17file scope (15 Python)",
     "black": "PASS15 Python",
     "mypy": "PASS505app sources",
     "converter_move": "AST exactly preserved; compatibility export typed via __all__",
     "independent_qa": "APPROVE, findings resolved",
     "db_execution": "not run locally; mandatory isolated CI",
-    "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565"
+    "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565",
+    "new_cases_expected": 112
   },
-  "source_tree": "63469b817687f53544ef100a1535e0f57c333c1d"
+  "source_tree": "01febc3c4a3c9f9c1d99b0a31e7d6efad1c3b675",
+  "ci_attempt": 2,
+  "previous_ci_failure": {
+    "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
+    "workflow": "e567f18d-c3e5-4e7b-b036-e845ffca86b8",
+    "cause": "Unparenthesized CASE inside PL/pgSQL IF condition terminated at internal THEN; migration0224 syntax end-of-input",
+    "checks": [
+      "backend",
+      "e2e",
+      "production-containers"
+    ],
+    "fix": "2 parentheses; parser-boundary regression"
+  }
 }
