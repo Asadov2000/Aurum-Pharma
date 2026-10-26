@@ -41,14 +41,15 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
       "number": 2,
-      "status": "not_started",
+      "status": "in_progress",
       "goal": "Cashier form/entrypoint using package1, explicit operator stages, existing permissions/MFA, recovery and receipt",
       "acceptance": [
         "Mixed electronic refund selectable from supported completed sale",
         "Existing quote/review/bind/activate/evidence/post/cancel rules and current scope permissions preserved",
         "Reload/reopen/lost response uses existing saved operation; completed result opens canonical receipt"
       ],
-      "depends_on": 1
+      "depends_on": 1,
+      "branch": "codex/mixed-electronic-refund-cashier-ui"
     },
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
@@ -64,9 +65,9 @@
     }
   ],
   "execution": {
-    "product_writer": "none; package1 merged, next package requires fresh single-writer grant",
-    "local_role": "preferred next developer; standby after completed package1",
-    "new_stage_grant_issued": false,
+    "product_writer": "local only, generation6; cloud standby without product grant",
+    "local_role": "implementation / isolated QA / independent review / CI publication",
+    "new_stage_grant_issued": true,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
@@ -76,9 +77,9 @@
     ],
     "product_writer_task": null,
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
-    "product_writer_run": "local-2026-10-26-client-recovery-01",
-    "current_generation": 5,
-    "current_stage_grant_active": false
+    "product_writer_run": "local-2026-10-26-mixed-refund-cashier-ui-01",
+    "current_generation": 6,
+    "current_stage_grant_active": true
   },
   "verified_main": "a19bc74b029b424f804727469faccaba24e0022c"
 }
