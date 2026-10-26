@@ -3,11 +3,11 @@
   "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
   "generation": 9,
   "owner": "local",
-  "phase": "ci-fix",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "57c0984cff4a8d5349e49cf8eac8811117c5d7e2",
+  "expected_head": "71ad98f372bc1434123bec466d6e279038dd1879",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "All8 final-head CI; fresh actual main/head/control; guarded merge and exact tested-main tree. No runtime/shared DB.",
+  "remaining_step": "Complete final-head CI incl full backend, Edge fixture, selective migration rehearsal and runtime privilege inventories; fresh refs, guarded merge and exact tested-main tree. No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
@@ -100,10 +100,11 @@
     "revision_contract": "PASS: one Alembic head0224 and role-contract224; one-line diff only, no grants changed",
     "json_grouping": "30 no-DB regressions, Ruff/Black/diff PASS; independent full SQL operator review APPROVE",
     "rollback_test_fix": "Ruff/Black/whitespace PASS; immutable sale UUID captured before rollback; 500/effects/journal assertions retained; QA cause confirmed; collect-only PASS, QA APPROVE",
-    "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE"
+    "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE",
+    "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES"
   },
-  "source_tree": "1afd14265fa7ba09a67680824ae83833bd73dd3c",
-  "ci_attempt": 9,
+  "source_tree": "ed1cbea18ea00f7c9d533c2395357117e726a2a0",
+  "ci_attempt": 10,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -161,12 +162,13 @@
       "workflow": "87f3bef7-5bdc-4c2a-8ffe-07c8507c425c"
     }
   ],
-  "ci_workflow": "6a37415f-826c-4755-ba6d-8da78a529e5a",
-  "control_commit": "ebc04876f1ae9d8df3eb37436a5933dd9b2fa4c6",
+  "ci_workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6",
+  "control_commit": "fe9601b83c8c73bc3b7e15eb60c55517cddf542c",
   "review_fix": {
-    "cause": "Later manual migration rehearsal omits new table while dropping tenant-access function",
-    "fix": "Register training table in existing selective rehearsal lists; DB-agent bounded edit in progress",
-    "ci_failure_count": 0
+    "cause": "New journal must be included in existing selective migration and global privilege inventories",
+    "fix": "5+18 registration lines only; no production grant/guard changes",
+    "ci_failure_count": 0,
+    "head": "71ad98f372bc1434123bec466d6e279038dd1879"
   },
   "approvals": {
     "migration_ceiling_retry": {
