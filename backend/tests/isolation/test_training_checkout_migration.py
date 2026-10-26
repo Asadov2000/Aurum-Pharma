@@ -20,6 +20,7 @@ from alembic.operations import Operations
 from app.domains.pos.training_checkout_models import TrainingCheckout
 from app.domains.pos.training_checkout_repository import TrainingCheckoutRepository
 from app.domains.pos.training_checkout_schemas import TrainingCheckoutResultV1
+from app.domains.sync.integrity import canonical_json_hash
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
 from tests.domains.pos.test_training_checkout import complete, facts, training_source
@@ -413,7 +414,8 @@ async def test_training_history_blocks_downgrade_without_touching_saved_result(
         ("invalid-stock-created-at", "stock_shape"),
         ("missing-legacy-quantity", "legacy_stock_shape"),
         ("extra-opened-pack-field", "opened_pack_shape"),
-        ("extra-quote-line", "quote_line_shape"),
+        ("extra-quote-line", "hash"),
+        ("extra-quote-line-rehashed", "quote_line_shape"),
         ("extra-receipt-line", "receipt_line_shape"),
     ],
 )
@@ -458,7 +460,7 @@ async def test_raw_journal_rejects_unreadable_typed_payloads_before_persistence(
                 "extra-quote-line": cast(list[dict[str, object]], quote["lines"])[0],
                 "extra-receipt-line": cast(list[dict[str, object]], receipt["lines"])[0],
             }
-            extra_targets[mutation]["unexpected"] = True
+            extra_targets[mutation.removesuffix("-rehashed")]["unexpected"] = True
         elif mutation in {"packaging-string-version", "packaging-float-version"}:
             packaging = cast(dict[str, object], physical_before[0]["packaging"])
             packaging["version"] = "2" if mutation.endswith("string-version") else 2.0
@@ -468,6 +470,13 @@ async def test_raw_journal_rejects_unreadable_typed_payloads_before_persistence(
             cast(list[dict[str, object]], simulation["legacy_before"])[0].pop("quantity_remaining")
         else:
             raise AssertionError("unknown raw journal mutation")
+        quote_revision = result.request.expected_revision_hash
+        if mutation == "extra-quote-line-rehashed":
+            # Exercise the shape guard independently of the earlier hash guard.
+            quote_revision = canonical_json_hash(quote)
+            payload_request = cast(dict[str, object], payload["request"])
+            payload_request["expected_revision_hash"] = quote_revision
+            request_hash = canonical_json_hash(payload_request)
         # Core INSERT deliberately bypasses all request/result Pydantic validation.
         # The database must reject this row before complete_sale can run.
         await repository.session.execute(
@@ -480,7 +489,7 @@ async def test_raw_journal_rejects_unreadable_typed_payloads_before_persistence(
                 cashier_user_id=result.cashier_id,
                 sale_id=result.sale_id,
                 request_hash=request_hash,
-                quote_revision=result.request.expected_revision_hash,
+                quote_revision=quote_revision,
                 total_amount=result.total_amount,
                 receipt_number=result.receipt_number,
                 receipt_seq=result.receipt_sequence,
