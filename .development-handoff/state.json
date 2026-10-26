@@ -1,96 +1,53 @@
 {
   "version": 1,
-  "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
-  "generation": 6,
+  "work_item_id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
+  "generation": 7,
   "owner": "local",
-  "phase": "merged",
-  "run_id": "local-2026-10-26-mixed-refund-cashier-ui-01",
-  "branch": "codex/mixed-electronic-refund-cashier-ui",
-  "base_sha": "a19bc74b029b424f804727469faccaba24e0022c",
-  "expected_head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
+  "phase": "active",
+  "run_id": "local-2026-10-26-block4-acceptance-01",
+  "branch": "codex/unit-payment-block4-acceptance",
+  "base_sha": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
+  "expected_head": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
   "source_tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f",
-  "validated_sha": "bd4efbe16ba039931fe251ab53c69467acb78a24",
-  "pr": 424,
+  "validated_sha": null,
+  "pr": null,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "pending_transfer": false,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "plan_path": ".development-handoff/plans/block4-remaining-three-packages.json",
   "counter": "4/7 (1)",
-  "scope": "Cashier mixed electronic refund entry/form and existing lifecycle/recovery/receipt; necessary read-only option discovery from existing immutable electronic history, no schema changes",
+  "scope": "Final acceptance of existing block4: physical/mixed card/QR/split sale/refund matrix, recovery and no duplicate stock/payment effects; evidence/docs only unless a concrete acceptance failure requires a minimal fix",
   "acceptance": [
-    "Mixed electronic refund selectable from supported completed sale",
-    "Existing quote/review/bind/activate/evidence/post/cancel rules and current scope permissions preserved",
-    "Reload/reopen/lost response uses existing saved operation; completed result opens canonical receipt"
+    "Browser flows verify card/QR/combined payments/refunds, lost response, reload, closed shift, current permissions and readonly",
+    "No duplicate payout/payment/stock movement; existing cash and physical regressions remain green",
+    "All mandatory CI on final head; evidence against fixed block4 criteria; then remaining block counter changes to3/7"
   ],
   "excluded": [
-    "Dependency/stack changes",
-    "Migrations/new persistent tables",
-    "Bank integrations or external payouts",
-    "UI reference page redesign",
-    "Runtime/deployment/shared database access"
+    "New product requirements",
+    "Training simulation/Edge/pilot release",
+    "Bank integration or external payout calls",
+    "Dependencies/stack changes",
+    "Deployment/runtime/shared DB access"
   ],
-  "remaining_step": "Package2 complete. Next UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01: fixed existing block4 card/QR/split physical/mixed sales/refunds, lost response/reload/closed shift/current rights/readonly, no duplicate payment/payout/stock movement, full finalhead CI. Fresh actual main/PR/owner check required before any next grant. No new requirements, bank integrations, deployment or shared DB.",
+  "remaining_step": "Fill confirmed browser coverage gaps (QR/split checkout/refund, stock snapshots), reconcile existing backend/frontend authority evidence, full finalhead CI and guarded merge; only then close block4 and counter3/7.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
-    },
-    "local_resolved": [
-      {
-        "step": "formatter",
-        "cause": "wrong existing interpreter lacks Black",
-        "count": 1,
-        "resolution": "use verified existing QAvenv Black26.10.1; formatter and check passed"
-      },
-      {
-        "step": "local pure selection",
-        "cause": "DB-dependent preview test module selected alongside pure tests",
-        "count": 1,
-        "resolution": "real connections blocked; only pure/API run locally37pass, allDB cases retained for disposable CI"
-      },
-      {
-        "step": "additional strict QA",
-        "cause": "optional QA config included preexisting test code not covered by project tsc, unchecked baseline indexes",
-        "count": 1,
-        "resolution": "project tsconfig unchanged; extra strict check scoped to new tests/E2E, baseline Vitest preserved"
-      },
-      {
-        "step": "ESLint",
-        "cause": "unnecessary useCallback sale dependencies",
-        "count": 1,
-        "resolution": "removed unused deps, full lint passes unchanged zero-warning limit"
-      }
-    ]
+    }
   },
   "previous_completed": {
-    "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
-    "pr": 423,
-    "main": "a19bc74b029b424f804727469faccaba24e0022c",
-    "tree": "b9c527d84a3e317c8486ececee2988b720a122a4",
-    "validated_head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
-    "ci": "all8success; exact tested/main tree verified",
-    "failure_history": {
-      "current_stage": {
-        "consecutive": 0,
-        "cause": null,
-        "resolved_previous": {
-          "consecutive": 2,
-          "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third"
-        }
-      },
-      "historical_restore": {
-        "proper_vm_proxy": 1,
-        "oversize_transport": 1,
-        "resolved_by": "offline verified inputs within per-file limits; source and tools READY",
-        "old_scratch_execution_offline": 2,
-        "old_scratch_stop": true
-      }
-    }
+    "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
+    "pr": 424,
+    "main": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
+    "tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f",
+    "validated_head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
+    "ci": "all8success; main/tested tree exact"
   },
   "old_actors": {
     "scratch": {
@@ -112,36 +69,5 @@
   "runtime_changes": false,
   "shared_db_access": false,
   "paid_resources_created": 0,
-  "blocker": null,
-  "local_checks": {
-    "head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
-    "frontend_targeted": 97,
-    "backend_pure": 37,
-    "backend_network_connections": 0,
-    "ruff": "PASS",
-    "black": "PASS",
-    "mypy": "PASS497appfiles",
-    "app_typecheck": "PASS",
-    "additional_strict_new_tests_e2e": "PASS",
-    "eslint": "PASS",
-    "prettier": "PASS",
-    "build_startup_budgets": "PASS",
-    "playwright_list": "6cases including mixed refund extension; no setup/execution locally",
-    "whitespace": "PASS",
-    "independent_review": "APPROVE"
-  },
-  "ci_workflow": "0aca0f18-a655-4c88-b19c-f81f9d6e69a8",
-  "main_sha": "52b0a7582725f775888c6ff7f87d591bd0f0dba3",
-  "main_tree": "b573e4bab7c57b36644cd5a313904b4f76d8109f",
-  "merged_at": "2026-10-26T13:19:36Z",
-  "next_work_item_id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
-  "next_stage_grant_issued": false,
-  "ci_final": {
-    "workflow": "0aca0f18-a655-4c88-b19c-f81f9d6e69a8",
-    "head": "bd4efbe16ba039931fe251ab53c69467acb78a24",
-    "all8success": true,
-    "frontend_tests": 3203,
-    "e2e": 161
-  },
-  "cloud_checkout_note": "Cloud remains historical standby with no product grant. Packages1/2 merged in PR423/424; future cloud continuation must read actual main52b0a758 and control, synchronize safely, never replay old snapshots."
+  "blocker": null
 }

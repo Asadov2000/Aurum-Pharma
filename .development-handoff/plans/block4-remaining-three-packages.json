@@ -59,20 +59,21 @@
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
       "number": 3,
-      "status": "not_started",
+      "status": "in_progress",
       "goal": "Final existing block4 acceptance across physical/mixed card/QR/split sales and refunds",
       "acceptance": [
         "Browser flows verify card/QR/combined payments/refunds, lost response, reload, closed shift, current permissions and readonly",
         "No duplicate payout/payment/stock movement; existing cash and physical regressions remain green",
         "All mandatory CI on final head; evidence against fixed block4 criteria; then remaining block counter changes to3/7"
       ],
-      "depends_on": 2
+      "depends_on": 2,
+      "branch": "codex/unit-payment-block4-acceptance"
     }
   ],
   "execution": {
-    "product_writer": "none; package2 merged, next acceptance package requires fresh single-writer grant",
-    "local_role": "preferred next developer; standby after completed package2",
-    "new_stage_grant_issued": false,
+    "product_writer": "local only, generation7; cloud standby without grant",
+    "local_role": "acceptance implementation / independent review / isolated QA / full CI",
+    "new_stage_grant_issued": true,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
@@ -82,9 +83,9 @@
     ],
     "product_writer_task": null,
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
-    "product_writer_run": "local-2026-10-26-mixed-refund-cashier-ui-01",
-    "current_generation": 6,
-    "current_stage_grant_active": false
+    "product_writer_run": "local-2026-10-26-block4-acceptance-01",
+    "current_generation": 7,
+    "current_stage_grant_active": true
   },
   "verified_main": "52b0a7582725f775888c6ff7f87d591bd0f0dba3"
 }
