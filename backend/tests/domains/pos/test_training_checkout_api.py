@@ -302,6 +302,7 @@ async def test_training_http_commit_failure_never_returns_saved_success(
     db_session: AsyncSession,
 ) -> None:
     source = await source_for(db_session)
+    sale_id = source.sale.id
 
     async def failing_commit() -> AsyncIterator[AsyncSession]:
         async with db_session.begin_nested():
@@ -311,16 +312,16 @@ async def test_training_http_commit_failure_never_returns_saved_success(
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         async with cart_actor(db_session):
-            body = await request_for(client, source.sale.id)
+            body = await request_for(client, sale_id)
             before = await facts(db_session)
             app.dependency_overrides[get_db] = failing_commit
-            response = await client.post(f"{training_path(source.sale.id)}/complete", json=body)
+            response = await client.post(f"{training_path(sale_id)}/complete", json=body)
             assert response.status_code == 500
             assert await facts(db_session) == before
             assert (
                 await db_session.scalar(
                     text("SELECT count(*) FROM pos_training_checkout WHERE sale_id=:sale"),
-                    {"sale": source.sale.id},
+                    {"sale": sale_id},
                 )
                 == 0
             )
