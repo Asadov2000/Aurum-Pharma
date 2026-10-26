@@ -13,7 +13,7 @@
     {
       "number": 1,
       "id": "UNIT-TRAINING-SIMULATION-CORE-01",
-      "status": "implementation",
+      "status": "awaiting_ci",
       "goal": "Pure simulation of both stock systems on copies, exact existing retail quote, deterministic typed training-only outcome",
       "acceptance": [
         "Whole physical/mixed basket simulated without stock/payment/DB writes, unchanged inputs, deterministic repeat",
@@ -21,7 +21,9 @@
         "Strict typed explicit is_test simulation result without real payment/stock/receipt identities",
         "Independent QA, targeted pure tests/style/types then all8 final-head CI before guarded merge and tested-main tree proof"
       ],
-      "branch": "codex/unit-training-simulation"
+      "branch": "codex/unit-training-simulation",
+      "pr": 426,
+      "head": "036182463bb74a1014b76862170ec146bfd3a3e8"
     },
     {
       "number": 2,
