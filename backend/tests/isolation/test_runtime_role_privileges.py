@@ -63,6 +63,7 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_training_checkout",
     "pos_mixed_electronic_refund_posting",
     "pos_mixed_electronic_refund_outcome",
     "pos_mixed_electronic_refund_binding",
@@ -273,6 +274,13 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "assert_training_checkout_stock_snapshot",
+    "assert_training_checkout_document",
+    "assert_training_checkout",
+    "trg_training_checkout_guard",
+    "training_checkout_sale_write_allowed",
+    "trg_training_checkout_complete",
+    "trg_training_checkout_return_boundary",
     "mixed_electronic_refund_posting_write_allowed",
     "assert_mixed_electronic_refund_posting",
     "trg_mixed_electronic_refund_posting_guard",
@@ -763,6 +771,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "training_checkout_sale_write_allowed",
     "physical_writeoff_status",
     "record_physical_writeoff",
     "cancel_physical_writeoff",
@@ -1619,6 +1628,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'physical_writeoff_command','physical_writeoff_entry',
                       'physical_writeoff_cancellation',
                       'mixed_customer_return_disposition','physical_customer_return_disposition',
+                      'pos_training_checkout',
                       'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
                       'pos_physical_return_command','pos_physical_return_line',
@@ -1628,6 +1638,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "pos_training_checkout",
         "physical_writeoff_command",
         "physical_writeoff_entry",
         "physical_writeoff_cancellation",
@@ -1701,6 +1712,12 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "assert_training_checkout_stock_snapshot",
+        "assert_training_checkout_document",
+        "assert_training_checkout",
+        "trg_training_checkout_guard",
+        "trg_training_checkout_complete",
+        "trg_training_checkout_return_boundary",
         "mixed_electronic_refund_posting_write_allowed",
         "assert_mixed_electronic_refund_posting",
         "trg_mixed_electronic_refund_posting_guard",
@@ -1774,6 +1791,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert journal_guard["support_can_execute"] is False
         assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
+        "training_checkout_sale_write_allowed",
         "post_unit_legacy_transition",
         "physical_writeoff_status",
         "record_physical_writeoff",
