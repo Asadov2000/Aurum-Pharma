@@ -245,7 +245,7 @@ BEGIN
  keys:=ARRAY['schema_version','state','is_test','stock_date','quote','total_amount',
    'physical_before','physical_after','legacy_before','legacy_after'];
  IF jsonb_typeof(r->'simulation') IS DISTINCT FROM 'object'
-   OR r->'simulation'-keys<>'{}'::JSONB OR NOT (r->'simulation' ?& keys)
+   OR (r->'simulation')-keys<>'{}'::JSONB OR NOT (r->'simulation' ?& keys)
    OR jsonb_typeof(r->'simulation'->'stock_date') IS DISTINCT FROM 'string'
    OR coalesce(r->'simulation'->>'stock_date','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
   RAISE EXCEPTION 'training_checkout_simulation_shape_invalid' USING ERRCODE='23514';
