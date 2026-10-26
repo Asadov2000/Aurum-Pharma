@@ -123,11 +123,11 @@ def test_result_rejects_forged_identity_or_real_document_shape(change: dict[str,
 @pytest.mark.parametrize(
     "section,field,value",
     [
-        ("receipt", "branch_id", str(uuid4())),
+        pytest.param("receipt", "branch_id", str(uuid4()), id="receipt-branch"),
         ("receipt", "total_amount", "0.51"),
         ("receipt", "is_test", 1),
         ("receipt", "change_amount", "0.00"),
-        ("request", "operation_id", str(uuid4())),
+        pytest.param("request", "operation_id", str(uuid4()), id="request-operation"),
         ("request", "expected_revision_hash", "a" * 64),
         ("simulation", "total_amount", "0.51"),
     ],
