@@ -3,11 +3,11 @@
   "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
   "generation": 9,
   "owner": "local",
-  "phase": "blocked",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "228a150f6555160efb028a95a157b1ef7e92e18d",
+  "expected_head": "57aed2b68995eb113da387a2a864e4427ed1cd2e",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "With user approval only: role-contract revision ceiling223->224; exact source tests/style; same PR final CI and guarded merge. No runtime/shared DB changes.",
+  "remaining_step": "Final-head full CI incl real migration roundtrip/RLS/SQL/HTTP/Edge; fresh actual main/head/control then guarded merge and exact tested-main tree.",
   "failure_counters": {
     "current_stage": {
       "step": "CI disposable DB seed",
@@ -44,14 +44,16 @@
     "backend_roundtrip": {
       "step": "Verify cluster-safe migration roundtrip",
       "cause": "actual_head_number224 != role_contract_head223 at backend-10.sh line14",
-      "consecutive": 4,
-      "confirmed_by": "Same unchanged role-contract line864 across attempts1-4; backend action exits before SQL"
+      "consecutive": 5,
+      "confirmed_by": "Same unchanged role-contract line864 across attempts1-4; backend action exits before SQL",
+      "approved_retry": true,
+      "fix": "Ceiling aligned223->224; approved retry pending final-head CI"
     }
   },
   "runtime_changes": false,
   "shared_db_access": false,
   "paid_resources_created": 0,
-  "blocker": "Awaiting user exception to two-identical-failures rule: backend-10 compares migration head224 to role-contract max223; repeated attempts retained same mismatch.",
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-SIMULATION-CORE-01",
     "pr": 426,
@@ -85,10 +87,11 @@
     "db_execution": "not run locally; mandatory isolated CI",
     "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565",
     "new_cases_expected": 114,
-    "last_fix": "30 no-DB tests, Ruff/Black/diff PASS; independent ACL APPROVE"
+    "last_fix": "30 no-DB tests, Ruff/Black/diff PASS; independent ACL APPROVE",
+    "revision_contract": "PASS: one Alembic head0224 and role-contract224; one-line diff only, no grants changed"
   },
-  "source_tree": "e005e8a12ea9c0297739b6d777ba65bb23913376",
-  "ci_attempt": 5,
+  "source_tree": "45dfa0b6ed82d3aadb40420bf80c09cf1fa6f3a8",
+  "ci_attempt": 6,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -115,14 +118,27 @@
       "cause": "Missing EXECUTE for invoker trigger calling narrowly scoped training checkout predicate",
       "consecutive": 1,
       "fix": "Grant only read-only predicate to existing app/support/Edge sale writers; expanded real ACL matrix"
+    },
+    {
+      "head": "228a150f6555160efb028a95a157b1ef7e92e18d",
+      "workflow": "bb398962-9f65-4486-abc2-e27767e9ae8e",
+      "cause": "Backend migration roundtrip exits on role-contract ceiling223 vs Alembic224 before SQL",
+      "fix": "One-line registration224; user followup authorized retry",
+      "consecutive": 5
     }
   ],
-  "ci_workflow": "bb398962-9f65-4486-abc2-e27767e9ae8e",
-  "control_commit": "c3827961ac869ffe9f49e164b2f99822f39ce9fa",
+  "ci_workflow": "1a052309-054d-440f-a93d-65c194485969",
+  "control_commit": "8e1cb2cf41bf72446d7571a288fc3fc9d2ae1111",
   "review_fix": {
     "cause": "Bootstrap normalizes Edge routine ACL, so non-app invoker must skip app-only training predicate",
     "fix": "Explicit nested PL/pgSQL IF; EXECUTE only aurum_app; other functions private",
     "ci_failure_count": 0,
     "head": "228a150f6555160efb028a95a157b1ef7e92e18d"
+  },
+  "approvals": {
+    "migration_ceiling_retry": {
+      "source": "User followup дальше immediately after explicit permission request and blocker report",
+      "scope": "Only align role-contract223->224 and rerun same PR stage; no runtime/shared DB/dependency changes"
+    }
   }
 }

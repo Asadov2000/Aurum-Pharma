@@ -41,7 +41,7 @@
       "depends_on": 1,
       "branch": "codex/unit-training-checkout",
       "pr": 427,
-      "head": "228a150f6555160efb028a95a157b1ef7e92e18d"
+      "head": "57aed2b68995eb113da387a2a864e4427ed1cd2e"
     },
     {
       "number": 3,
