@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "71ad98f372bc1434123bec466d6e279038dd1879",
+  "expected_head": "f574b81a2750dcfa4a0e45d5e4b4c610cca30b84",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Complete final-head CI incl full backend, Edge fixture, selective migration rehearsal and runtime privilege inventories; fresh refs, guarded merge and exact tested-main tree. No runtime/shared DB.",
+  "remaining_step": "All8 final-head CI incl unchanged foundation RLS contract, complete training/Edge/privilege/migration tests; fresh refs then guarded merge and exact tested-main tree. No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
@@ -57,6 +57,18 @@
       "cause": "Fixture restores Sale triggers before pending training_checkout_complete events are checked",
       "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
       "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain"
+    },
+    "foundation_policy": {
+      "step": "Foundation RLS metadata contract",
+      "consecutive": 3,
+      "cause": "New policy references legacy is_support_session helper; all tenant branch isolation assertions passed; global policy helper reference count expected0 actual1",
+      "affected_heads": [
+        "6c1db235cfbcb4b997a171f83b0894747b1144d8",
+        "57c0984cff4a8d5349e49cf8eac8811117c5d7e2",
+        "71ad98f372bc1434123bec466d6e279038dd1879"
+      ],
+      "fix": "Canonical scoped-support predicate substituted; user approved retry; exact final-head CI pending",
+      "approved_retry": true
     }
   },
   "runtime_changes": false,
@@ -101,10 +113,11 @@
     "json_grouping": "30 no-DB regressions, Ruff/Black/diff PASS; independent full SQL operator review APPROVE",
     "rollback_test_fix": "Ruff/Black/whitespace PASS; immutable sale UUID captured before rollback; 500/effects/journal assertions retained; QA cause confirmed; collect-only PASS, QA APPROVE",
     "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE",
-    "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES"
+    "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES",
+    "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged"
   },
-  "source_tree": "ed1cbea18ea00f7c9d533c2395357117e726a2a0",
-  "ci_attempt": 10,
+  "source_tree": "7b245ebd7f787567452d0150cc4fdca448dd535e",
+  "ci_attempt": 11,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -160,10 +173,24 @@
       "head": "f6bd2d4d4c40ccd930c2072a16573fae94db882a",
       "fix": "Add0224 completion constraint to existing0190/0223 immediate/deferred fixture drain",
       "workflow": "87f3bef7-5bdc-4c2a-8ffe-07c8507c425c"
+    },
+    {
+      "step": "Foundation RLS metadata contract",
+      "consecutive": 3,
+      "cause": "New policy references legacy is_support_session helper; all tenant branch isolation assertions passed; global policy helper reference count expected0 actual1",
+      "affected_heads": [
+        "6c1db235cfbcb4b997a171f83b0894747b1144d8",
+        "57c0984cff4a8d5349e49cf8eac8811117c5d7e2",
+        "71ad98f372bc1434123bec466d6e279038dd1879"
+      ],
+      "fix": "Use canonical NOT is_tenant_support_session in new policy; assertions/production foundation policies unchanged",
+      "approved_retry": true,
+      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
+      "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
     }
   ],
-  "ci_workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6",
-  "control_commit": "fe9601b83c8c73bc3b7e15eb60c55517cddf542c",
+  "ci_workflow": "c4ed2655-1058-4416-a4da-ca6f13eed503",
+  "control_commit": "f91ddfbc6e5d7ee7440226d5c32e85432436eeb3",
   "review_fix": {
     "cause": "New journal must be included in existing selective migration and global privilege inventories",
     "fix": "5+18 registration lines only; no production grant/guard changes",
@@ -174,6 +201,10 @@
     "migration_ceiling_retry": {
       "source": "Explicit user answer: Да, исправить и продолжить этот этап",
       "scope": "Only align role-contract223->224 and rerun same PR stage; no runtime/shared DB/dependency changes"
+    },
+    "foundation_policy_retry": {
+      "source": "Explicit user answer Да, исправить и продолжить этот этап",
+      "scope": "Replace new policy legacy helper with canonical scoped-support helper; same PR full CI and main; no shared DB/runtime/dependencies"
     }
   }
 }
