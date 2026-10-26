@@ -6,7 +6,7 @@
   "counter": {
     "open_blocks": 4,
     "total_blocks": 7,
-    "remaining_packages_to_3_of_7": 3,
+    "remaining_packages_to_3_of_7": 2,
     "unit": "accepted package, not PR or request"
   },
   "scope": "Existing block4 only; no new requirements, training simulation, Edge, pilot or bank integrations",
@@ -14,7 +14,7 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
       "number": 1,
-      "status": "awaiting_ci",
+      "status": "completed",
       "goal": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
       "acceptance": [
         "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
@@ -33,7 +33,10 @@
       ],
       "suggested_branch": "codex/mixed-electronic-refund-client-recovery",
       "pr": 423,
-      "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e"
+      "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
+      "validated_head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
+      "merge_commit": "a19bc74b029b424f804727469faccaba24e0022c",
+      "validated_tree": "b9c527d84a3e317c8486ececee2988b720a122a4"
     },
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
@@ -61,9 +64,9 @@
     }
   ],
   "execution": {
-    "product_writer": "local only, generation5; cloud standby without product grant",
-    "local_role": "implementation / independent review / isolated QA / CI publication",
-    "new_stage_grant_issued": true,
+    "product_writer": "none; package1 merged, next package requires fresh single-writer grant",
+    "local_role": "preferred next developer; standby after completed package1",
+    "new_stage_grant_issued": false,
     "old_schedulers": "remain PAUSED; no new schedule",
     "constraints": [
       "Included account limits only; no purchases/paid APIs/credits/VMs",
@@ -74,6 +77,8 @@
     "product_writer_task": null,
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
     "product_writer_run": "local-2026-10-26-client-recovery-01",
-    "current_generation": 5
-  }
+    "current_generation": 5,
+    "current_stage_grant_active": false
+  },
+  "verified_main": "a19bc74b029b424f804727469faccaba24e0022c"
 }

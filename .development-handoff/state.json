@@ -3,24 +3,24 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
   "generation": 5,
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "merged",
   "run_id": "local-2026-10-26-client-recovery-01",
   "branch": "codex/mixed-electronic-refund-client-recovery",
   "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
   "expected_head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
   "source_tree": "b9c527d84a3e317c8486ececee2988b720a122a4",
-  "validated_sha": null,
+  "validated_sha": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
   "pr": 423,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "pending_transfer": false,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "plan_path": ".development-handoff/plans/block4-remaining-three-packages.json",
-  "counter": "4/7 (3)",
+  "counter": "4/7 (2)",
   "scope": "Strict mixed electronic refund frontend HTTP contracts/clients plus scoped persistent recovery",
   "acceptance": [
     "All existing 12 mixed-electronic-refunds HTTP operations and recovery GETs; strict schemas, UUIDv4, exact historical quantities/money/payment allocations and source bindings",
@@ -37,7 +37,7 @@
     "Dependency or stack changes",
     "Runtime deployment, shared database access"
   ],
-  "remaining_step": "Wait for all8 finalhead CI contexts; fix failures within existing rules, fresh main/head/control/PR review, merge expectedhead, verify exact main tree. No deployment/runtime/shared DB.",
+  "remaining_step": "Package1 complete. Next: UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01 after fresh actual-main/PR/owner check and explicit single-writer grant. Cloud standby has older source and must resync/reconcile before future work; do not replay saved candidate. No deployment/runtime/shared DB.",
   "cloud_environment": {
     "id": "ccarenv_b64_Y2NhcmVudl81MDlhYzI1ZWY4ZDQ4MTkxOWRlNTk0MjRkZGY5ODBjOQ",
     "mode": "existing published Aurum VM resumed",
@@ -152,7 +152,6 @@
     "candidate_tree": "7d0f93f74525b1253f9136a80bcc8fc7390150c8",
     "control_before": "fda9db8def60f1f9ae7218d46ad499df3aa05310"
   },
-  "control_commit": "986c65c6f8987d69c55bd5b57a9134a402459837",
   "import_verified": "14/14 original SHA256 matched before intentional authorized edits",
   "local_checks": {
     "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
@@ -165,5 +164,18 @@
     "whitespace": "PASS",
     "independent_security_qa": "APPROVE"
   },
-  "ci_workflow": "9df5f308-77ae-4c11-b510-0088616194d8"
+  "ci_workflow": "9df5f308-77ae-4c11-b510-0088616194d8",
+  "main_sha": "a19bc74b029b424f804727469faccaba24e0022c",
+  "main_tree": "b9c527d84a3e317c8486ececee2988b720a122a4",
+  "merged_at": "2026-10-26T12:05:09Z",
+  "next_work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
+  "next_stage_grant_issued": false,
+  "ci_final": {
+    "workflow": "9df5f308-77ae-4c11-b510-0088616194d8",
+    "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
+    "all8success": true,
+    "frontend_tests": 3147,
+    "e2e": 161
+  },
+  "cloud_checkout_note": "Standby snapshot at baseline139 plus pre-fix candidate; not current main. Latest completed result is PR423/maina19. Must synchronize source with actual GitHub before any future grant."
 }
