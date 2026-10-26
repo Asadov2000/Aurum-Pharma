@@ -111,6 +111,7 @@ from app.domains.pos.schemas import (
     ZReport,
 )
 from app.domains.pos.service import POSService
+from app.domains.pos.training_checkout_router import router as training_checkout_router
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_electronic_checkout_router import (
     router as unit_electronic_checkout_router,
@@ -145,6 +146,7 @@ router.include_router(mixed_electronic_refund_review_router)
 router.include_router(mixed_zero_return_router)
 router.include_router(physical_cart_router)
 router.include_router(physical_cash_checkout_router)
+router.include_router(training_checkout_router)
 router.include_router(physical_cash_refund_router)
 router.include_router(physical_zero_return_router)
 router.include_router(quarantine_report_router)

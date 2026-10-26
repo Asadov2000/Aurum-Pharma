@@ -125,6 +125,8 @@ from app.domains.pos.schemas import (
     ZReportPaymentBreakdown,
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
+from app.domains.pos.training_checkout_schemas import TrainingReceiptDocumentV1
+from app.domains.pos.training_receipt_read import training_receipt_lines, training_receipt_snapshot
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 from app.domains.pos.unit_electronic_refund_posting_schemas import PhysicalElectronicRefundReceiptV3
@@ -762,6 +764,8 @@ class POSService:
         Decimal,
         list[tuple[str, Decimal]],
     ]:
+        if training_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Training unit sale refunds are not supported")
         if mixed_receipt_snapshot(parent) is not None:
             raise BusinessRuleError("Mixed sale refunds are not supported yet")
         await self._assert_consumed_refund_history(parent)
@@ -2443,6 +2447,8 @@ class POSService:
     @staticmethod
     def get_receipt_item_names(sale: Sale) -> dict[int, str]:
         """Return immutable line names for a completed receipt snapshot."""
+        if training_receipt_snapshot(sale) is not None:
+            return {}
         if (
             mixed_electronic_refund_snapshot(sale) is not None
             or mixed_cash_refund_snapshot(sale) is not None
@@ -2469,6 +2475,8 @@ class POSService:
     @staticmethod
     def get_physical_receipt_items(sale: Sale) -> list[ReceiptLine]:
         """Read physical lines after the caller has authorized access to the sale."""
+        if training_receipt_snapshot(sale) is not None:
+            return []
         if (
             mixed_electronic_refund_snapshot(sale) is not None
             or mixed_cash_refund_snapshot(sale) is not None
@@ -2484,6 +2492,9 @@ class POSService:
     @staticmethod
     def get_mixed_receipt_items(sale: Sale) -> list[ReceiptLine]:
         """Keep mixed global positions separate from legacy and physical-only reads."""
+        training = training_receipt_snapshot(sale)
+        if training is not None:
+            return training_receipt_lines(training)
         refund = mixed_electronic_refund_snapshot(sale) or mixed_cash_refund_snapshot(sale)
         if refund is not None:
             return mixed_cash_refund_lines(refund)
@@ -2706,6 +2717,7 @@ class POSService:
             | MixedReceiptDocumentV4
             | MixedCashRefundReceiptV4
             | MixedElectronicRefundReceiptV4
+            | TrainingReceiptDocumentV1
         ),
     ) -> ReceiptData:
         # Versioned receipts store retail facts, not historical pharmacy/cashier headers.
@@ -2717,7 +2729,9 @@ class POSService:
             local_datetime = snapshot.completed_at.astimezone(ZoneInfo(timezone_name))
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AurumError("Tenant report timezone is invalid") from exc
-        if isinstance(snapshot, MixedCashRefundReceiptV4 | MixedElectronicRefundReceiptV4):
+        if isinstance(snapshot, TrainingReceiptDocumentV1):
+            lines = training_receipt_lines(snapshot)
+        elif isinstance(snapshot, MixedCashRefundReceiptV4 | MixedElectronicRefundReceiptV4):
             lines = mixed_cash_refund_lines(snapshot)
         elif isinstance(snapshot, PhysicalCashRefundReceiptV3 | PhysicalElectronicRefundReceiptV3):
             lines = physical_cash_refund_lines(snapshot)
@@ -2758,16 +2772,25 @@ class POSService:
             total=snapshot.total_amount,
             currency=snapshot.currency,
             payments=(
-                [ReceiptPayment(method="cash", amount=snapshot.total_amount)]
-                if isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4)
-                else [
-                    ReceiptPayment(method=payment.method, amount=payment.amount)
-                    for payment in snapshot.payments
+                [
+                    ReceiptPayment(method=part.method, amount=part.amount)
+                    for part in snapshot.simulated_payments
                 ]
+                if isinstance(snapshot, TrainingReceiptDocumentV1)
+                else (
+                    [ReceiptPayment(method="cash", amount=snapshot.total_amount)]
+                    if isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4)
+                    else [
+                        ReceiptPayment(method=payment.method, amount=payment.amount)
+                        for payment in snapshot.payments
+                    ]
+                )
             ),
-            # Cash tender and change are not part of this version's saved receipt.
+            # Training keeps simulated change; live versioned receipts do not save tender.
             paid_total=None,
-            change=None,
+            change=(
+                snapshot.change_amount if isinstance(snapshot, TrainingReceiptDocumentV1) else None
+            ),
         )
 
     async def build_receipt(
@@ -2791,9 +2814,13 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_view_branch_ids=allowed_view_branch_ids,
             )
-        mixed_refund = mixed_electronic_refund_snapshot(sale) or mixed_cash_refund_snapshot(sale)
-        if mixed_refund is not None:
-            return await self._compose_physical_receipt_data(sale, mixed_refund)
+        saved_receipt = (
+            training_receipt_snapshot(sale)
+            or mixed_electronic_refund_snapshot(sale)
+            or mixed_cash_refund_snapshot(sale)
+        )
+        if saved_receipt is not None:
+            return await self._compose_physical_receipt_data(sale, saved_receipt)
         refund = electronic_refund_snapshot(sale) or physical_cash_refund_snapshot(sale)
         if refund is not None:
             return await self._compose_physical_receipt_data(sale, refund)
@@ -4867,6 +4894,8 @@ class POSService:
         )
         parent = await self._lock_sale(parent_sale_id)
         self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if training_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Training unit sale refunds are not supported")
         existing = await self._find_existing_refund(
             parent=parent,
             operation_id=effective_operation_id,
