@@ -186,12 +186,19 @@ async def test_training_schema_uses_least_privilege_and_private_function_ownersh
             False,
         )
         for signature in module.FUNCTIONS:
+            callable_predicate = (
+                signature == "training_checkout_sale_write_allowed(text,text,jsonb,jsonb)"
+            )
             metadata = (
                 await connection.execute(
                     text("""
                         SELECT pg_get_userbyid(proowner),prosecdef,proconfig,
                           has_function_privilege('aurum_app',oid,'EXECUTE'),
                           has_function_privilege('aurum_support',oid,'EXECUTE'),
+                          has_function_privilege('aurum_edge_cash_owner',oid,'EXECUTE'),
+                          has_function_privilege('aurum_edge_cash_executor',oid,'EXECUTE'),
+                          has_function_privilege('aurum_mailer',oid,'EXECUTE'),
+                          has_function_privilege('aurum_billing_worker',oid,'EXECUTE'),
                           EXISTS(SELECT 1 FROM aclexplode(proacl) WHERE grantee=0)
                         FROM pg_proc WHERE oid=CAST(:signature AS regprocedure)
                     """),
@@ -202,6 +209,10 @@ async def test_training_schema_uses_least_privilege_and_private_function_ownersh
                 "aurum_schema_owner",
                 True,
                 ["search_path=pg_catalog, pg_temp"],
+                callable_predicate,
+                callable_predicate,
+                callable_predicate,
+                False,
                 False,
                 False,
                 False,

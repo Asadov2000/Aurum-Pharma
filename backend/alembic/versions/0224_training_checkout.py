@@ -758,6 +758,13 @@ def upgrade() -> None:
          ALTER FUNCTION public.{signature} OWNER TO aurum_schema_owner;
          REVOKE ALL ON FUNCTION public.{signature} FROM PUBLIC,aurum_app,aurum_support;
         """)
+    # The old sale immutability trigger is SECURITY INVOKER. Its existing
+    # app/support/Edge writers must evaluate this read-only predicate; other
+    # helpers stay private, and the predicate rejects non-app sessions early.
+    _sql("""
+      GRANT EXECUTE ON FUNCTION public.training_checkout_sale_write_allowed(text,text,jsonb,jsonb)
+       TO aurum_app,aurum_support,aurum_edge_cash_owner;
+    """)
     for signature, old, new in PATCHES:
         _patch(signature, old, new, upgrade=True)
     _sql("""
