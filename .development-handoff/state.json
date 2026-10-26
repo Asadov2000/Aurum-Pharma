@@ -1,39 +1,40 @@
 {
   "version": 1,
-  "work_item_id": "UNIT-TRAINING-SIMULATION-CORE-01",
-  "generation": 8,
+  "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
+  "generation": 9,
   "owner": "local",
-  "phase": "merged",
-  "run_id": "local-2026-10-26-unit-training-core-01",
-  "branch": "codex/unit-training-simulation",
-  "base_sha": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055",
-  "expected_head": "036182463bb74a1014b76862170ec146bfd3a3e8",
-  "validated_sha": "036182463bb74a1014b76862170ec146bfd3a3e8",
-  "pr": 426,
+  "phase": "implementation",
+  "run_id": "local-2026-10-26-unit-training-saved-01",
+  "branch": "codex/unit-training-checkout",
+  "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
+  "expected_head": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "pending_transfer": false,
   "plan_path": ".development-handoff/plans/block5-training-three-packages.json",
   "counter": "3/7 (2)",
-  "scope": "Pure physical/mixed training stock+retail simulation reusing current quote and physical planner; immutable inputs, virtual residuals for both stock systems; no authority or posting identities",
+  "scope": "Separate immutable training journal, atomic completion of physical/mixed saved is_test sale and current-authority GET recovery; use existing internal receipt allocator, explicit TEST document, no real payments/stock movements",
   "acceptance": [
-    "Whole physical/mixed basket simulated without stock/payment/DB writes, unchanged inputs, deterministic repeat",
-    "Reuse current quote/planner; exact amounts/quantities, aggregate shared legacy allocation and FEFO/stale/shortage/foreign scope validation; no prepared_unit fallback",
-    "Strict typed explicit is_test simulation result without real payment/stock/receipt identities",
-    "Independent QA, targeted pure tests/style/types then all8 final-head CI before guarded merge and tested-main tree proof"
+    "One immutable test-only result and canonical receipt per operation/sale; same request replay and readonly/closed-shift GET without recalculating live quote or stock",
+    "Saved is_test and current actor/tenant/branch/pos.sell, existing Rx/catalog/discount/payment settings rules; no real sale fallback",
+    "Existing internal receipt identity preserved per ADR0010; no actual SalePayment, stock commands/movements/quarantine or financial report effects",
+    "New table RLS/audit redaction/immutability/deferred consistency; no weakening0197/real stock/payment guards; downgrade rejects history",
+    "Local pure contracts/style/types and independent QA; complete CI incl migration/SQL/HTTP/recovery on disposable environment; guarded merge/exact tested-main tree"
   ],
   "excluded": [
-    "HTTP/UI/persistence in this first package",
-    "Changing real training guards/0197, payments, reports, packaging rules, dependency versions",
-    "Runtime/deployment/shared DB access",
-    "Edge, pilot or bank integration"
+    "Cashier UI and frontend integration (package3)",
+    "Training returns, new product requirements, dependencies/stack",
+    "Runtime deployment/restarts, shared DB access/migrations",
+    "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Core package accepted in main. Next planned package: UNIT-TRAINING-CHECKOUT-SAVED-01, separate server completion/recovery of test-only document; not started/no grant. Fresh actual main/PR/code/owner reconciliation required first. Cloud standby, no runtime/shared DB changes.",
+  "remaining_step": "Implement contracts/service/receipt adapter + RLS migration + scoped HTTP. Validate and publish same work item, all8 final-head CI then guarded merge. Package3 remains after accepted server package.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -45,17 +46,18 @@
   "paid_resources_created": 0,
   "blocker": null,
   "previous_completed": {
-    "work_item_id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
-    "pr": 425,
-    "main": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055",
-    "validated_head": "29f99d50852261ed6703a9b41ced4dc2075a6028",
-    "tree": "82b7c05a503071a5b0b8765990f8fd4cc1234c13",
+    "work_item_id": "UNIT-TRAINING-SIMULATION-CORE-01",
+    "pr": 426,
+    "main": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
+    "validated_head": "036182463bb74a1014b76862170ec146bfd3a3e8",
+    "tree": "d2cb594ab43b65fe29803f8528dc120e5af5ffb9",
     "ci": "all8success"
   },
   "agents": {
-    "backend": "training_simulation.py + test_training_simulation.py only",
-    "root": "recon, plan/docs, checks, publication and merge",
-    "qa": "independent readonly review after implementation"
+    "backend": "Training contracts/repository/service/receipt adapter + 2 domain tests",
+    "database": "Model/registry/migration0224 + migration isolation tests",
+    "root": "Router+HTTP tests/docs/control/verification/publication/merge",
+    "qa": "Independent review after writers stop"
   },
   "old_schedulers": "PAUSED; no new schedule",
   "constraints": [
@@ -64,21 +66,5 @@
     "One root writer with explicitly partitioned agent files; cloud standby",
     "Two identical failures STOP; only standing Ruff E501 exception",
     "Actual GitHub main/head/control check before publication/merge, expected SHA guards, exact tested-tree verification"
-  ],
-  "source_tree": "d2cb594ab43b65fe29803f8528dc120e5af5ffb9",
-  "local_checks": {
-    "pure_pytest": "34 passed, no warnings",
-    "ruff": "PASS",
-    "black": "PASS",
-    "mypy": "PASS strict one production source with imports",
-    "whitespace": "PASS",
-    "independent_review": "APPROVE",
-    "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565"
-  },
-  "ci_workflow": "71239ecf-d59e-4c1a-a48d-925e611514ec",
-  "main_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "main_tree": "d2cb594ab43b65fe29803f8528dc120e5af5ffb9",
-  "ci_result": "all8success on final head; frontend3203/239files; E2E165; complete backend evidence gate passed",
-  "tested_main_tree_exact": true,
-  "isolated_origin_main": "Verified GitHub signed merge commit imported and remote-tracking ref fast-forwarded; no shell network or runtime checkout changes"
+  ]
 }

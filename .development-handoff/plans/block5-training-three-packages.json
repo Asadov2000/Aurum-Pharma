@@ -31,14 +31,15 @@
     {
       "number": 2,
       "id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
-      "status": "not_started",
+      "status": "implementation",
       "goal": "Separate server completion and recovery of immutable clearly test-marked document, no real payments/stock movements/report effects",
       "acceptance": [
         "Persisted sale.is_test and current tenant/branch/actor authority checked",
         "Same operation recovered without effects on actual stock, money, quarantine or financial reports",
         "Explicit test receipt, immutable historical result; real guards retained"
       ],
-      "depends_on": 1
+      "depends_on": 1,
+      "branch": "codex/unit-training-checkout"
     },
     {
       "number": 3,
@@ -54,12 +55,12 @@
     }
   ],
   "execution": {
-    "product_writer": "none; package1 completed, no next-stage grant",
+    "product_writer": "local root generation9 with explicitly partitioned backend and DB agents; cloud standby",
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
     "cloud_product_grant": false,
     "old_schedulers": "PAUSED",
-    "current_stage_grant_active": false,
-    "current_generation": 8
+    "current_stage_grant_active": true,
+    "current_generation": 9
   },
   "verified_main": "574248d3a1fa1daaec3aecc1cbb67a4a33233636"
 }
