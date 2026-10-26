@@ -5,7 +5,7 @@
   "counter": {
     "open_blocks": 3,
     "total_blocks": 7,
-    "remaining_packages_to_2_of_7": 3,
+    "remaining_packages_to_2_of_7": 2,
     "unit": "accepted functional package, not request or PR"
   },
   "scope": "Existing block5 training physical and mixed sale only; no new requirements",
@@ -13,7 +13,7 @@
     {
       "number": 1,
       "id": "UNIT-TRAINING-SIMULATION-CORE-01",
-      "status": "awaiting_ci",
+      "status": "completed",
       "goal": "Pure simulation of both stock systems on copies, exact existing retail quote, deterministic typed training-only outcome",
       "acceptance": [
         "Whole physical/mixed basket simulated without stock/payment/DB writes, unchanged inputs, deterministic repeat",
@@ -23,7 +23,10 @@
       ],
       "branch": "codex/unit-training-simulation",
       "pr": 426,
-      "head": "036182463bb74a1014b76862170ec146bfd3a3e8"
+      "head": "036182463bb74a1014b76862170ec146bfd3a3e8",
+      "validated_head": "036182463bb74a1014b76862170ec146bfd3a3e8",
+      "merge_commit": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
+      "validated_tree": "d2cb594ab43b65fe29803f8528dc120e5af5ffb9"
     },
     {
       "number": 2,
@@ -51,12 +54,12 @@
     }
   ],
   "execution": {
-    "product_writer": "local root generation8, backend agent explicitly partitioned files only",
+    "product_writer": "none; package1 completed, no next-stage grant",
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
     "cloud_product_grant": false,
     "old_schedulers": "PAUSED",
-    "current_stage_grant_active": true,
+    "current_stage_grant_active": false,
     "current_generation": 8
   },
-  "verified_main": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055"
+  "verified_main": "574248d3a1fa1daaec3aecc1cbb67a4a33233636"
 }
