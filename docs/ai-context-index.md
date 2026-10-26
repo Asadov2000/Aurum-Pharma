@@ -51,6 +51,7 @@
 | Задача | Реализация | Тесты |
 |---|---|---|
 | Backend-домен | `backend/app/domains/<domain>/` | `backend/tests/domains/<domain>/` |
+| Чистое ядро учебной физической и смешанной продажи | `pos/training_simulation.py`; [границы и три этапа](unit-sales.md#учебная-симуляция--три-результата-до-закрытия-блока-5) | `tests/domains/pos/test_training_simulation.py`; виртуальные остатки обоих складов, общий запас повторных строк, точные суммы, неизменность входов; без HTTP, сохранённого чека, платежей или движений товара |
 | Предварительный план электронной/комбинированной оплаты физических корзин | `pos/unit_payment_plan.py`, `unit_payment_plan_router.py`; POST `/sales/{sale_id}/unit-payment-plan/preview` | `test_unit_payment_plan*.py`; актуальная оценка, точные суммы, права и настройки, без принятия денег или записи попытки |
 | Сохранение и восстановление плана оплаты | `pos/unit_payment_intent_{models,repository,schemas,service}.py`, миграция 0208; POST/GET `/sales/{sale_id}/unit-payment-plan/intents` | `test_unit_payment_intent*.py`; неизменяемый снимок, одинаковый повтор и конкуренция, scoped GET в readonly, без принятия денег и записи попытки |
 | Закрепление плана оплаты и окончательная отмена подготовки | `pos/unit_payment_binding_{models,repository,schemas,service,router}.py`, миграция 0209 | `test_unit_payment_binding*.py`; один активный план на продажу, блокировка черновика, отмена до активации и после неё, гонки и восстановление, без приёма денег |
