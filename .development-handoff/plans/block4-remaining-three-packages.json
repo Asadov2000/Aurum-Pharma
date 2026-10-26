@@ -41,7 +41,7 @@
     {
       "id": "UNIT-MIXED-ELECTRONIC-REFUND-CASHIER-UI-01",
       "number": 2,
-      "status": "in_progress",
+      "status": "awaiting_ci",
       "goal": "Cashier form/entrypoint using package1, explicit operator stages, existing permissions/MFA, recovery and receipt",
       "acceptance": [
         "Mixed electronic refund selectable from supported completed sale",
@@ -49,7 +49,9 @@
         "Reload/reopen/lost response uses existing saved operation; completed result opens canonical receipt"
       ],
       "depends_on": 1,
-      "branch": "codex/mixed-electronic-refund-cashier-ui"
+      "branch": "codex/mixed-electronic-refund-cashier-ui",
+      "pr": 424,
+      "head": "bd4efbe16ba039931fe251ab53c69467acb78a24"
     },
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
