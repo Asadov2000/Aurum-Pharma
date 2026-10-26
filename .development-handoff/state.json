@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
+  "expected_head": "c5e1649ff89adac44c19b71466402df052fb5e4d",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Full final-head CI incl training metadata/rollback/raw payload and foundation isolation; fresh refs then guarded merge/exact tested-main tree. No runtime/shared DB.",
+  "remaining_step": "Full final-head CI incl independent hash and line-shape rejection cases, then fresh refs, guarded merge and exact tested-main tree. No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
@@ -60,7 +60,7 @@
     },
     "foundation_policy": {
       "step": "Foundation RLS metadata contract",
-      "consecutive": 3,
+      "consecutive": 0,
       "cause": "New policy references legacy is_support_session helper; all tenant branch isolation assertions passed; global policy helper reference count expected0 actual1",
       "affected_heads": [
         "6c1db235cfbcb4b997a171f83b0894747b1144d8",
@@ -68,7 +68,9 @@
         "71ad98f372bc1434123bec466d6e279038dd1879"
       ],
       "fix": "Canonical scoped-support predicate substituted; user approved retry; exact final-head CI pending",
-      "approved_retry": true
+      "approved_retry": true,
+      "resolved_on": "f574b81a2750dcfa4a0e45d5e4b4c610cca30b84",
+      "evidence": "backend3429 Pytest shard1 success; strict foundation metadata and branch isolation assertions retained"
     },
     "metadata_cursor": {
       "step": "Training schema privilege metadata test",
@@ -76,6 +78,13 @@
       "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
       "head": "71ad98f372bc1434123bec466d6e279038dd1879",
       "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions"
+    },
+    "raw_quote_shape": {
+      "step": "Raw journal extra quote-line rejection",
+      "consecutive": 1,
+      "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
+      "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
+      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes"
     }
   },
   "runtime_changes": false,
@@ -114,7 +123,7 @@
     "independent_qa": "APPROVE, findings resolved",
     "db_execution": "not run locally; mandatory isolated CI",
     "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565",
-    "new_cases_expected": 114,
+    "new_cases_expected": 115,
     "last_fix": "30 no-DB tests, Ruff/Black/diff PASS; independent ACL APPROVE",
     "revision_contract": "PASS: one Alembic head0224 and role-contract224; one-line diff only, no grants changed",
     "json_grouping": "30 no-DB regressions, Ruff/Black/diff PASS; independent full SQL operator review APPROVE",
@@ -122,10 +131,11 @@
     "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE",
     "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES",
     "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged",
-    "metadata_cursor": "30 no-DB regressions, Ruff/Black/diff PASS; SQLAlchemy result materialization fix independently approved, ACL/type assertions retained"
+    "metadata_cursor": "30 no-DB regressions, Ruff/Black/diff PASS; SQLAlchemy result materialization fix independently approved, ACL/type assertions retained",
+    "raw_quote_shape": "30 no-DB regressions+Ruff/Black/diff PASS; QA APPROVE; 1 extra DB test case; independent SQL binding review APPROVE"
   },
-  "source_tree": "ff62c86c1b1bc9c528c700943620bd3cf8115be6",
-  "ci_attempt": 12,
+  "source_tree": "39c7ea3bff3d266617f70596a3c1c736f2110dfe",
+  "ci_attempt": 13,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -203,10 +213,18 @@
       "head": "71ad98f372bc1434123bec466d6e279038dd1879",
       "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions",
       "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
+    },
+    {
+      "step": "Raw journal extra quote-line rejection",
+      "consecutive": 1,
+      "head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
+      "cause": "Tampered quote fails earlier hash guard; test incorrectly expected downstream shape guard",
+      "fix": "Retain hash rejection case and add hash-consistent forged quote case to prove line whitelist independently; no production validation changes",
+      "workflow": "56348b2f-75ba-4ced-9a6b-90c65f79a2d0"
     }
   ],
-  "ci_workflow": "56348b2f-75ba-4ced-9a6b-90c65f79a2d0",
-  "control_commit": "a245e713bfde1a70ef5bdaf5c7365462dfe8466f",
+  "ci_workflow": "806a0cf8-bfe1-46d2-b314-843eb6f7df96",
+  "control_commit": "3b710e81d144b2569bf46d61bdf172e3cf0ea423",
   "review_fix": {
     "cause": "New journal must be included in existing selective migration and global privilege inventories",
     "fix": "5+18 registration lines only; no production grant/guard changes",
