@@ -59,7 +59,7 @@
     {
       "id": "UNIT-PAYMENT-BLOCK4-ACCEPTANCE-01",
       "number": 3,
-      "status": "in_progress",
+      "status": "awaiting_ci",
       "goal": "Final existing block4 acceptance across physical/mixed card/QR/split sales and refunds",
       "acceptance": [
         "Browser flows verify card/QR/combined payments/refunds, lost response, reload, closed shift, current permissions and readonly",
@@ -67,7 +67,9 @@
         "All mandatory CI on final head; evidence against fixed block4 criteria; then remaining block counter changes to3/7"
       ],
       "depends_on": 2,
-      "branch": "codex/unit-payment-block4-acceptance"
+      "branch": "codex/unit-payment-block4-acceptance",
+      "pr": 425,
+      "head": "29f99d50852261ed6703a9b41ced4dc2075a6028"
     }
   ],
   "execution": {
