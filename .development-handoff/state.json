@@ -3,14 +3,14 @@
   "work_item_id": "UNIT-MIXED-ELECTRONIC-REFUND-CLIENT-RECOVERY-01",
   "generation": 5,
   "owner": "local",
-  "phase": "active",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-10-26-client-recovery-01",
   "branch": "codex/mixed-electronic-refund-client-recovery",
   "base_sha": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
-  "expected_head": "139c40ee9ad1456fdcf10bbd0eb55bcb38fcad89",
-  "source_tree": "5dff0a337d685405e1e6cbd0b2970f06d89538b1",
+  "expected_head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
+  "source_tree": "b9c527d84a3e317c8486ececee2988b720a122a4",
   "validated_sha": null,
-  "pr": null,
+  "pr": 423,
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
@@ -37,7 +37,7 @@
     "Dependency or stack changes",
     "Runtime deployment, shared database access"
   ],
-  "remaining_step": "Import verified exact snapshot, implement same three fixes locally, independent review, targeted and complete CI on finalhead, guarded merge. Do not touch runtime checkout or shared DB.",
+  "remaining_step": "Wait for all8 finalhead CI contexts; fix failures within existing rules, fresh main/head/control/PR review, merge expectedhead, verify exact main tree. No deployment/runtime/shared DB.",
   "cloud_environment": {
     "id": "ccarenv_b64_Y2NhcmVudl81MDlhYzI1ZWY4ZDQ4MTkxOWRlNTk0MjRkZGY5ODBjOQ",
     "mode": "existing published Aurum VM resumed",
@@ -55,8 +55,12 @@
   },
   "failure_counters": {
     "current_stage": {
-      "consecutive": 2,
-      "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third"
+      "consecutive": 0,
+      "cause": null,
+      "resolved_previous": {
+        "consecutive": 2,
+        "cause": "Recovery test expectations omit new RAM-only contextCheck field; same test failed in targeted runs second and third"
+      }
     },
     "historical_restore": {
       "proper_vm_proxy": 1,
@@ -147,5 +151,19 @@
     "cloud_ack": "All product/subagent writes stopped; exact14files snapshot7d0f93f preserved, no changes aftersnapshot; standby; no PR/CI/control/automation writes.",
     "candidate_tree": "7d0f93f74525b1253f9136a80bcc8fc7390150c8",
     "control_before": "fda9db8def60f1f9ae7218d46ad499df3aa05310"
-  }
+  },
+  "control_commit": "986c65c6f8987d69c55bd5b57a9134a402459837",
+  "import_verified": "14/14 original SHA256 matched before intentional authorized edits",
+  "local_checks": {
+    "head": "c32d2f1af8f119b94d7089203052fdc9f2e0893e",
+    "targeted_vitest": 326,
+    "typecheck": "PASS",
+    "eslint": "PASS",
+    "prettier": "PASS",
+    "build": "PASS",
+    "startup_budgets": "PASS",
+    "whitespace": "PASS",
+    "independent_security_qa": "APPROVE"
+  },
+  "ci_workflow": "9df5f308-77ae-4c11-b510-0088616194d8"
 }
