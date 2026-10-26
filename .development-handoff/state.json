@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "f574b81a2750dcfa4a0e45d5e4b4c610cca30b84",
+  "expected_head": "266ac4cbaf9c38d30f90eaa7408d0c5294ee53a8",
   "validated_sha": null,
   "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "All8 final-head CI incl unchanged foundation RLS contract, complete training/Edge/privilege/migration tests; fresh refs then guarded merge and exact tested-main tree. No runtime/shared DB.",
+  "remaining_step": "Full final-head CI incl training metadata/rollback/raw payload and foundation isolation; fresh refs then guarded merge/exact tested-main tree. No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "step": "Training HTTP commit-failure test",
@@ -69,6 +69,13 @@
       ],
       "fix": "Canonical scoped-support predicate substituted; user approved retry; exact final-head CI pending",
       "approved_retry": true
+    },
+    "metadata_cursor": {
+      "step": "Training schema privilege metadata test",
+      "consecutive": 1,
+      "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
+      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
+      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions"
     }
   },
   "runtime_changes": false,
@@ -114,10 +121,11 @@
     "rollback_test_fix": "Ruff/Black/whitespace PASS; immutable sale UUID captured before rollback; 500/effects/journal assertions retained; QA cause confirmed; collect-only PASS, QA APPROVE",
     "edge_fixture": "Ruff/Black/diff PASS; existing constraint drain extended, production unchanged, independent review APPROVE",
     "fixture_inventories": "Ruff/Black/diff PASS; manual rehearsal+global least privilege inventories aligned; independently scoped agents STOPWRITES",
-    "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged"
+    "policy_fix": "30 no-DB regressions, Ruff/Black/diff PASS, independent security APPROVE; foundation assertion0 unchanged",
+    "metadata_cursor": "30 no-DB regressions, Ruff/Black/diff PASS; SQLAlchemy result materialization fix independently approved, ACL/type assertions retained"
   },
-  "source_tree": "7b245ebd7f787567452d0150cc4fdca448dd535e",
-  "ci_attempt": 11,
+  "source_tree": "ff62c86c1b1bc9c528c700943620bd3cf8115be6",
+  "ci_attempt": 12,
   "ci_error_history": [
     {
       "head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
@@ -187,10 +195,18 @@
       "approved_retry": true,
       "head": "71ad98f372bc1434123bec466d6e279038dd1879",
       "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
+    },
+    {
+      "step": "Training schema privilege metadata test",
+      "consecutive": 1,
+      "cause": "dict(CursorResult.tuples()) treats CursorResult.keys as mapping protocol and raises not-subscriptable TypeError",
+      "head": "71ad98f372bc1434123bec466d6e279038dd1879",
+      "fix": "Materialize tuples().all() before dict; preserve exact columns/ACL assertions",
+      "workflow": "2991f72b-5417-4770-b9c7-c58920c5d6d6"
     }
   ],
-  "ci_workflow": "c4ed2655-1058-4416-a4da-ca6f13eed503",
-  "control_commit": "f91ddfbc6e5d7ee7440226d5c32e85432436eeb3",
+  "ci_workflow": "56348b2f-75ba-4ced-9a6b-90c65f79a2d0",
+  "control_commit": "a245e713bfde1a70ef5bdaf5c7365462dfe8466f",
   "review_fix": {
     "cause": "New journal must be included in existing selective migration and global privilege inventories",
     "fix": "5+18 registration lines only; no production grant/guard changes",
