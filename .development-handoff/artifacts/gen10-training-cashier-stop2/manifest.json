@@ -1,0 +1,75 @@
+{
+  "generation": 10,
+  "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
+  "run_id": "cloud-2026-10-27-training-cashier-01",
+  "phase": "blocked_STOP2",
+  "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
+  "source_path": "/workspace/Aurum-Pharma-gen10",
+  "candidate_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
+  "candidate_tree_location": "local Git objects; not published as product ref",
+  "archive": "/workspace/work/gen10-source/blocked-candidate.tar.gz",
+  "archive_sha256": "929f8ad07e7c3e3beee4440658c6d3f88752bae3bf06e9f3b746437c46bba266",
+  "archive_bytes": 7237215,
+  "files_sha256": {
+    "docs/unit-sales.md": "760ca29b9d976bb871899d5435d154d201e6d61a277fc401dc204c2ccc901886",
+    "frontend/e2e/training-unit-checkout.spec.ts": "93414402c3e1fc528c9737c1f412d58d7d7bfa81247a291cb9e723e1041b74ae",
+    "frontend/src/features/pos/SaleArea.tsx": "9c4763f80c38c078598a35e434d0c8db4cbd8d0e002db42728ab7bee27a24a39",
+    "frontend/src/features/pos/TrainingCheckoutPanel.tsx": "ceab2680be075e7763952bcdeb73fddd67ccb4b87f46c0a7f3e44ebab7226698",
+    "frontend/src/features/pos/trainingCheckout.ts": "e8797064d84a6cf19cd8725fe9196ede40b2892dc94c53dbd3d5fa825b578b3e",
+    "frontend/src/features/pos/trainingCheckoutPresence.ts": "a9d6d0b37adb69437a685b98966ef87ffcf4aab1dffae70737af81ddb49af0c5",
+    "frontend/tests/features/pos/SaleAreaPhysicalCart.test.tsx": "22f37476f08fe41e4f65515916f4b40b1249e08d694143a74ae8b133c4eec42e",
+    "frontend/tests/features/pos/TrainingCheckoutPanel.test.tsx": "7d89965278df563c9d9cee32848bb478b09d28936a44ccf3490726b6609d1112",
+    "frontend/tests/features/pos/trainingCheckout.test.ts": "7e6c9227c615fab3f9bdbf17b4b8f22d97db665bb872cc34f625183f558b211b",
+    "frontend/tests/features/pos/trainingCheckoutFixture.ts": "b25c62034c22c248ddb6f30a541b44098f200bf1950f919ce9baab64031a5139",
+    "frontend/vite.config.ts": "0b45522287bbf3d5ecf4301c152b97c85795e514cb2d9aede53fddb80353ee69"
+  },
+  "failure": {
+    "command": "NODE_ENV=production /workspace/aurum-env-repair-qa/frontend-check pnpm build",
+    "checker": "frontend/scripts/check-startup-bundle.mjs",
+    "cause": "POS /pos gzip exceeds unchanged 195.00 KiB startup budget",
+    "consecutive": 2,
+    "attempts": [
+      {
+        "log": "build-second.log",
+        "actual_KiB": "195.01",
+        "limit_KiB": "195.00"
+      },
+      {
+        "log": "build-third.log",
+        "actual_KiB": "195.09",
+        "limit_KiB": "195.00"
+      }
+    ]
+  },
+  "checks": {
+    "targeted": "105 passed; 3 files",
+    "full_vitest": "3252 passed; 241 files; 270.59s; started before final lazy-helper extraction",
+    "typecheck": "passed before final lazy-helper extraction; subsequent build typecheck also passed",
+    "lint": "passed before final lazy-helper extraction",
+    "E2E": "not run locally; two new specs await isolated CI",
+    "e2e_typecheck": "14 existing diagnostics; none in new training spec",
+    "security_review": "APPROVE safety; not release readiness",
+    "qa_review": "no new defect; release blocked by STOP2"
+  },
+  "publication": {
+    "product_commit": false,
+    "remote_product_ref": false,
+    "pr": null,
+    "ci_started": false
+  },
+  "remaining": "Await explicit human decision on STOP2; diagnose lazy startup graph, preserve budgets; then required checks, independent review, final-head CI and guarded merge. No other package granted.",
+  "historical_single_failures": [
+    "unused import typecheck resolved",
+    "effect lint warning resolved",
+    "snapshot test expected mutated fixture corrected",
+    "first build missing POS manifest entry resolved by existing shared helper chunk grouping"
+  ],
+  "snapshot_transport": {
+    "method": "direct JSON source content through exec output",
+    "consecutive": 2,
+    "cause": "output truncation",
+    "stopped": true,
+    "fallback": "local immutable Git tree/archive + coordination manifest only; no product edits/retests"
+  }
+}
