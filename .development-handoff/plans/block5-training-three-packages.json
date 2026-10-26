@@ -31,7 +31,7 @@
     {
       "number": 2,
       "id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
-      "status": "implementation",
+      "status": "awaiting_ci",
       "goal": "Separate server completion and recovery of immutable clearly test-marked document, no real payments/stock movements/report effects",
       "acceptance": [
         "Persisted sale.is_test and current tenant/branch/actor authority checked",
@@ -39,7 +39,9 @@
         "Explicit test receipt, immutable historical result; real guards retained"
       ],
       "depends_on": 1,
-      "branch": "codex/unit-training-checkout"
+      "branch": "codex/unit-training-checkout",
+      "pr": 427,
+      "head": "520c8fd15e3a7db03736e27b52ee43fc67064643"
     },
     {
       "number": 3,

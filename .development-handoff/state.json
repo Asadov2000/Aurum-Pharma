@@ -3,13 +3,13 @@
   "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
   "generation": 9,
   "owner": "local",
-  "phase": "implementation",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-10-26-unit-training-saved-01",
   "branch": "codex/unit-training-checkout",
   "base_sha": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
-  "expected_head": "574248d3a1fa1daaec3aecc1cbb67a4a33233636",
+  "expected_head": "520c8fd15e3a7db03736e27b52ee43fc67064643",
   "validated_sha": null,
-  "pr": null,
+  "pr": 427,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -34,7 +34,7 @@
     "Runtime deployment/restarts, shared DB access/migrations",
     "Edge, bank integration and pilot"
   ],
-  "remaining_step": "Implement contracts/service/receipt adapter + RLS migration + scoped HTTP. Validate and publish same work item, all8 final-head CI then guarded merge. Package3 remains after accepted server package.",
+  "remaining_step": "Full final-head CI incl migration/RLS/HTTP/rollback; diagnose failures per persisted two-failure rule; fresh main/head/control then guarded merge/exact tested-main tree. After accepted,3/7(1). No runtime/shared DB.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -66,5 +66,18 @@
     "One root writer with explicitly partitioned agent files; cloud standby",
     "Two identical failures STOP; only standing Ruff E501 exception",
     "Actual GitHub main/head/control check before publication/merge, expected SHA guards, exact tested-tree verification"
-  ]
+  ],
+  "local_checks": {
+    "pure_contracts": "26 passed",
+    "migration_hooks_no_db": "1 passed",
+    "new_cases_collected": 111,
+    "ruff": "PASS17file scope (15 Python)",
+    "black": "PASS15 Python",
+    "mypy": "PASS505app sources",
+    "converter_move": "AST exactly preserved; compatibility export typed via __all__",
+    "independent_qa": "APPROVE, findings resolved",
+    "db_execution": "not run locally; mandatory isolated CI",
+    "lock_sha256": "008c8072d1fce6e851c4881aa04e66067b04ee535b490151b93352f81d82c565"
+  },
+  "source_tree": "63469b817687f53544ef100a1535e0f57c333c1d"
 }
