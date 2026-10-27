@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-27-edge-checkout-source-01",
   "branch": "codex/unit-edge-checkout-source",
   "base_sha": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
-  "expected_head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
+  "expected_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c",
   "base_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
   "validated_sha": null,
   "pr": 431,
@@ -36,11 +36,17 @@
     "Running Aurum/shared DB/deployment/restarts",
     "Dependencies/stack/UI changes or paid resources"
   ],
-  "remaining_step": "Wait all8 final-head CI; fix actual failures within STOP2, then expected-head guarded merge and verify exact tree",
+  "remaining_step": "All8 complete CI on final approved dependency-fix head, then guarded merge and exact-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
+    },
+    "dependency_audit": {
+      "consecutive": 1,
+      "cause": "three known vulnerabilities in two locked Python packages",
+      "step": "Audit Python dependencies",
+      "head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676"
     }
   },
   "blocker": null,
@@ -59,7 +65,7 @@
     "AGENTS STOP2 except standing RuffE501",
     "Fresh main/control/head reconciliation before publishing and guarded merge; exact tested-main tree"
   ],
-  "head_tree": "2c0746573aaab6be4a9943280704d3c198dab882",
+  "head_tree": "424031b3838fcaaceaf5b47eb30d050032c3f81b",
   "local_checks": {
     "pure_pytest": 558,
     "new_pure": 41,
@@ -69,5 +75,17 @@
     "mypy_app": 509,
     "diff_check": "pass",
     "independent_reviews": "approved"
+  },
+  "dependency_update_authorized": {
+    "fpdf2": {
+      "from": "2.8.7",
+      "to": "2.8.8"
+    },
+    "msgpack": {
+      "from": "1.2.1",
+      "to": "1.2.3"
+    },
+    "scope": "lock-only; no other dependency changes or runtime installs",
+    "by": "user explicit 2026-10-27"
   }
 }
