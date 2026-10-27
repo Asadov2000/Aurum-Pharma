@@ -3,14 +3,14 @@
   "generation": 12,
   "work_item_id": "UNIT-EDGE-RETAIL-STORAGE-01",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-27-edge-retail-storage-01",
   "branch": "codex/unit-edge-retail-storage",
   "base_sha": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
-  "expected_head": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
+  "expected_head": "be63e3dd06c93506e8422a4b9cd63bbbbcfcaaeb",
   "base_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
   "validated_sha": null,
-  "pr": null,
+  "pr": 430,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -35,7 +35,7 @@
     "Running Aurum/shared DB/deploy/service restarts",
     "Dependencies/stack/UI changes, purchases/paid APIs/resources"
   ],
-  "remaining_step": "Implement retail_sale_event_storage codec + independent tests/docs, review, final-head CI and guarded main merge",
+  "remaining_step": "Await all8 final-head CI for PR430; diagnose any failure via pinned public CircleCI evidence; guarded merge/exact tested-main tree; no runtime deployment.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -57,5 +57,18 @@
     "No runtime/shared DB changes or deployment",
     "AGENTS STOP2; only standing RuffE501 exception",
     "Fresh main/control/head before publication/merge; no force; verify final tested tree"
-  ]
+  ],
+  "source_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
+  "ci_workflow": "e86e74f3-140f-4011-be48-5e3a8ff391f0",
+  "local_checks": {
+    "pytest": 517,
+    "new_cases": 78,
+    "ruff": "PASS",
+    "black": "PASS",
+    "mypy": "PASS507 app sources",
+    "independent_review": "Backend+QA APPROVE",
+    "whitespace": "PASS",
+    "plan": "Critical full CI matrix",
+    "db_connections": 0
+  }
 }
