@@ -14,6 +14,13 @@ class DisposableCiGuards(unittest.TestCase):
         if os.name == "nt":
             shell = str(Path(os.environ["ProgramFiles"]) / "Git/bin/sh.exe")
         self.assertIsNotNone(shell, "A POSIX shell is required")
+        if os.name == "nt":
+            # Initialize MSYS separately from the unchanged 5-second guard deadline.
+            # This bounded empty command never opens database or credential files.
+            subprocess.run(
+                [str(shell), "-c", ":"], capture_output=True, text=True, timeout=30,
+                check=True,
+            )
         cases = (
             ({}, "explicitly disposable"),
             ({"CI": "true"}, "explicitly disposable"),
