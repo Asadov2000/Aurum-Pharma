@@ -3,11 +3,11 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "recovery_contract_repair",
+  "phase": "ci_pending",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "expected_head": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
+  "expected_head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
   "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
   "validated_sha": null,
   "pr": 428,
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Validate minimal exactauthrefresh observer and required legacyreceipt literal schema/fixture/negative tests; independent review; samePR all8CI then guardedmerge/exacttestedtree and closeblock5 counter2/7/stop.",
+  "remaining_step": "Wait all8 final-head CI and root readonly review; guardedmerge exacttestedtree proof, closepackage3/block5 counter2/7/grantfalse/activefalse/pendingtransferfalse/localwritesstoppedtrue/schedulersPAUSED and stop.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -68,7 +68,8 @@
       "consecutive": 1,
       "cause": "Physical reaches final noPOST assertion: exact /api/v1/auth/refresh incorrectly included",
       "local_fix": "Exclude only exact auth refresh endpoint, retain all other POSTs and realEffects/commands assertions",
-      "validation": "Prettier ESLint whitespace PASS; unpublished pending mixed diagnosis"
+      "validation": "Prettier ESLint whitespace PASS; unpublished pending mixed diagnosis",
+      "status": "exact authrefresh observer fix published"
     },
     "mixed_reload": {
       "ci_runs": 1,
@@ -80,7 +81,8 @@
         "backend/app/domains/pos/training_checkout_schemas.py:118",
         "frontend/src/features/pos/trainingCheckout.ts legacyReceipt",
         "Independent QA readonly diagnosis"
-      ]
+      ],
+      "status": "strict backend-matching receipt fields/fixture/5negative tests published"
     }
   },
   "blocker": null,
@@ -101,7 +103,7 @@
     "All required final-head contexts success; expected head guarded merge; verify actual main tree",
     "This grant only package3; checkpoint and stop after completion, do not invent further stages"
   ],
-  "candidate_tree": "589737175a758365bc906a4cc4bb0319051bc11a",
+  "candidate_tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
   "snapshot": {
     "manifest": ".development-handoff/artifacts/gen10-training-cashier-stop2/manifest.json",
     "local_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
@@ -159,6 +161,17 @@
       "plan": "Auto PlanOnly targeted isolated E2E; executes only in CI",
       "independent_review": "QA+security APPROVE exact fixture; runtime assertions require CI",
       "scope": "Only E2E fixture; no product/guard/dependency/limit changes"
+    },
+    "final_recovery_repair": {
+      "targeted": 112,
+      "prettier": "PASS",
+      "eslint": "PASS",
+      "whitespace": "PASS",
+      "plan": "Auto PlanOnly critical fullmatrix",
+      "production_build_typecheck": "PASS",
+      "pos_gzip": "194.81KiB limit195unchanged",
+      "review": "Independent QA+security APPROVE exact candidate51ef353f",
+      "full_CI": "pending final head"
     }
   },
   "approvals": {
