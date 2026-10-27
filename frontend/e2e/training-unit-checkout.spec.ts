@@ -42,15 +42,17 @@ interface TrainingResult {
   };
 }
 
-function sql(query: string): string {
+function sql(query: string, role: "postgres" | "aurum_support" = "postgres"): string {
   // dockerExec validates both immutable container IDs and their disposable project.
   return dockerExec(E2E_POSTGRES_CONTAINER, [
     "psql",
     "-U",
-    "postgres",
+    role,
     "-d",
     E2E_POSTGRES_DB,
     "-At",
+    "-v",
+    "ON_ERROR_STOP=1",
     "-c",
     query,
   ]).trim();
@@ -225,12 +227,49 @@ for (const kind of ["physical", "mixed"] as const) {
           expectedCartItems: 1,
         });
       const saleId = await addPhysicalFormats(page, medicine.brand_name);
-      // The isolated seed's OWNER tenant is active. Match the established backend
-      // training_source fixture by marking only this new draft, never the tenant.
-      // This test proves dispatch from persisted is_test, not setup-tenant creation.
+      const sourceResponse = await api.get(`sales/${saleId}`);
+      expect(sourceResponse.ok()).toBe(true);
+      const source = (await sourceResponse.json()) as {
+        id: string;
+        tenant_id: string;
+        branch_id: string;
+        register_id: string;
+        cashier_user_id: string;
+        status: string;
+        is_test: boolean;
+      };
+      const meResponse = await api.get("auth/me");
+      expect(meResponse.ok()).toBe(true);
+      const me = (await meResponse.json()) as { id: string; active_tenant_id: string };
+      expect(source).toMatchObject({
+        id: saleId,
+        tenant_id: me.active_tenant_id,
+        branch_id: branch.id,
+        register_id: register.id,
+        cashier_user_id: me.id,
+        status: "draft",
+        is_test: false,
+      });
+      // Match backend training_source's established support session, only inside
+      // the guarded disposable CI database. Actual SESSION_USER matters to the
+      // branch-writer guard; SET ROLE or a flag on postgres is insufficient.
       expect(
-        sql(`UPDATE sale SET is_test=true WHERE id='${saleId}'
-        AND status='draft' AND register_id='${checkedId(register.id)}' RETURNING id;`),
+        sql(
+          `BEGIN;
+          SET LOCAL app.support_session='true';
+          SET LOCAL app.support_access_session_id='';
+          SET LOCAL app.tenant_id='${checkedId(source.tenant_id)}';
+          SET LOCAL app.user_id='${checkedId(source.cashier_user_id)}';
+          SET LOCAL app.branch_id='${checkedId(branch.id)}';
+          UPDATE sale SET is_test=true WHERE id='${checkedId(saleId)}'
+          AND tenant_id='${checkedId(source.tenant_id)}'
+          AND branch_id='${checkedId(branch.id)}'
+          AND register_id='${checkedId(register.id)}'
+          AND cashier_user_id='${checkedId(me.id)}'
+          AND status='draft' AND is_test=false RETURNING id;
+          COMMIT;`,
+          "aurum_support",
+        ),
       ).toContain(saleId);
       const draft = await api.get(`sales/${saleId}`);
       expect(draft.ok()).toBe(true);
