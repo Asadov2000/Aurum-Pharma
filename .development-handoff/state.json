@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "ci_pending",
+  "phase": "blocked_ci_evidence",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -15,7 +15,7 @@
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_active_turn": false,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,33 +29,29 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Await all8 final-head CI for PR428; diagnose failures only from approved evidence, independent review, fresh main/control/head guarded merge and exact tested-tree proof.",
+  "remaining_step": "Get approved E2E failure evidence, diagnose cause before any fix/rerun, continue same PR428 under existing cloud ownership; all8 final-head CI then fresh guarded merge and main tree proof. No blind CI rerun or merge.",
   "failure_counters": {
     "current_stage": {
-      "cause": "POS /pos gzip exceeds unchanged 195.00 KiB startup budget",
-      "consecutive": 0,
-      "command": "NODE_ENV=production /workspace/aurum-env-repair-qa/frontend-check pnpm build",
-      "attempts": [
-        {
-          "log": "build-second.log",
-          "actual_KiB": "195.01",
-          "limit_KiB": "195.00"
-        },
-        {
-          "log": "build-third.log",
-          "actual_KiB": "195.09",
-          "limit_KiB": "195.00"
-        }
-      ],
-      "approved_retry": true,
-      "approval": "approvals.pos_build_budget_retry",
-      "status": "resolved_by_authorized_lazy_boundary_repair",
-      "final_pos_gzip_KiB": "194.98",
-      "total_budget_failures": 4,
-      "historical_consecutive": 2
+      "consecutive": 1,
+      "cause": "Unknown CI E2E failure; required diagnostic evidence inaccessible",
+      "context": "ci/circleci: e2e",
+      "workflow": "469b1f1b-8052-4ca5-8a55-5984775c3d50",
+      "job": "28c3f09e-2a50-4151-b8d0-286c37e21b9d",
+      "head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
+      "rerun": false
     }
   },
-  "blocker": null,
+  "blocker": {
+    "type": "missing_CircleCI_failure_evidence",
+    "url": "https://app.circleci.com/workflow/469b1f1b-8052-4ca5-8a55-5984775c3d50/job/28c3f09e-2a50-4151-b8d0-286c37e21b9d",
+    "github_check_runs": 0,
+    "PR_comments": 0,
+    "PR_reviews": 0,
+    "status_description": null,
+    "CircleCI_read_tools": false,
+    "CircleCI_allowed_hosts": [],
+    "need": "Failed step name, bounded log and Playwright failure/test report; no secrets/business data"
+  },
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
@@ -112,5 +108,28 @@
   "restore_history": {
     "auto_review_rejection": "one blob denied for missing authorization context; reread current explicit grant and destination, same operation approved; no alternative channel",
     "raw_commit_materialization": "one checked mismatch, newline diagnostic did not match either; no import/ref move performed; method stopped"
+  },
+  "budget_repair_history": {
+    "cause": "POS /pos gzip exceeds unchanged 195.00 KiB startup budget",
+    "consecutive": 0,
+    "command": "NODE_ENV=production /workspace/aurum-env-repair-qa/frontend-check pnpm build",
+    "attempts": [
+      {
+        "log": "build-second.log",
+        "actual_KiB": "195.01",
+        "limit_KiB": "195.00"
+      },
+      {
+        "log": "build-third.log",
+        "actual_KiB": "195.09",
+        "limit_KiB": "195.00"
+      }
+    ],
+    "approved_retry": true,
+    "approval": "approvals.pos_build_budget_retry",
+    "status": "resolved_by_authorized_lazy_boundary_repair",
+    "final_pos_gzip_KiB": "194.98",
+    "total_budget_failures": 4,
+    "historical_consecutive": 2
   }
 }
