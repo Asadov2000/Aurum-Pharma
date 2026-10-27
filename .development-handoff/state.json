@@ -3,11 +3,11 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "e2e_fixture_repair",
+  "phase": "ci_pending",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "expected_head": "6281301414a173aebe483dd3b03301ba3e243dca",
+  "expected_head": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
   "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
   "validated_sha": null,
   "pr": 428,
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Repair disposable E2E fixture via established scoped session only; independent review; samePR all8 CI then guarded merge and exacttree proof. No guard/RLS changes.",
+  "remaining_step": "All8 final-head CI including actual physical+mixed training assertions, then guarded merge/exacttestedtree and close package3/block5; counter2/7; stop.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -60,7 +60,8 @@
       "cause": "Own draft sale UPDATE through postgres rejected SESSION_USER by assert_current_branch_writer; both training fixtures before checkout assertions",
       "result": "165 passed /2 failed; ordinary Playwright retry per scenario",
       "evidence": "Root verified PublicJson revision/workflow; no tokens/cookies",
-      "approval_exception": false
+      "approval_exception": false,
+      "status": "scoped_support_fixture_fix_published"
     }
   },
   "blocker": null,
@@ -81,7 +82,7 @@
     "All required final-head contexts success; expected head guarded merge; verify actual main tree",
     "This grant only package3; checkpoint and stop after completion, do not invent further stages"
   ],
-  "candidate_tree": "308b71e19f83c52690ee5bfd6c85cbc4b11802d1",
+  "candidate_tree": "589737175a758365bc906a4cc4bb0319051bc11a",
   "snapshot": {
     "manifest": ".development-handoff/artifacts/gen10-training-cashier-stop2/manifest.json",
     "local_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
@@ -102,7 +103,15 @@
     },
     "review": "QA+security APPROVE readiness dedup and lazy unchanged matcher with context guards",
     "final_full_vitest": "3254 passed /241 files /254.62s on exact final files",
-    "CI": "tooling-linux/windows,frontend,audit,production-containers success; E2E failure; backend pending; gate not yet run"
+    "CI": "tooling-linux/windows,frontend,audit,production-containers success; E2E failure; backend pending; gate not yet run",
+    "fixture_fix": {
+      "prettier": "PASS",
+      "eslint": "PASS",
+      "whitespace": "PASS",
+      "plan": "Auto PlanOnly targeted isolated E2E; executes only in CI",
+      "independent_review": "QA+security APPROVE exact fixture; runtime assertions require CI",
+      "scope": "Only E2E fixture; no product/guard/dependency/limit changes"
+    }
   },
   "approvals": {
     "pos_build_budget_retry": {
