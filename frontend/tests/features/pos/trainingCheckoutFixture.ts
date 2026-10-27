@@ -109,7 +109,7 @@ export function trainingFixture(mixed = true) {
     if (rest.inventory_kind === "legacy_pack") {
       const { batch_id: unusedBatch, ...facts } = rest;
       void unusedBatch;
-      return { ...facts, name: "Legacy" };
+      return { ...facts, name: "Legacy", sale_format: "pack" as const, unit_label: "уп." as const };
     }
     return { ...rest, name: "Physical", unit_label: "табл." };
   });

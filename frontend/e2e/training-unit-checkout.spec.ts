@@ -355,7 +355,12 @@ for (const kind of ["physical", "mixed"] as const) {
       blockStatus = false;
       const postsAfterReload: string[] = [];
       page.on("request", (outgoing) => {
-        if (outgoing.method() === "POST") postsAfterReload.push(new URL(outgoing.url()).pathname);
+        if (outgoing.method() !== "POST") return;
+        const pathname = new URL(outgoing.url()).pathname;
+        // Reload renews the in-memory access token through its httpOnly cookie.
+        // Only this exact auth endpoint is outside the no-command-replay contract;
+        // every sale/stock/payment/training POST remains forbidden after reload.
+        if (pathname !== "/api/v1/auth/refresh") postsAfterReload.push(pathname);
       });
       await page.reload();
       // Mounting the pending panel recovers via GET; it must never replay a POST.

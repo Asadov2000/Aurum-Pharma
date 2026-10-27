@@ -318,6 +318,22 @@ describe("training-only durable checkout", () => {
       await expect(parseTrainingResult(f.result, p, () => undefined)).rejects.toThrow();
     },
   );
+  it.each(["format", "label", "missing-format", "missing-label", "extra"])(
+    "rejects invalid legacy TEST receipt display contract %s",
+    async (kind) => {
+      const f = trainingFixture(),
+        p = store(),
+        line = f.result.receipt.lines.find((row) => row.inventory_kind === "legacy_pack");
+      expect(line).toBeDefined();
+      if (!line) throw new Error("Missing mixed fixture row");
+      if (kind === "format") Reflect.set(line, "sale_format", "unit");
+      if (kind === "label") Reflect.set(line, "unit_label", "табл.");
+      if (kind === "missing-format") Reflect.deleteProperty(line, "sale_format");
+      if (kind === "missing-label") Reflect.deleteProperty(line, "unit_label");
+      if (kind === "extra") Reflect.set(line, "unexpected", true);
+      await expect(parseTrainingResult(f.result, p, () => undefined)).rejects.toThrow();
+    },
+  );
   it.each([1, 1.1, "1e0", "01.00", "0.001"])("rejects noncanonical money %s", (amount) => {
     const r = trainingFixture().request;
     expect(trainingCheckoutRequestSchema.safeParse({ ...r, cash_tendered: amount }).success).toBe(

@@ -132,6 +132,8 @@ const physicalReceipt = z
 const legacyReceipt = z
   .object({
     inventory_kind: z.literal("legacy_pack"),
+    sale_format: z.literal("pack"),
+    unit_label: z.literal("уп."),
     position: legacyShape.position,
     name: printable(500),
     quantity: legacyShape.quantity,
