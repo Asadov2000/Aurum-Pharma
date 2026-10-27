@@ -3,11 +3,11 @@
   "generation": 13,
   "work_item_id": "UNIT-EDGE-CHECKOUT-SOURCE-01",
   "owner": "local",
-  "phase": "awaiting_user_exception",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-27-edge-checkout-source-01",
   "branch": "codex/unit-edge-checkout-source",
   "base_sha": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
-  "expected_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
+  "expected_head": "99d946ccc063ceed4286ca5c41acb3679f92f993",
   "base_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
   "validated_sha": null,
   "pr": 431,
@@ -36,7 +36,7 @@
     "Running Aurum/shared DB/deployment/restarts",
     "Dependencies/stack/UI changes or paid resources"
   ],
-  "remaining_step": "Await STOP2 exception; then commit approved DNS lock patch and all8 full CI on final head before guarded merge",
+  "remaining_step": "All8 required CI success on final head; guarded expected-head merge and exact-main-tree confirmation",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -55,7 +55,11 @@
       "first_failed_head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
       "step": "Pytest shard1 no-output timeout",
       "corrected_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
-      "second_failed_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c"
+      "second_failed_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c",
+      "exception": {
+        "by": "user explicit approval 2026-10-27",
+        "scope": "rerun corrected fixture and continue PR431; no limits or protections weakening"
+      }
     },
     "dns_audit": {
       "consecutive": 1,
@@ -63,7 +67,7 @@
       "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82"
     }
   },
-  "blocker": "STOP2: the first two already-running CI revisions with old fixture order timed out in RLS actor setup; fixture reordered in 5b9c821. Approved dnspython 2.9.0 lock patch ready, uncommitted. Await explicit exception before any more product publication/rechecks.",
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-RETAIL-STORAGE-01",
     "pr": 430,
@@ -79,7 +83,7 @@
     "AGENTS STOP2 except standing RuffE501",
     "Fresh main/control/head reconciliation before publishing and guarded merge; exact tested-main tree"
   ],
-  "head_tree": "8c2d0378bb7ed791af0fdc08792e5ee3af04b58f",
+  "head_tree": "20e2fd88bcb3fbafebbb412fc948e75e77521076",
   "local_checks": {
     "pure_pytest": 558,
     "new_pure": 41,
@@ -108,8 +112,8 @@
     }
   },
   "ci": {
-    "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
+    "head": "99d946ccc063ceed4286ca5c41acb3679f92f993",
     "state": "starting",
-    "previous_workflow": "79a2c677-7dd3-4641-8698-03acd6541db7"
+    "previous_workflow": "85a74344-ed47-4fd5-8d55-b959c08c75f1"
   }
 }
