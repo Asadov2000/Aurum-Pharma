@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-27-edge-checkout-source-01",
   "branch": "codex/unit-edge-checkout-source",
   "base_sha": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
-  "expected_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
+  "expected_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
   "base_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
   "validated_sha": null,
   "pr": 431,
@@ -36,7 +36,7 @@
     "Running Aurum/shared DB/deployment/restarts",
     "Unapproved dependency/stack/UI changes or paid resources"
   ],
-  "remaining_step": "All8 final-head CI; expected-head guarded merge and exact-main-tree verification",
+  "remaining_step": "Final-head all8 CI after stabilized existing catalog-create E2E; guarded expected-head merge and exact-main-tree confirmation",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -73,6 +73,13 @@
       "first_failed_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
       "corrected_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
       "step": "same-branch metadata RLS test"
+    },
+    "catalog_create_e2e": {
+      "consecutive": 1,
+      "cause": "Existing delayed CatalogPicker list intercepts click on create-card button; retry passed but fail-on-flaky rejects",
+      "first_failed_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
+      "step": "Playwright incoming-catalog-create existing-card case",
+      "corrected_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     }
   },
   "blocker": null,
@@ -91,7 +98,7 @@
     "AGENTS STOP2 except standing RuffE501",
     "Fresh main/control/head reconciliation before publishing and guarded merge; exact tested-main tree"
   ],
-  "head_tree": "ca23de6c4348bfb9b9a0c781f83c3df37181d414",
+  "head_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
   "local_checks": {
     "pure_pytest": 558,
     "new_pure": 41,
@@ -101,7 +108,14 @@
     "mypy_app": 509,
     "diff_check": "pass",
     "independent_reviews": "approved",
-    "effective_policy_test_review": "independent approve"
+    "effective_policy_test_review": "independent approve",
+    "e2e_correction": {
+      "prettier": "pass",
+      "eslint": "pass",
+      "frontend_tsc": "pass",
+      "playwright_collected": 2,
+      "independent_review": "approved"
+    }
   },
   "dependency_update_authorized": {
     "fpdf2": {
@@ -121,22 +135,8 @@
     }
   },
   "ci": {
-    "head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
-    "workflow": "b5649bc2-72ba-48d0-8926-01265f317e52",
-    "state": "running",
-    "verified_success": [
-      "tooling-linux",
-      "dependency-audit"
-    ],
-    "required_contexts": [
-      "backend",
-      "frontend",
-      "e2e",
-      "dependency-audit",
-      "production-containers",
-      "tooling-linux",
-      "tooling-windows",
-      "ci-gate"
-    ]
+    "head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
+    "state": "starting",
+    "previous_workflow": "b5649bc2-72ba-48d0-8926-01265f317e52"
   }
 }
