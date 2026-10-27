@@ -3,11 +3,11 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "build_budget_repair",
+  "phase": "ci_pending",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "expected_head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
+  "expected_head": "6281301414a173aebe483dd3b03301ba3e243dca",
   "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
   "validated_sha": null,
   "pr": 428,
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Reduce initial POS graph with margin under unchanged195KiB; verify normal+Docker-equivalent build env without services; final tests/reviews, update samePR428 with expected head, all8CI then guarded merge.",
+  "remaining_step": "Wait final local Vitest and all8 final-head CI; if failure get diagnostic evidence; fresh main/control/head guarded merge then exact tested tree readback, close package3/block5 and stop.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -39,7 +39,16 @@
       "workflow": "469b1f1b-8052-4ca5-8a55-5984775c3d50",
       "job_number": 3468,
       "failed_step": "Start isolated application stack",
-      "not_playwright_failure": true
+      "not_playwright_failure": true,
+      "status": "budget_fix_published_samePR",
+      "historical_budget_failures": {
+        "local": [
+          "195.01KiB",
+          "195.09KiB",
+          "195.01KiB approvedretry"
+        ],
+        "firstCI": "rounded195.00KiB above exact threshold; setup step notPlaywright"
+      }
     }
   },
   "blocker": null,
@@ -60,7 +69,7 @@
     "All required final-head contexts success; expected head guarded merge; verify actual main tree",
     "This grant only package3; checkpoint and stop after completion, do not invent further stages"
   ],
-  "candidate_tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
+  "candidate_tree": "308b71e19f83c52690ee5bfd6c85cbc4b11802d1",
   "snapshot": {
     "manifest": ".development-handoff/artifacts/gen10-training-cashier-stop2/manifest.json",
     "local_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
@@ -70,14 +79,18 @@
     "remote_candidate_source_published": false
   },
   "qa": {
-    "local_validated_tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
-    "targeted": "107 passed",
-    "full_vitest": "3254 passed /241 files on final files",
-    "typecheck": "PASS",
+    "targeted": "111 passed",
     "lint": "PASS",
-    "production_build": "PASS unchanged195.00KiB budget; POS194.98KiB/16requests",
-    "review": "two independent readonly approvals; lazy guard movement preserved",
-    "E2E": "existing isolated CI pending"
+    "typecheck": "PASS via both builds",
+    "builds": {
+      "normal": "194.78KiB",
+      "E2E_URL": "194.79KiB",
+      "limit": "195.00KiB unchanged",
+      "requests": 16
+    },
+    "review": "QA+security APPROVE readiness dedup and lazy unchanged matcher with context guards",
+    "final_full_vitest": "running on exact final files",
+    "CI": "automatic workflow from samePR branch update, no manual rerun"
   },
   "approvals": {
     "pos_build_budget_retry": {
