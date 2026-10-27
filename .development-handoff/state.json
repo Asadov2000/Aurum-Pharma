@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "blocked_ci_evidence",
+  "phase": "blocked_mixed_recovery_artifact",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Read exact revision/workflow-matched PublicJson failed-step log before any fix or retry. If same branch-writer fixture cause, STOP2 applies. After diagnosed repair all8 finalhead CI and root review required before guarded merge/exact main tree. Grant remains only package3; no next stage.",
+  "remaining_step": "Obtain exact mixed error-context/artifact through existing approved read channel; diagnose before product change/retry. Physical exact auth-refresh observer fix validated locally but unpublished. Then independent review/finalchecks/all8 CI/rootreview/guardedmerge/exacttree, closepackage3/block5 counter2/7 and stop.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -61,21 +61,31 @@
       "result": "165 passed /2 failed; ordinary Playwright retry per scenario",
       "evidence": "Root verified PublicJson revision/workflow; no tokens/cookies",
       "approval_exception": false,
-      "status": "scoped_support_fixture_fix_published"
+      "status": "resolved_in_CI3484_no_branch_writer_error"
+    },
+    "recovery_observer": {
+      "ci_runs": 1,
+      "consecutive": 1,
+      "cause": "Physical reaches final noPOST assertion: exact /api/v1/auth/refresh incorrectly included",
+      "local_fix": "Exclude only exact auth refresh endpoint, retain all other POSTs and realEffects/commands assertions",
+      "validation": "Prettier ESLint whitespace PASS; unpublished pending mixed diagnosis"
+    },
+    "mixed_reload": {
+      "ci_runs": 1,
+      "consecutive": 1,
+      "cause": "Unknown: TEST receipt button absent after reload; do not assume flaky or repeated writer error",
+      "failed_assertion": "training-unit-checkout.spec.ts:364:9 getByRole button Открыть TEST-чек not found within existing15000ms"
     }
   },
   "blocker": {
     "head": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
     "workflow": "e0ca94fb-ddfc-4179-8bfe-3f24616f173f",
+    "job_number": 3484,
     "job": "2691835e-1515-4dee-a388-8e0c25288c92",
-    "context": "ci/circleci: e2e",
-    "cause": "Unknown new failed-step/test evidence required; do not assume repeated fixture cause",
-    "previous_diagnosed_cause_count": 1,
-    "current_undiagnosed_ci_failure_count": 1,
-    "logs_requested": true,
-    "manual_rerun": false,
-    "github_check_runs": 0,
-    "github_comments": 0
+    "needed": "test-results/training-unit-checkout-rec-e8993-eceipt-without-real-effects-chromium/error-context.md; screenshot/test-failed-1.png or trace.zip if context inconclusive",
+    "reason": "Determine rendered sale/panel/error/session state for mixed reload before further fix or CI retry",
+    "source": "Root revision/workflow-verified PublicJson diagnostics",
+    "manual_rerun": false
   },
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
@@ -118,38 +128,31 @@
     "CI": [
       {
         "context": "ci/circleci: tooling-linux",
-        "state": "success",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/0b98c18f-2cf1-4e52-be90-ec8a20be47e6"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "pending",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/c3e0aa30-7ece-474f-894e-d37cb5686df4"
+        "state": "success"
       },
       {
         "context": "ci/circleci: dependency-audit",
-        "state": "success",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/c7b1b8cd-2cb7-4002-a2cb-4beab6c901a9"
+        "state": "success"
       },
       {
         "context": "ci/circleci: tooling-windows",
-        "state": "success",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/184ebfc9-7a41-4a54-a8ae-7a2355bfd2fa"
+        "state": "success"
       },
       {
         "context": "ci/circleci: frontend",
-        "state": "success",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/d7147580-8ee6-4327-9a9e-0c5aa97e3dcc"
+        "state": "success"
       },
       {
         "context": "ci/circleci: production-containers",
-        "state": "success",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/e87d7ba5-228e-4d68-a1b9-0d5494a15f67"
+        "state": "success"
       },
       {
         "context": "ci/circleci: e2e",
-        "state": "failure",
-        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/2691835e-1515-4dee-a388-8e0c25288c92"
+        "state": "failure"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
       }
     ],
     "fixture_fix": {
