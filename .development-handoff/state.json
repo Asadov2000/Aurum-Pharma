@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "blocked",
+  "phase": "build_budget_repair",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -14,7 +14,7 @@
   "source_path": "/workspace/Aurum-Pharma-gen10",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
-  "cloud_product_grant": false,
+  "cloud_product_grant": true,
   "cloud_active_turn": false,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Await explicit human decision on STOP2; diagnose lazy startup graph, preserve budgets; then required checks, independent review, final-head CI and guarded merge. No other package granted.",
+  "remaining_step": "Authorized scoped POS startup bundle optimization without raising 195.00KiB budget; verify final candidate, complete all required final-head CI and guarded main merge.",
   "failure_counters": {
     "current_stage": {
       "cause": "POS /pos gzip exceeds unchanged 195.00 KiB startup budget",
@@ -46,10 +46,13 @@
           "actual_KiB": "195.09",
           "limit_KiB": "195.00"
         }
-      ]
+      ],
+      "approved_retry": true,
+      "approval": "approvals.pos_build_budget_retry",
+      "status": "authorized_repair"
     }
   },
-  "blocker": "STOP2: two consecutive POS startup gzip budget failures (195.01 then 195.09 KiB > unchanged195.00). No further source edits/checks/publication without explicit human decision.",
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
@@ -62,7 +65,7 @@
     "Included limits only; no purchases/credits/paid resources or new installations/dependency changes",
     "Cloud sole product writer; local stopped; old schedules paused",
     "No running Aurum/shared DB/deploy/restarts; isolated CI only",
-    "AGENTS two-identical-failures STOP; standing exception only Ruff E501",
+    "AGENTS two-identical-failures STOP except standing Ruff E501 and current-stage explicitly authorized POS startup budget repair",
     "Protected UI references unchanged; no real payments or stock effects",
     "All required final-head contexts success; expected head guarded merge; verify actual main tree",
     "This grant only package3; checkpoint and stop after completion, do not invent further stages"
@@ -85,5 +88,13 @@
     "e2e_typecheck": "14 existing diagnostics; none in new training spec",
     "security_review": "APPROVE safety; not release readiness",
     "qa_review": "no new defect; release blocked by STOP2"
+  },
+  "approvals": {
+    "pos_build_budget_retry": {
+      "source": "Direct human authorization 2026-10-27 in root chat: Да, пусть облако исправит размер сборки без повышения лимита и доведёт этот этап до зелёного CI и main. Только бесплатно, без дублирования работы и изменений работающего Aurum и общей БД.",
+      "scope": "Same Work-Item-ID and package3 only: repair POS gzip startup budget and verify until success without raising limits or weakening checks. Other STOP2 rules remain, no dependency changes/runtime/shared DB/deployment/purchases.",
+      "status": "active",
+      "approved_after_consecutive_failures": 2
+    }
   }
 }
