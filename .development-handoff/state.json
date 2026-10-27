@@ -3,13 +3,13 @@
   "generation": 14,
   "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-27-edge-checkout-origin-01",
   "branch": "codex/unit-edge-checkout-origin",
   "base_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
   "expected_head": "1b945454a46aeb86713a77a7c975d315160cf36e",
   "base_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
-  "validated_sha": null,
+  "validated_sha": "1b945454a46aeb86713a77a7c975d315160cf36e",
   "pr": 432,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -17,7 +17,7 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -38,7 +38,7 @@
     "Backfill/retroactive identity, duplicated financial evidence, new worker bypass or public endpoints",
     "Dependency/stack/protected UI changes, paid resources, cloud product writes"
   ],
-  "remaining_step": "Full CI on corrected trigger-ACL probe; guarded merge and tested-main-tree verification",
+  "remaining_step": "This work item is complete. Before any next Edge item, freshly inspect main/open PRs/acceptance criteria and confirm local ownership; no deployment or shared DB changes.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -65,11 +65,12 @@
       "resolved_head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6"
     },
     "trigger_acl_probe": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "asyncpg result introspection of trigger pseudo-type raises client InternalClientError before server EXECUTE ACL",
       "first_failed_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
       "step": "Pytest / test_direct_origin_dml_and_trigger_function_calls_are_not_runtime_capabilities",
-      "corrected_head": "1b945454a46aeb86713a77a7c975d315160cf36e"
+      "corrected_head": "1b945454a46aeb86713a77a7c975d315160cf36e",
+      "resolved_head": "1b945454a46aeb86713a77a7c975d315160cf36e"
     }
   },
   "blocker": null,
@@ -107,7 +108,62 @@
   },
   "ci": {
     "head": "1b945454a46aeb86713a77a7c975d315160cf36e",
-    "state": "starting",
-    "previous_workflow": "b9c4ed3f-27ba-4977-8f7f-a2b2f1d8a393"
-  }
+    "workflow": "4bd63251-38a5-49c6-8b89-1e8a24ff0d27",
+    "state": "all8success",
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success"
+      }
+    ],
+    "counts": {
+      "backend": 7207,
+      "backend_shards": [
+        3604,
+        3603
+      ],
+      "frontend_tests": 3259,
+      "frontend_files": 241,
+      "e2e": 167
+    }
+  },
+  "control_sha": "b5f5a6e2c4b9a80b796be0c5ddbf7460835bda96",
+  "merged_main": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
+  "merged_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
+  "runtime": {
+    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_checkout_clean": true,
+    "running_services": "untouched",
+    "shared_database": "untouched; migration0225 not applied to shared DB",
+    "deployment_authorized": false
+  },
+  "completed_at": "2026-10-27 19:21:50 UTC"
 }
