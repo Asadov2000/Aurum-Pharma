@@ -128,6 +128,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "pos_retail_checkout_origin",
     "unit_stock_opening_pack_v2",
     "unit_legacy_transition",
     "unit_stock_opened_pack_v2",
@@ -274,6 +275,8 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_capture_retail_checkout_origin",
+    "trg_retail_checkout_origin_guard",
     "assert_training_checkout_stock_snapshot",
     "assert_training_checkout_document",
     "assert_training_checkout",
@@ -1712,6 +1715,8 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_capture_retail_checkout_origin",
+        "trg_retail_checkout_origin_guard",
         "assert_training_checkout_stock_snapshot",
         "assert_training_checkout_document",
         "assert_training_checkout",
