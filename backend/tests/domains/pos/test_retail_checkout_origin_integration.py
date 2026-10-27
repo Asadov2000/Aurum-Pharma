@@ -261,14 +261,16 @@ async def test_direct_origin_dml_and_trigger_function_calls_are_not_runtime_capa
 ) -> None:
     result = await finish(db_session, await prepare(db_session, "physical-cash"))
     saved = await read_origin(db_session, result)
+    # PERFORM reaches server-side EXECUTE checks without exposing the trigger
+    # pseudo-type to asyncpg's result-type introspection.
     statements = (
         "INSERT INTO pos_retail_checkout_origin SELECT * "
         "FROM pos_retail_checkout_origin WHERE id=:id",
         "UPDATE pos_retail_checkout_origin SET writer_epoch=writer_epoch+1 WHERE id=:id",
         "DELETE FROM pos_retail_checkout_origin WHERE id=:id",
         "TRUNCATE pos_retail_checkout_origin",
-        "SELECT public.trg_capture_retail_checkout_origin()",
-        "SELECT public.trg_retail_checkout_origin_guard()",
+        "DO $$ BEGIN PERFORM public.trg_capture_retail_checkout_origin(); END $$",
+        "DO $$ BEGIN PERFORM public.trg_retail_checkout_origin_guard(); END $$",
     )
     before = await protected_facts(db_session)
     for statement in statements:
