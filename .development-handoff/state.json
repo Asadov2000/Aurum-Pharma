@@ -3,14 +3,14 @@
   "generation": 11,
   "work_item_id": "UNIT-EDGE-RETAIL-EVENTS-01",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-27-edge-retail-events-01",
   "branch": "codex/unit-edge-v3-readiness",
   "base_sha": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
-  "expected_head": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+  "expected_head": "20eb5ce074498f5960fc51fcefa0323a94e82d1d",
   "base_tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
   "validated_sha": null,
-  "pr": null,
+  "pr": 429,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -34,11 +34,18 @@
     "Stock/payment/return effects, deployment/service restart",
     "New requirements, dependency/stack changes, purchases/paid resources"
   ],
-  "remaining_step": "Implement pure event contract, tests and synchronize completed block5 docs; review, verify, same-work-item PR and CI",
+  "remaining_step": "Await all8 final-head CI; approved public CircleCI diagnostics for failures; guarded merge/exact-tested-main proof. Cloud remains stopped.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
+    },
+    "resolved_local_setup": {
+      "step": "pytest collection",
+      "cause": "No isolated test JWT key",
+      "consecutive": 0,
+      "historical_failures": 1,
+      "fix": "Ephemeral CSPRNG key in child environment;439 tests pass; no real secret access"
     }
   },
   "blocker": null,
@@ -57,5 +64,17 @@
     "No runtime/shared DB/deploy changes",
     "AGENTS STOP2 preserved; only standing RuffE501 exception; previous-stage budget approval not applicable",
     "Fresh main/head/readbacks, no force, exact final-head CI and guarded merge"
-  ]
+  ],
+  "source_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
+  "local_checks": {
+    "pure_pytest": 439,
+    "new_cases": 76,
+    "ruff": "PASS",
+    "black": "PASS",
+    "mypy": "PASS506 app sources",
+    "independent_review": "APPROVE implementation and tests/docs",
+    "whitespace": "PASS",
+    "plan": "critical/full CI matrix",
+    "local_db_connections": 0
+  }
 }
