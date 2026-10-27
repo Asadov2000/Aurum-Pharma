@@ -3,13 +3,13 @@
   "generation": 11,
   "work_item_id": "UNIT-EDGE-RETAIL-EVENTS-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "merged",
   "run_id": "local-2026-10-27-edge-retail-events-01",
   "branch": "codex/unit-edge-v3-readiness",
   "base_sha": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
   "expected_head": "20eb5ce074498f5960fc51fcefa0323a94e82d1d",
   "base_tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
-  "validated_sha": null,
+  "validated_sha": "20eb5ce074498f5960fc51fcefa0323a94e82d1d",
   "pr": 429,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -17,8 +17,8 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "local_product_writes_stopped": false,
-  "local_heartbeat": "ACTIVE: existing aurum hourly, bounded to PR429; pause after completion or external blocker",
+  "local_product_writes_stopped": true,
+  "local_heartbeat": "PAUSED: PR429 completed; no next-stage grant",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (N уточняется по критериям блока6)",
@@ -34,7 +34,7 @@
     "Stock/payment/return effects, deployment/service restart",
     "New requirements, dependency/stack changes, purchases/paid resources"
   ],
-  "remaining_step": "Await all8 final-head CI; approved public CircleCI diagnostics for failures; guarded merge/exact-tested-main proof. Cloud remains stopped.",
+  "remaining_step": "UNIT-EDGE-RETAIL-EVENTS-01 completed in PR429. Block6 remains open: trusted persistence/publication/apply, bootstrap/stock cost/restrictions, returns and restart/30-day acceptance need separately scoped implementation after fresh recon. No new stage started.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -81,9 +81,76 @@
   "control_commit": "2f217873b9b5128373d85f837b9a5cc0d6f5d382",
   "automation": {
     "id": "aurum",
-    "status": "ACTIVE",
+    "status": "PAUSED",
     "interval_minutes": 60,
     "target_thread": "01a125cf-bee5-71a1-b92f-4bb4b8483b49",
-    "scope": "PR429 only; no next stage; notify meaningful changes only"
+    "scope": "PR429 only; no next stage; notify meaningful changes only",
+    "paused_reason": "Current bounded PR429 completed"
+  },
+  "validated_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
+  "merge_commit": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
+  "verified_main": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
+  "runtime_changes": false,
+  "shared_db_access": false,
+  "paid_resources_created": 0,
+  "final_ci": {
+    "head": "20eb5ce074498f5960fc51fcefa0323a94e82d1d",
+    "workflow": "a608a6ee-4eb4-4c17-ab40-be84349b1b30",
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/ae1cb3de-7502-4574-9348-91250a670dfd"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/6bfaf1fb-19b4-4200-b72d-20dccf363c3f"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/12751250-d475-4d7b-a91a-259f71a12aab"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/04ec6f35-98b7-4b77-ad2f-ef6c81027758"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/a318f547-360c-4227-9478-e8bef489d552"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/8bc0a83f-f831-41a5-ae98-769374e43c25"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/17d68cee-c826-42c0-b5a6-3acca661583d"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/a608a6ee-4eb4-4c17-ab40-be84349b1b30/job/caef3bf4-92d0-485e-b2f1-778497b9681c"
+      }
+    ],
+    "frontend_tests": 3259,
+    "frontend_files": 241,
+    "e2e": 167,
+    "backend": "success; strict full-collection CI gate passed",
+    "new_pure_cases": 76
+  },
+  "final_proof": {
+    "merge_commit": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
+    "main_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
+    "tested_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
+    "identical": true,
+    "isolated_main_diff": "empty",
+    "primary_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_unchanged": true
   }
 }
