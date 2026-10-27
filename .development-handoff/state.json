@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "ci_pending",
+  "phase": "blocked_ci_evidence",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -15,7 +15,7 @@
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_active_turn": false,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "All8 final-head CI including actual physical+mixed training assertions, then guarded merge/exacttestedtree and close package3/block5; counter2/7; stop.",
+  "remaining_step": "Read exact revision/workflow-matched PublicJson failed-step log before any fix or retry. If same branch-writer fixture cause, STOP2 applies. After diagnosed repair all8 finalhead CI and root review required before guarded merge/exact main tree. Grant remains only package3; no next stage.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -64,7 +64,19 @@
       "status": "scoped_support_fixture_fix_published"
     }
   },
-  "blocker": null,
+  "blocker": {
+    "head": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
+    "workflow": "e0ca94fb-ddfc-4179-8bfe-3f24616f173f",
+    "job": "2691835e-1515-4dee-a388-8e0c25288c92",
+    "context": "ci/circleci: e2e",
+    "cause": "Unknown new failed-step/test evidence required; do not assume repeated fixture cause",
+    "previous_diagnosed_cause_count": 1,
+    "current_undiagnosed_ci_failure_count": 1,
+    "logs_requested": true,
+    "manual_rerun": false,
+    "github_check_runs": 0,
+    "github_comments": 0
+  },
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
@@ -103,7 +115,43 @@
     },
     "review": "QA+security APPROVE readiness dedup and lazy unchanged matcher with context guards",
     "final_full_vitest": "3254 passed /241 files /254.62s on exact final files",
-    "CI": "tooling-linux/windows,frontend,audit,production-containers success; E2E failure; backend pending; gate not yet run",
+    "CI": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/0b98c18f-2cf1-4e52-be90-ec8a20be47e6"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "pending",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/c3e0aa30-7ece-474f-894e-d37cb5686df4"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/c7b1b8cd-2cb7-4002-a2cb-4beab6c901a9"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/184ebfc9-7a41-4a54-a8ae-7a2355bfd2fa"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/d7147580-8ee6-4327-9a9e-0c5aa97e3dcc"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/e87d7ba5-228e-4d68-a1b9-0d5494a15f67"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "failure",
+        "url": "https://app.circleci.com/workflow/e0ca94fb-ddfc-4179-8bfe-3f24616f173f/job/2691835e-1515-4dee-a388-8e0c25288c92"
+      }
+    ],
     "fixture_fix": {
       "prettier": "PASS",
       "eslint": "PASS",
