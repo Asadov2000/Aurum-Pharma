@@ -3,13 +3,13 @@
   "generation": 13,
   "work_item_id": "UNIT-EDGE-CHECKOUT-SOURCE-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-27-edge-checkout-source-01",
   "branch": "codex/unit-edge-checkout-source",
   "base_sha": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
   "expected_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
   "base_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
-  "validated_sha": null,
+  "validated_sha": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
   "pr": 431,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -17,7 +17,7 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -36,21 +36,22 @@
     "Running Aurum/shared DB/deployment/restarts",
     "Unapproved dependency/stack/UI changes or paid resources"
   ],
-  "remaining_step": "Final-head all8 CI after stabilized existing catalog-create E2E; guarded expected-head merge and exact-main-tree confirmation",
+  "remaining_step": "Work-Item complete. Remaining blocks6 Edge and7 pilot stay open. Any next bounded stage starts after fresh GitHub/code recon and ownership grant; no automatic deployment/cloud takeover.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
-      "cause": null
+      "cause": null,
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     },
     "dependency_audit": {
       "consecutive": 0,
       "cause": "three known vulnerabilities in two locked Python packages",
       "step": "Audit Python dependencies",
       "head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
-      "resolved_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c"
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     },
     "checkout_source_integration": {
-      "consecutive": 2,
+      "consecutive": 0,
       "cause": "second cashier seed on independent connection after checkout holds tenant-access exclusive transaction advisory lock",
       "first_failed_head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
       "step": "Pytest shard1 no-output timeout",
@@ -58,28 +59,32 @@
       "second_failed_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c",
       "exception": {
         "by": "user explicit approval 2026-10-27",
-        "scope": "rerun corrected fixture and continue PR431; no limits or protections weakening"
-      }
+        "scope": "rerun corrected fixture and continue PR431; no limits or protections weakening",
+        "consumed_for": "PR431 only; not a future-stage waiver"
+      },
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     },
     "dns_audit": {
       "consecutive": 0,
       "cause": "dnspython CVE-2026-114605",
       "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
-      "resolved_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a"
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     },
     "source_rls_assertion": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "invalid test expectation of cashier-only metadata RLS despite existing permissive mixed_return_read policy",
       "first_failed_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
       "corrected_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
-      "step": "same-branch metadata RLS test"
+      "step": "same-branch metadata RLS test",
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     },
     "catalog_create_e2e": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Existing delayed CatalogPicker list intercepts click on create-card button; retry passed but fail-on-flaky rejects",
       "first_failed_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
       "step": "Playwright incoming-catalog-create existing-card case",
-      "corrected_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
+      "corrected_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
+      "resolved_head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c"
     }
   },
   "blocker": null,
@@ -136,7 +141,55 @@
   },
   "ci": {
     "head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
-    "state": "starting",
-    "previous_workflow": "b5649bc2-72ba-48d0-8926-01265f317e52"
+    "workflow": "9dbd80b5-ff01-4491-978d-843b4e7811a3",
+    "state": "all8success",
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success"
+      }
+    ],
+    "frontend_tests": 3259,
+    "e2e_tests": 167,
+    "backend": "full pytest both shards and complete-evidence gate passed"
+  },
+  "merged_main_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
+  "merged_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
+  "pr_state": "merged",
+  "runtime": {
+    "primary_source_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_source_status": "clean and unchanged",
+    "deployment": "not performed",
+    "shared_db": "not accessed or changed by this stage",
+    "local_heartbeat": "PAUSED",
+    "cloud_grant": false
   }
 }
