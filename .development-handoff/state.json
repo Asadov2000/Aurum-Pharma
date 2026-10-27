@@ -34,7 +34,7 @@
     "New persistent event record/table, stream source identity, publication/application/bootstrap/returns activation",
     "Public HTTP endpoint or new permissions/worker bypass",
     "Running Aurum/shared DB/deployment/restarts",
-    "Dependencies/stack/UI changes or paid resources"
+    "Unapproved dependency/stack/UI changes or paid resources"
   ],
   "remaining_step": "All8 final-head CI; expected-head guarded merge and exact-main-tree verification",
   "failure_counters": {
@@ -62,9 +62,10 @@
       }
     },
     "dns_audit": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "dnspython CVE-2026-114605",
-      "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82"
+      "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
+      "resolved_head": "d885b3814cc0deba1bfd4603b792703ebd13e70a"
     },
     "source_rls_assertion": {
       "consecutive": 1,
@@ -121,7 +122,21 @@
   },
   "ci": {
     "head": "d885b3814cc0deba1bfd4603b792703ebd13e70a",
-    "state": "starting",
-    "previous_workflow": "ef643e5b-2c5e-4a5a-a995-f71ecd8e85c9"
+    "workflow": "b5649bc2-72ba-48d0-8926-01265f317e52",
+    "state": "running",
+    "verified_success": [
+      "tooling-linux",
+      "dependency-audit"
+    ],
+    "required_contexts": [
+      "backend",
+      "frontend",
+      "e2e",
+      "dependency-audit",
+      "production-containers",
+      "tooling-linux",
+      "tooling-windows",
+      "ci-gate"
+    ]
   }
 }
