@@ -3,14 +3,14 @@
   "generation": 14,
   "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-27-edge-checkout-origin-01",
   "branch": "codex/unit-edge-checkout-origin",
   "base_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
-  "expected_head": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
+  "expected_head": "3b7ff63f056772711ee6f7ffd9e90aae9d3c4a30",
   "base_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
   "validated_sha": null,
-  "pr": null,
+  "pr": 432,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -38,11 +38,15 @@
     "Backfill/retroactive identity, duplicated financial evidence, new worker bypass or public endpoints",
     "Dependency/stack/protected UI changes, paid resources, cloud product writes"
   ],
-  "remaining_step": "Implement model/migration/readers and independent tests/review; targeted local checks, full isolated CI and main",
+  "remaining_step": "Wait all8 final-head CI including actual migration/ACL/completion tests, then expected-head guarded merge and exact-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
+    },
+    "lint_unused_import": {
+      "consecutive": 0,
+      "cause": "Unused local alembic.op import removed; Ruff passed"
     }
   },
   "blocker": null,
@@ -53,5 +57,20 @@
     "main": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
     "tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
     "ci": "all8success"
+  },
+  "head_tree": "1d887d1561a4c5766482b13a994d99f8498630e7",
+  "local_checks": {
+    "pure_pytest": 578,
+    "new_pure_structural": 20,
+    "db_cases_collected": 15,
+    "mypy_app": 512,
+    "black": "pass",
+    "ruff": "pass",
+    "diff_check": "pass",
+    "independent_sql_security": "approved",
+    "independent_app_qa": "approved",
+    "verification_plan": "Auto full matrix",
+    "pypi_locked_versions": 103,
+    "pypi_advisories": 0
   }
 }
