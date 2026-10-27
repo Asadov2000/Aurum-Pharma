@@ -3,13 +3,13 @@
   "generation": 12,
   "work_item_id": "UNIT-EDGE-RETAIL-STORAGE-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "merged",
   "run_id": "local-2026-10-27-edge-retail-storage-01",
   "branch": "codex/unit-edge-retail-storage",
   "base_sha": "074eb44d0b2e08d6442f11b4ee0c481dea64e38d",
   "expected_head": "be63e3dd06c93506e8422a4b9cd63bbbbcfcaaeb",
   "base_tree": "73d98bb57cb320a866d6b8e5350845b5d7988c7c",
-  "validated_sha": null,
+  "validated_sha": "be63e3dd06c93506e8422a4b9cd63bbbbcfcaaeb",
   "pr": 430,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -17,7 +17,7 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -35,7 +35,7 @@
     "Running Aurum/shared DB/deploy/service restarts",
     "Dependencies/stack/UI changes, purchases/paid APIs/resources"
   ],
-  "remaining_step": "Await all8 final-head CI for PR430; diagnose any failure via pinned public CircleCI evidence; guarded merge/exact tested-main tree; no runtime deployment.",
+  "remaining_step": "UNIT-EDGE-RETAIL-STORAGE-01 complete in PR430. Block6 still needs separately scoped trusted repository/source identity and atomic event/projection/cursor integration before live publication, plus compatible bootstrap/returns/restart acceptance. No next-stage grant or runtime activation.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -70,5 +70,76 @@
     "whitespace": "PASS",
     "plan": "Critical full CI matrix",
     "db_connections": 0
+  },
+  "control_commit": "8a61c8bd591d023b5f1d235c1b827a70d708cbf4",
+  "validated_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
+  "merge_commit": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
+  "verified_main": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
+  "runtime_changes": false,
+  "shared_db_access": false,
+  "paid_resources_created": 0,
+  "final_ci": {
+    "head": "be63e3dd06c93506e8422a4b9cd63bbbbcfcaaeb",
+    "workflow": "e86e74f3-140f-4011-be48-5e3a8ff391f0",
+    "attempts": 1,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/cbda212e-5452-4514-b3cf-eb92dabf702b"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/875a8470-d668-428e-9b05-9f28d8c33046"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/1bf955b5-760c-49bf-a17c-b6dc014015b3"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/d13eb0b8-8990-47a0-b809-e073f12bf36c"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/47ccfabe-5d1a-4e70-9a10-63e32428c332"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/fae6f30e-0675-46b1-a4a2-f3c4c09aee3c"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/ce0315e0-46e4-4a20-9b59-a20c1320c654"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/e86e74f3-140f-4011-be48-5e3a8ff391f0/job/a83bc5ef-035f-437e-908f-6253f789aa06"
+      }
+    ],
+    "full_backend": "success",
+    "full_frontend": "success",
+    "full_e2e": "success",
+    "strict_ci_gate": "success",
+    "new_pure_cases": 78
+  },
+  "final_proof": {
+    "merge_commit": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
+    "main_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
+    "tested_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
+    "identical": true,
+    "isolated_main_diff": "empty",
+    "primary_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_unchanged": true,
+    "shared_db_access": false,
+    "runtime_changes": false,
+    "paid_resources_created": 0
   }
 }
