@@ -42,7 +42,7 @@ function splitRuntimeDependencies(id: string): string | undefined {
   // Keep those small primitives with the existing lazy controls, so the panel
   // cannot absorb POSPage's route entry or add a POS startup request.
   if (
-    /\/src\/features\/pos\/(operationId|operationStorage|posStorageScope|physicalCashRecoveryPresence|unitPaymentPreparationPresence)\.ts$/.test(
+    /\/src\/features\/pos\/(operationId|operationStorage|posStorageScope|physicalCashRecoveryPresence|unitPaymentPreparationPresence|trainingCheckoutPresence)\.ts$/.test(
       normalizedId,
     )
   ) {

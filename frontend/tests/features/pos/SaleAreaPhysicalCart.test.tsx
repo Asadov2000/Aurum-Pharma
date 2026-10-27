@@ -410,23 +410,23 @@ describe("SaleArea physical cart integration", () => {
         request.mockRejectedValue(new Error("Training sale must not request real cash"));
       }
       mount();
-      const panel = await screen.findByRole("region", { name: "Оплата наличными" });
-      const pay = within(panel).getByRole("button", { name: "Завершить продажу" });
-      expect(pay).toBeDisabled();
-      expect(within(panel).getByLabelText("Получено наличными, TJS")).toBeDisabled();
-      expect(calls.panel).toHaveBeenLastCalledWith(
-        expect.objectContaining({ kind, canPay: false }),
-      );
       if (testFlag === true) {
+        const panel = await screen.findByRole("region", { name: "Учебная продажа" });
+        expect(screen.queryByRole("region", { name: "Оплата наличными" })).not.toBeInTheDocument();
         expect(
-          screen.getByText(
-            kind === "mixed"
-              ? "Смешанная корзина пока недоступна в тренировочной продаже."
-              : "Поштучная продажа пока недоступна в тренировочной продаже.",
-          ),
-        ).toBeInTheDocument();
+          screen.queryByRole("region", { name: "Подготовка карты и QR" }),
+        ).not.toBeInTheDocument();
+        expect(within(panel).getByText(/деньги и товар не списываются/)).toBeInTheDocument();
+      } else {
+        const panel = await screen.findByRole("region", { name: "Оплата наличными" });
+        const pay = within(panel).getByRole("button", { name: "Завершить продажу" });
+        expect(pay).toBeDisabled();
+        expect(within(panel).getByLabelText("Получено наличными, TJS")).toBeDisabled();
+        expect(calls.panel).toHaveBeenLastCalledWith(
+          expect.objectContaining({ kind, canPay: false }),
+        );
+        fireEvent.click(pay);
       }
-      fireEvent.click(pay);
       for (const key of ["Enter", "F4", "F2"]) fireEvent.keyDown(window, { key });
       for (const request of requests) expect(request).not.toHaveBeenCalled();
       expect(calls.addPayment).not.toHaveBeenCalled();

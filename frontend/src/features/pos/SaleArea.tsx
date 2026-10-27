@@ -1,3 +1,5 @@
+import { hasTrainingCheckout } from "./trainingCheckoutPresence";
+import { type TrainingCheckoutResult } from "./trainingCheckout";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import {
@@ -115,6 +117,10 @@ const ShiftBar = lazy(async () => {
 const PhysicalCartEditor = lazy(async () => {
   const module = await import("./PhysicalCartEditor");
   return { default: module.PhysicalCartEditor };
+});
+const TrainingCheckoutPanel = lazy(async () => {
+  const module = await import("./TrainingCheckoutPanel");
+  return { default: module.TrainingCheckoutPanel };
 });
 const PhysicalPaymentPanels = lazy(async () => {
   const module = await import("./PhysicalPaymentPanels");
@@ -467,7 +473,12 @@ function ActiveWorkspace({
     () => init.saleId !== null && hasUnitPaymentPreparation(init.saleId, storageScope),
   );
   const physicalPreparationBlockedRef = useRef(physicalPreparationBlocked);
-  const physicalOperationsBlocked = physicalCashBlocked || physicalPreparationBlocked;
+  const [trainingBlocked, setTrainingBlocked] = useState(
+    () => init.saleId !== null && hasTrainingCheckout(init.saleId, storageScope),
+  );
+  const trainingBlockedRef = useRef(trainingBlocked);
+  const physicalOperationsBlocked =
+    physicalCashBlocked || physicalPreparationBlocked || trainingBlocked;
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
   const [pendingPayment, setPendingPayment] = useState<PendingPaymentOperation | null>(() =>
     init.saleId ? loadPendingPaymentOperation(init.saleId) : null,
@@ -608,6 +619,7 @@ function ActiveWorkspace({
         ? "mixed"
         : "physical";
   const physicalCartActive = isDraft && (physicalEditorOpen || preparedItems.length > 0);
+  const trainingActive = sale?.is_test === true && (physicalCartActive || trainingBlocked);
   const receiptItemCount = items.length + preparedItems.length;
   const recordedPayments = sale?.payments ?? [];
   const payments =
@@ -899,6 +911,39 @@ function ActiveWorkspace({
       return true;
     },
     [sessionIsActive, refetchSale, persistCompletedReceipt, queryClient],
+  );
+
+  const updateTrainingBlocked = useCallback(
+    (blocked: boolean) => {
+      if (!sessionIsActive()) return;
+      trainingBlockedRef.current = blocked;
+      setTrainingBlocked(blocked);
+    },
+    [sessionIsActive],
+  );
+  const acceptTraining = useCallback(
+    (result: TrainingCheckoutResult): boolean => {
+      if (
+        !sessionIsActive() ||
+        saleIdRef.current !== result.sale_id ||
+        result.tenant_id !== storageScope.tenantId ||
+        result.cashier_id !== storageScope.userId ||
+        result.register_id !== registerId
+      )
+        return false;
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
+      return true;
+    },
+    [
+      sessionIsActive,
+      storageScope.tenantId,
+      storageScope.userId,
+      registerId,
+      persistCompletedReceipt,
+    ],
   );
 
   const acceptPhysicalCash = useCallback(
@@ -1997,7 +2042,12 @@ function ActiveWorkspace({
   };
 
   const startNewSale = (): boolean => {
-    if (physicalCashBlockedRef.current || physicalPreparationBlockedRef.current || !hasOpenShift) {
+    if (
+      physicalCashBlockedRef.current ||
+      physicalPreparationBlockedRef.current ||
+      trainingBlockedRef.current ||
+      !hasOpenShift
+    ) {
       setTopError("Сначала проверьте текущую оплату и откройте смену.");
       return false;
     }
@@ -2509,44 +2559,82 @@ function ActiveWorkspace({
             className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
           >
             <div className="xl:h-full xl:min-h-0">
-              {(physicalCartActive || physicalOperationsBlocked) &&
+              {(physicalCartActive || physicalOperationsBlocked || trainingActive) &&
               saleId &&
               (branchId || sale?.branch_id) ? (
                 <Suspense fallback={<p role="status">Загрузка оплаты…</p>}>
-                  {sale?.is_test === true && (
-                    <p role="status" className="mb-3 text-sm text-foreground-muted">
-                      {cashKind === "mixed"
-                        ? "Смешанная корзина пока недоступна в тренировочной продаже."
-                        : "Поштучная продажа пока недоступна в тренировочной продаже."}
+                  {trainingActive && sale ? (
+                    <TrainingCheckoutPanel
+                      key={`training:${saleId}`}
+                      sale={sale}
+                      scope={storageScope}
+                      registerId={registerId}
+                      sessionIsActive={sessionIsActive}
+                      canStart={
+                        hasOpenShift &&
+                        isDraft &&
+                        online &&
+                        !physicalCartBusy &&
+                        !posCommand.blocked &&
+                        !physicalCashBlocked &&
+                        !physicalPreparationBlocked &&
+                        !pendingCheckout &&
+                        !pendingPayment &&
+                        !completionUncertain &&
+                        !checkoutUncertain &&
+                        !checkoutReconciling &&
+                        !saleQuery.isError &&
+                        !saleQuery.isPlaceholderData &&
+                        recordedPayments.length === 0 &&
+                        stagedPayments.length === 0 &&
+                        !paymentSettingsLoading &&
+                        !paymentSettingsUnavailable
+                      }
+                      paymentMethods={paymentMethods}
+                      mixedPaymentEnabled={mixedPaymentEnabled}
+                      onBlockedChange={updateTrainingBlocked}
+                      refreshSale={async () => (await refetchSale({ throwOnError: true })).data}
+                      onCompleted={acceptTraining}
+                      onPrint={() => setPrintOpen(true)}
+                      onNewSale={() => {
+                        void startNewSale();
+                      }}
+                    />
+                  ) : trainingBlocked ? (
+                    <p role="alert">
+                      Сначала восстановите сохранённую учебную операцию в исходной продаже.
                     </p>
+                  ) : (
+                    <>
+                      <PhysicalPaymentPanels
+                        key={`${saleId}:${cashKind}`}
+                        paymentMethods={paymentMethods}
+                        mixedPaymentEnabled={mixedPaymentEnabled}
+                        canPrepare={physicalPaymentReady && !physicalCashBlocked}
+                        canCancel={preparationWritable}
+                        canResolveDecline={canReconcileExternalPayment}
+                        onPreparationBlockedChange={updatePhysicalPreparationBlocked}
+                        kind={cashKind}
+                        saleId={saleId}
+                        branchId={branchId ?? sale!.branch_id}
+                        registerId={registerId}
+                        scope={storageScope}
+                        items={preparedItems}
+                        legacyItems={cashKind === "mixed" ? items : undefined}
+                        online={online}
+                        canPay={
+                          physicalPaymentReady &&
+                          !physicalPreparationBlocked &&
+                          paymentMethods.includes("cash")
+                        }
+                        sessionIsActive={sessionIsActive}
+                        beforeStart={preparePhysicalCash}
+                        onBlockedChange={updatePhysicalCashBlocked}
+                        onCompleted={acceptPhysicalCash}
+                        onElectronicCompleted={acceptPhysicalElectronic}
+                      />
+                    </>
                   )}
-                  <PhysicalPaymentPanels
-                    key={`${saleId}:${cashKind}`}
-                    paymentMethods={paymentMethods}
-                    mixedPaymentEnabled={mixedPaymentEnabled}
-                    canPrepare={physicalPaymentReady && !physicalCashBlocked}
-                    canCancel={preparationWritable}
-                    canResolveDecline={canReconcileExternalPayment}
-                    onPreparationBlockedChange={updatePhysicalPreparationBlocked}
-                    kind={cashKind}
-                    saleId={saleId}
-                    branchId={branchId ?? sale!.branch_id}
-                    registerId={registerId}
-                    scope={storageScope}
-                    items={preparedItems}
-                    legacyItems={cashKind === "mixed" ? items : undefined}
-                    online={online}
-                    canPay={
-                      physicalPaymentReady &&
-                      !physicalPreparationBlocked &&
-                      paymentMethods.includes("cash")
-                    }
-                    sessionIsActive={sessionIsActive}
-                    beforeStart={preparePhysicalCash}
-                    onBlockedChange={updatePhysicalCashBlocked}
-                    onCompleted={acceptPhysicalCash}
-                    onElectronicCompleted={acceptPhysicalElectronic}
-                  />
                 </Suspense>
               ) : (
                 <PaymentPanel
