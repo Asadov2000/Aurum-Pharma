@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "local_product_writes_stopped": false,
-  "local_heartbeat": "PAUSED",
+  "local_heartbeat": "ACTIVE: existing aurum hourly, bounded to PR429; pause after completion or external blocker",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (N уточняется по критериям блока6)",
@@ -76,5 +76,14 @@
     "whitespace": "PASS",
     "plan": "critical/full CI matrix",
     "local_db_connections": 0
+  },
+  "ci_workflow": "a608a6ee-4eb4-4c17-ab40-be84349b1b30",
+  "control_commit": "2f217873b9b5128373d85f837b9a5cc0d6f5d382",
+  "automation": {
+    "id": "aurum",
+    "status": "ACTIVE",
+    "interval_minutes": 60,
+    "target_thread": "01a125cf-bee5-71a1-b92f-4bb4b8483b49",
+    "scope": "PR429 only; no next stage; notify meaningful changes only"
   }
 }
