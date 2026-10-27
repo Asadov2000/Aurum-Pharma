@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-27-edge-checkout-origin-01",
   "branch": "codex/unit-edge-checkout-origin",
   "base_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
-  "expected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
+  "expected_head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6",
   "base_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
   "validated_sha": null,
   "pr": 432,
@@ -38,7 +38,7 @@
     "Backfill/retroactive identity, duplicated financial evidence, new worker bypass or public endpoints",
     "Dependency/stack/protected UI changes, paid resources, cloud product writes"
   ],
-  "remaining_step": "All8 final-head CI after exact role-contract 0225 alignment; guarded merge and exact-main-tree verification",
+  "remaining_step": "Final-head all8 CI after Windows shell readiness fix; guarded merge and exact-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -49,11 +49,19 @@
       "cause": "Unused local alembic.op import removed; Ruff passed"
     },
     "role_contract_head": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "CI compares actual Alembic head225 with role-contract max224 before migration roundtrip",
       "first_failed_head": "3b7ff63f056772711ee6f7ffd9e90aae9d3c4a30",
       "step": "Verify cluster-safe migration roundtrip",
-      "corrected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c"
+      "corrected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
+      "resolved_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c"
+    },
+    "windows_shell_startup": {
+      "consecutive": 1,
+      "cause": "First cold Git Bash launch exceeded 5-second negative test process deadline; other11 cases passed",
+      "first_failed_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
+      "step": "Disposable database safety guards",
+      "corrected_head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6"
     }
   },
   "blocker": null,
@@ -65,7 +73,7 @@
     "tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
     "ci": "all8success"
   },
-  "head_tree": "df62514021c47c5cf4f9b8c4878075447f3a7f28",
+  "head_tree": "9ad9edc99d5d60ad7b0ef98d9abbfa18ecfabe38",
   "local_checks": {
     "pure_pytest": 578,
     "new_pure_structural": 20,
@@ -80,11 +88,16 @@
     "pypi_locked_versions": 103,
     "pypi_advisories": 0,
     "exact_role_contract_head_test": "pass",
-    "role_contract_security_review": "approved"
+    "role_contract_security_review": "approved",
+    "windows_negative_guards": {
+      "state": "pass",
+      "cases": 12,
+      "security_review": "approved; case deadlines/assertions unchanged"
+    }
   },
   "ci": {
-    "head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
+    "head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6",
     "state": "starting",
-    "previous_workflow": "40ebf808-a87b-4d1b-b560-f85adccc6006"
+    "previous_workflow": "10c77c5b-c3bc-470c-8af5-958ad4400cea"
   }
 }
