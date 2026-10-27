@@ -1,0 +1,71 @@
+{
+  "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
+  "generation": 10,
+  "pr": 428,
+  "head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
+  "tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
+  "main": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+  "merge_method": "squash",
+  "main_parent": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "exact_tested_main_tree": true,
+  "ci": [
+    {
+      "context": "ci/circleci: tooling-linux",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/6b9e1970-526c-4dd5-b85b-36216f6d95f9",
+      "updated_at": "2026-10-27T11:01:23Z"
+    },
+    {
+      "context": "ci/circleci: dependency-audit",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/3464a365-f7bd-4608-9a0a-3151f98ff372",
+      "updated_at": "2026-10-27T11:02:43Z"
+    },
+    {
+      "context": "ci/circleci: tooling-windows",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/039a83ae-c4d0-4d25-bf82-55dd610b2ef6",
+      "updated_at": "2026-10-27T11:06:26Z"
+    },
+    {
+      "context": "ci/circleci: frontend",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/4e7eb1ea-0222-4696-b81d-f970be9ce741",
+      "updated_at": "2026-10-27T11:07:49Z"
+    },
+    {
+      "context": "ci/circleci: production-containers",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/edf5e3e9-1600-4956-9626-ac4ffed360b9",
+      "updated_at": "2026-10-27T11:17:38Z"
+    },
+    {
+      "context": "ci/circleci: e2e",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/7121a798-5685-4ba0-ae22-a82f71b4ba10",
+      "updated_at": "2026-10-27T11:22:45Z"
+    },
+    {
+      "context": "ci/circleci: backend",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/78ee3868-89aa-4992-9daa-e2388779f93f",
+      "updated_at": "2026-10-27T11:35:09Z"
+    },
+    {
+      "context": "ci/circleci: ci-gate",
+      "state": "success",
+      "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/ebe2b660-8fa7-4d71-9e8b-d1ca0967da42",
+      "updated_at": "2026-10-27T11:35:19Z"
+    }
+  ],
+  "review": "Root readonly APPROVE exact a2dcb785 four-file fix; fullstage independent QA/security already approved; not blanket untested approval",
+  "e2e": "SUCCESS exact final head; independent QA verified both unconditional physical/mixed scenarios included without skip/filter through checkout/lostresponse/reloadGET/TESTprint/no-real-effects assertions",
+  "counter": "2/7",
+  "cloud_product_grant": false,
+  "cloud_active_turn": false,
+  "pending_transfer": false,
+  "local_product_writes_stopped": true,
+  "schedulers": "PAUSED",
+  "next_stage_grant": false,
+  "constraints": "No installs/dependency/runtime/shared DB/deployment/paid resources changes; old workspaces preserved"
+}

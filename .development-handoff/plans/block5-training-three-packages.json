@@ -3,9 +3,9 @@
   "created_date": "2026-10-26",
   "baseline_main": "b17e33e5bd883d2d99cdabde2ab6d1d3251b1055",
   "counter": {
-    "open_blocks": 3,
+    "open_blocks": 2,
     "total_blocks": 7,
-    "remaining_packages_to_2_of_7": 1,
+    "remaining_packages_to_2_of_7": 0,
     "unit": "accepted functional package, not request or PR"
   },
   "scope": "Existing block5 training physical and mixed sale only; no new requirements",
@@ -50,7 +50,7 @@
     {
       "number": 3,
       "id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
-      "status": "cloud_build_budget_repair",
+      "status": "completed",
       "goal": "Existing setup/training cashier UI, saved recovery/test receipt and final physical/mixed acceptance",
       "acceptance": [
         "Existing training mode completes physical/mixed test sale and clearly identifies test receipt",
@@ -58,18 +58,27 @@
         "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
       ],
       "depends_on": 2,
-      "branch": "codex/unit-training-cashier-acceptance"
+      "branch": "codex/unit-training-cashier-acceptance",
+      "pr": 428,
+      "head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
+      "validated_head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
+      "validated_tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
+      "merge_commit": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+      "ci": "all8success",
+      "tested_main_tree_exact": true
     }
   ],
   "execution": {
-    "product_writer": "cloud",
+    "product_writer": "none; cloud stopped, future development on PC after explicit acceptance",
     "cloud_standby_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
-    "cloud_product_grant": true,
+    "cloud_product_grant": false,
     "old_schedulers": "PAUSED",
-    "current_stage_grant_active": true,
+    "current_stage_grant_active": false,
     "current_generation": 10,
     "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
     "local_product_writes_stopped": true
   },
-  "verified_main": "358f5af661a48629804ec7ec2a6c0391cdc1b501"
+  "verified_main": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+  "block5_status": "completed",
+  "next_stage_grant": false
 }

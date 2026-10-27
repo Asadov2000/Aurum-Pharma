@@ -3,33 +3,33 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "ci_pending",
+  "phase": "merged",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
   "expected_head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
   "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
-  "validated_sha": null,
+  "validated_sha": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
   "pr": 428,
   "source_path": "/workspace/Aurum-Pharma-gen10",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
-  "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_product_grant": false,
+  "cloud_active_turn": false,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED; no new schedules",
   "pending_transfer": false,
   "plan_path": ".development-handoff/plans/block5-training-three-packages.json",
-  "counter": "3/7 (1)",
+  "counter": "2/7",
   "scope": "Existing physical/mixed cashier training UI using saved is_test training API, idempotent saved recovery and TEST receipt; final acceptance, no new requirements",
   "acceptance": [
     "Existing training mode completes physical/mixed test sale and clearly identifies test receipt",
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Wait all8 final-head CI and root readonly review; guardedmerge exacttestedtree proof, closepackage3/block5 counter2/7/grantfalse/activefalse/pendingtransferfalse/localwritesstoppedtrue/schedulersPAUSED and stop.",
+  "remaining_step": "Package3/block5 completed and accepted; cloud stopped. Further development only on PC after separate explicit grant/fresh source reconciliation. No next-stage grant.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -65,15 +65,16 @@
     },
     "recovery_observer": {
       "ci_runs": 1,
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Physical reaches final noPOST assertion: exact /api/v1/auth/refresh incorrectly included",
       "local_fix": "Exclude only exact auth refresh endpoint, retain all other POSTs and realEffects/commands assertions",
       "validation": "Prettier ESLint whitespace PASS; unpublished pending mixed diagnosis",
-      "status": "exact authrefresh observer fix published"
+      "status": "resolved_finalhead_E2E_success",
+      "historical_consecutive": 1
     },
     "mixed_reload": {
       "ci_runs": 1,
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Proven contract mismatch: backend LegacyReceiptLineV4 necessarily emits sale_format pack and unit_label уп.; frontend strict legacyReceipt omitted both and rejected mixed result before setResult; local fixture mirrored incorrect omission",
       "failed_assertion": "training-unit-checkout.spec.ts:364:9 getByRole button Открыть TEST-чек not found within existing15000ms",
       "evidence": [
@@ -82,7 +83,8 @@
         "frontend/src/features/pos/trainingCheckout.ts legacyReceipt",
         "Independent QA readonly diagnosis"
       ],
-      "status": "strict backend-matching receipt fields/fixture/5negative tests published"
+      "status": "resolved_finalhead_E2E_success",
+      "historical_consecutive": 1
     }
   },
   "blocker": null,
@@ -123,35 +125,55 @@
       "requests": 16
     },
     "review": "QA+security APPROVE readiness dedup and lazy unchanged matcher with context guards",
-    "final_full_vitest": "3254 passed /241 files /254.62s on exact final files",
+    "final_full_vitest": "Final-head required frontend CI SUCCESS; earlier local3254 was historical before recovery contract fix",
     "CI": [
       {
         "context": "ci/circleci: tooling-linux",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/6b9e1970-526c-4dd5-b85b-36216f6d95f9",
+        "updated_at": "2026-10-27T11:01:23Z"
       },
       {
         "context": "ci/circleci: dependency-audit",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/3464a365-f7bd-4608-9a0a-3151f98ff372",
+        "updated_at": "2026-10-27T11:02:43Z"
       },
       {
         "context": "ci/circleci: tooling-windows",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/039a83ae-c4d0-4d25-bf82-55dd610b2ef6",
+        "updated_at": "2026-10-27T11:06:26Z"
       },
       {
         "context": "ci/circleci: frontend",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/4e7eb1ea-0222-4696-b81d-f970be9ce741",
+        "updated_at": "2026-10-27T11:07:49Z"
       },
       {
         "context": "ci/circleci: production-containers",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/edf5e3e9-1600-4956-9626-ac4ffed360b9",
+        "updated_at": "2026-10-27T11:17:38Z"
       },
       {
         "context": "ci/circleci: e2e",
-        "state": "failure"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/7121a798-5685-4ba0-ae22-a82f71b4ba10",
+        "updated_at": "2026-10-27T11:22:45Z"
       },
       {
         "context": "ci/circleci: backend",
-        "state": "success"
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/78ee3868-89aa-4992-9daa-e2388779f93f",
+        "updated_at": "2026-10-27T11:35:09Z"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/73ae6249-e759-47fa-a054-e961f4312abc/job/ebe2b660-8fa7-4d71-9e8b-d1ca0967da42",
+        "updated_at": "2026-10-27T11:35:19Z"
       }
     ],
     "fixture_fix": {
@@ -172,24 +194,27 @@
       "pos_gzip": "194.81KiB limit195unchanged",
       "review": "Independent QA+security APPROVE exact candidate51ef353f",
       "full_CI": "pending final head"
-    }
+    },
+    "final_e2e": "SUCCESS exact final head; independent QA verified both unconditional physical/mixed scenarios included without skip/filter through checkout/lostresponse/reloadGET/TESTprint/no-real-effects assertions",
+    "root_review": "Root readonly APPROVE exact a2dcb785 four-file fix; fullstage independent QA/security already approved; not blanket untested approval"
   },
   "approvals": {
     "pos_build_budget_retry": {
       "source": "Direct human authorization 2026-10-27 in root chat: Да, пусть облако исправит размер сборки без повышения лимита и доведёт этот этап до зелёного CI и main. Только бесплатно, без дублирования работы и изменений работающего Aurum и общей БД.",
       "scope": "Same Work-Item-ID and package3 only: repair POS gzip startup budget and verify until success without raising limits or weakening checks. Other STOP2 rules remain, no dependency changes/runtime/shared DB/deployment/purchases.",
-      "status": "active",
+      "status": "closed_stage_merged",
       "approved_after_consecutive_failures": 2
     }
   },
   "publication": {
-    "head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
-    "tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
-    "parent": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "head": "a2dcb785faac7498b000fb2d1ff9000f7b5c07c1",
+    "tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
+    "parent": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
     "pr": 428,
-    "source_proof": "Remote tree equals local git write-tree exactly",
+    "merge_commit": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+    "source_proof": "Remote final tree equals local git write-tree; actual merged main tree identical; parent equals verified original main",
     "local_checkout_HEAD": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-    "local_state": "candidate staged; exact raw remote commit not reconstructed from API metadata; method stopped, no forced ref update"
+    "local_state": "Historical staged exact candidate preserved; no reset/clean/forced refs"
   },
   "restore_history": {
     "auto_review_rejection": "one blob denied for missing authorization context; reread current explicit grant and destination, same operation approved; no alternative channel",
@@ -230,5 +255,19 @@
       "Route JavaScript budget exceeded: POS /pos gzip195.00KiB >195.00KiB (rounded output)"
     ]
   },
-  "runtime_note": "One exec transport disconnect; current environment status and subsequent read-only pwd/git write-tree succeeded; source tree remains308b71e19f83c52690ee5bfd6c85cbc4b11802d1"
+  "runtime_note": "One exec transport disconnect; current environment status and subsequent read-only pwd/git write-tree succeeded; source tree remains308b71e19f83c52690ee5bfd6c85cbc4b11802d1",
+  "merge_commit": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+  "actual_main": "24e7b58a4ede831736d6e3e5d1660e9feaee7af7",
+  "tested_main_tree": "51ef353f28155a0c3def9f9e446b8f95f6b47598",
+  "publication_history": [
+    {
+      "head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
+      "tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
+      "parent": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "pr": 428,
+      "source_proof": "Remote tree equals local git write-tree exactly",
+      "local_checkout_HEAD": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+      "local_state": "candidate staged; exact raw remote commit not reconstructed from API metadata; method stopped, no forced ref update"
+    }
+  ]
 }
