@@ -3,19 +3,19 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "build_budget_repair",
+  "phase": "ci_pending",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
-  "expected_head": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+  "expected_head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
   "base_tree": "5063b6f45be6d5c3fa28326992ff673737485fb8",
   "validated_sha": null,
-  "pr": null,
+  "pr": 428,
   "source_path": "/workspace/Aurum-Pharma-gen10",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": false,
+  "cloud_active_turn": true,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,11 +29,11 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Authorized scoped POS startup bundle optimization without raising 195.00KiB budget; verify final candidate, complete all required final-head CI and guarded main merge.",
+  "remaining_step": "Await all8 final-head CI for PR428; diagnose failures only from approved evidence, independent review, fresh main/control/head guarded merge and exact tested-tree proof.",
   "failure_counters": {
     "current_stage": {
       "cause": "POS /pos gzip exceeds unchanged 195.00 KiB startup budget",
-      "consecutive": 2,
+      "consecutive": 0,
       "command": "NODE_ENV=production /workspace/aurum-env-repair-qa/frontend-check pnpm build",
       "attempts": [
         {
@@ -49,7 +49,10 @@
       ],
       "approved_retry": true,
       "approval": "approvals.pos_build_budget_retry",
-      "status": "authorized_repair"
+      "status": "resolved_by_authorized_lazy_boundary_repair",
+      "final_pos_gzip_KiB": "194.98",
+      "total_budget_failures": 4,
+      "historical_consecutive": 2
     }
   },
   "blocker": null,
@@ -70,7 +73,7 @@
     "All required final-head contexts success; expected head guarded merge; verify actual main tree",
     "This grant only package3; checkpoint and stop after completion, do not invent further stages"
   ],
-  "candidate_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
+  "candidate_tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
   "snapshot": {
     "manifest": ".development-handoff/artifacts/gen10-training-cashier-stop2/manifest.json",
     "local_tree": "efaf65e8b8fbfea13d8baae7ea52644f0734a0dd",
@@ -80,14 +83,14 @@
     "remote_candidate_source_published": false
   },
   "qa": {
-    "targeted": "105 passed; 3 files",
-    "full_vitest": "3252 passed; 241 files; 270.59s; started before final lazy-helper extraction",
-    "typecheck": "passed before final lazy-helper extraction; subsequent build typecheck also passed",
-    "lint": "passed before final lazy-helper extraction",
-    "E2E": "not run locally; two new specs await isolated CI",
-    "e2e_typecheck": "14 existing diagnostics; none in new training spec",
-    "security_review": "APPROVE safety; not release readiness",
-    "qa_review": "no new defect; release blocked by STOP2"
+    "local_validated_tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
+    "targeted": "107 passed",
+    "full_vitest": "3254 passed /241 files on final files",
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "production_build": "PASS unchanged195.00KiB budget; POS194.98KiB/16requests",
+    "review": "two independent readonly approvals; lazy guard movement preserved",
+    "E2E": "existing isolated CI pending"
   },
   "approvals": {
     "pos_build_budget_retry": {
@@ -96,5 +99,18 @@
       "status": "active",
       "approved_after_consecutive_failures": 2
     }
+  },
+  "publication": {
+    "head": "d956d1af9317fac5edb230179c41c3df1899a2f1",
+    "tree": "de1337f5aaf806fcfc5b2e585a1f8d86968c9652",
+    "parent": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "pr": 428,
+    "source_proof": "Remote tree equals local git write-tree exactly",
+    "local_checkout_HEAD": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
+    "local_state": "candidate staged; exact raw remote commit not reconstructed from API metadata; method stopped, no forced ref update"
+  },
+  "restore_history": {
+    "auto_review_rejection": "one blob denied for missing authorization context; reread current explicit grant and destination, same operation approved; no alternative channel",
+    "raw_commit_materialization": "one checked mismatch, newline diagnostic did not match either; no import/ref move performed; method stopped"
   }
 }
