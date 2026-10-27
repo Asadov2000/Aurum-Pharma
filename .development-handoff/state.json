@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "blocked_ci_evidence",
+  "phase": "e2e_fixture_repair",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -15,7 +15,7 @@
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": false,
+  "cloud_active_turn": true,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Obtain exact new E2E failed-step/test evidence through approved PublicJson/read tools; diagnose before code/retry, continue samePR under current cloud grant. All8 final-head success required before guarded merge. After merge closepackage3/block5, counter2/7, grantfalse/activefalse/pendingtransferfalse/localwritesstoppedtrue/schedulersPAUSED and stop; no next stage.",
+  "remaining_step": "Repair disposable E2E fixture via established scoped session only; independent review; samePR all8 CI then guarded merge and exacttree proof. No guard/RLS changes.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -49,22 +49,21 @@
         ],
         "firstCI": "rounded195.00KiB above exact threshold; setup step notPlaywright"
       }
+    },
+    "e2e_fixture": {
+      "consecutive": 1,
+      "ci_runs": 1,
+      "head": "6281301414a173aebe483dd3b03301ba3e243dca",
+      "workflow": "01c20707-3693-4db0-8245-5c26e7983f31",
+      "job_number": 3478,
+      "failed_step": "Run Playwright E2E",
+      "cause": "Own draft sale UPDATE through postgres rejected SESSION_USER by assert_current_branch_writer; both training fixtures before checkout assertions",
+      "result": "165 passed /2 failed; ordinary Playwright retry per scenario",
+      "evidence": "Root verified PublicJson revision/workflow; no tokens/cookies",
+      "approval_exception": false
     }
   },
-  "blocker": {
-    "context": "ci/circleci: e2e",
-    "head": "6281301414a173aebe483dd3b03301ba3e243dca",
-    "workflow": "01c20707-3693-4db0-8245-5c26e7983f31",
-    "job": "8a1b9a53-65ca-46e2-bc5b-28585caffdc1",
-    "url": "https://app.circleci.com/workflow/01c20707-3693-4db0-8245-5c26e7983f31/job/8a1b9a53-65ca-46e2-bc5b-28585caffdc1",
-    "cause": "Unknown; need failed-step log/test report; do not assume same budget cause",
-    "current_undiagnosed_failure_count": 1,
-    "github_check_runs": 0,
-    "PR_comments": 0,
-    "status_description": null,
-    "diagnostics_requested": true,
-    "manual_rerun": false
-  },
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
