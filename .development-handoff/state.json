@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-27-edge-checkout-source-01",
   "branch": "codex/unit-edge-checkout-source",
   "base_sha": "ab36bcf63d9d385b2acdd7062897fe59f946e4b0",
-  "expected_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c",
+  "expected_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
   "base_tree": "819ceb360bfe4c662f46c3746dae4d82e25f24ad",
   "validated_sha": null,
   "pr": 431,
@@ -36,17 +36,25 @@
     "Running Aurum/shared DB/deployment/restarts",
     "Dependencies/stack/UI changes or paid resources"
   ],
-  "remaining_step": "All8 complete CI on final approved dependency-fix head, then guarded merge and exact-main-tree verification",
+  "remaining_step": "Final-head full CI after fixed test fixture self-wait; expected-head guarded merge and exact-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
     },
     "dependency_audit": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "three known vulnerabilities in two locked Python packages",
       "step": "Audit Python dependencies",
-      "head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676"
+      "head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
+      "resolved_head": "fdfa085e4f66972ae29b97a6e9336a9d5b45830c"
+    },
+    "checkout_source_integration": {
+      "consecutive": 1,
+      "cause": "second cashier seed on independent connection after checkout holds tenant-access exclusive transaction advisory lock",
+      "first_failed_head": "b8a56cc0c8808527dc11a627e5bcd8978c4e5676",
+      "step": "Pytest shard1 no-output timeout",
+      "corrected_head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82"
     }
   },
   "blocker": null,
@@ -65,7 +73,7 @@
     "AGENTS STOP2 except standing RuffE501",
     "Fresh main/control/head reconciliation before publishing and guarded merge; exact tested-main tree"
   ],
-  "head_tree": "424031b3838fcaaceaf5b47eb30d050032c3f81b",
+  "head_tree": "8c2d0378bb7ed791af0fdc08792e5ee3af04b58f",
   "local_checks": {
     "pure_pytest": 558,
     "new_pure": 41,
@@ -87,5 +95,10 @@
     },
     "scope": "lock-only; no other dependency changes or runtime installs",
     "by": "user explicit 2026-10-27"
+  },
+  "ci": {
+    "head": "5b9c821da7fcb654882bbc7eadd0dfd754052d82",
+    "state": "starting",
+    "previous_workflow": "79a2c677-7dd3-4641-8698-03acd6541db7"
   }
 }
