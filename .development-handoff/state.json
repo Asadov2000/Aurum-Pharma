@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "ci_pending",
+  "phase": "blocked_ci_evidence",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -15,7 +15,7 @@
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": true,
+  "cloud_active_turn": false,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Wait final local Vitest and all8 final-head CI; if failure get diagnostic evidence; fresh main/control/head guarded merge then exact tested tree readback, close package3/block5 and stop.",
+  "remaining_step": "Obtain exact new E2E failed-step/test evidence through approved PublicJson/read tools; diagnose before code/retry, continue samePR under current cloud grant. All8 final-head success required before guarded merge. After merge closepackage3/block5, counter2/7, grantfalse/activefalse/pendingtransferfalse/localwritesstoppedtrue/schedulersPAUSED and stop; no next stage.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -51,7 +51,20 @@
       }
     }
   },
-  "blocker": null,
+  "blocker": {
+    "context": "ci/circleci: e2e",
+    "head": "6281301414a173aebe483dd3b03301ba3e243dca",
+    "workflow": "01c20707-3693-4db0-8245-5c26e7983f31",
+    "job": "8a1b9a53-65ca-46e2-bc5b-28585caffdc1",
+    "url": "https://app.circleci.com/workflow/01c20707-3693-4db0-8245-5c26e7983f31/job/8a1b9a53-65ca-46e2-bc5b-28585caffdc1",
+    "cause": "Unknown; need failed-step log/test report; do not assume same budget cause",
+    "current_undiagnosed_failure_count": 1,
+    "github_check_runs": 0,
+    "PR_comments": 0,
+    "status_description": null,
+    "diagnostics_requested": true,
+    "manual_rerun": false
+  },
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
@@ -84,13 +97,13 @@
     "typecheck": "PASS via both builds",
     "builds": {
       "normal": "194.78KiB",
-      "E2E_URL": "194.79KiB",
+      "E2E_URL_and_Docker_empty_public_website": "194.79KiB",
       "limit": "195.00KiB unchanged",
       "requests": 16
     },
     "review": "QA+security APPROVE readiness dedup and lazy unchanged matcher with context guards",
-    "final_full_vitest": "running on exact final files",
-    "CI": "automatic workflow from samePR branch update, no manual rerun"
+    "final_full_vitest": "3254 passed /241 files /254.62s on exact final files",
+    "CI": "tooling-linux/windows,frontend,audit,production-containers success; E2E failure; backend pending; gate not yet run"
   },
   "approvals": {
     "pos_build_budget_retry": {
@@ -147,5 +160,6 @@
       "POS /pos: 594.74 KiB raw /195.00 KiB gzip (16 JS requests)",
       "Route JavaScript budget exceeded: POS /pos gzip195.00KiB >195.00KiB (rounded output)"
     ]
-  }
+  },
+  "runtime_note": "One exec transport disconnect; current environment status and subsequent read-only pwd/git write-tree succeeded; source tree remains308b71e19f83c52690ee5bfd6c85cbc4b11802d1"
 }
