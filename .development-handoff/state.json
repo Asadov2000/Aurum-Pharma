@@ -3,7 +3,7 @@
   "generation": 10,
   "work_item_id": "UNIT-TRAINING-CASHIER-ACCEPTANCE-01",
   "owner": "cloud",
-  "phase": "blocked_mixed_recovery_artifact",
+  "phase": "recovery_contract_repair",
   "run_id": "cloud-2026-10-27-training-cashier-01",
   "branch": "codex/unit-training-cashier-acceptance",
   "base_sha": "358f5af661a48629804ec7ec2a6c0391cdc1b501",
@@ -15,7 +15,7 @@
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": true,
-  "cloud_active_turn": false,
+  "cloud_active_turn": true,
   "grant_condition": "Before product writes: verified separate clean checkout at actual GitHub main, matching bundle/tree; ownership/control generation10 unchanged; fresh complete PR overlap recon. Preserve historical STOP2 checkout.",
   "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
@@ -29,7 +29,7 @@
     "Reload/lost response recovers same result with no real stock/payment effects",
     "Full end-to-end matrix and final-head CI, guarded merge/exact main tree"
   ],
-  "remaining_step": "Obtain exact mixed error-context/artifact through existing approved read channel; diagnose before product change/retry. Physical exact auth-refresh observer fix validated locally but unpublished. Then independent review/finalchecks/all8 CI/rootreview/guardedmerge/exacttree, closepackage3/block5 counter2/7 and stop.",
+  "remaining_step": "Validate minimal exactauthrefresh observer and required legacyreceipt literal schema/fixture/negative tests; independent review; samePR all8CI then guardedmerge/exacttestedtree and closeblock5 counter2/7/stop.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -73,20 +73,17 @@
     "mixed_reload": {
       "ci_runs": 1,
       "consecutive": 1,
-      "cause": "Unknown: TEST receipt button absent after reload; do not assume flaky or repeated writer error",
-      "failed_assertion": "training-unit-checkout.spec.ts:364:9 getByRole button Открыть TEST-чек not found within existing15000ms"
+      "cause": "Proven contract mismatch: backend LegacyReceiptLineV4 necessarily emits sale_format pack and unit_label уп.; frontend strict legacyReceipt omitted both and rejected mixed result before setResult; local fixture mirrored incorrect omission",
+      "failed_assertion": "training-unit-checkout.spec.ts:364:9 getByRole button Открыть TEST-чек not found within existing15000ms",
+      "evidence": [
+        "backend/app/domains/pos/mixed_documents.py:48",
+        "backend/app/domains/pos/training_checkout_schemas.py:118",
+        "frontend/src/features/pos/trainingCheckout.ts legacyReceipt",
+        "Independent QA readonly diagnosis"
+      ]
     }
   },
-  "blocker": {
-    "head": "b3820efd2781eb53f5a33ee4d4f032972d792bdf",
-    "workflow": "e0ca94fb-ddfc-4179-8bfe-3f24616f173f",
-    "job_number": 3484,
-    "job": "2691835e-1515-4dee-a388-8e0c25288c92",
-    "needed": "test-results/training-unit-checkout-rec-e8993-eceipt-without-real-effects-chromium/error-context.md; screenshot/test-failed-1.png or trace.zip if context inconclusive",
-    "reason": "Determine rendered sale/panel/error/session state for mixed reload before further fix or CI retry",
-    "source": "Root revision/workflow-verified PublicJson diagnostics",
-    "manual_rerun": false
-  },
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-TRAINING-CHECKOUT-SAVED-01",
     "pr": 427,
