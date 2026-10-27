@@ -160,9 +160,11 @@ async def test_current_caller_scope_and_exact_operation_are_required_for_saved_s
 async def test_journal_rls_hides_other_cashiers_even_when_their_tenant_and_branch_match(
     db_session: AsyncSession, db_engine: AsyncEngine, maintenance_engine: AsyncEngine
 ) -> None:
-    original = await completed(db_session, "mixed-cash")
     context = runtime(db_session)
+    # Seed the other actor before checkout takes the tenant-access transaction
+    # lock. The seed helper uses a separate connection with the same lock.
     other_actor = await seed_receiving_actor(db_engine, maintenance_engine, context.stock)
+    original = await completed(db_session, "mixed-cash")
     before = await protected_facts(db_session)
     await set_receiving_context(db_session, context.stock, other_actor)
     try:
