@@ -14,6 +14,7 @@ from app.domains.pos.retail_checkout_source_service import RetailCheckoutSourceS
 from app.domains.pos.retail_sale_events import RetailCheckoutResult
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import seed_receiving_actor, set_receiving_context
+from tests.domains.inventory.test_unit_ledger import seed_ledger_context
 from tests.domains.pos import test_mixed_electronic_checkout as mixed_electronic
 from tests.domains.pos import test_unit_electronic_checkout as physical_electronic
 from tests.domains.pos.test_mixed_cash_checkout import complete as complete_mixed_cash
@@ -157,7 +158,7 @@ async def test_current_caller_scope_and_exact_operation_are_required_for_saved_s
     assert await protected_facts(db_session) == before
 
 
-async def test_journal_rls_hides_other_cashiers_even_when_their_tenant_and_branch_match(
+async def test_refund_authorized_same_branch_reader_sees_metadata_but_cannot_read_cashiers_source(
     db_session: AsyncSession, db_engine: AsyncEngine, maintenance_engine: AsyncEngine
 ) -> None:
     context = runtime(db_session)
@@ -171,11 +172,76 @@ async def test_journal_rls_hides_other_cashiers_even_when_their_tenant_and_branc
         marker = await RetailCheckoutSourceRepository(db_session).read(
             original.tenant_id, original.sale_id, original.operation_id
         )
-        assert marker is None or (marker.mixed is None and marker.physical is None)
-        with pytest.raises((PermissionDeniedError, NotFoundError)):
+        # 0189 mixed_return_read intentionally permits same-branch pos.refund
+        # readers. The source service still requires the original cashier.
+        assert marker is not None
+        assert (marker.tenant_id, marker.sale_id, marker.branch_id, marker.cashier_id) == (
+            original.tenant_id,
+            original.sale_id,
+            original.branch_id,
+            original.cashier_id,
+        )
+        assert marker.cashier_id != other_actor
+        assert marker.physical is None
+        assert marker.mixed is not None and marker.mixed.kind == "mixed"
+        assert marker.mixed.operation_id == original.operation_id
+        with pytest.raises(PermissionDeniedError, match="cashier"):
             await read(db_session, original, actor_id=other_actor)
     finally:
         await set_receiving_context(db_session, context.stock, context.actor_id)
+    assert await protected_facts(db_session) == before
+
+
+@pytest.mark.parametrize("path", ["physical-cash", "mixed-cash"])
+async def test_real_foreign_tenant_cannot_read_source_metadata_or_saved_result(
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+    path: PathKind,
+) -> None:
+    context = runtime(db_session)
+    # Commit only independent synthetic identities before the checkout takes
+    # its tenant transaction lock. The checkout itself remains uncommitted.
+    async with AsyncSession(db_engine) as support:
+        async with support.begin():
+            assert str(await support.scalar(text("SELECT current_database()"))).endswith("_test")
+            assert await support.scalar(text("SELECT current_user")) == "aurum_support"
+            await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+            foreign = await seed_ledger_context(support)
+    foreign_actor = await seed_receiving_actor(db_engine, maintenance_engine, foreign)
+    original = await completed(db_session, path)
+    before = await protected_facts(db_session)
+    await set_receiving_context(db_session, foreign, foreign_actor)
+    try:
+        assert await db_session.scalar(text("SELECT session_user")) == "aurum_app"
+        repository = RetailCheckoutSourceRepository(db_session)
+        assert (
+            await repository.read(original.tenant_id, original.sale_id, original.operation_id)
+            is None
+        )
+        assert (
+            await repository.read(foreign.tenant_id, original.sale_id, original.operation_id)
+            is None
+        )
+        table = "pos_mixed_checkout" if path == "mixed-cash" else "pos_physical_checkout"
+        assert (
+            await db_session.scalar(
+                text(f"SELECT count(*) FROM {table} WHERE id=:operation"),
+                {"operation": original.operation_id},
+            )
+            == 0
+        )
+        with pytest.raises(NotFoundError):
+            await read(
+                db_session,
+                original,
+                tenant_id=foreign.tenant_id,
+                actor_id=foreign_actor,
+                allowed_branch_ids={foreign.branch_id},
+            )
+    finally:
+        await set_receiving_context(db_session, context.stock, context.actor_id)
+    assert await read(db_session, original) == original
     assert await protected_facts(db_session) == before
 
 
