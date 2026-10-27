@@ -7,7 +7,7 @@
   "run_id": "local-2026-10-27-edge-checkout-origin-01",
   "branch": "codex/unit-edge-checkout-origin",
   "base_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
-  "expected_head": "3b7ff63f056772711ee6f7ffd9e90aae9d3c4a30",
+  "expected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
   "base_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
   "validated_sha": null,
   "pr": 432,
@@ -38,7 +38,7 @@
     "Backfill/retroactive identity, duplicated financial evidence, new worker bypass or public endpoints",
     "Dependency/stack/protected UI changes, paid resources, cloud product writes"
   ],
-  "remaining_step": "Wait all8 final-head CI including actual migration/ACL/completion tests, then expected-head guarded merge and exact-main-tree verification",
+  "remaining_step": "All8 final-head CI after exact role-contract 0225 alignment; guarded merge and exact-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -47,6 +47,13 @@
     "lint_unused_import": {
       "consecutive": 0,
       "cause": "Unused local alembic.op import removed; Ruff passed"
+    },
+    "role_contract_head": {
+      "consecutive": 1,
+      "cause": "CI compares actual Alembic head225 with role-contract max224 before migration roundtrip",
+      "first_failed_head": "3b7ff63f056772711ee6f7ffd9e90aae9d3c4a30",
+      "step": "Verify cluster-safe migration roundtrip",
+      "corrected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c"
     }
   },
   "blocker": null,
@@ -58,7 +65,7 @@
     "tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
     "ci": "all8success"
   },
-  "head_tree": "1d887d1561a4c5766482b13a994d99f8498630e7",
+  "head_tree": "df62514021c47c5cf4f9b8c4878075447f3a7f28",
   "local_checks": {
     "pure_pytest": 578,
     "new_pure_structural": 20,
@@ -71,6 +78,13 @@
     "independent_app_qa": "approved",
     "verification_plan": "Auto full matrix",
     "pypi_locked_versions": 103,
-    "pypi_advisories": 0
+    "pypi_advisories": 0,
+    "exact_role_contract_head_test": "pass",
+    "role_contract_security_review": "approved"
+  },
+  "ci": {
+    "head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
+    "state": "starting",
+    "previous_workflow": "40ebf808-a87b-4d1b-b560-f85adccc6006"
   }
 }
