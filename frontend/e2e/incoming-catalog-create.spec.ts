@@ -173,7 +173,12 @@ test("selects an existing catalog card from incoming creation without losing the
     await incomingDialog.getByLabel("Количество единиц").fill("7");
     await incomingDialog.getByLabel("Закупочная цена за единицу").fill("4.00");
     await incomingDialog.getByLabel("Розничная цена за единицу").fill("6.00");
-    await incomingDialog.getByPlaceholder(/Начните вводить название/).fill(name);
+    const catalogSearch = incomingDialog.getByPlaceholder(/Начните вводить название/);
+    await catalogSearch.fill(name);
+    // Dismiss typeahead before its delayed results can cover the create button.
+    await incomingDialog.getByRole("heading", { name: "Добавить позицию", exact: true }).click();
+    await expect(catalogSearch).toHaveAttribute("aria-expanded", "false");
+    await expect(catalogSearch).toHaveValue(name);
     await incomingDialog.getByRole("button", { name: `Проверить и создать «${name}»` }).click();
 
     const productDialog = page.getByRole("dialog", { name: "Добавить товар", exact: true });
