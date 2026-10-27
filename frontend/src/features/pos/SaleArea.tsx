@@ -54,7 +54,6 @@ import {
   hasPhysicalCashRecovery,
 } from "./physicalCashRecoveryPresence";
 import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
-import { matchesElectronicCompletedSale } from "./electronicCheckoutReceipt";
 import { type CashCheckoutResult } from "./PhysicalCashPanel";
 import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
@@ -645,11 +644,10 @@ function ActiveWorkspace({
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
   const cartMutationPending =
     !hasOpenShift || posCommand.blocked || physicalCartBusy || physicalOperationsBlocked || !online;
-  const physicalPaymentReady =
+  const unitPaymentReady =
     hasOpenShift &&
     isDraft &&
     preparedItems.length > 0 &&
-    sale?.is_test === false &&
     recordedPayments.length === 0 &&
     stagedPayments.length === 0 &&
     !physicalCartBusy &&
@@ -664,6 +662,7 @@ function ActiveWorkspace({
     !saleQuery.isPlaceholderData &&
     !paymentSettingsLoading &&
     !paymentSettingsUnavailable;
+  const physicalPaymentReady = unitPaymentReady && sale?.is_test === false;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const saleEditingBlocked =
     !hasOpenShift ||
@@ -897,6 +896,8 @@ function ActiveWorkspace({
         electronicAcceptanceOwner.current.branchId === result.branch_id &&
         electronicAcceptanceOwner.current.tenantId === result.tenant_id &&
         electronicAcceptanceOwner.current.userId === result.cashier_id;
+      if (!current()) return false;
+      const { matchesElectronicCompletedSale } = await import("./electronicCheckoutReceipt");
       if (!current()) return false;
       const refreshed = await refetchSale({ throwOnError: true });
       if (!current()) return false;
@@ -2571,24 +2572,10 @@ function ActiveWorkspace({
                       registerId={registerId}
                       sessionIsActive={sessionIsActive}
                       canStart={
-                        hasOpenShift &&
-                        isDraft &&
+                        unitPaymentReady &&
                         online &&
-                        !physicalCartBusy &&
-                        !posCommand.blocked &&
                         !physicalCashBlocked &&
-                        !physicalPreparationBlocked &&
-                        !pendingCheckout &&
-                        !pendingPayment &&
-                        !completionUncertain &&
-                        !checkoutUncertain &&
-                        !checkoutReconciling &&
-                        !saleQuery.isError &&
-                        !saleQuery.isPlaceholderData &&
-                        recordedPayments.length === 0 &&
-                        stagedPayments.length === 0 &&
-                        !paymentSettingsLoading &&
-                        !paymentSettingsUnavailable
+                        !physicalPreparationBlocked
                       }
                       paymentMethods={paymentMethods}
                       mixedPaymentEnabled={mixedPaymentEnabled}
