@@ -3,7 +3,7 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "awaiting_repeat_scan_exception",
+  "phase": "implementing_approved_restic_fix",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,10 +33,10 @@
   ],
   "excluded": [
     "Runtime Aurum/shared DB/restarts/deployment",
-    "Dependencies/stack/protected UI/paid resources",
+    "Unapproved dependency/stack/protected UI changes or paid resources; approved go-jose pins in Caddy/restic only",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Await explicit approval for restic pin and one-time STOP2 continuation. No new product writes, CI rerun or merge until approved. Existing CI may finish read-only.",
+  "remaining_step": "Apply exact restic-only go-jose v4.1.6 pin and compiled-version assertion; full final-head CI; guarded merge after all8 success",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -59,7 +59,7 @@
       "resolved_target": "aurum-gateway:ci usr/bin/caddy clean"
     }
   },
-  "blocker": "STOP2: same CVE-2026-116587 in two consecutive production scans. Caddy v4.1.6 now clean; restic still v4.1.4. Await explicit restic-scope dependency update and one-time STOP2 exception.",
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
     "pr": 432,
@@ -109,8 +109,9 @@
     "to": "v4.1.6",
     "path": "infra/backup/Dockerfile",
     "stage": "restic only; mc clean and unchanged",
-    "approved": false,
-    "stop2_exception": false,
-    "proposal": ".codex/unit-edge-checkout-event-2026-10-28/restic-go-jose.proposed.patch"
+    "approved": true,
+    "stop2_exception": true,
+    "proposal": ".codex/unit-edge-checkout-event-2026-10-28/restic-go-jose.proposed.patch",
+    "approval_source": "User instructed 'дальше' directly after the specific restic patch proposal and STOP2 approval request; acknowledged scope before action."
   }
 }
