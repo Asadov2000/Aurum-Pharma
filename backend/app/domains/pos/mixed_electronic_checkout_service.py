@@ -161,6 +161,15 @@ class MixedElectronicCheckoutService:
                 total_amount=saved.plan.quote.total_amount,
             )
             await self._persist(sale, saved, result, attempts)
+            # The evidence reader imports checkout readers; keep that boundary lazy.
+            from app.domains.pos.retail_checkout_event_producer import produce_retail_checkout_event
+
+            await produce_retail_checkout_event(
+                self.repository.session,
+                result,
+                actor_id=actor_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             await self.cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             return result
 

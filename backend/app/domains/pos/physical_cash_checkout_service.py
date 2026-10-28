@@ -263,5 +263,14 @@ class PhysicalCashCheckoutService:
             ).record_cash(result)
             await self.repository.complete_sale(sale, receipt, completed_at)
             await self.repository.validate_completion()
+            # The evidence reader imports checkout readers; keep that boundary lazy.
+            from app.domains.pos.retail_checkout_event_producer import produce_retail_checkout_event
+
+            await produce_retail_checkout_event(
+                self.repository.session,
+                result,
+                actor_id=actor_id,
+                allowed_branch_ids=allowed_branch_ids,
+            )
             await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
             return result

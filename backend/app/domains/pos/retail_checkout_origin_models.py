@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -30,3 +30,8 @@ class RetailCheckoutOrigin(Base):
         DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
     )
     created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+
+    source_transaction_id: Mapped[int | None] = mapped_column(BigInteger)
+    event_capture_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )

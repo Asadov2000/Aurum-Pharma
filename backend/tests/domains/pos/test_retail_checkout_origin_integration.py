@@ -335,5 +335,7 @@ async def test_captured_origin_has_one_immutable_metadata_only_audit_entry(
         "writer_epoch",
         "created_at",
         "created_by",
+        "source_transaction_id",
+        "event_capture_required",
     }
     assert "result_payload" not in audit.new_values and "receipt_payload" not in audit.new_values

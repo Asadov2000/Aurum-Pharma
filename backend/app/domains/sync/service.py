@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal, cast
@@ -50,6 +51,7 @@ from app.domains.sync.models import (
     SyncCursor,
     SyncInboxEvent,
     SyncNode,
+    SyncOutboxEvent,
     SyncSaleProjection,
     SyncWriterActivation,
 )
@@ -121,6 +123,12 @@ class _EnvelopeError(ValueError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
+
+
+def _require_compatible_delivery(rows: Sequence[SyncOutboxEvent]) -> None:
+    """Keep unsupported retail events in order until their receiver is ready."""
+    if any(row.event_type in {"pos.sale.completed.v3", "pos.sale.completed.v4"} for row in rows):
+        raise BusinessRuleError("Retail event delivery requires a compatible receiver")
 
 
 def _quarantine_evidence_hash(
@@ -1173,6 +1181,7 @@ class SyncCloudService:
             after_sequence=effective_after,
             limit=limit + 1,
         )
+        _require_compatible_delivery(rows)
         has_more = len(rows) > limit
         rows = rows[:limit]
         envelopes: list[SyncEventEnvelope] = []
@@ -1221,6 +1230,7 @@ class SyncCloudService:
             limit=max(1, scope.checkpoint_sequence + 1),
             through_sequence=scope.checkpoint_sequence,
         )
+        _require_compatible_delivery(rows)
         if len(rows) != scope.checkpoint_sequence:
             raise AurumError("Bootstrap history is incomplete")
         events = [SyncEventEnvelope.model_validate(row) for row in rows]
@@ -1320,6 +1330,7 @@ class SyncCloudService:
             through_sequence=last_sequence,
             limit=settings.EDGE_BOOTSTRAP_CHUNK_SIZE + 1,
         )
+        _require_compatible_delivery(rows)
         if len(rows) != last_sequence - first_sequence + 1:
             raise AurumError("Bootstrap chunk history is incomplete")
         events = [SyncEventEnvelope.model_validate(row) for row in rows]
