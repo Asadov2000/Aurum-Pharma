@@ -3,12 +3,12 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "implementing_approved_restic_fix",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
   "base_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-  "expected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
+  "expected_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
   "validated_sha": null,
   "pr": 433,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -36,7 +36,7 @@
     "Unapproved dependency/stack/protected UI changes or paid resources; approved go-jose pins in Caddy/restic only",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Apply exact restic-only go-jose v4.1.6 pin and compiled-version assertion; full final-head CI; guarded merge after all8 success",
+  "remaining_step": "Full all8 final-head CI with both approved go-jose fixes, then guarded merge and exact-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -56,7 +56,8 @@
       "corrected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
       "last_failed_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
       "remaining_target": "aurum-backup:ci usr/local/bin/restic",
-      "resolved_target": "aurum-gateway:ci usr/bin/caddy clean"
+      "resolved_target": "aurum-gateway:ci usr/bin/caddy clean",
+      "restic_corrected_head": "c76430e7038df30017a01fb4c794cb4b7538255d"
     }
   },
   "blocker": null,
@@ -68,8 +69,8 @@
     "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
     "ci": "all8success"
   },
-  "control_sha": "36c9e80ded00eb824bef9c6a2033590cfd451de2",
-  "head_tree": "9f00a55e9b7b51ca69dc53d9b15950dd0560a260",
+  "control_sha": "f772f84de26af3e1745d4f1c08ff35cf1456274c",
+  "head_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
   "local_checks": {
     "pure_pytest": 239,
     "new_pure": 25,
@@ -83,13 +84,15 @@
     "pypi_locked_versions": 103,
     "pypi_advisories": 0,
     "verification_plan": "Auto critical/full matrix",
-    "caddy_run_syntax": "pass; sh -n only, no local build or network commands"
+    "caddy_run_syntax": "pass; sh -n only, no local build or network commands",
+    "go_run_syntax": "Caddy/restic/mc sh -n passed; no local builds/network commands",
+    "restic_security_review": "approved; other build pins/mc unchanged"
   },
   "ci": {
-    "head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
-    "workflow": "2f3e1f85-0b30-4055-b838-f2acbe47dee0",
+    "head": "c76430e7038df30017a01fb4c794cb4b7538255d",
+    "workflow": "95db74f6-1f81-48c9-8375-4794f9f06ed4",
     "state": "pending",
-    "previous_workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4"
+    "previous_workflow": "2f3e1f85-0b30-4055-b838-f2acbe47dee0"
   },
   "proposed_dependency_change": {
     "module": "github.com/go-jose/go-jose/v4",
