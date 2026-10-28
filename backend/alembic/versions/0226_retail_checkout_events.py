@@ -29,11 +29,13 @@ FUNCTIONS = (
 )
 PUBLIC_FUNCTIONS = FUNCTIONS[6:8]
 AUDIT_OLD = "IF v_result IS NULL THEN RETURN NULL; END IF;"
-AUDIT_NEW = AUDIT_OLD + """
- IF p_table_name IN ('pos_retail_checkout_event','sync_retail_event_producer_gate') THEN
+AUDIT_NEW = """
+ IF p_table_name IN ('pos_retail_checkout_event','sync_retail_event_producer_gate')
+   AND v_result IS NOT NULL THEN
   RETURN jsonb_build_object(
    'created_at',v_result->'created_at','created_by',v_result->'created_by');
- END IF;"""
+ END IF;
+""" + AUDIT_OLD
 
 
 def _sql(sql: str) -> None:

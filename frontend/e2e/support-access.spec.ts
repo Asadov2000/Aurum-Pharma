@@ -98,10 +98,16 @@ test.describe("Scoped tenant support access", () => {
     }
     if (!tenant) throw new Error("E2E tenant is unavailable");
 
+    // Bootstrap both sessions before testing late activation versus logout,
+    // matching the two-tab logout setup without overlapping initial refreshes.
     await page.goto("/admin/tenants");
+    await expect(page.getByLabel("Поиск (название или email)")).toBeVisible();
+    await expect(page.getByLabel("Поиск (название или email)")).toBeEnabled();
     const otherTab = await context.newPage();
     await otherTab.goto("/admin/tenants");
     await expect(otherTab.getByRole("button", { name: "Меню профиля", exact: true })).toBeVisible();
+    await expect(otherTab.getByLabel("Поиск (название или email)")).toBeVisible();
+    await expect(otherTab.getByLabel("Поиск (название или email)")).toBeEnabled();
 
     let releaseIdentity!: () => void;
     const pendingIdentity = new Promise<void>((resolve) => {

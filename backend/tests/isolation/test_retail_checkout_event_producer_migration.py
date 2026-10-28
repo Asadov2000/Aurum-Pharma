@@ -39,13 +39,62 @@ UNCHANGED = (
 )
 
 
-def migration() -> ModuleType:
-    path = Path(__file__).resolve().parents[2] / "alembic/versions/0226_retail_checkout_events.py"
+def migration(filename: str = "0226_retail_checkout_events.py") -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions" / filename
     spec = importlib.util.spec_from_file_location("retail_event_producer_migration", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_audit_patch_preserves_historical_rehearsals_and_null_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = migration()
+    physical = migration("0218_unit_electronic_refund_posting.py")
+    mixed = migration("0223_mixed_electronic_refund_posting.py")
+    signature = "audit_redact_table_snapshot(text,jsonb)"
+    original = "BEGIN\n" + current.AUDIT_OLD + "\nRETURN v_result;\nEND;"
+
+    class DefinitionConnection:
+        definition = original
+
+        def scalar(self, _statement: object, _parameters: object = None) -> str:
+            return self.definition
+
+        def exec_driver_sql(self, statement: str) -> None:
+            self.definition = statement
+
+    connection = DefinitionConnection()
+    monkeypatch.setattr(current.op, "get_bind", lambda: connection)
+    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
+    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
+    before_current = connection.definition
+    current._audit(True)
+    after_current = connection.definition
+    assert after_current.count(mixed.AUDIT_NEW) == 1
+    assert after_current.count(current.AUDIT_OLD) == 1
+
+    # Real historical downgrade/upgrade functions must still find their exact anchors.
+    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=False)
+    assert connection.definition.count(physical.AUDIT_NEW) == 1
+    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=False)
+    assert connection.definition == original.replace(current.AUDIT_OLD, current.AUDIT_NEW, 1)
+    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
+    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
+    assert connection.definition == after_current
+    current._audit(False)
+    assert connection.definition == before_current
+
+    # A NULL snapshot skips the new branch and reaches the unchanged NULL return.
+    prefix, null_guard, suffix = current.AUDIT_NEW.partition(current.AUDIT_OLD)
+    assert null_guard == current.AUDIT_OLD and suffix == ""
+    condition, metadata_return = prefix.split(" THEN", 1)
+    assert "AND v_result IS NOT NULL" in condition
+    assert "RETURN jsonb_build_object" in metadata_return
+    assert "'created_at',v_result->'created_at','created_by',v_result->'created_by'" in prefix
+    assert "RETURN" not in condition
 
 
 def test_migration_is_default_off_and_captures_its_decision_without_history_backfill(
@@ -164,7 +213,14 @@ async def test_private_sql_canonicalization_and_hash_match_python_typed_records(
 ) -> None:
     value = (
         {
-            "я": [None, True, False, 0, 2**63 - 1, {"a": 'строка\n\t"\\', "💊": "таблетка"}],
+            "я": [
+                None,
+                True,
+                False,
+                0,
+                2**63 - 1,
+                {"a": 'строка\n\t"\\', "💊": "таблетка"},
+            ],
             "a": {"z": "decimal amounts remain strings", "cost": "0.01"},
         }
         if kind == "nested-unicode"
