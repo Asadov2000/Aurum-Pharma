@@ -23,30 +23,36 @@ def run_historical_rehearsal(
     assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
     snapshot = text(
         "SELECT pg_get_functiondef(oid),proowner,proacl::text,proconfig "
-        "FROM pg_proc WHERE oid="
-        "'public.audit_redact_table_snapshot(text,jsonb)'::regprocedure"
+        "FROM pg_proc WHERE oid IN ("
+        "'public.trg_guard_sale_immutability()'::regprocedure,"
+        "'public.trg_unit_cart_payment_boundary()'::regprocedure,"
+        "'public.audit_redact_table_snapshot(text,jsonb)'::regprocedure) ORDER BY oid"
     )
-    before = connection.execute(snapshot).one()
+    before = connection.execute(snapshot).all()
+    assert len(before) == 3
     path = Path(__file__).resolve().parents[2] / "alembic/versions/0224_training_checkout.py"
     spec = importlib.util.spec_from_file_location("historical_audit_training_patch", path)
     assert spec is not None and spec.loader is not None
     training = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(training)
-    patches = [
-        patch for patch in training.PATCHES if patch[0] == "audit_redact_table_snapshot(text,jsonb)"
-    ]
-    assert len(patches) == 1
-    signature, old, new = patches[0]
+    patches = training.PATCHES
+    assert len(patches) == 3
+    assert {patch[0] for patch in patches} == {
+        "trg_guard_sale_immutability()",
+        "trg_unit_cart_payment_boundary()",
+        "audit_redact_table_snapshot(text,jsonb)",
+    }
     savepoint = connection.begin_nested()
     try:
         with Operations.context(MigrationContext.configure(connection)):
-            training._patch(signature, old, new, upgrade=False)
+            for signature, old, new in reversed(patches):
+                training._patch(signature, old, new, upgrade=False)
         # The original callback owns its Operations context and all live roundtrip assertions.
         rehearse(connection)
     finally:
         # Also restore asserted partial-history refusals, and inspect only after rollback.
         savepoint.rollback()
-        assert connection.execute(snapshot).one() == before
+        assert connection.execute(snapshot).all() == before
 
 
 def migration() -> ModuleType:

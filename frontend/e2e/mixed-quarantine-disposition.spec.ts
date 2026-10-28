@@ -422,13 +422,16 @@ for (const zero of [false, true]) {
       await expect(dialog).not.toBeVisible();
       expect(submitted).toHaveLength(2);
       expect(persistedFacts(fixture)).toEqual({ ...before, decisions: 2 });
+      // Retry one connection reset only for these final read-only probes.
       const remaining = await api.get("customer-returns/mixed", {
         params: { branch_id: fixture.sale.branch_id },
+        maxRetries: 1,
       });
       expect(remaining.ok()).toBe(true);
       expect(await remaining.json()).toMatchObject({ items: [], total: 0 });
       const history = await api.get("customer-returns/mixed/dispositions", {
         params: { branch_id: fixture.sale.branch_id },
+        maxRetries: 1,
       });
       expect(history.ok()).toBe(true);
       const saved = (await history.json()) as { total: number; items: Decision[] };

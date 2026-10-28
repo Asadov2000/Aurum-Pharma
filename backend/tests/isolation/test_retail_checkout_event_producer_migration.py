@@ -49,6 +49,34 @@ def migration(filename: str = "0226_retail_checkout_events.py") -> ModuleType:
     return module
 
 
+class DefinitionConnection:
+    """Only model function-definition reads and replacement DDL, without SQL execution."""
+
+    def __init__(self, definitions: dict[str, str], audit_signature: str) -> None:
+        self.definitions = dict(definitions)
+        self.audit_signature = audit_signature
+        self.active_signature: str | None = None
+
+    def scalar(self, statement: object, parameters: dict[str, str] | None = None) -> str:
+        assert "pg_get_functiondef" in str(statement)
+        self.active_signature = (
+            self.audit_signature
+            if parameters is None
+            else parameters["signature"].removeprefix("public.")
+        )
+        return self.definitions[self.active_signature]
+
+    def exec_driver_sql(self, statement: str) -> None:
+        assert self.active_signature is not None
+        self.definitions[self.active_signature] = statement
+
+    def execute(self, statement: TextClause) -> None:
+        # 0224 escapes colon binds through Alembic op.execute(text(...)).
+        # Compile that real SQL text representation; never evaluate it.
+        assert isinstance(statement, TextClause)
+        self.exec_driver_sql(str(statement))
+
+
 def test_audit_patch_preserves_historical_rehearsals_and_null_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -56,55 +84,54 @@ def test_audit_patch_preserves_historical_rehearsals_and_null_guard(
     physical = migration("0218_unit_electronic_refund_posting.py")
     mixed = migration("0223_mixed_electronic_refund_posting.py")
     training = migration("0224_training_checkout.py")
-    signature = "audit_redact_table_snapshot(text,jsonb)"
-    training_patch = next(patch for patch in training.PATCHES if patch[0] == signature)
-    original = "BEGIN\n" + current.AUDIT_OLD + "\nRETURN v_result;\nEND;"
-
-    class DefinitionConnection:
-        definition = original
-
-        def scalar(self, _statement: object, _parameters: object = None) -> str:
-            return self.definition
-
-        def exec_driver_sql(self, statement: str) -> None:
-            self.definition = statement
-
-        def execute(self, statement: TextClause) -> None:
-            # 0224 escapes colon binds through Alembic op.execute(text(...)).
-            # Compile that real SQL text representation; never evaluate it.
-            assert isinstance(statement, TextClause)
-            self.definition = str(statement)
-
-    connection = DefinitionConnection()
+    audit = "audit_redact_table_snapshot(text,jsonb)"
+    originals = {
+        audit: "BEGIN\n" + current.AUDIT_OLD + "\nRETURN v_result;\nEND;",
+        "trg_guard_sale_immutability()": "BEGIN\nRETURN NEW;\nEND;",
+        "trg_unit_cart_payment_boundary()": "BEGIN\nRETURN NEW;\nEND;",
+    }
+    assert {patch[0] for patch in training.PATCHES} == set(originals)
+    older = [
+        (module, patch)
+        for module in (physical, mixed)
+        for patch in module.PATCHES
+        if patch[0] in originals
+    ]
+    connection = DefinitionConnection(originals, audit)
     monkeypatch.setattr(current.op, "get_bind", lambda: connection)
     monkeypatch.setattr(training.op, "execute", connection.execute)
-    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
-    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
-    training._patch(*training_patch, upgrade=True)
-    before_current = connection.definition
+    for module, patch in older:
+        module._patch(*patch, upgrade=True)
+    for patch in training.PATCHES:
+        training._patch(*patch, upgrade=True)
+    before_current = dict(connection.definitions)
     current._audit(True)
-    after_current = connection.definition
-    assert after_current.count(training_patch[2]) == 1
-    assert after_current.count(current.AUDIT_NEW) == 1
-    # 0224 interrupts the older exact anchor even with the safe 0226 prefix.
-    assert after_current.count(mixed.AUDIT_NEW) == 0
-    assert after_current.count(current.AUDIT_OLD) == 1
+    after_current = dict(connection.definitions)
+    # All three later 0224 fragments interrupt older exact downgrade anchors.
+    for signature, _, new in mixed.PATCHES:
+        if signature in originals:
+            assert after_current[signature].count(new) == 0
+    assert after_current[audit].count(current.AUDIT_NEW) == 1
+    assert after_current[audit].count(current.AUDIT_OLD) == 1
 
-    # The selective rehearsal peels only 0224's audit branch. Its table and
-    # other training guards remain installed, as does the 0226 audit prefix.
-    training._patch(*training_patch, upgrade=False)
-    assert connection.definition.count(mixed.AUDIT_NEW) == 1
-    assert connection.definition.count(current.AUDIT_NEW) == 1
-    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=False)
-    assert connection.definition.count(physical.AUDIT_NEW) == 1
-    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=False)
-    assert connection.definition == original.replace(current.AUDIT_OLD, current.AUDIT_NEW, 1)
-    physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
-    mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
-    training._patch(*training_patch, upgrade=True)
-    assert connection.definition == after_current
+    # The selective rehearsal peels all three known 0224 patches in reverse,
+    # retaining the 0226 prefix and every underlying historical function body.
+    for patch in reversed(training.PATCHES):
+        training._patch(*patch, upgrade=False)
+    for module, patch in reversed(older):
+        assert connection.definitions[patch[0]].count(patch[2]) == 1
+        module._patch(*patch, upgrade=False)
+    assert connection.definitions == {
+        **originals,
+        audit: originals[audit].replace(current.AUDIT_OLD, current.AUDIT_NEW, 1),
+    }
+    for module, patch in older:
+        module._patch(*patch, upgrade=True)
+    for patch in training.PATCHES:
+        training._patch(*patch, upgrade=True)
+    assert connection.definitions == after_current
     current._audit(False)
-    assert connection.definition == before_current
+    assert connection.definitions == before_current
 
     # A NULL snapshot skips the new branch and reaches the unchanged NULL return.
     prefix, null_guard, suffix = current.AUDIT_NEW.partition(current.AUDIT_OLD)
