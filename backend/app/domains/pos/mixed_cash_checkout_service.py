@@ -241,9 +241,25 @@ class MixedCashCheckoutService:
                 UnitCheckoutPaymentRepository(self.repository.session)
             ).record_cash(result)
             await self.repository.complete_sale(sale, receipt, completed_at)
-            await self.repository.validate_completion()
-            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            await self._validate_completed(result, actor_id, allowed_branch_ids)
             return result
+
+    async def _validate_completed(
+        self, result: MixedCheckoutResultV4, actor_id: UUID, allowed_branch_ids: set[UUID]
+    ) -> None:
+        # The evidence reader imports checkout readers; keep that boundary lazy.
+        from app.domains.pos.retail_checkout_event_producer import produce_retail_checkout_event
+
+        await self.repository.validate_completion()
+        await produce_retail_checkout_event(
+            self.repository.session,
+            result,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        await UnitCartRepository(self.repository.session).assert_actor(
+            result.tenant_id, actor_id, result.branch_id
+        )
 
     async def _post_stock(
         self,

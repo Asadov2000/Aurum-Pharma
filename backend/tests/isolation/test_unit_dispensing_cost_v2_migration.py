@@ -21,6 +21,7 @@ from tests.domains.inventory.test_unit_cost_ledger_v2 import costs, priced_sourc
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import cart_line, dispense
 from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_cash_for_roundtrip,
+    run_historical_rehearsal,
     upgrade_cash_after_roundtrip,
 )
 from tests.isolation.test_unit_physical_block_migration import migration as blocking_migration
@@ -137,7 +138,7 @@ async def test_cost_migration_roundtrip_or_refuses_known_history(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 
@@ -210,7 +211,7 @@ async def test_legacy_cost_remains_unknown_without_backfill_or_replay_recalculat
             assert any(row["units_taken"] > 0 for row in original)
             assert all(row[field] is None for row in original for field in COST_FIELDS)
 
-            await connection.run_sync(_roundtrip_or_refuse_known_costs)
+            await connection.run_sync(run_historical_rehearsal, _roundtrip_or_refuse_known_costs)
             current = (
                 (
                     await connection.execute(

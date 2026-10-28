@@ -10,7 +10,10 @@ from uuid import UUID
 
 from app.core.errors import ConflictError
 from app.domains.pos.retail_checkout_origin_repository import RetailCheckoutOriginRepository
-from app.domains.pos.retail_checkout_origin_service import RetailCheckoutOriginService
+from app.domains.pos.retail_checkout_origin_service import (
+    RetailCheckoutOriginEvidence,
+    RetailCheckoutOriginService,
+)
 from app.domains.pos.retail_sale_event_storage import (
     RetailSaleEventAnchor,
     build_retail_sale_event_anchor,
@@ -25,6 +28,33 @@ class RetailCheckoutEventCandidate:
 
     anchor: RetailSaleEventAnchor
     record: bytes
+
+
+def build_retail_checkout_event_candidate(
+    evidence: RetailCheckoutOriginEvidence, *, position: RetailSaleStreamPosition
+) -> RetailCheckoutEventCandidate:
+    """Encode caller-authorized evidence; this helper does not grant authority.
+
+    The producer must obtain evidence from the authorized source reader and a
+    protected reservation independently. This pure encoding step proves neither.
+    """
+    if evidence.origin is None:
+        raise ConflictError("Retail event preparation requires a captured checkout origin")
+    position = RetailSaleStreamPosition.model_validate(position.model_dump(mode="python"))
+    if (
+        position.origin_node_id != evidence.origin.origin_node_id
+        or position.writer_epoch != evidence.origin.writer_epoch
+    ):
+        raise ConflictError("Retail event position differs from the captured checkout writer")
+    envelope = build_retail_sale_event(evidence.result, position=position)
+    anchor = build_retail_sale_event_anchor(
+        envelope,
+        previous_source_checksum=position.previous_source_checksum,
+        previous_projection_checksum=position.previous_projection_checksum,
+    )
+    return RetailCheckoutEventCandidate(
+        anchor=anchor, record=encode_retail_sale_event(envelope, anchor=anchor)
+    )
 
 
 class RetailCheckoutEventService:
@@ -55,23 +85,4 @@ class RetailCheckoutEventService:
                 actor_id=actor_id,
                 allowed_branch_ids=allowed_branch_ids,
             )
-            if evidence.origin is None:
-                raise ConflictError("Retail event preparation requires a captured checkout origin")
-            position = RetailSaleStreamPosition.model_validate(position.model_dump(mode="python"))
-            if (
-                position.origin_node_id != evidence.origin.origin_node_id
-                or position.writer_epoch != evidence.origin.writer_epoch
-            ):
-                raise ConflictError(
-                    "Retail event position differs from the captured checkout writer"
-                )
-            envelope = build_retail_sale_event(evidence.result, position=position)
-            anchor = build_retail_sale_event_anchor(
-                envelope,
-                previous_source_checksum=position.previous_source_checksum,
-                previous_projection_checksum=position.previous_projection_checksum,
-            )
-            return RetailCheckoutEventCandidate(
-                anchor=anchor,
-                record=encode_retail_sale_event(envelope, anchor=anchor),
-            )
+            return build_retail_checkout_event_candidate(evidence, position=position)

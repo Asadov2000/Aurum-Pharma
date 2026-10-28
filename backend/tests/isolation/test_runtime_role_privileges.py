@@ -128,6 +128,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "pos_retail_checkout_event",
     "pos_retail_checkout_origin",
     "unit_stock_opening_pack_v2",
     "unit_legacy_transition",
@@ -180,6 +181,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "sync_retail_event_producer_gate",
     "physical_writeoff_command",
     "physical_writeoff_entry",
     "physical_writeoff_cancellation",
@@ -275,6 +277,15 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "retail_event_canonical_json",
+    "retail_event_hash",
+    "trg_retail_event_gate_guard",
+    "trg_retail_event_capture",
+    "trg_retail_event_immutable",
+    "assert_retail_event_source",
+    "reserve_retail_checkout_event_position",
+    "store_retail_checkout_event",
+    "trg_retail_checkout_event_required",
     "trg_capture_retail_checkout_origin",
     "trg_retail_checkout_origin_guard",
     "assert_training_checkout_stock_snapshot",
@@ -774,6 +785,8 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "reserve_retail_checkout_event_position",
+    "store_retail_checkout_event",
     "training_checkout_sale_write_allowed",
     "physical_writeoff_status",
     "record_physical_writeoff",
@@ -1715,6 +1728,9 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_retail_event_capture",
+        "assert_retail_event_source",
+        "trg_retail_checkout_event_required",
         "trg_capture_retail_checkout_origin",
         "trg_retail_checkout_origin_guard",
         "assert_training_checkout_stock_snapshot",
@@ -1789,13 +1805,22 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["app_can_execute"] is False
         assert guard["support_can_execute"] is False
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
-    for name in ("trg_unit_legacy_transition_immutable", "physical_writeoff_selection"):
+    for name in (
+        "trg_unit_legacy_transition_immutable",
+        "physical_writeoff_selection",
+        "retail_event_canonical_json",
+        "retail_event_hash",
+        "trg_retail_event_gate_guard",
+        "trg_retail_event_immutable",
+    ):
         journal_guard = next(row for row in function_privileges if row["proname"] == name)
         assert journal_guard["is_security_definer"] is False
         assert journal_guard["app_can_execute"] is False
         assert journal_guard["support_can_execute"] is False
         assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
+        "reserve_retail_checkout_event_position",
+        "store_retail_checkout_event",
         "training_checkout_sale_write_allowed",
         "post_unit_legacy_transition",
         "physical_writeoff_status",

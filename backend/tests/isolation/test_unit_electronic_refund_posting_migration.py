@@ -18,6 +18,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_posting_migration,
     mixed_electronic_refund_preparation_migration,
+    run_historical_rehearsal,
 )
 
 db_session = receiving_session_fixture
@@ -132,7 +133,7 @@ async def test_posting_roundtrip_restores_exact_historical_guards(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

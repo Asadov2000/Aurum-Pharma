@@ -21,6 +21,7 @@ from tests.domains.pos.test_unit_physical_checkout_preparation import checkout_s
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_refund_for_roundtrip,
+    run_historical_rehearsal,
     upgrade_refund_after_roundtrip,
 )
 
@@ -117,7 +118,7 @@ async def test_refund_migration_roundtrip_preserves_guards_or_refuses_history(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

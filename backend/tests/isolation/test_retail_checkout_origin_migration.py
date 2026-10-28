@@ -28,8 +28,8 @@ UNCHANGED = (
 )
 
 
-def migration() -> ModuleType:
-    path = Path(__file__).resolve().parents[2] / "alembic/versions/0225_retail_checkout_origin.py"
+def migration(filename: str = "0225_retail_checkout_origin.py") -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions" / filename
     spec = importlib.util.spec_from_file_location("retail_origin_migration", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -182,6 +182,10 @@ async def test_empty_migration_roundtrip_or_history_refusal_preserves_existing_g
                         module.downgrade()
                 assert getattr(denied.value.orig, "sqlstate", None) == "55000"
             else:
+                # Rehearse in dependency order: 0226 has an FK and triggers on
+                # origin. The surrounding disposable transaction restores both.
+                successor = migration("0226_retail_checkout_events.py")
+                successor.downgrade()
                 module.downgrade()
                 assert (
                     connection.scalar(
@@ -190,6 +194,7 @@ async def test_empty_migration_roundtrip_or_history_refusal_preserves_existing_g
                     is None
                 )
                 module.upgrade()
+                successor.upgrade()
         assert {
             signature: connection.execute(definition, {"signature": signature}).one()
             for signature in UNCHANGED
