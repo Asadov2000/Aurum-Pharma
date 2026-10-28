@@ -9,7 +9,7 @@
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "4d8ecb965b0ae987708e7604d46f7a20e0ef8388",
+  "expected_head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
   "validated_sha": null,
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -41,7 +41,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Full final-head CI including historical audit compatibility and deterministic support/logout setup, then guarded merge and exact main tree proof",
+  "remaining_step": "All8 CI on rehearsal-compatible final head, guarded merge, main equality proof and decrement E6-01 once",
   "failure_counters": {
     "legacy_stream_test": {
       "consecutive": 0,
@@ -93,7 +93,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "177ec4015c1c9be35b4d2172f3f6822e8f6d336b",
+  "control_sha": "e6a33b647a4f8aaf4ec2331ab219e29edc5015df",
   "local_validation": {
     "pure_tests": 284,
     "mypy_files": 516,
@@ -106,7 +106,8 @@
     "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
     "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
     "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
-    "4d8ecb965b0ae987708e7604d46f7a20e0ef8388"
+    "4d8ecb965b0ae987708e7604d46f7a20e0ef8388",
+    "071a2497efd4b8a320a3e1589b2d909063f73c3a"
   ],
   "baseline_findings": [
     {
@@ -116,6 +117,14 @@
       "evidence": "CI3686 trace shows overlapping initial refresh200/me200 in two tabs, first tenant query401 then retry401 while second tab rotates refresh and succeeds200",
       "interpretation": "Consistent with cross-tab refresh/session invalidation race; exact 401 reason not captured",
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
+    }
+  ],
+  "static_findings": [
+    {
+      "cause": "Historical test helpers skipped training224 audit while selectively unwinding223; demonstrated before another CI failure",
+      "fix": "Wrap full original rehearsal callback in disposable savepoint, peel only224 audit, run every original assertion before cleanup, always rollback and verify full audit definition/owner/ACL/config",
+      "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+      "scope": "20 test caller files; old callback bodies/assertions unchanged; pure regression actual218/223/224/226"
     }
   ]
 }
