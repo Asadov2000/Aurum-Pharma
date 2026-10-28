@@ -1,169 +1,55 @@
 {
   "version": 1,
-  "generation": 14,
-  "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
+  "generation": 15,
+  "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-10-27-edge-checkout-origin-01",
-  "branch": "codex/unit-edge-checkout-origin",
-  "base_sha": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
-  "expected_head": "1b945454a46aeb86713a77a7c975d315160cf36e",
-  "base_tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
-  "validated_sha": "1b945454a46aeb86713a77a7c975d315160cf36e",
-  "pr": 432,
+  "phase": "implementing",
+  "run_id": "local-2026-10-28-edge-checkout-event-01",
+  "branch": "codex/unit-edge-checkout-events",
+  "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
+  "base_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
+  "expected_head": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "local_product_writes_stopped": true,
+  "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (N уточняется по критериям блока6)",
-  "scope": "DB-stamped immutable origin node/epoch for newly inserted real physical/mixed checkout journals; no retrospective assignment or Edge publication",
+  "scope": "Prepare an in-memory v3/v4 retail event candidate from an authorized saved checkout and immutable captured origin, binding externally supplied position to original writer metadata. No reservation or publication.",
   "acceptance": [
-    "One origin record in same transaction for each actual aurum_app physical/mixed cash/electronic journal; replay no duplicate; rollback atomic",
-    "Identity from canonical guarded sync_stream/node/epoch under writer lock, p_allow_edge=false; no caller identity or new Edge capability",
-    "Old existing journals and privileged historical fixture/migration inserts remain unbound; no backfill; no JSON/receipt/payment duplication",
-    "Tenant RLS, immutable metadata and trigger audit; runtime SELECT only, no direct INSERT/UPDATE/DELETE or callable capture function",
-    "Scoped authorized historical read retains stored node/epoch independent of current writer state; no current-epoch reassignment",
-    "Migration0225 working empty downgrade refuses destroying nonempty origin history; actual DB checks only disposable CI",
-    "All8 exact final-head CI then guarded merge and tested-main-tree equality"
+    "One authorized source/origin evidence read, preserving old read API and no-autoflush/dirty-session fail-closed behavior",
+    "Strict revalidation of external position and exact captured origin_node/epoch match; missing historical origin rejected, no current-writer substitution",
+    "Both real physical/mixed cash/electronic source results roundtrip canonical bounded codec; replay returns same bytes; no current stock/price recalculation",
+    "No DB writes, stream reservation/finalization, outbox/projection/cursor/receiver activation, or new endpoint/capability",
+    "Auth/tenant/branch/actor isolation and unchanged protected facts; full 8 exact-head CI then guarded merge and tested-main-tree equality"
   ],
   "excluded": [
-    "Running Aurum/shared DB/restarts/deployment",
-    "Stream sequence reservation, checksums/outbox/inbox/receiver/bootstrap activation or event publishing",
-    "Backfill/retroactive identity, duplicated financial evidence, new worker bypass or public endpoints",
-    "Dependency/stack/protected UI changes, paid resources, cloud product writes"
+    "Runtime Aurum/shared DB/restarts/deployment",
+    "Dependencies/stack/protected UI/paid resources",
+    "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "This work item is complete. Before any next Edge item, freshly inspect main/open PRs/acceptance criteria and confirm local ownership; no deployment or shared DB changes.",
+  "remaining_step": "Implement bounded preparation service + source evidence bundle; targeted checks and full CI",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
-    },
-    "lint_unused_import": {
-      "consecutive": 0,
-      "cause": "Unused local alembic.op import removed; Ruff passed"
-    },
-    "role_contract_head": {
-      "consecutive": 0,
-      "cause": "CI compares actual Alembic head225 with role-contract max224 before migration roundtrip",
-      "first_failed_head": "3b7ff63f056772711ee6f7ffd9e90aae9d3c4a30",
-      "step": "Verify cluster-safe migration roundtrip",
-      "corrected_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
-      "resolved_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c"
-    },
-    "windows_shell_startup": {
-      "consecutive": 0,
-      "cause": "First cold Git Bash launch exceeded 5-second negative test process deadline; other11 cases passed",
-      "first_failed_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
-      "step": "Disposable database safety guards",
-      "corrected_head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6",
-      "resolved_head": "1b71fa61383002ba2444a88a0e3389429aa7e7c6"
-    },
-    "trigger_acl_probe": {
-      "consecutive": 0,
-      "cause": "asyncpg result introspection of trigger pseudo-type raises client InternalClientError before server EXECUTE ACL",
-      "first_failed_head": "44fcc0becb59b0e37a3f864baddf7cbdb926695c",
-      "step": "Pytest / test_direct_origin_dml_and_trigger_function_calls_are_not_runtime_capabilities",
-      "corrected_head": "1b945454a46aeb86713a77a7c975d315160cf36e",
-      "resolved_head": "1b945454a46aeb86713a77a7c975d315160cf36e"
     }
   },
   "blocker": null,
   "previous_completed": {
-    "work_item_id": "UNIT-EDGE-CHECKOUT-SOURCE-01",
-    "pr": 431,
-    "head": "5e96a03eccc3bc2db3c9a9e797bd31013e91db0c",
-    "main": "4b597c17eea47ff1649d29e8a8c5744b53fb75c6",
-    "tree": "5b8153daf4f304d3ab500a0db37a202a5db028ef",
-    "ci": "all8success"
-  },
-  "head_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-  "local_checks": {
-    "pure_pytest": 578,
-    "new_pure_structural": 20,
-    "db_cases_collected": 15,
-    "mypy_app": 512,
-    "black": "pass",
-    "ruff": "pass",
-    "diff_check": "pass",
-    "independent_sql_security": "approved",
-    "independent_app_qa": "approved",
-    "verification_plan": "Auto full matrix",
-    "pypi_locked_versions": 103,
-    "pypi_advisories": 0,
-    "exact_role_contract_head_test": "pass",
-    "role_contract_security_review": "approved",
-    "windows_negative_guards": {
-      "state": "pass",
-      "cases": 12,
-      "security_review": "approved; case deadlines/assertions unchanged"
-    },
-    "trigger_acl_probe_review": "approved; DO/PERFORM preserves server42501 and separate function ACL checks",
-    "origin_integration_collected": 12
-  },
-  "ci": {
+    "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
+    "pr": 432,
     "head": "1b945454a46aeb86713a77a7c975d315160cf36e",
-    "workflow": "4bd63251-38a5-49c6-8b89-1e8a24ff0d27",
-    "state": "all8success",
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success"
-      }
-    ],
-    "counts": {
-      "backend": 7207,
-      "backend_shards": [
-        3604,
-        3603
-      ],
-      "frontend_tests": 3259,
-      "frontend_files": 241,
-      "e2e": 167
-    }
-  },
-  "control_sha": "b5f5a6e2c4b9a80b796be0c5ddbf7460835bda96",
-  "merged_main": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
-  "merged_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-  "runtime": {
-    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
-    "primary_checkout_clean": true,
-    "running_services": "untouched",
-    "shared_database": "untouched; migration0225 not applied to shared DB",
-    "deployment_authorized": false
-  },
-  "completed_at": "2026-10-27 19:21:50 UTC"
+    "main": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
+    "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
+    "ci": "all8success"
+  }
 }
