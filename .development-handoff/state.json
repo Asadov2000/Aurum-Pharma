@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "fix_ci",
+  "phase": "ci_pending",
   "run_id": "local-2026-10-28-edge-receiver-01",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "2cb742e3f19024110ed43304425faa2d866623dc",
+  "expected_head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
   "validated_sha": null,
   "pr": 435,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -38,14 +38,15 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Fix test-only provisioning for E6-02, wait remaining first-run shard, inspect all failures then publish one coherent fix and rerun full CI.",
+  "remaining_step": "Test-only owner provisioning fixed; wait second exact-head full8 CI, no new work or writers. Merge only final success.",
   "failure_counters": {
     "receiver_db_fixture": {
       "consecutive": 1,
       "step": "backend Pytest",
       "head": "2cb742e3f19024110ed43304425faa2d866623dc",
       "cause": "Integration fixture called SyncAdminService.create_node with cashier runtime; INSERT sync_node correctly denied",
-      "fix": "QA to provision test Edge through schema owner on disposable CI DB; preserve runtime privileges"
+      "fix": "QA to provision test Edge through schema owner on disposable CI DB; preserve runtime privileges",
+      "fix_head": "d86207048f09897aaaaf501b3137ccd2b198ec00"
     }
   },
   "blocker": null,
@@ -69,12 +70,7 @@
     "diff_check": "pass"
   },
   "fix_commits": [
-    "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
-    "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
-    "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
-    "4d8ecb965b0ae987708e7604d46f7a20e0ef8388",
-    "071a2497efd4b8a320a3e1589b2d909063f73c3a",
-    "b490fc50e43ff8e71ef63372536d0e5246c99ced"
+    "d86207048f09897aaaaf501b3137ccd2b198ec00"
   ],
   "baseline_findings": [
     {
@@ -98,11 +94,9 @@
   "merged_tree": null,
   "completed_at": null,
   "ci": {
-    "head": "2cb742e3f19024110ed43304425faa2d866623dc",
-    "workflow": "44d68f71-a8a3-47b6-93bb-fa3fa9cdb75b",
-    "state": "failed",
-    "cause": "Test-only provisioning used cashier runtime for sync-node registration; both failed shards share helper",
-    "green_jobs": 6
+    "head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
+    "workflow": "c624217a-eeb2-42ed-9235-3559823b34e0",
+    "state": "pending"
   },
   "main_tree_matches_tested_head": true,
   "runtime": {
@@ -112,5 +106,13 @@
     "shared_database": "not accessed or changed",
     "deployment": false
   },
-  "head_tree": "53150e526dd3a83e50c57714dea0736c9b3a14b1"
+  "head_tree": "2cb73149c7ca6bf32b7d467d368ea761944a333a",
+  "initial_commit": "2cb742e3f19024110ed43304425faa2d866623dc",
+  "first_ci": {
+    "head": "2cb742e3f19024110ed43304425faa2d866623dc",
+    "workflow": "44d68f71-a8a3-47b6-93bb-fa3fa9cdb75b",
+    "backend": 3726,
+    "cause": "Both failing pytest shards called administrative node creation as cashier in shared test helper; runtime denied correctly",
+    "green_jobs": 6
+  }
 }
