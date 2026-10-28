@@ -16,6 +16,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_electronic_for_roundtrip,
     payment_component_migration,
     refund_payment_component_migration,
+    run_historical_rehearsal,
     upgrade_electronic_after_roundtrip,
 )
 
@@ -87,7 +88,7 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

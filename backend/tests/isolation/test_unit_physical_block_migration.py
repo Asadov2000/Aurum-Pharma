@@ -24,6 +24,7 @@ from tests.domains.incoming.test_unit_acceptance import (
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import receive_source
 from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_cash_for_roundtrip,
+    run_historical_rehearsal,
     upgrade_cash_after_roundtrip,
 )
 
@@ -92,7 +93,7 @@ async def test_blocking_roundtrip_preserves_functions_acl_and_untouched_stock(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

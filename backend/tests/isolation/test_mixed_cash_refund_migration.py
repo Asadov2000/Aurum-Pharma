@@ -37,6 +37,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_zero_return_migration,
     physical_disposition_migration,
     refund_payment_component_migration,
+    run_historical_rehearsal,
     upgrade_electronic_after_roundtrip,
 )
 
@@ -510,6 +511,6 @@ async def test_disposable_roundtrip_restores_historical_guards_and_acl_or_refuse
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()

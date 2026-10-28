@@ -20,6 +20,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_mixed_refund_posting_for_roundtrip,
     mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_posting_migration,
+    run_historical_rehearsal,
 )
 
 db_session = receiving_session_fixture
@@ -189,7 +190,7 @@ async def test_outcome_schema_roundtrip_security_and_legacy_triggers(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

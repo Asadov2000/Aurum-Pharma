@@ -15,6 +15,7 @@ from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     downgrade_electronic_for_roundtrip,
     refund_payment_component_migration,
+    run_historical_rehearsal,
     upgrade_electronic_after_roundtrip,
 )
 
@@ -87,7 +88,7 @@ async def test_payment_component_roundtrip_preserves_security_and_parent_functio
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 
@@ -115,7 +116,7 @@ async def test_populated_payment_journal_refuses_downgrade_without_losing_histor
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(refuse)
+            await connection.run_sync(run_historical_rehearsal, refuse)
         finally:
             await transaction.rollback()
     context = runtime(db_session)

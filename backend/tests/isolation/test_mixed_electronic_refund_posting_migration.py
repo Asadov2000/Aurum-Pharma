@@ -20,6 +20,7 @@ from tests.domains.pos.test_mixed_electronic_refund_posting import facts, post, 
 from tests.domains.pos.test_unit_return import runtime
 from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_electronic_refund_posting_migration,
+    run_historical_rehearsal,
 )
 
 db_session = receiving_session_fixture
@@ -178,7 +179,7 @@ async def test_posting_roundtrip_restores_exact_head_functions_security_and_comp
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 

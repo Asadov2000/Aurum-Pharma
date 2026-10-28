@@ -24,6 +24,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_posting_migration,
     mixed_electronic_refund_preparation_migration,
+    run_historical_rehearsal,
 )
 
 db_session = receiving_session_fixture
@@ -143,7 +144,7 @@ async def test_refund_intent_roundtrip_preserves_security(maintenance_engine: As
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 
@@ -227,6 +228,6 @@ async def test_nonempty_downgrade_rejected(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()

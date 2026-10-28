@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.sql.elements import TextClause
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -54,7 +55,9 @@ def test_audit_patch_preserves_historical_rehearsals_and_null_guard(
     current = migration()
     physical = migration("0218_unit_electronic_refund_posting.py")
     mixed = migration("0223_mixed_electronic_refund_posting.py")
+    training = migration("0224_training_checkout.py")
     signature = "audit_redact_table_snapshot(text,jsonb)"
+    training_patch = next(patch for patch in training.PATCHES if patch[0] == signature)
     original = "BEGIN\n" + current.AUDIT_OLD + "\nRETURN v_result;\nEND;"
 
     class DefinitionConnection:
@@ -66,23 +69,39 @@ def test_audit_patch_preserves_historical_rehearsals_and_null_guard(
         def exec_driver_sql(self, statement: str) -> None:
             self.definition = statement
 
+        def execute(self, statement: TextClause) -> None:
+            # 0224 escapes colon binds through Alembic op.execute(text(...)).
+            # Compile that real SQL text representation; never evaluate it.
+            assert isinstance(statement, TextClause)
+            self.definition = str(statement)
+
     connection = DefinitionConnection()
     monkeypatch.setattr(current.op, "get_bind", lambda: connection)
+    monkeypatch.setattr(training.op, "execute", connection.execute)
     physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
     mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
+    training._patch(*training_patch, upgrade=True)
     before_current = connection.definition
     current._audit(True)
     after_current = connection.definition
-    assert after_current.count(mixed.AUDIT_NEW) == 1
+    assert after_current.count(training_patch[2]) == 1
+    assert after_current.count(current.AUDIT_NEW) == 1
+    # 0224 interrupts the older exact anchor even with the safe 0226 prefix.
+    assert after_current.count(mixed.AUDIT_NEW) == 0
     assert after_current.count(current.AUDIT_OLD) == 1
 
-    # Real historical downgrade/upgrade functions must still find their exact anchors.
+    # The selective rehearsal peels only 0224's audit branch. Its table and
+    # other training guards remain installed, as does the 0226 audit prefix.
+    training._patch(*training_patch, upgrade=False)
+    assert connection.definition.count(mixed.AUDIT_NEW) == 1
+    assert connection.definition.count(current.AUDIT_NEW) == 1
     mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=False)
     assert connection.definition.count(physical.AUDIT_NEW) == 1
     physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=False)
     assert connection.definition == original.replace(current.AUDIT_OLD, current.AUDIT_NEW, 1)
     physical._patch(signature, physical.AUDIT_OLD, physical.AUDIT_NEW, upgrade=True)
     mixed._patch(signature, mixed.AUDIT_OLD, mixed.AUDIT_NEW, upgrade=True)
+    training._patch(*training_patch, upgrade=True)
     assert connection.definition == after_current
     current._audit(False)
     assert connection.definition == before_current

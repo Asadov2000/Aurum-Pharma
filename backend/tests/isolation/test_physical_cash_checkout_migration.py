@@ -1,6 +1,7 @@
 """Cash binding rollback preserves old guards and never discards checkout history."""
 
 import importlib.util
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -12,6 +13,40 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+
+
+def run_historical_rehearsal(
+    connection: Connection, rehearse: Callable[[Connection], None]
+) -> None:
+    """Run every historical assertion before rolling back the isolated rehearsal."""
+    assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+    assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    snapshot = text(
+        "SELECT pg_get_functiondef(oid),proowner,proacl::text,proconfig "
+        "FROM pg_proc WHERE oid="
+        "'public.audit_redact_table_snapshot(text,jsonb)'::regprocedure"
+    )
+    before = connection.execute(snapshot).one()
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0224_training_checkout.py"
+    spec = importlib.util.spec_from_file_location("historical_audit_training_patch", path)
+    assert spec is not None and spec.loader is not None
+    training = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(training)
+    patches = [
+        patch for patch in training.PATCHES if patch[0] == "audit_redact_table_snapshot(text,jsonb)"
+    ]
+    assert len(patches) == 1
+    signature, old, new = patches[0]
+    savepoint = connection.begin_nested()
+    try:
+        with Operations.context(MigrationContext.configure(connection)):
+            training._patch(signature, old, new, upgrade=False)
+        # The original callback owns its Operations context and all live roundtrip assertions.
+        rehearse(connection)
+    finally:
+        # Also restore asserted partial-history refusals, and inspect only after rollback.
+        savepoint.rollback()
+        assert connection.execute(snapshot).one() == before
 
 
 def migration() -> ModuleType:
@@ -512,7 +547,7 @@ async def test_cash_binding_roundtrip_preserves_stock_and_guard_acl(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 
@@ -557,6 +592,6 @@ async def test_edge_compatibility_roundtrip_preserves_guard_owner_and_acl(
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()

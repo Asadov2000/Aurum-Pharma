@@ -29,6 +29,7 @@ from tests.isolation.test_physical_cash_checkout_migration import (
     mixed_electronic_refund_outcome_migration,
     mixed_electronic_refund_posting_migration,
     mixed_electronic_refund_preparation_migration,
+    run_historical_rehearsal,
 )
 from tests.isolation.test_unit_electronic_refund_binding_migration import (
     insert_history,
@@ -140,7 +141,7 @@ async def test_activation_roundtrip_restores_binding_guard(maintenance_engine: A
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(rehearse)
+            await connection.run_sync(run_historical_rehearsal, rehearse)
         finally:
             await transaction.rollback()
 
