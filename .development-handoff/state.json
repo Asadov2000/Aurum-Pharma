@@ -3,13 +3,13 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
   "base_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
   "expected_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
-  "validated_sha": null,
+  "validated_sha": "c76430e7038df30017a01fb4c794cb4b7538255d",
   "pr": 433,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -36,7 +36,7 @@
     "Unapproved dependency/stack/protected UI changes or paid resources; approved go-jose pins in Caddy/restic only",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Full all8 final-head CI with both approved go-jose fixes, then guarded merge and exact-main-tree verification",
+  "remaining_step": "This work item is complete. Before another Edge item, freshly inspect main/open PRs/current criteria and confirm local ownership. No deployment or shared DB changes.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -47,17 +47,20 @@
       "cause": "Initial Black/Ruff import order and E501 fixed; checks passed"
     },
     "production_scan": {
-      "consecutive": 2,
-      "cause": "CVE-2026-116587 in Caddy go-jose/v4 v4.1.4, fixed v4.1.6",
+      "consecutive": 0,
+      "cause": "CVE-2026-116587 in go-jose/v4 v4.1.4 originally affected both Caddy and restic; both pinned v4.1.6 and final scan passed",
       "head": "ee0a16792573c810bd907846388e18ec7924434c",
       "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
       "job": 3637,
       "step": "Scan production images for fixable vulnerabilities",
       "corrected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
       "last_failed_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
-      "remaining_target": "aurum-backup:ci usr/local/bin/restic",
-      "resolved_target": "aurum-gateway:ci usr/bin/caddy clean",
-      "restic_corrected_head": "c76430e7038df30017a01fb4c794cb4b7538255d"
+      "remaining_target": null,
+      "resolved_target": "Caddy and restic clean in final production-container CI; mc unchanged",
+      "restic_corrected_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
+      "resolved_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
+      "resolved_workflow": "95db74f6-1f81-48c9-8375-4794f9f06ed4",
+      "prior_consecutive_failures": 2
     }
   },
   "blocker": null,
@@ -69,7 +72,7 @@
     "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
     "ci": "all8success"
   },
-  "control_sha": "f772f84de26af3e1745d4f1c08ff35cf1456274c",
+  "control_sha": "6af667d5987a5920635385a36259bb3636c6f0f5",
   "head_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
   "local_checks": {
     "pure_pytest": 239,
@@ -86,13 +89,57 @@
     "verification_plan": "Auto critical/full matrix",
     "caddy_run_syntax": "pass; sh -n only, no local build or network commands",
     "go_run_syntax": "Caddy/restic/mc sh -n passed; no local builds/network commands",
-    "restic_security_review": "approved; other build pins/mc unchanged"
+    "restic_security_review": "approved; other build pins/mc unchanged",
+    "production_containers": "pass: approved go-jose pins checked in Caddy/restic binaries, all image scans/backup/restore and TLS checks passed"
   },
   "ci": {
     "head": "c76430e7038df30017a01fb4c794cb4b7538255d",
     "workflow": "95db74f6-1f81-48c9-8375-4794f9f06ed4",
-    "state": "pending",
-    "previous_workflow": "2f3e1f85-0b30-4055-b838-f2acbe47dee0"
+    "state": "all8success",
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success"
+      }
+    ],
+    "counts": {
+      "backend": 7241,
+      "backend_shards": [
+        3621,
+        3620
+      ],
+      "frontend_tests": 3259,
+      "frontend_files": 241,
+      "e2e": 167
+    }
   },
   "proposed_dependency_change": {
     "module": "github.com/go-jose/go-jose/v4",
@@ -115,6 +162,19 @@
     "approved": true,
     "stop2_exception": true,
     "proposal": ".codex/unit-edge-checkout-event-2026-10-28/restic-go-jose.proposed.patch",
-    "approval_source": "User instructed 'дальше' directly after the specific restic patch proposal and STOP2 approval request; acknowledged scope before action."
-  }
+    "approval_source": "User explicitly answered: Да, обновить go-jose в restic и продолжить PR #433 (2026-10-28); earlier continuation instruction also acknowledged.",
+    "stop2_exception_consumed": true
+  },
+  "merged_main": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
+  "merged_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
+  "runtime": {
+    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_checkout_clean": true,
+    "running_services": "untouched by this work",
+    "shared_database": "not accessed or changed by this work; no new migration in this stage",
+    "active_backups": "untouched by this work",
+    "deployment_authorized": false,
+    "isolated_source_matches_main_tree": true
+  },
+  "completed_at": "2026-10-28 07:18:51 UTC"
 }
