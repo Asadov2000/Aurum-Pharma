@@ -117,6 +117,31 @@ async def stage_anchor(maintenance_engine: AsyncEngine, case: Case) -> None:
         )
 
 
+async def enroll_target(
+    maintenance_engine: AsyncEngine, *, tenant_id: UUID, branch_id: UUID
+) -> UUID:
+    """Provision a synthetic receiver as schema owner after source commit."""
+    async with AsyncSession(maintenance_engine, expire_on_commit=False) as owner:
+        async with owner.begin():
+            assert str(await owner.scalar(text("SELECT current_database()"))).endswith("_test")
+            assert await owner.scalar(text("SELECT current_user")) == "aurum_schema_owner"
+            await owner.execute(
+                text(
+                    "SELECT set_config('app.tenant_id',:tenant,true),"
+                    "set_config('app.branch_id',:branch,true)"
+                ),
+                {"tenant": str(tenant_id), "branch": str(branch_id)},
+            )
+            node = await SyncAdminService(SyncCloudRepository(owner)).create_node(
+                SyncNodeCreate(
+                    tenant_id=tenant_id,
+                    branch_id=branch_id,
+                    display_name="Retail receive test",
+                )
+            )
+            return node.id
+
+
 async def prepared_case(
     session: AsyncSession,
     maintenance_engine: AsyncEngine,
@@ -129,15 +154,12 @@ async def prepared_case(
     candidate = await produce(session, source)
     assert candidate is not None
     envelope = SyncEventEnvelope.model_validate(json.loads(candidate.record)["envelope"])
-    node = await SyncAdminService(SyncCloudRepository(session)).create_node(
-        SyncNodeCreate(
-            tenant_id=source.tenant_id,
-            branch_id=source.branch_id,
-            display_name="Retail receive test",
-        )
-    )
-    case = Case(source, candidate, envelope, node.id, runtime(session))
+    context = runtime(session)
     await session.commit()
+    node_id = await enroll_target(
+        maintenance_engine, tenant_id=source.tenant_id, branch_id=source.branch_id
+    )
+    case = Case(source, candidate, envelope, node_id, context)
     if with_anchor:
         await stage_anchor(maintenance_engine, case)
     await edge_context(session, case)
@@ -319,11 +341,6 @@ async def test_real_v1_v3_v4_v1_stream_keeps_exact_documents_and_shared_watermar
     await checkout_legacy(db_session, physical.sale.register_id)
     candidates = [await produce(db_session, source) for source in (first, second)]
     assert all(candidate is not None for candidate in candidates)
-    node = await SyncAdminService(SyncCloudRepository(db_session)).create_node(
-        SyncNodeCreate(
-            tenant_id=first.tenant_id, branch_id=first.branch_id, display_name="Mixed stream test"
-        )
-    )
     context = runtime(db_session)
     rows = list(
         (
@@ -341,11 +358,14 @@ async def test_real_v1_v3_v4_v1_stream_keeps_exact_documents_and_shared_watermar
     events = [SyncEventEnvelope.model_validate(row, from_attributes=True) for row in rows]
     assert [item.schema_version for item in events] == [1, 3, 4, 1]
     await db_session.commit()
+    node_id = await enroll_target(
+        maintenance_engine, tenant_id=first.tenant_id, branch_id=first.branch_id
+    )
     cases = []
     for source, candidate in zip((first, second), candidates, strict=True):
         assert candidate is not None
         envelope = next(item for item in events if item.event_id == source.event_id)
-        case = Case(source, candidate, envelope, node.id, context)
+        case = Case(source, candidate, envelope, node_id, context)
         cases.append(case)
         await stage_anchor(maintenance_engine, case)
     await edge_context(db_session, cases[0])
