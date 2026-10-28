@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "ci_running",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
+  "expected_head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
   "validated_sha": null,
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -41,7 +41,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Test dormant-hook fast path, await second backend shard, publish same PR434 and run full CI",
+  "remaining_step": "All8 full CI on final head after dormant-hook and exact function registry fixes, then guarded merge and main proof",
   "failure_counters": {
     "legacy_stream_test": {
       "consecutive": 0,
@@ -51,16 +51,23 @@
       "resolved": "Corrected canonical legacy checkout case passed in second run before later new failure"
     },
     "manual_access_roundtrip": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Two new tenant tables lacked standard a00_tenant_access triggers",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
-      "fix": "Add existing tenant access trigger, keep all assertions"
+      "fix": "Add existing tenant access trigger, keep all assertions",
+      "resolved": "Standard tenant access roundtrip passed in second run"
     },
     "dormant_hook_recovery": {
       "consecutive": 1,
       "cause": "Dormant checkout hook invoked financial recovery reader before checking immutable required flag; interfered with unchanged deferred-payment-constraint fault test",
       "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
       "fix": "Protected capture-state no-autoflush fast path in optional hook; strict producer unchanged"
+    },
+    "runtime_function_registry": {
+      "consecutive": 1,
+      "cause": "Exact app-executable function test registry omitted the two intentional producer operations; no actual grant defect",
+      "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
+      "fix": "Register exactly reserve_retail_checkout_event_position and store_retail_checkout_event; all ACL assertions unchanged"
     }
   },
   "blocker": null,
@@ -72,9 +79,9 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "f2aebeee17e7de0aa609fd55d57aa62ec0af953e",
+  "control_sha": "aafd09c3b0486261ee3a909c142b4ca8e61e38dd",
   "local_validation": {
-    "pure_tests": 273,
+    "pure_tests": 283,
     "mypy_files": 516,
     "ruff": "pass",
     "black": "pass",
@@ -83,6 +90,7 @@
   },
   "fix_commits": [
     "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
-    "d97cd4203f4e567d818e11ea9f8444d5c248deb8"
+    "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
+    "ddeff78dce8f8571faf802a48af51c1c9dfd9682"
   ]
 }
