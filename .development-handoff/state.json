@@ -3,7 +3,7 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "awaiting_dependency_approval",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -36,7 +36,7 @@
     "Dependencies/stack/protected UI/paid resources",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Full exact-head 8-context CI, then guarded merge and tested-main-tree verification",
+  "remaining_step": "Await explicit dependency approval; continue read-only observation of existing backend and E2E. No CI rerun or merge before approved fix and green full CI.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -45,9 +45,17 @@
     "formatting": {
       "consecutive": 0,
       "cause": "Initial Black/Ruff import order and E501 fixed; checks passed"
+    },
+    "production_scan": {
+      "consecutive": 1,
+      "cause": "CVE-2026-116587 in Caddy go-jose/v4 v4.1.4, fixed v4.1.6",
+      "head": "ee0a16792573c810bd907846388e18ec7924434c",
+      "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
+      "job": 3637,
+      "step": "Scan production images for fixable vulnerabilities"
     }
   },
-  "blocker": null,
+  "blocker": "Caddy binary contains github.com/go-jose/go-jose/v4 v4.1.4; Trivy CVE-2026-116587 HIGH, fixed4.1.6. Explicit AGENTS dependency approval requested; not yet granted.",
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
     "pr": 432,
@@ -56,7 +64,7 @@
     "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
     "ci": "all8success"
   },
-  "control_sha": "52b2d337fd8d3cb7fa3e0172d90dbfc5645b4f1d",
+  "control_sha": "31a4365284a84696d0f421994ea337d118ef9770",
   "head_tree": "4697619b17c76ae7322d6a7338073b376ed42781",
   "local_checks": {
     "pure_pytest": 239,
@@ -76,5 +84,15 @@
     "head": "ee0a16792573c810bd907846388e18ec7924434c",
     "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
     "state": "pending"
+  },
+  "proposed_dependency_change": {
+    "module": "github.com/go-jose/go-jose/v4",
+    "from": "v4.1.4",
+    "to": "v4.1.6",
+    "path": "frontend/Dockerfile.production",
+    "scope": "Add exact Go get pin + module/compiled-binary version checks; keep Caddy/Go/baseimages/all existing pins",
+    "advisory": "https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q",
+    "release": "https://github.com/go-jose/go-jose/releases/tag/v4.1.6",
+    "approved": false
   }
 }
