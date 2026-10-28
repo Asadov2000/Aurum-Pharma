@@ -360,6 +360,9 @@ def upgrade() -> None:
           REVOKE ALL ON public.{table} FROM PUBLIC,aurum_app,aurum_support;
           CREATE POLICY schema_owner ON public.{table} TO aurum_schema_owner
            USING(true) WITH CHECK(true);
+          CREATE TRIGGER a00_tenant_access BEFORE INSERT OR UPDATE OR DELETE
+           ON public.{table} FOR EACH ROW
+           EXECUTE FUNCTION public.trg_enforce_tenant_access('pos');
           CREATE TRIGGER z90_retail_event_audit AFTER INSERT OR UPDATE OR DELETE
            ON public.{table} FOR EACH ROW EXECUTE FUNCTION public.trg_audit_log();
         """)
