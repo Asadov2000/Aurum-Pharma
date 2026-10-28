@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "ci_running",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "f227f3562f476c28bae600dbcc37ead0818f5010",
+  "expected_head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
   "validated_sha": null,
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -41,14 +41,19 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Correct real v1 test path, await other backend shard, recheck and publish same PR434",
+  "remaining_step": "Full CI after both first-run fixes; preserve per-cause count1 until successful exact-head CI",
   "failure_counters": {
-    "current_stage": {
-      "step": "backend/Pytest concurrent legacy stream integration",
-      "cause": "New concurrency test used legacy POSService.complete without the canonical v1 checkout emitter; expected second outbox event absent",
+    "legacy_stream_test": {
       "consecutive": 1,
+      "cause": "Test used low-level legacy complete without v1 emitter",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
-      "workflow": "2ac0e308-5403-4250-b2e4-ae2b65acaeb0"
+      "fix_head": "ad264c9aabe9740d961f945ac14fb71ab34c4baf"
+    },
+    "manual_access_roundtrip": {
+      "consecutive": 1,
+      "cause": "Two new tenant tables lacked standard a00_tenant_access triggers",
+      "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
+      "fix": "Add existing tenant access trigger, keep all assertions"
     }
   },
   "blocker": null,
@@ -60,7 +65,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "335d559a07c186f7a4f084c9e2296e304a988c5c",
+  "control_sha": "74dee6ef115cde216cdebdc3463116f0f7057ea6",
   "local_validation": {
     "pure_tests": 273,
     "mypy_files": 516,
@@ -68,5 +73,9 @@
     "black": "pass",
     "diff_check": "pass",
     "sql_review": "approved_for_ci"
-  }
+  },
+  "fix_commits": [
+    "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
+    "d97cd4203f4e567d818e11ea9f8444d5c248deb8"
+  ]
 }
