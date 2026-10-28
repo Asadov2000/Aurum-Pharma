@@ -9,7 +9,7 @@
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+  "expected_head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
   "validated_sha": null,
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -41,7 +41,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "All8 CI on rehearsal-compatible final head, guarded merge, main equality proof and decrement E6-01 once",
+  "remaining_step": "Full exact-head CI after complete3-function rehearsal compatibility and bounded GET reset resilience, then guarded merge and stage decrement",
   "failure_counters": {
     "legacy_stream_test": {
       "consecutive": 0,
@@ -72,16 +72,32 @@
       "resolved": "Exact runtime role privileges test passed in third-run successful backend shard"
     },
     "historical_audit_anchor": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
       "cause": "New audit branch after the shared NULL anchor interrupted older strict historical audit patches",
-      "fix": "Prepend new non-null metadata branch before the original NULL anchor; preserve original migration texts and assertions"
+      "fix": "Prepend new non-null metadata branch before the original NULL anchor; preserve original migration texts and assertions",
+      "resolved": "Audit anchor unwind passed before later separate sale-guard interleaving failure"
     },
     "support_e2e_setup": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
       "cause": "Parallel initial tab bootstrap overlapped protected tenant reads with rotating refresh sessions; first query received two401s",
-      "fix": "Boot both tab data queries before the distinct late-support-activation/logout test; preserve all security assertions"
+      "fix": "Boot both tab data queries before the distinct late-support-activation/logout test; preserve all security assertions",
+      "resolved": "Support startup/logout case passed in fourth-run all-green E2E job3693 on4d8ecb96"
+    },
+    "e2e_get_transport": {
+      "consecutive": 1,
+      "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+      "cause": "APIRequestContext read-only final queue GET had socket hang up in mixed zero quarantine recovery test",
+      "fix": "Inspect exact Playwright bounded ECONNRESET transport retry for only idempotent queue/history GETs; no HTTP/error assertion or write retries"
+    },
+    "historical_training_guard": {
+      "consecutive": 1,
+      "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+      "case": "test_mixed_electronic_refund_posting_migration::test_posting_roundtrip_restores_exact_head_functions_security_and_component_parent",
+      "cause": "Training sale ALLOW prefix interrupted older sale immutability patch after the audit-only peel",
+      "fix": "Temporarily remove exactly all three known224 patches in reverse order and verify all three function/security snapshots after rollback",
+      "fix_head": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     }
   },
   "blocker": null,
@@ -93,7 +109,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "e6a33b647a4f8aaf4ec2331ab219e29edc5015df",
+  "control_sha": "eedfc4d4d90e6e438ab2a206f1b7c1cc6b1b982d",
   "local_validation": {
     "pure_tests": 284,
     "mypy_files": 516,
@@ -107,7 +123,8 @@
     "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
     "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
     "4d8ecb965b0ae987708e7604d46f7a20e0ef8388",
-    "071a2497efd4b8a320a3e1589b2d909063f73c3a"
+    "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+    "b490fc50e43ff8e71ef63372536d0e5246c99ced"
   ],
   "baseline_findings": [
     {
@@ -122,8 +139,8 @@
   "static_findings": [
     {
       "cause": "Historical test helpers skipped training224 audit while selectively unwinding223; demonstrated before another CI failure",
-      "fix": "Wrap full original rehearsal callback in disposable savepoint, peel only224 audit, run every original assertion before cleanup, always rollback and verify full audit definition/owner/ACL/config",
-      "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
+      "fix": "Scoped rehearsal temporarily removes exactly all three known224 function patches, runs every original callback assertion, rolls back own savepoint and verifies all3 definitions/owner/ACL/config",
+      "head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
       "scope": "20 test caller files; old callback bodies/assertions unchanged; pure regression actual218/223/224/226"
     }
   ]
