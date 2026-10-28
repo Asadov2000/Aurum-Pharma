@@ -4,14 +4,14 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "recon",
+  "phase": "ci_pending",
   "run_id": "local-2026-10-28-edge-receiver-01",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "524ca37af16fc36465dad56bd193706981da7292",
+  "expected_head": "2cb742e3f19024110ed43304425faa2d866623dc",
   "validated_sha": null,
-  "pr": null,
+  "pr": 435,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -38,7 +38,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Design receiver trust boundary and migration; implement/test on isolated checkout. Next-stage count remains8 until full E6-02 acceptance.",
+  "remaining_step": "PR435 published; wait exact-head full8 CI, fix only confirmed failures in same item, expected-head merge after success. No runtime/DB/cloud authoring.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -51,12 +51,14 @@
   },
   "control_sha": null,
   "local_validation": {
-    "pure_tests": 284,
-    "mypy_files": 516,
+    "existing_pure": 374,
+    "new_pure": 36,
+    "database_cases_collected": 16,
     "ruff": "pass",
     "black": "pass",
-    "diff_check": "pass",
-    "sql_review": "approved_for_ci"
+    "mypy_source_files": 516,
+    "architecture_review": "approved",
+    "diff_check": "pass"
   },
   "fix_commits": [
     "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
@@ -95,5 +97,6 @@
     "application": "not changed or restarted",
     "shared_database": "not accessed or changed",
     "deployment": false
-  }
+  },
+  "head_tree": "53150e526dd3a83e50c57714dea0736c9b3a14b1"
 }
