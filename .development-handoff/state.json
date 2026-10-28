@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "ci_pending",
+  "phase": "fix_ci",
   "run_id": "local-2026-10-28-edge-receiver-01",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -38,8 +38,16 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "PR435 published; wait exact-head full8 CI, fix only confirmed failures in same item, expected-head merge after success. No runtime/DB/cloud authoring.",
-  "failure_counters": {},
+  "remaining_step": "Fix test-only provisioning for E6-02, wait remaining first-run shard, inspect all failures then publish one coherent fix and rerun full CI.",
+  "failure_counters": {
+    "receiver_db_fixture": {
+      "consecutive": 1,
+      "step": "backend Pytest",
+      "head": "2cb742e3f19024110ed43304425faa2d866623dc",
+      "cause": "Integration fixture called SyncAdminService.create_node with cashier runtime; INSERT sync_node correctly denied",
+      "fix": "QA to provision test Edge through schema owner on disposable CI DB; preserve runtime privileges"
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
@@ -89,7 +97,13 @@
   "merged_main_sha": null,
   "merged_tree": null,
   "completed_at": null,
-  "ci": null,
+  "ci": {
+    "head": "2cb742e3f19024110ed43304425faa2d866623dc",
+    "workflow": "44d68f71-a8a3-47b6-93bb-fa3fa9cdb75b",
+    "state": "failed",
+    "cause": "Test-only provisioning used cashier runtime for sync-node registration; both failed shards share helper",
+    "green_jobs": 6
+  },
   "main_tree_matches_tested_head": true,
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
