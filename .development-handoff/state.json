@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "fixing_ci",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
@@ -41,19 +41,26 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Full CI after both first-run fixes; preserve per-cause count1 until successful exact-head CI",
+  "remaining_step": "Test dormant-hook fast path, await second backend shard, publish same PR434 and run full CI",
   "failure_counters": {
     "legacy_stream_test": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Test used low-level legacy complete without v1 emitter",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
-      "fix_head": "ad264c9aabe9740d961f945ac14fb71ab34c4baf"
+      "fix_head": "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
+      "resolved": "Corrected canonical legacy checkout case passed in second run before later new failure"
     },
     "manual_access_roundtrip": {
       "consecutive": 1,
       "cause": "Two new tenant tables lacked standard a00_tenant_access triggers",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
       "fix": "Add existing tenant access trigger, keep all assertions"
+    },
+    "dormant_hook_recovery": {
+      "consecutive": 1,
+      "cause": "Dormant checkout hook invoked financial recovery reader before checking immutable required flag; interfered with unchanged deferred-payment-constraint fault test",
+      "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
+      "fix": "Protected capture-state no-autoflush fast path in optional hook; strict producer unchanged"
     }
   },
   "blocker": null,
@@ -65,7 +72,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "74dee6ef115cde216cdebdc3463116f0f7057ea6",
+  "control_sha": "f2aebeee17e7de0aa609fd55d57aa62ec0af953e",
   "local_validation": {
     "pure_tests": 273,
     "mypy_files": 516,
