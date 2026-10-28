@@ -128,6 +128,7 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "sync_retail_event_anchor",
     "pos_retail_checkout_event",
     "pos_retail_checkout_origin",
     "unit_stock_opening_pack_v2",
@@ -277,6 +278,7 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_retail_edge_anchor_guard",
     "retail_event_canonical_json",
     "retail_event_hash",
     "trg_retail_event_gate_guard",
@@ -1728,6 +1730,7 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_retail_edge_anchor_guard",
         "trg_retail_event_capture",
         "assert_retail_event_source",
         "trg_retail_checkout_event_required",

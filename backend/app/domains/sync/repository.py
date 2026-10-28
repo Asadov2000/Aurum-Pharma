@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -35,6 +37,7 @@ from app.domains.sync.models import (
     SyncReadSnapshotComponent,
     SyncReadSnapshotCursor,
     SyncReadSupplierProjection,
+    SyncRetailEventAnchor,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -1663,6 +1666,63 @@ class SyncEdgeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @asynccontextmanager
+    async def event_savepoint(self) -> AsyncIterator[None]:
+        """Rollback one retail event without retaining an incomplete inbox/cursor."""
+        async with self.session.begin_nested():
+            yield
+
+    async def get_retail_event_anchor(
+        self,
+        *,
+        event_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> SyncRetailEventAnchor | None:
+        result = await self.session.execute(
+            select(SyncRetailEventAnchor).where(
+                SyncRetailEventAnchor.event_id == event_id,
+                SyncRetailEventAnchor.tenant_id == tenant_id,
+                SyncRetailEventAnchor.branch_id == branch_id,
+                SyncRetailEventAnchor.target_edge_node_id == edge_node_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_local_edge_node_id(self) -> UUID | None:
+        value = await self.session.scalar(
+            text("SELECT NULLIF(current_setting('app.edge_node_id',true),'')")
+        )
+        if not isinstance(value, str):
+            return None
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+
+    async def get_retail_event_anchor_by_position(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
+        sequence: int,
+    ) -> SyncRetailEventAnchor | None:
+        result = await self.session.execute(
+            select(SyncRetailEventAnchor).where(
+                SyncRetailEventAnchor.tenant_id == tenant_id,
+                SyncRetailEventAnchor.branch_id == branch_id,
+                SyncRetailEventAnchor.target_edge_node_id == edge_node_id,
+                SyncRetailEventAnchor.origin_node_id == origin_node_id,
+                SyncRetailEventAnchor.writer_epoch == writer_epoch,
+                SyncRetailEventAnchor.sequence == sequence,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_active_read_snapshot_id(
         self,
         *,
@@ -2234,7 +2294,7 @@ class SyncEdgeRepository:
         start_projection_checksum: str,
     ) -> SyncCursor:
         result = await self.session.execute(
-            insert(SyncCursor)
+            pg_insert(SyncCursor)
             .values(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
@@ -2248,9 +2308,29 @@ class SyncEdgeRepository:
                 projection_checksum=start_projection_checksum,
                 status="synced",
             )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    SyncCursor.tenant_id,
+                    SyncCursor.branch_id,
+                    SyncCursor.origin_node_id,
+                    SyncCursor.writer_epoch,
+                ]
+            )
             .returning(SyncCursor)
         )
-        return result.scalar_one()
+        inserted = result.scalar_one_or_none()
+        if inserted is not None:
+            return inserted
+        existing = await self.get_cursor(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
+            for_update=True,
+        )
+        if existing is None:
+            raise RuntimeError("Edge sync cursor disappeared during initialization")
+        return existing
 
     async def update_cursor(
         self,
@@ -2378,6 +2458,8 @@ class SyncEdgeRepository:
         payments: list[dict[str, object]],
         source_payload_hash: str,
         projection_hash: str,
+        schema_version: int = 1,
+        stock_command_id: UUID | None = None,
     ) -> SyncSaleProjection:
         statement = (
             insert(SyncSaleProjection)
@@ -2407,6 +2489,8 @@ class SyncEdgeRepository:
                 payments=payments,
                 source_payload_hash=source_payload_hash,
                 projection_hash=projection_hash,
+                schema_version=schema_version,
+                stock_command_id=stock_command_id,
             )
             .returning(SyncSaleProjection)
         )

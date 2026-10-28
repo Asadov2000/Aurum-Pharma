@@ -21,6 +21,14 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.core.time import utc_now
+from app.domains.pos.mixed_documents import MixedCheckoutResultV4
+from app.domains.pos.physical_documents import PhysicalCheckoutResultV3
+from app.domains.pos.retail_sale_event_storage import (
+    RetailSaleEventAnchor,
+    decode_retail_sale_event,
+    encode_retail_sale_event,
+)
+from app.domains.pos.retail_sale_events import RetailCheckoutResult
 from app.domains.pos.schemas import SaleCheckoutResult, SaleRefundResult
 from app.domains.sync.activation_bootstrap import (
     ActivationBootstrapValidationError,
@@ -39,6 +47,7 @@ from app.domains.sync.bootstrap import (
 )
 from app.domains.sync.credentials import EdgeCredential, issue_edge_credential
 from app.domains.sync.integrity import (
+    canonical_json_bytes,
     canonical_json_hash,
     projection_stream_checksum,
     sale_projection_hash,
@@ -116,6 +125,7 @@ from app.domains.sync.schemas import (
 
 logger = structlog.get_logger("sync.service")
 CursorStatus = Literal["synced", "gap", "quarantined", "mismatch"]
+ProjectedSale = SaleCheckoutResult | SaleRefundResult | RetailCheckoutResult
 _QUARANTINE_INCIDENT_NAMESPACE = UUID("c4d7c709-8bd5-4f89-94cb-fcd324d8800b")
 
 
@@ -1658,7 +1668,7 @@ class SyncEdgeApplyService:
 
     @staticmethod
     def _same_inbox_event(existing: SyncInboxEvent, incoming: SyncEventEnvelope) -> bool:
-        return (
+        same = (
             existing.event_id == incoming.event_id
             and existing.tenant_id == incoming.tenant_id
             and existing.branch_id == incoming.branch_id
@@ -1670,6 +1680,97 @@ class SyncEdgeApplyService:
             and existing.projection_hash == incoming.projection_hash
             and existing.projection_checksum == incoming.projection_checksum
             and existing.status == "applied"
+        )
+        if existing.schema_version in (3, 4) or incoming.schema_version in (3, 4):
+            try:
+                same_payload = canonical_json_bytes(existing.payload) == canonical_json_bytes(
+                    incoming.payload
+                )
+            except (ValueError, TypeError, OverflowError):
+                return False
+            same = same and (
+                existing.operation_id == incoming.operation_id
+                and existing.aggregate_type == incoming.aggregate_type
+                and existing.aggregate_id == incoming.aggregate_id
+                and existing.event_type == incoming.event_type
+                and existing.schema_version == incoming.schema_version
+                and existing.occurred_at == incoming.occurred_at
+                and same_payload
+            )
+        return same
+
+    async def _validate_retail_slot(self, envelope: SyncEventEnvelope) -> None:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("retail_anchor_scope_unavailable")
+        row = await self.repo.get_retail_event_anchor_by_position(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+        )
+        if row is not None and (
+            row.event_id != envelope.event_id
+            or envelope.schema_version not in (3, 4)
+            or envelope.event_type != f"pos.sale.completed.v{envelope.schema_version}"
+        ):
+            raise _EnvelopeError("retail_anchor_mismatch")
+
+    async def _retail_result(
+        self,
+        envelope: SyncEventEnvelope,
+        *,
+        previous_checksums: tuple[str, str] | None = None,
+    ) -> RetailCheckoutResult:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("retail_anchor_scope_unavailable")
+        row = await self.repo.get_retail_event_anchor(
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+        )
+        if row is None:
+            raise _EnvelopeError("retail_anchor_missing")
+        if row.event_id != envelope.event_id or row.target_edge_node_id != self._edge_node_id:
+            raise _EnvelopeError("retail_anchor_mismatch")
+        if previous_checksums is not None and (
+            row.previous_source_checksum != previous_checksums[0]
+            or row.previous_projection_checksum != previous_checksums[1]
+        ):
+            raise _EnvelopeError("retail_anchor_checkpoint_mismatch")
+        try:
+            anchor = RetailSaleEventAnchor(
+                tenant_id=row.tenant_id,
+                branch_id=row.branch_id,
+                origin_node_id=row.origin_node_id,
+                writer_epoch=row.writer_epoch,
+                sequence=row.sequence,
+                previous_source_checksum=row.previous_source_checksum,
+                previous_projection_checksum=row.previous_projection_checksum,
+                event_fingerprint=row.event_fingerprint,
+            )
+            record = encode_retail_sale_event(envelope, anchor=anchor)
+            result = decode_retail_sale_event(record, anchor=anchor)
+            if result.is_test:
+                raise ValueError("training retail events are not enabled")
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("retail_anchor_mismatch") from exc
+        return result
+
+    async def _validate_incoming_event(
+        self, envelope: SyncEventEnvelope, *, cursor: SyncCursor
+    ) -> ProjectedSale:
+        if envelope.schema_version not in (3, 4):
+            return self._validate_event(
+                envelope,
+                previous_source_checksum=cursor.source_checksum,
+                previous_projection_checksum=cursor.projection_checksum,
+            )
+        return await self._retail_result(
+            envelope,
+            previous_checksums=(cursor.source_checksum, cursor.projection_checksum),
         )
 
     @staticmethod
@@ -1752,6 +1853,8 @@ class SyncEdgeApplyService:
         parent = await self.repo.get_sale_projection(refund.parent_sale_id)
         if parent is None:
             raise _EnvelopeError("refund_parent_missing")
+        if parent.schema_version not in (None, 1):
+            raise _EnvelopeError("refund_parent_version_unsupported")
         if (
             parent.sale_type != "sale"
             or parent.tenant_id != refund.tenant_id
@@ -1895,17 +1998,25 @@ class SyncEdgeApplyService:
         applied: int,
         duplicates: int,
     ) -> tuple[EdgeApplyResult | None, bool]:
+        scope_reason: str | None = None
         if (
             envelope.tenant_id != pull.tenant_id
             or envelope.branch_id != pull.branch_id
             or envelope.origin_node_id != pull.origin_node_id
             or envelope.writer_epoch != pull.writer_epoch
         ):
+            scope_reason = "event_scope_mismatch"
+        else:
+            try:
+                await self._validate_retail_slot(envelope)
+            except _EnvelopeError as exc:
+                scope_reason = exc.reason_code
+        if scope_reason is not None:
             halted = await self._stop(
                 cursor=cursor,
                 envelope=None,
                 cursor_status="quarantined",
-                reason_code="event_scope_mismatch",
+                reason_code=scope_reason,
                 applied=applied,
                 duplicates=duplicates,
             )
@@ -1913,13 +2024,20 @@ class SyncEdgeApplyService:
 
         existing = await self.repo.get_inbox_event(envelope.event_id)
         if envelope.sequence <= cursor.last_sequence:
+            reason_code = "event_identity_collision"
             if existing is not None and self._same_inbox_event(existing, envelope):
-                return None, True
+                try:
+                    if envelope.schema_version in (3, 4):
+                        await self._retail_result(envelope)
+                except _EnvelopeError as exc:
+                    reason_code = exc.reason_code
+                else:
+                    return None, True
             halted = await self._stop(
                 cursor=cursor,
                 envelope=envelope if existing is None else None,
                 cursor_status="quarantined",
-                reason_code="event_identity_collision",
+                reason_code=reason_code,
                 applied=applied,
                 duplicates=duplicates,
             )
@@ -1955,11 +2073,7 @@ class SyncEdgeApplyService:
         duplicates: int,
     ) -> EdgeApplyResult | None:
         try:
-            sale = self._validate_event(
-                envelope,
-                previous_source_checksum=cursor.source_checksum,
-                previous_projection_checksum=cursor.projection_checksum,
-            )
+            sale = await self._validate_incoming_event(envelope, cursor=cursor)
         except _EnvelopeError as exc:
             return await self._stop(
                 cursor=cursor,
@@ -2006,45 +2120,24 @@ class SyncEdgeApplyService:
                     duplicates=duplicates,
                 )
 
-        inbox = await self.repo.insert_inbox(envelope, status="received")
         try:
-            await self.repo.insert_sale_projection(
-                sale_id=sale.sale_id,
-                tenant_id=sale.tenant_id,
-                branch_id=sale.branch_id,
-                origin_node_id=envelope.origin_node_id,
-                writer_epoch=envelope.writer_epoch,
-                sequence=envelope.sequence,
-                source_event_id=envelope.event_id,
-                operation_id=sale.operation_id,
-                sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
-                parent_sale_id=(
-                    sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None
-                ),
-                parent_fully_refunded=(
-                    sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
-                ),
-                register_id=sale.register_id,
-                shift_id=sale.shift_id,
-                cashier_user_id=sale.cashier_user_id,
-                receipt_number=sale.receipt_number,
-                receipt_seq=sale.receipt_seq,
-                sale_created_at=sale.created_at,
-                completed_at=sale.completed_at,
-                total_amount=sale.total_amount,
-                currency=sale.currency,
-                is_test=sale.is_test,
-                items=[
-                    cast(dict[str, object], item.model_dump(mode="json")) for item in sale.items
-                ],
-                payments=[
-                    cast(dict[str, object], payment.model_dump(mode="json"))
-                    for payment in sale.payments
-                ],
-                source_payload_hash=envelope.payload_hash,
-                projection_hash=envelope.projection_hash,
-            )
+            if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4):
+                async with self.repo.event_savepoint():
+                    await self._persist_new_event(cursor=cursor, envelope=envelope, sale=sale)
+            else:
+                await self._persist_new_event(cursor=cursor, envelope=envelope, sale=sale)
         except SyncProjectionOperationCollision:
+            if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4):
+                restored = await self.repo.get_cursor(
+                    tenant_id=envelope.tenant_id,
+                    branch_id=envelope.branch_id,
+                    origin_node_id=envelope.origin_node_id,
+                    writer_epoch=envelope.writer_epoch,
+                    for_update=True,
+                )
+                if restored is None:
+                    raise AurumError("Edge sync cursor disappeared during recovery") from None
+                cursor = restored
             return await self._stop(
                 cursor=cursor,
                 envelope=envelope,
@@ -2053,6 +2146,69 @@ class SyncEdgeApplyService:
                 applied=applied,
                 duplicates=duplicates,
             )
+        return None
+
+    async def _persist_new_event(
+        self, *, cursor: SyncCursor, envelope: SyncEventEnvelope, sale: ProjectedSale
+    ) -> None:
+        inbox = await self.repo.insert_inbox(envelope, status="received")
+        await self.repo.insert_sale_projection(
+            sale_id=sale.sale_id,
+            tenant_id=sale.tenant_id,
+            branch_id=sale.branch_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+            source_event_id=envelope.event_id,
+            operation_id=sale.operation_id,
+            sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
+            parent_sale_id=(sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None),
+            parent_fully_refunded=(
+                sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
+            ),
+            register_id=sale.register_id,
+            shift_id=sale.shift_id,
+            cashier_user_id=(
+                sale.cashier_id
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else sale.cashier_user_id
+            ),
+            receipt_number=sale.receipt_number,
+            receipt_seq=(
+                sale.receipt_sequence
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else sale.receipt_seq
+            ),
+            sale_created_at=sale.created_at,
+            completed_at=sale.completed_at,
+            total_amount=sale.total_amount,
+            currency=sale.currency,
+            is_test=sale.is_test,
+            items=[
+                cast(dict[str, object], item.model_dump(mode="json"))
+                for item in (
+                    sale.lines
+                    if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                    else sale.items
+                )
+            ],
+            payments=[
+                cast(dict[str, object], payment.model_dump(mode="json"))
+                for payment in sale.payments
+            ],
+            source_payload_hash=envelope.payload_hash,
+            projection_hash=envelope.projection_hash,
+            schema_version=(
+                sale.schema_version
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else 1
+            ),
+            stock_command_id=(
+                sale.stock_command_id
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else None
+            ),
+        )
         await self.repo.mark_inbox(
             inbox,
             status="applied",
@@ -2067,7 +2223,6 @@ class SyncEdgeApplyService:
             projection_checksum=envelope.projection_checksum,
             status="synced",
         )
-        return None
 
     async def apply(self, pull: SyncPullResponse) -> EdgeApplyResult:
         self._edge_node_id = pull.edge_node_id
@@ -2122,6 +2277,30 @@ class SyncEdgeApplyService:
             "items": row.items,
             "payments": row.payments,
         }
+        if row.schema_version in (3, 4):
+            if row.sale_type != "sale" or row.is_test:
+                raise ValueError("unsupported retail projection lifecycle")
+            del payload["cashier_user_id"], payload["receipt_seq"], payload["items"]
+            payload.update(
+                {
+                    "schema_version": row.schema_version,
+                    "document_kind": (
+                        "physical_checkout" if row.schema_version == 3 else "mixed_checkout"
+                    ),
+                    "stock_command_id": row.stock_command_id,
+                    "cashier_id": row.cashier_user_id,
+                    "receipt_sequence": row.receipt_seq,
+                    "lines": row.items,
+                }
+            )
+            retail_sale: RetailCheckoutResult
+            if row.schema_version == 3:
+                retail_sale = PhysicalCheckoutResultV3.model_validate(payload)
+            else:
+                retail_sale = MixedCheckoutResultV4.model_validate(payload)
+            return cast(dict[str, object], retail_sale.model_dump(mode="json"))
+        if row.schema_version not in (None, 1) or row.stock_command_id is not None:
+            raise ValueError("unsupported sale projection version")
         if row.sale_type == "return":
             payload.update(
                 {
@@ -2136,6 +2315,44 @@ class SyncEdgeApplyService:
             raise ValueError("unsupported sale projection type")
         return cast(dict[str, object], sale.model_dump(mode="json"))
 
+    async def _verified_projection_checksums(
+        self,
+        row: SyncSaleProjection,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> tuple[str, str]:
+        payload = self._projection_payload(row)
+        inbox = await self.repo.get_inbox_event(row.source_event_id)
+        if inbox is None or inbox.status != "applied":
+            raise ValueError("projection has no applied source")
+        envelope = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+        await self._validate_retail_slot(envelope)
+        version = row.schema_version if row.schema_version is not None else 1
+        if (
+            version != envelope.schema_version
+            or row.source_payload_hash != envelope.payload_hash
+            or row.origin_node_id != envelope.origin_node_id
+            or row.writer_epoch != envelope.writer_epoch
+            or row.sequence != envelope.sequence
+        ):
+            raise ValueError("projection metadata differs from its saved source")
+        source: ProjectedSale
+        if envelope.schema_version in (3, 4):
+            source = await self._retail_result(
+                envelope,
+                previous_checksums=(previous_source_checksum, previous_projection_checksum),
+            )
+        else:
+            source = self._validate_event(
+                envelope,
+                previous_source_checksum=previous_source_checksum,
+                previous_projection_checksum=previous_projection_checksum,
+            )
+        if canonical_json_bytes(source.model_dump(mode="json")) != canonical_json_bytes(payload):
+            raise ValueError("projection differs from its saved source")
+        return sale_projection_hash(payload), envelope.stream_checksum
+
     async def verify_projection(
         self,
         *,
@@ -2144,6 +2361,10 @@ class SyncEdgeApplyService:
         origin_node_id: UUID,
         writer_epoch: int,
     ) -> EdgeApplyResult:
+        if self._edge_node_id is None:
+            self._edge_node_id = await self.repo.get_local_edge_node_id()
+        if self._edge_node_id is None:
+            raise PermissionDeniedError("Edge node scope is required for projection verification")
         cursor = await self.repo.get_cursor(
             tenant_id=tenant_id,
             branch_id=branch_id,
@@ -2162,9 +2383,18 @@ class SyncEdgeApplyService:
         )
         expected_sequence = cursor.start_sequence + 1
         checksum = cursor.start_projection_checksum
+        source_checksum = cursor.start_source_checksum
         valid = True
         for row in rows:
-            projection_hash = sale_projection_hash(self._projection_payload(row))
+            try:
+                projection_hash, next_source_checksum = await self._verified_projection_checksums(
+                    row,
+                    previous_source_checksum=source_checksum,
+                    previous_projection_checksum=checksum,
+                )
+            except (ValueError, TypeError, OverflowError):
+                valid = False
+                break
             if row.sequence != expected_sequence or row.projection_hash != projection_hash:
                 valid = False
                 break
@@ -2176,8 +2406,13 @@ class SyncEdgeApplyService:
                 sale_id=row.sale_id,
                 projection_hash=projection_hash,
             )
+            source_checksum = next_source_checksum
             expected_sequence += 1
-        if expected_sequence - 1 != cursor.last_sequence or checksum != cursor.projection_checksum:
+        if (
+            expected_sequence - 1 != cursor.last_sequence
+            or checksum != cursor.projection_checksum
+            or source_checksum != cursor.source_checksum
+        ):
             valid = False
         if not valid:
             return await self._stop(

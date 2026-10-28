@@ -392,6 +392,27 @@ class SyncCursor(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
+class SyncRetailEventAnchor(Base):
+    """Independent owner-provisioned evidence, never derived by the receiver."""
+
+    __tablename__ = "sync_retail_event_anchor"
+
+    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
 class SyncSaleProjection(Base):
     __tablename__ = "sync_sale_projection"
 
@@ -403,6 +424,8 @@ class SyncSaleProjection(Base):
     sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    stock_command_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     sale_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'sale'"))
     parent_sale_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     parent_fully_refunded: Mapped[bool | None] = mapped_column(Boolean)
