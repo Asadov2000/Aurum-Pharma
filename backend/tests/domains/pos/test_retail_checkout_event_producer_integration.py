@@ -4,6 +4,7 @@ import asyncio
 import json
 from decimal import Decimal
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -396,15 +397,9 @@ async def test_physical_and_mixed_or_legacy_sales_share_one_ordered_branch_strea
         # Both physical portions consume the same real lot, branch and register.
         await put_physical(db_session, second.id, position=2, quantity=5)
         second_request = await saved_request(db_session, second)
-    else:
-        await pos.add_payment(
-            sale_id=second.id,
-            payment_method="cash",
-            amount=Decimal("0.02"),
-            actor_id=context.actor_id,
-            allowed_branch_ids={context.stock.branch_id},
-        )
     second_id = second.id
+    legacy_operation_id = uuid4()
+    register_id = physical.sale.register_id
     await db_session.commit()
     await set_receiving_context(db_session, context.stock, context.actor_id)
     before = await stream_facts(db_session)
@@ -420,9 +415,16 @@ async def test_physical_and_mixed_or_legacy_sales_share_one_ordered_branch_strea
                 assert second_request is not None
                 await complete_mixed(caller, second_request)
             else:
-                await POSService(POSRepository(caller)).complete(
-                    sale_id=second_id,
-                    actor_id=context.actor_id,
+                # The v1 emitter is checkout(), used by the public atomic
+                # endpoint. complete() finalizes a legacy sale without outbox.
+                await POSService(POSRepository(caller)).checkout(
+                    tenant_id=context.stock.tenant_id,
+                    register_id=register_id,
+                    cashier_user_id=context.actor_id,
+                    operation_id=legacy_operation_id,
+                    draft_sale_id=second_id,
+                    items=[(context.stock.catalog_id, Decimal("0.001"))],
+                    payments=[("cash", Decimal("0.02"), None)],
                     allowed_branch_ids={context.stock.branch_id},
                 )
             await caller.commit()
