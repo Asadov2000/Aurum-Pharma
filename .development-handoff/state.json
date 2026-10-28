@@ -3,14 +3,14 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
   "base_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-  "expected_head": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
+  "expected_head": "ee0a16792573c810bd907846388e18ec7924434c",
   "validated_sha": null,
-  "pr": null,
+  "pr": 433,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -36,11 +36,15 @@
     "Dependencies/stack/protected UI/paid resources",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Implement bounded preparation service + source evidence bundle; targeted checks and full CI",
+  "remaining_step": "Full exact-head 8-context CI, then guarded merge and tested-main-tree verification",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
+    },
+    "formatting": {
+      "consecutive": 0,
+      "cause": "Initial Black/Ruff import order and E501 fixed; checks passed"
     }
   },
   "blocker": null,
@@ -51,5 +55,26 @@
     "main": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
     "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
     "ci": "all8success"
+  },
+  "control_sha": "52b2d337fd8d3cb7fa3e0172d90dbfc5645b4f1d",
+  "head_tree": "4697619b17c76ae7322d6a7338073b376ed42781",
+  "local_checks": {
+    "pure_pytest": 239,
+    "new_pure": 25,
+    "db_cases_collected": 9,
+    "mypy_app": 513,
+    "ruff": "pass",
+    "black": "pass",
+    "diff_check": "pass",
+    "independent_architecture_security": "approved",
+    "independent_qa": "approved",
+    "pypi_locked_versions": 103,
+    "pypi_advisories": 0,
+    "verification_plan": "Auto critical/full matrix"
+  },
+  "ci": {
+    "head": "ee0a16792573c810bd907846388e18ec7924434c",
+    "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
+    "state": "pending"
   }
 }
