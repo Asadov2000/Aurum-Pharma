@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "fixing_ci",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
@@ -41,11 +41,14 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Wait for all8 full CI on exact head; fix first failures without duplication, guarded merge after success",
+  "remaining_step": "Correct real v1 test path, await other backend shard, recheck and publish same PR434",
   "failure_counters": {
     "current_stage": {
-      "consecutive": 0,
-      "cause": null
+      "step": "backend/Pytest concurrent legacy stream integration",
+      "cause": "New concurrency test used legacy POSService.complete without the canonical v1 checkout emitter; expected second outbox event absent",
+      "consecutive": 1,
+      "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
+      "workflow": "2ac0e308-5403-4250-b2e4-ae2b65acaeb0"
     }
   },
   "blocker": null,
@@ -57,7 +60,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "676dc07f6f7ff0de92fe28ff15ff3f9b6e052d69",
+  "control_sha": "335d559a07c186f7a4f084c9e2296e304a988c5c",
   "local_validation": {
     "pure_tests": 273,
     "mypy_files": 516,
