@@ -3,7 +3,7 @@
   "generation": 15,
   "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "awaiting_repeat_scan_exception",
   "run_id": "local-2026-10-28-edge-checkout-event-01",
   "branch": "codex/unit-edge-checkout-events",
   "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -36,7 +36,7 @@
     "Dependencies/stack/protected UI/paid resources",
     "Sequence reservation, publication, migration, backfill, new alternate journal"
   ],
-  "remaining_step": "Full all8 CI on approved go-jose security fix, then guarded merge and exact-main-tree verification",
+  "remaining_step": "Await explicit approval for restic pin and one-time STOP2 continuation. No new product writes, CI rerun or merge until approved. Existing CI may finish read-only.",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -47,16 +47,19 @@
       "cause": "Initial Black/Ruff import order and E501 fixed; checks passed"
     },
     "production_scan": {
-      "consecutive": 1,
+      "consecutive": 2,
       "cause": "CVE-2026-116587 in Caddy go-jose/v4 v4.1.4, fixed v4.1.6",
       "head": "ee0a16792573c810bd907846388e18ec7924434c",
       "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
       "job": 3637,
       "step": "Scan production images for fixable vulnerabilities",
-      "corrected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff"
+      "corrected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
+      "last_failed_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
+      "remaining_target": "aurum-backup:ci usr/local/bin/restic",
+      "resolved_target": "aurum-gateway:ci usr/bin/caddy clean"
     }
   },
-  "blocker": null,
+  "blocker": "STOP2: same CVE-2026-116587 in two consecutive production scans. Caddy v4.1.6 now clean; restic still v4.1.4. Await explicit restic-scope dependency update and one-time STOP2 exception.",
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
     "pr": 432,
@@ -65,7 +68,7 @@
     "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
     "ci": "all8success"
   },
-  "control_sha": "8d0957b26dc4ba8adf50b417d7614e14ab973107",
+  "control_sha": "36c9e80ded00eb824bef9c6a2033590cfd451de2",
   "head_tree": "9f00a55e9b7b51ca69dc53d9b15950dd0560a260",
   "local_checks": {
     "pure_pytest": 239,
@@ -98,5 +101,16 @@
     "release": "https://github.com/go-jose/go-jose/releases/tag/v4.1.6",
     "approved": true,
     "approval_source": "User explicitly approved go-jose v4.1.4 -> v4.1.6 in PR433 on 2026-10-28"
+  },
+  "diagnostic_correction": "Initial ad hoc log deduplication incorrectly merged identical CVE rows across images. Corrected reader preserves image and binary target context and repeated findings.",
+  "proposed_restic_change": {
+    "module": "github.com/go-jose/go-jose/v4",
+    "from": "v4.1.4",
+    "to": "v4.1.6",
+    "path": "infra/backup/Dockerfile",
+    "stage": "restic only; mc clean and unchanged",
+    "approved": false,
+    "stop2_exception": false,
+    "proposal": ".codex/unit-edge-checkout-event-2026-10-28/restic-go-jose.proposed.patch"
   }
 }
