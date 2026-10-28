@@ -9,7 +9,7 @@
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
+  "expected_head": "4d8ecb965b0ae987708e7604d46f7a20e0ef8388",
   "validated_sha": null,
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -41,7 +41,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "All8 full CI on final head after dormant-hook and exact function registry fixes, then guarded merge and main proof",
+  "remaining_step": "Full final-head CI including historical audit compatibility and deterministic support/logout setup, then guarded merge and exact main tree proof",
   "failure_counters": {
     "legacy_stream_test": {
       "consecutive": 0,
@@ -58,16 +58,30 @@
       "resolved": "Standard tenant access roundtrip passed in second run"
     },
     "dormant_hook_recovery": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Dormant checkout hook invoked financial recovery reader before checking immutable required flag; interfered with unchanged deferred-payment-constraint fault test",
       "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
-      "fix": "Protected capture-state no-autoflush fast path in optional hook; strict producer unchanged"
+      "fix": "Protected capture-state no-autoflush fast path in optional hook; strict producer unchanged",
+      "resolved": "Old deferred-payment fault test passed before later historical migration failure in third run"
     },
     "runtime_function_registry": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Exact app-executable function test registry omitted the two intentional producer operations; no actual grant defect",
       "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
-      "fix": "Register exactly reserve_retail_checkout_event_position and store_retail_checkout_event; all ACL assertions unchanged"
+      "fix": "Register exactly reserve_retail_checkout_event_position and store_retail_checkout_event; all ACL assertions unchanged",
+      "resolved": "Exact runtime role privileges test passed in third-run successful backend shard"
+    },
+    "historical_audit_anchor": {
+      "consecutive": 1,
+      "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
+      "cause": "New audit branch after the shared NULL anchor interrupted older strict historical audit patches",
+      "fix": "Prepend new non-null metadata branch before the original NULL anchor; preserve original migration texts and assertions"
+    },
+    "support_e2e_setup": {
+      "consecutive": 1,
+      "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
+      "cause": "Parallel initial tab bootstrap overlapped protected tenant reads with rotating refresh sessions; first query received two401s",
+      "fix": "Boot both tab data queries before the distinct late-support-activation/logout test; preserve all security assertions"
     }
   },
   "blocker": null,
@@ -79,9 +93,9 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "aafd09c3b0486261ee3a909c142b4ca8e61e38dd",
+  "control_sha": "177ec4015c1c9be35b4d2172f3f6822e8f6d336b",
   "local_validation": {
-    "pure_tests": 283,
+    "pure_tests": 284,
     "mypy_files": 516,
     "ruff": "pass",
     "black": "pass",
@@ -91,6 +105,17 @@
   "fix_commits": [
     "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
     "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
-    "ddeff78dce8f8571faf802a48af51c1c9dfd9682"
+    "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
+    "4d8ecb965b0ae987708e7604d46f7a20e0ef8388"
+  ],
+  "baseline_findings": [
+    {
+      "id": "AUTH-PARALLEL-BOOTSTRAP-01",
+      "status": "open",
+      "scope": "Separate baseline auth reliability finding, outside the nine Edge stages",
+      "evidence": "CI3686 trace shows overlapping initial refresh200/me200 in two tabs, first tenant query401 then retry401 while second tab rotates refresh and succeeds200",
+      "interpretation": "Consistent with cross-tab refresh/session invalidation race; exact 401 reason not captured",
+      "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
+    }
   ]
 }
