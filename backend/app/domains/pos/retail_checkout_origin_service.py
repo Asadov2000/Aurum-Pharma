@@ -1,5 +1,6 @@
 """Recover captured source identity without fabricating history or Edge authority."""
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from app.core.errors import AurumError
@@ -10,7 +11,20 @@ from app.domains.pos.retail_checkout_origin_repository import (
 )
 from app.domains.pos.retail_checkout_source_repository import RetailCheckoutSourceRepository
 from app.domains.pos.retail_checkout_source_service import RetailCheckoutSourceService
+from app.domains.pos.retail_sale_events import RetailCheckoutResult
 from app.domains.pos.unit_cart_repository import UnitCartRepository
+
+
+@dataclass(frozen=True, slots=True)
+class RetailCheckoutOriginEvidence:
+    """A single authorized source read and its optional historical writer metadata.
+
+    This bundle does not reserve a position or prove a transaction committed.
+    The frozen container does not make nested checkout payloads deeply immutable.
+    """
+
+    result: RetailCheckoutResult
+    origin: RetailCheckoutOriginSnapshot | None
 
 
 class RetailCheckoutOriginService:
@@ -26,6 +40,24 @@ class RetailCheckoutOriginService:
         actor_id: UUID,
         allowed_branch_ids: set[UUID] | None,
     ) -> RetailCheckoutOriginSnapshot | None:
+        evidence = await self.read_evidence(
+            tenant_id=tenant_id,
+            sale_id=sale_id,
+            operation_id=operation_id,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )
+        return evidence.origin
+
+    async def read_evidence(
+        self,
+        *,
+        tenant_id: UUID,
+        sale_id: UUID,
+        operation_id: UUID,
+        actor_id: UUID,
+        allowed_branch_ids: set[UUID] | None,
+    ) -> RetailCheckoutOriginEvidence:
         """Read the caller's transaction; absence never authorizes historical backfill.
 
         A captured writer is not a stream position, event anchor or proof that
@@ -58,4 +90,4 @@ class RetailCheckoutOriginService:
             ):
                 raise AurumError("Captured retail checkout origin differs from its source")
             await UnitCartRepository(session).assert_actor(tenant_id, actor_id, result.branch_id)
-            return origin
+            return RetailCheckoutOriginEvidence(result=result, origin=origin)
