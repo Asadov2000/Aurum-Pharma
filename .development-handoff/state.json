@@ -4,14 +4,14 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "ci_running",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "expected_head": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
+  "expected_head": "f227f3562f476c28bae600dbcc37ead0818f5010",
   "validated_sha": null,
-  "pr": null,
+  "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -41,7 +41,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Implement migration/model/repository and business producer; wire4 checkouts; targeted checks and isolated full CI",
+  "remaining_step": "Wait for all8 full CI on exact head; fix first failures without duplication, guarded merge after success",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
@@ -56,5 +56,14 @@
     "main": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
+  },
+  "control_sha": "676dc07f6f7ff0de92fe28ff15ff3f9b6e052d69",
+  "local_validation": {
+    "pure_tests": 273,
+    "mypy_files": 516,
+    "ruff": "pass",
+    "black": "pass",
+    "diff_check": "pass",
+    "sql_review": "approved_for_ci"
   }
 }
