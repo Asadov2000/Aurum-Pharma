@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
   "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "completed",
   "run_id": "local-2026-10-28-edge-atomic-events-01",
   "branch": "codex/unit-edge-atomic-events",
   "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
   "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
   "expected_head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
-  "validated_sha": null,
+  "validated_sha": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
   "pr": 434,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -19,11 +19,11 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (9)",
+  "counter": "2/7 (8)",
   "counter_after_full_completion": "2/7 (8)",
   "remaining_stage_plan": ".codex/edge-remaining-stages-2026-10-28.json",
   "scope": "E6-01 complete atomic retail producer: protected origin capture transaction/gate; durable canonical event and independent anchor; canonical common stream reserve/outbox/finalize inside all4 checkout savepoints. Default-off before reserve until compatible delivery.",
@@ -41,63 +41,71 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Full exact-head CI after complete3-function rehearsal compatibility and bounded GET reset resilience, then guarded merge and stage decrement",
+  "remaining_step": "E6-01 completed. Next accepted control stage E6-02: receiver, versioned projection and cursor; start only after fresh recon and a new exclusive local claim. Cloud has no product grant.",
   "failure_counters": {
     "legacy_stream_test": {
       "consecutive": 0,
       "cause": "Test used low-level legacy complete without v1 emitter",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
       "fix_head": "ad264c9aabe9740d961f945ac14fb71ab34c4baf",
-      "resolved": "Corrected canonical legacy checkout case passed in second run before later new failure"
+      "resolved": "Corrected canonical legacy checkout case passed in second run before later new failure",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "manual_access_roundtrip": {
       "consecutive": 0,
       "cause": "Two new tenant tables lacked standard a00_tenant_access triggers",
       "head": "f227f3562f476c28bae600dbcc37ead0818f5010",
       "fix": "Add existing tenant access trigger, keep all assertions",
-      "resolved": "Standard tenant access roundtrip passed in second run"
+      "resolved": "Standard tenant access roundtrip passed in second run",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "dormant_hook_recovery": {
       "consecutive": 0,
       "cause": "Dormant checkout hook invoked financial recovery reader before checking immutable required flag; interfered with unchanged deferred-payment-constraint fault test",
       "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
       "fix": "Protected capture-state no-autoflush fast path in optional hook; strict producer unchanged",
-      "resolved": "Old deferred-payment fault test passed before later historical migration failure in third run"
+      "resolved": "Old deferred-payment fault test passed before later historical migration failure in third run",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "runtime_function_registry": {
       "consecutive": 0,
       "cause": "Exact app-executable function test registry omitted the two intentional producer operations; no actual grant defect",
       "head": "d97cd4203f4e567d818e11ea9f8444d5c248deb8",
       "fix": "Register exactly reserve_retail_checkout_event_position and store_retail_checkout_event; all ACL assertions unchanged",
-      "resolved": "Exact runtime role privileges test passed in third-run successful backend shard"
+      "resolved": "Exact runtime role privileges test passed in third-run successful backend shard",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "historical_audit_anchor": {
       "consecutive": 0,
       "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
       "cause": "New audit branch after the shared NULL anchor interrupted older strict historical audit patches",
       "fix": "Prepend new non-null metadata branch before the original NULL anchor; preserve original migration texts and assertions",
-      "resolved": "Audit anchor unwind passed before later separate sale-guard interleaving failure"
+      "resolved": "Audit anchor unwind passed before later separate sale-guard interleaving failure",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "support_e2e_setup": {
       "consecutive": 0,
       "head": "ddeff78dce8f8571faf802a48af51c1c9dfd9682",
       "cause": "Parallel initial tab bootstrap overlapped protected tenant reads with rotating refresh sessions; first query received two401s",
       "fix": "Boot both tab data queries before the distinct late-support-activation/logout test; preserve all security assertions",
-      "resolved": "Support startup/logout case passed in fourth-run all-green E2E job3693 on4d8ecb96"
+      "resolved": "Support startup/logout case passed in fourth-run all-green E2E job3693 on4d8ecb96",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "e2e_get_transport": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
       "cause": "APIRequestContext read-only final queue GET had socket hang up in mixed zero quarantine recovery test",
-      "fix": "Inspect exact Playwright bounded ECONNRESET transport retry for only idempotent queue/history GETs; no HTTP/error assertion or write retries"
+      "fix": "Inspect exact Playwright bounded ECONNRESET transport retry for only idempotent queue/history GETs; no HTTP/error assertion or write retries",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     },
     "historical_training_guard": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "071a2497efd4b8a320a3e1589b2d909063f73c3a",
       "case": "test_mixed_electronic_refund_posting_migration::test_posting_roundtrip_restores_exact_head_functions_security_and_component_parent",
       "cause": "Training sale ALLOW prefix interrupted older sale immutability patch after the audit-only peel",
       "fix": "Temporarily remove exactly all three known224 patches in reverse order and verify all three function/security snapshots after rollback",
-      "fix_head": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
+      "fix_head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
+      "resolved_by_final_ci": "b490fc50e43ff8e71ef63372536d0e5246c99ced"
     }
   },
   "blocker": null,
@@ -109,7 +117,7 @@
     "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
     "ci": "all8success"
   },
-  "control_sha": "eedfc4d4d90e6e438ab2a206f1b7c1cc6b1b982d",
+  "control_sha": "db88cc71a9d22ebad8465490a3aac66c2a713843",
   "local_validation": {
     "pure_tests": 284,
     "mypy_files": 516,
@@ -143,5 +151,83 @@
       "head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
       "scope": "20 test caller files; old callback bodies/assertions unchanged; pure regression actual218/223/224/226"
     }
-  ]
+  ],
+  "merged_main_sha": "524ca37af16fc36465dad56bd193706981da7292",
+  "merged_tree": "46b0f2aa6c550a5a573f92229f3be21a862c9f52",
+  "completed_at": "2026-10-28 13:07:10 UTC",
+  "ci": {
+    "head": "b490fc50e43ff8e71ef63372536d0e5246c99ced",
+    "workflow": "44af043a-d3b6-4405-bbac-15e95ca8ba2f",
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/2afa3c73-796c-4cb2-b2e3-9547ec81aa5e"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/34a0a982-2162-4ea2-a447-5dadb3947472"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/544f7347-c82c-4b29-bd1e-2246c94003a4"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/1c1857a0-b579-4dee-8696-dc34b52d87ed"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/8e615acb-e5c9-4f0b-b5f1-5c8af14fccc9"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/5f6d04cb-e960-4411-9ddb-451cc4101085"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/1609b37b-64a1-49c0-bf8c-54a829f618ee"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "url": "https://app.circleci.com/workflow/44af043a-d3b6-4405-bbac-15e95ca8ba2f/job/f66f5f5f-ba3d-4e49-8df9-63117de94c2c"
+      }
+    ],
+    "backend": {
+      "success": 7313,
+      "skipped": 1
+    },
+    "new_stage": {
+      "success": 73
+    },
+    "new_stage_count": 73,
+    "frontend": {
+      "passed": 3259,
+      "files": 241
+    },
+    "e2e": {
+      "passed": 167
+    },
+    "skip": [
+      {
+        "test": "tests.isolation.test_unit_prescription_migration::test_empty_unit_prescription_downgrade_roundtrip",
+        "reason": "/home/circleci/project/backend/tests/isolation/test_unit_prescription_migration.py:45: Immutable unit prescription history prevents an empty downgrade rehearsal"
+      }
+    ]
+  },
+  "main_tree_matches_tested_head": true,
+  "runtime": {
+    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_checkout_clean": true,
+    "application": "not changed or restarted",
+    "shared_database": "not accessed or changed",
+    "deployment": false
+  }
 }
