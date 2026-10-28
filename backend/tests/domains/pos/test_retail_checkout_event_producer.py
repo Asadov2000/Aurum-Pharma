@@ -7,6 +7,7 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AurumError, ConflictError, PermissionDeniedError
 from app.domains.pos import retail_checkout_event_producer as producer_module
@@ -321,5 +322,120 @@ async def test_pending_caller_state_is_preserved_and_never_queried(pending: str)
     collection.add(marker)
     with pytest.raises(ConflictError, match="clean session"):
         await produce(repository)
+    assert collection == {marker}
+    assert repository.session.events == []
+
+
+def install_hook_repository(monkeypatch: pytest.MonkeyPatch, repository: Repository) -> None:
+    def factory(session: AsyncSession) -> Repository:
+        assert session is repository.session
+        return repository
+
+    monkeypatch.setattr(producer_module, "RetailCheckoutEventRepository", factory)
+
+
+async def hook(repository: Repository) -> RetailCheckoutEventCandidate | None:
+    source = result("physical")
+    return await producer_module.produce_retail_checkout_event(
+        cast(AsyncSession, repository.session),
+        source,
+        actor_id=source.cashier_id,
+        allowed_branch_ids={source.branch_id},
+    )
+
+
+@pytest.mark.parametrize(
+    "capture",
+    [
+        pytest.param(None, id="no-origin-capture"),
+        pytest.param(RetailEventCaptureState(False, True), id="dormant-current-checkout"),
+        pytest.param(RetailEventCaptureState(False, False), id="dormant-historical-checkout"),
+    ],
+)
+async def test_convenience_hook_default_off_only_reads_capture_without_observing_financial_source(
+    monkeypatch: pytest.MonkeyPatch, capture: RetailEventCaptureState | None
+) -> None:
+    repository = Repository()
+    repository.state = capture
+    install_hook_repository(monkeypatch, repository)
+    # A denied evidence stub ensures no source/receipt/payment recovery runs
+    # before the dormant hook returns. Standalone produce remains auth-first.
+    install_evidence(monkeypatch, repository, denied=True)
+    assert await hook(repository) is None
+    assert repository.session.events == ["capture"]
+    assert repository.stored is None
+    assert repository.session.depth == 0
+
+
+async def test_required_hook_delegates_authorized_atomic_production_and_final_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Repository()
+    install_hook_repository(monkeypatch, repository)
+    install_evidence(monkeypatch, repository)
+    candidate = await hook(repository)
+    assert candidate is not None
+    assert decode_retail_sale_event(candidate.record, anchor=candidate.anchor) == result("physical")
+    events = repository.session.events
+    assert events[0] == "capture"
+    assert events.count("evidence") == events.count("reserve") == events.count("store") == 1
+    assert events.index("evidence") < events.index("read") < events.index("reserve")
+    assert events.index("store") < events.index("validate") < events.index("authority")
+    assert events[-1] == "release"
+
+
+async def test_required_hook_cannot_bypass_current_source_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Repository()
+    install_hook_repository(monkeypatch, repository)
+    install_evidence(monkeypatch, repository, denied=True)
+    with pytest.raises(PermissionDeniedError):
+        await hook(repository)
+    assert repository.session.events == ["capture", "evidence"]
+    assert repository.stored is None
+
+
+async def test_required_hook_preserves_committed_replay_before_current_transaction_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Repository()
+    install_evidence(monkeypatch, repository)
+    candidate = await produce(repository)
+    assert candidate is not None
+    repository.saved = snapshot(candidate, "physical")
+    repository.state = RetailEventCaptureState(True, False)
+    repository.reserved = replace(repository.reserved, origin_node_id=UUID(int=99), writer_epoch=8)
+    repository.session.events.clear()
+    install_hook_repository(monkeypatch, repository)
+    assert await hook(repository) == candidate
+    assert repository.session.events == ["capture", "evidence", "read"]
+    assert not {"reserve", "store", "validate"} & set(repository.session.events)
+
+
+async def test_required_hook_cannot_backfill_a_missing_committed_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Repository()
+    repository.state = RetailEventCaptureState(True, False)
+    install_hook_repository(monkeypatch, repository)
+    install_evidence(monkeypatch, repository)
+    with pytest.raises(ConflictError):
+        await hook(repository)
+    assert repository.session.events[:3] == ["capture", "evidence", "read"]
+    assert "reserve" not in repository.session.events
+
+
+@pytest.mark.parametrize("pending", ["new", "dirty", "deleted"])
+async def test_hook_refuses_pending_caller_state_before_even_capture_read(
+    monkeypatch: pytest.MonkeyPatch, pending: str
+) -> None:
+    repository = Repository()
+    install_hook_repository(monkeypatch, repository)
+    marker = object()
+    collection = cast(set[object], getattr(repository.session, pending))
+    collection.add(marker)
+    with pytest.raises(ConflictError, match="clean session"):
+        await hook(repository)
     assert collection == {marker}
     assert repository.session.events == []

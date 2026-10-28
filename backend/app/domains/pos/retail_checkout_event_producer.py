@@ -143,11 +143,25 @@ async def produce_retail_checkout_event(
     actor_id: UUID,
     allowed_branch_ids: set[UUID] | None,
 ) -> RetailCheckoutEventCandidate | None:
-    """Use only saved source IDs; never trust the caller's financial payload."""
-    return await RetailCheckoutEventProducer(RetailCheckoutEventRepository(session)).produce(
-        tenant_id=result.tenant_id,
-        sale_id=result.sale_id,
-        operation_id=result.operation_id,
-        actor_id=actor_id,
-        allowed_branch_ids=allowed_branch_ids,
-    )
+    """Optional checkout hook, not an authorized financial recovery reader.
+
+    A dormant captured decision must not introduce financial recovery checks
+    into the existing checkout. A required event always uses the strict producer;
+    its source IDs are read back and the caller's financial payload is not trusted.
+    """
+    if session.new or session.dirty or session.deleted:
+        raise ConflictError("Retail event production requires a clean session")
+    with session.no_autoflush:
+        repository = RetailCheckoutEventRepository(session)
+        capture = await repository.capture_state(
+            result.tenant_id, result.sale_id, result.operation_id
+        )
+        if capture is None or not capture.required:
+            return None
+        return await RetailCheckoutEventProducer(repository).produce(
+            tenant_id=result.tenant_id,
+            sale_id=result.sale_id,
+            operation_id=result.operation_id,
+            actor_id=actor_id,
+            allowed_branch_ids=allowed_branch_ids,
+        )

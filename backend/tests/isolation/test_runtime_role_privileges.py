@@ -785,6 +785,8 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "reserve_retail_checkout_event_position",
+    "store_retail_checkout_event",
     "training_checkout_sale_write_allowed",
     "physical_writeoff_status",
     "record_physical_writeoff",
