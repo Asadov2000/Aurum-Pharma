@@ -1,16 +1,17 @@
 {
   "version": 1,
-  "generation": 15,
-  "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
+  "generation": 16,
+  "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
+  "control_stage_id": "E6-01",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-10-28-edge-checkout-event-01",
-  "branch": "codex/unit-edge-checkout-events",
-  "base_sha": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
-  "base_tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-  "expected_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
-  "validated_sha": "c76430e7038df30017a01fb4c794cb4b7538255d",
-  "pr": 433,
+  "phase": "implementing",
+  "run_id": "local-2026-10-28-edge-atomic-events-01",
+  "branch": "codex/unit-edge-atomic-events",
+  "base_sha": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
+  "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
+  "expected_head": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,163 +19,42 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (N уточняется по критериям блока6)",
-  "scope": "Prepare an in-memory v3/v4 retail event candidate from an authorized saved checkout and immutable captured origin, binding externally supplied position to original writer metadata. No reservation or publication.",
+  "counter": "2/7 (9)",
+  "counter_after_full_completion": "2/7 (8)",
+  "remaining_stage_plan": ".codex/edge-remaining-stages-2026-10-28.json",
+  "scope": "E6-01 complete atomic retail producer: protected origin capture transaction/gate; durable canonical event and independent anchor; canonical common stream reserve/outbox/finalize inside all4 checkout savepoints. Default-off before reserve until compatible delivery.",
   "acceptance": [
-    "One authorized source/origin evidence read, preserving old read API and no-autoflush/dirty-session fail-closed behavior",
-    "Strict revalidation of external position and exact captured origin_node/epoch match; missing historical origin rejected, no current-writer substitution",
-    "Both real physical/mixed cash/electronic source results roundtrip canonical bounded codec; replay returns same bytes; no current stock/price recalculation",
-    "No DB writes, stream reservation/finalization, outbox/projection/cursor/receiver activation, or new endpoint/capability",
-    "Auth/tenant/branch/actor isolation and unchanged protected facts; full 8 exact-head CI then guarded merge and tested-main-tree equality"
+    "All4 physical/mixed cash/electronic checkout paths persist protected stream position/event/anchor/outbox/finalize in same transaction; source payload and SQL recomputed hashes bound to immutable checkout",
+    "Owner-only per-branch default-off gate; origin immutable required decision and top transaction ID captured at insertion; historical origins remain NULL/false, no backfill",
+    "Deferred required-origin/event invariant enforced inside checkout savepoint and at commit; failures rollback money/stock/receipt/event/stream together",
+    "Exact replay and concurrent retries safe; existing receipt lock order preserved; shared branch stock/register and legacy-v1 concurrency verified",
+    "Runtime direct DML denied; tenant/actor/branch RLS and current writer checks preserved; trigger audit redacts record bytes",
+    "No unsupported v3/v4 delivery or v1 gap; producer off by default, no runtime activation/deployment/shared DB changes",
+    "All8 exact-head CI then expected-head merge and main tree equality; only then E6-01 closed and remaining8"
   ],
   "excluded": [
-    "Runtime Aurum/shared DB/restarts/deployment",
-    "Unapproved dependency/stack/protected UI changes or paid resources; approved go-jose pins in Caddy/restic only",
-    "Sequence reservation, publication, migration, backfill, new alternate journal"
+    "Running Aurum/shared DB/active backups/restarts/deployment",
+    "Unapproved dependencies/stack/protected UI/paid resources",
+    "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "This work item is complete. Before another Edge item, freshly inspect main/open PRs/current criteria and confirm local ownership. No deployment or shared DB changes.",
+  "remaining_step": "Implement migration/model/repository and business producer; wire4 checkouts; targeted checks and isolated full CI",
   "failure_counters": {
     "current_stage": {
       "consecutive": 0,
       "cause": null
-    },
-    "formatting": {
-      "consecutive": 0,
-      "cause": "Initial Black/Ruff import order and E501 fixed; checks passed"
-    },
-    "production_scan": {
-      "consecutive": 0,
-      "cause": "CVE-2026-116587 in go-jose/v4 v4.1.4 originally affected both Caddy and restic; both pinned v4.1.6 and final scan passed",
-      "head": "ee0a16792573c810bd907846388e18ec7924434c",
-      "workflow": "a03424f8-452d-46f1-917c-f4ab3b2da6f4",
-      "job": 3637,
-      "step": "Scan production images for fixable vulnerabilities",
-      "corrected_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
-      "last_failed_head": "c58f274c80c2d2be06d8f36838008d35b5b8deff",
-      "remaining_target": null,
-      "resolved_target": "Caddy and restic clean in final production-container CI; mc unchanged",
-      "restic_corrected_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
-      "resolved_head": "c76430e7038df30017a01fb4c794cb4b7538255d",
-      "resolved_workflow": "95db74f6-1f81-48c9-8375-4794f9f06ed4",
-      "prior_consecutive_failures": 2
     }
   },
   "blocker": null,
   "previous_completed": {
-    "work_item_id": "UNIT-EDGE-CHECKOUT-ORIGIN-01",
-    "pr": 432,
-    "head": "1b945454a46aeb86713a77a7c975d315160cf36e",
-    "main": "67b5e74a48613a592f8cf475a8dcc9d7461833f9",
-    "tree": "45e660c9daa0e9d404860a10a2c4db38314115a6",
-    "ci": "all8success"
-  },
-  "control_sha": "6af667d5987a5920635385a36259bb3636c6f0f5",
-  "head_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "local_checks": {
-    "pure_pytest": 239,
-    "new_pure": 25,
-    "db_cases_collected": 9,
-    "mypy_app": 513,
-    "ruff": "pass",
-    "black": "pass",
-    "diff_check": "pass",
-    "independent_architecture_security": "approved",
-    "independent_qa": "approved",
-    "pypi_locked_versions": 103,
-    "pypi_advisories": 0,
-    "verification_plan": "Auto critical/full matrix",
-    "caddy_run_syntax": "pass; sh -n only, no local build or network commands",
-    "go_run_syntax": "Caddy/restic/mc sh -n passed; no local builds/network commands",
-    "restic_security_review": "approved; other build pins/mc unchanged",
-    "production_containers": "pass: approved go-jose pins checked in Caddy/restic binaries, all image scans/backup/restore and TLS checks passed"
-  },
-  "ci": {
+    "work_item_id": "UNIT-EDGE-CHECKOUT-EVENT-01",
+    "pr": 433,
     "head": "c76430e7038df30017a01fb4c794cb4b7538255d",
-    "workflow": "95db74f6-1f81-48c9-8375-4794f9f06ed4",
-    "state": "all8success",
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success"
-      }
-    ],
-    "counts": {
-      "backend": 7241,
-      "backend_shards": [
-        3621,
-        3620
-      ],
-      "frontend_tests": 3259,
-      "frontend_files": 241,
-      "e2e": 167
-    }
-  },
-  "proposed_dependency_change": {
-    "module": "github.com/go-jose/go-jose/v4",
-    "from": "v4.1.4",
-    "to": "v4.1.6",
-    "path": "frontend/Dockerfile.production",
-    "scope": "Add exact Go get pin + module/compiled-binary version checks; keep Caddy/Go/baseimages/all existing pins",
-    "advisory": "https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q",
-    "release": "https://github.com/go-jose/go-jose/releases/tag/v4.1.6",
-    "approved": true,
-    "approval_source": "User explicitly approved go-jose v4.1.4 -> v4.1.6 in PR433 on 2026-10-28"
-  },
-  "diagnostic_correction": "Initial ad hoc log deduplication incorrectly merged identical CVE rows across images. Corrected reader preserves image and binary target context and repeated findings.",
-  "proposed_restic_change": {
-    "module": "github.com/go-jose/go-jose/v4",
-    "from": "v4.1.4",
-    "to": "v4.1.6",
-    "path": "infra/backup/Dockerfile",
-    "stage": "restic only; mc clean and unchanged",
-    "approved": true,
-    "stop2_exception": true,
-    "proposal": ".codex/unit-edge-checkout-event-2026-10-28/restic-go-jose.proposed.patch",
-    "approval_source": "User explicitly answered: Да, обновить go-jose в restic и продолжить PR #433 (2026-10-28); earlier continuation instruction also acknowledged.",
-    "stop2_exception_consumed": true
-  },
-  "merged_main": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
-  "merged_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
-  "runtime": {
-    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
-    "primary_checkout_clean": true,
-    "running_services": "untouched by this work",
-    "shared_database": "not accessed or changed by this work; no new migration in this stage",
-    "active_backups": "untouched by this work",
-    "deployment_authorized": false,
-    "isolated_source_matches_main_tree": true
-  },
-  "completed_at": "2026-10-28 07:18:51 UTC"
+    "main": "17ba5d47eb197da54c4bd44729714982b5cbfe28",
+    "tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
+    "ci": "all8success"
+  }
 }
