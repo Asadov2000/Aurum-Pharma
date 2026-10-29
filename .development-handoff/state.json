@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "fixing_e2e_price_cache",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "5ae26794f0546261411b28dbcb527a1a809047c4",
+  "expected_head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Finish deterministic stale GET/cache regression and local frontend checks, await current backend result before next push, then full exact-head CI and main",
+  "remaining_step": "All8 CI success on47aa plus proof181new cases, fresh main/head/cloud ownership then protected merge and tested-tree main proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -107,7 +107,19 @@
       "job": 3801,
       "previous_e2e_job": 3792,
       "previous_e2e_result": "success",
-      "proof": "166passed,1flaky; no HTTP/auth/timeout error; price comparison categories only"
+      "proof": "166passed,1flaky; no HTTP/auth/timeout error; price comparison categories only",
+      "fix_commit": "7295c084",
+      "status": "Price cache fix with deterministic regression13pass; remote E2E pending"
+    },
+    "writeoff_cost_source_acl": {
+      "consecutive": 1,
+      "cause": "Raw physical_writeoff_entry intentionally not granted to aurum_app",
+      "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
+      "job": 3798,
+      "fix": "Owner guarded bounded source RPC; raw ACL and RLS unchanged",
+      "fix_commit": "47aa4107",
+      "local_checks": "mypy/Ruff/Black pass;8negative cases collected;independent review approved",
+      "status": "awaiting full CI"
     }
   },
   "blocker": null,
@@ -153,12 +165,20 @@
     "new_reducer": 41,
     "new_receiver": 23,
     "pure_passed_with_regressions": 207,
-    "full_backend_collected": 7609,
-    "new_stage_cases": 173,
+    "full_backend_collected": 7617,
+    "new_stage_cases": 181,
     "mypy_sources": 524,
     "snapshot_cost_target_mypy": "2 files pass",
     "db_tests": "collected only; disposable full CI required",
-    "architecture": "Independent review approved explicit immutable normal and closed/opened legacy initialization sources; complete ACL registry; all agents stopped"
+    "architecture": "Independent review approved explicit immutable normal and closed/opened legacy initialization sources; complete ACL registry; all agents stopped",
+    "frontend": {
+      "targeted_passed": 13,
+      "deterministic_red_green": "old hook fails stale cache assertion; corrected hook passes same regression",
+      "full_typecheck": "pass",
+      "targeted_eslint": "pass",
+      "prettier": "pass",
+      "qa_tools": "Existing tools reused; target ReactQuery/Vitest/React versions match; unused mocked-router seroval old in local QA; final CI exact lock"
+    }
   },
   "design": {
     "stream": "One existing stream; schema5 stock commands/config revisions and checkout companion; existing retail v1/v3/v4 hashes unchanged",
@@ -168,15 +188,20 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "335208dd03e9db5488c567ad7f585da5c463b631",
+  "head_tree": "0b798b9eecf30d6129915295c71f0adc2f137e6e",
   "ci": {
-    "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
-    "status": "running",
-    "previous_workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-    "new_case_result": "pending",
-    "workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
-    "backend_job": 3798
+    "head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
+    "status": "pending",
+    "previous_workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
+    "new_case_result": "pending"
   },
-  "updated_at": "2026-10-29 10:43:34 UTC",
-  "pending_changes": null
+  "updated_at": "2026-10-29 11:10:53 UTC",
+  "pending_changes": null,
+  "support": {
+    "case": 18248399,
+    "response_sent_once": true,
+    "purpose": "Request human/integrations engineering review and supported readonly CircleCI MCP web configuration; mismatch not asserted as proven",
+    "proof": ".codex/unit-edge-stock-events-2026-10-29/openai-support-reply.jpg",
+    "reply_status": "sent; no follow-up awaited"
+  }
 }
