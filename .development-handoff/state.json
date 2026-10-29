@@ -201,7 +201,8 @@
       "targeted_eslint": "pass",
       "prettier": "pass",
       "qa_tools": "Existing tools reused; target ReactQuery/Vitest/React versions match; unused mocked-router seroval old in local QA; final CI exact lock"
-    }
+    },
+    "remaining_db_review": "Independent review of remaining14 cases: no additional concrete blockers; execution pending full CI"
   },
   "design": {
     "stream": "One existing stream; schema5 stock commands/config revisions and checkout companion; existing retail v1/v3/v4 hashes unchanged",
@@ -218,15 +219,17 @@
     "status": "running",
     "previous_workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
     "previous_backend_passed": 7199,
-    "previous_new_success": 166
+    "previous_new_success": 166,
+    "backend_job": 3821,
+    "gate_job": 3826
   },
-  "updated_at": "2026-10-29T13:23:06.960Z",
+  "updated_at": "2026-10-29T13:26:40.031Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
     "response_sent_once": true,
     "purpose": "Request human/integrations engineering review and supported readonly CircleCI MCP web configuration; mismatch not asserted as proven",
     "proof": ".codex/unit-edge-stock-events-2026-10-29/openai-support-reply.jpg",
-    "reply_status": "sent; no follow-up awaited"
+    "reply_status": "Reply sent once; later reread found no new reply"
   }
 }
