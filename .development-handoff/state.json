@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_e2e_price_cache",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Full final-head eight-job CI; prove all173 new tests executed; protected merge and tested-tree main proof",
+  "remaining_step": "Finish deterministic stale GET/cache regression and local frontend checks, await current backend result before next push, then full exact-head CI and main",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -58,14 +58,15 @@
       "resolved": "bounded pinned workflow and job metadata reads succeeded after local DNS recovery"
     },
     "windows_tpm_fixture_startup": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "tooling-windows: powershell test-windows-tpm-readiness",
       "cause": "PowerShell test child cold startup exceeded 10000ms: expected observed, got timeout",
       "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
       "job": 3790,
       "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-      "status": "Native Windows mocked fixture fixed;79checks pass inPS5andpwsh;remoteCIpending",
-      "fix_commit": "5ae26794"
+      "status": "Resolved: final-head tooling-windows3795SUCCESS",
+      "fix_commit": "5ae26794",
+      "previous_consecutive": 1
     },
     "catalog_historical_migration": {
       "consecutive": 2,
@@ -97,6 +98,16 @@
       "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain",
       "fix_commit": "6af677e2",
       "status": "Approved fix applied; await next backend CI result"
+    },
+    "incoming_price_e2e": {
+      "consecutive": 1,
+      "step": "E2E incoming-unit-preparation.spec.ts16/132",
+      "cause": "Edited sale price reverted to initial price after fast modal reopen and packaging toggle; stale detail cache",
+      "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
+      "job": 3801,
+      "previous_e2e_job": 3792,
+      "previous_e2e_result": "success",
+      "proof": "166passed,1flaky; no HTTP/auth/timeout error; price comparison categories only"
     }
   },
   "blocker": null,
@@ -130,6 +141,11 @@
       "id": "PHYSICAL-SNAPSHOT-WRITEOFF-COST-01",
       "cause": "Snapshot remaining cost currently subtracts dispense movements but omits posted physical writeoff entries",
       "status": "implemented_with_8_collected_regressions_pending_CI"
+    },
+    {
+      "id": "INCOMING-ITEM-PRICE-STALE-CACHE-01",
+      "cause": "PATCH invalidates without publishing returned item; reopening can pin old item and subsequent checkbox save posts old price",
+      "status": "minimal hook fix implemented; deterministic regression being checked; E2E unchanged"
     }
   ],
   "local_validation": {
@@ -161,6 +177,6 @@
     "workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
     "backend_job": 3798
   },
-  "updated_at": "2026-10-29 09:59:38 UTC",
+  "updated_at": "2026-10-29 10:43:34 UTC",
   "pending_changes": null
 }
