@@ -61,9 +61,12 @@ from app.domains.sync.models import (
     SyncInboxEvent,
     SyncNode,
     SyncOutboxEvent,
+    SyncReadSnapshot,
+    SyncReadSnapshotComponent,
     SyncSaleProjection,
     SyncWriterActivation,
 )
+from app.domains.sync.physical_read_snapshot import PhysicalRecord
 from app.domains.sync.read_snapshot import (
     REQUIRED_COMPONENTS,
     ChunkDescriptor,
@@ -665,6 +668,32 @@ class SyncCloudService:
     def __init__(self, repo: SyncCloudRepository) -> None:
         self.repo = repo
 
+    async def _read_snapshot_for_version(
+        self,
+        *,
+        schema_version: int,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        credential_kid: UUID,
+    ) -> tuple[SyncReadSnapshot, list[SyncReadSnapshotComponent]] | None:
+        if schema_version == 1:
+            return await self.repo.get_latest_read_snapshot(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                edge_node_id=edge_node_id,
+                credential_kid=credential_kid,
+            )
+        if schema_version != 2:
+            raise BusinessRuleError("Unknown read snapshot version")
+        return await self.repo.get_latest_read_snapshot(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            credential_kid=credential_kid,
+            schema_version=2,
+        )
+
     async def read_snapshot_manifest(
         self,
         *,
@@ -673,8 +702,10 @@ class SyncCloudService:
         branch_id: UUID,
         credential_kid: UUID,
         credential_digest: str | None = None,
+        schema_version: int = 1,
     ) -> ManifestRead:
-        stored = await self.repo.get_latest_read_snapshot(
+        stored = await self._read_snapshot_for_version(
+            schema_version=schema_version,
             tenant_id=tenant_id,
             branch_id=branch_id,
             edge_node_id=edge_node_id,
@@ -687,8 +718,10 @@ class SyncCloudService:
                 expected_branch_id=branch_id,
                 expected_credential_kid=credential_kid,
                 credential_digest=credential_digest,
+                schema_version=schema_version,
             )
-            stored = await self.repo.get_latest_read_snapshot(
+            stored = await self._read_snapshot_for_version(
+                schema_version=schema_version,
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 edge_node_id=edge_node_id,
@@ -731,6 +764,7 @@ class SyncCloudService:
             )
         manifest = Manifest(
             schema_version=snapshot.schema_version,
+            profile="physical_read_only_v2" if snapshot.schema_version == 2 else "read_only_v1",
             snapshot_id=snapshot.snapshot_id,
             edge_node_id=snapshot.node_id,
             tenant_id=snapshot.tenant_id,
@@ -748,6 +782,25 @@ class SyncCloudService:
             signature=snapshot.signature,
         )
 
+    async def _physical_records_for_version(
+        self,
+        *,
+        schema_version: int,
+        tenant_id: UUID,
+        branch_id: UUID,
+    ) -> tuple[PhysicalRecord, ...]:
+        if schema_version == 1:
+            return ()
+        if schema_version != 2:
+            raise BusinessRuleError("Unknown read snapshot version")
+        from app.domains.sync.physical_read_snapshot_repository import read_physical_source_facts
+        from app.domains.sync.physical_read_snapshot_service import build_physical_source_records
+
+        facts = await read_physical_source_facts(
+            self.repo.session, tenant_id=tenant_id, branch_id=branch_id
+        )
+        return build_physical_source_records(facts, tenant_id=tenant_id, branch_id=branch_id)
+
     async def publish_read_snapshot(
         self,
         *,
@@ -756,11 +809,22 @@ class SyncCloudService:
         expected_branch_id: UUID,
         expected_credential_kid: UUID,
         credential_digest: str,
+        schema_version: int = 1,
     ) -> ManifestRead:
         """Publish one internally consistent snapshot for an active Edge node."""
 
+        if schema_version == 2:
+            from app.domains.sync.physical_read_snapshot_repository import (
+                assert_physical_source_context,
+            )
+
+            await assert_physical_source_context(self.repo.session)
+            # No pending edits may be discarded. Clean identities must reload
+            # through this transaction's MVCC view, including foundation/legacy rows.
+            self.repo.session.expire_all()
         await self.repo.lock_read_snapshot_scope(edge_node_id)
-        stored = await self.repo.get_latest_read_snapshot(
+        stored = await self._read_snapshot_for_version(
+            schema_version=schema_version,
             tenant_id=expected_tenant_id,
             branch_id=expected_branch_id,
             edge_node_id=edge_node_id,
@@ -775,6 +839,7 @@ class SyncCloudService:
                     tenant_id=expected_tenant_id,
                     branch_id=expected_branch_id,
                     credential_kid=expected_credential_kid,
+                    schema_version=schema_version,
                 )
 
         foundation_source = await self.repo.read_snapshot_foundation_source(
@@ -788,6 +853,12 @@ class SyncCloudService:
         )
         inventory_rows = await self.repo.read_snapshot_inventory_source(
             tenant_id=expected_tenant_id, branch_id=expected_branch_id
+        )
+
+        physical = await self._physical_records_for_version(
+            schema_version=schema_version,
+            tenant_id=expected_tenant_id,
+            branch_id=expected_branch_id,
         )
 
         foundation = FoundationRecord(
@@ -917,14 +988,15 @@ class SyncCloudService:
             )
             for batch, branch_name, product in inventory_rows
         )
-        source_fingerprint = canonical_json_hash(
-            {
-                "foundation": foundation.model_dump(mode="json", exclude={"source_fingerprint"}),
-                "catalog": [item.model_dump(mode="json") for item in catalog],
-                "suppliers": [item.model_dump(mode="json") for item in suppliers],
-                "inventory": [item.model_dump(mode="json") for item in inventory],
-            }
-        )
+        source_payload: dict[str, object] = {
+            "foundation": foundation.model_dump(mode="json", exclude={"source_fingerprint"}),
+            "catalog": [item.model_dump(mode="json") for item in catalog],
+            "suppliers": [item.model_dump(mode="json") for item in suppliers],
+            "inventory": [item.model_dump(mode="json") for item in inventory],
+        }
+        if schema_version == 2:
+            source_payload["physical"] = [item.model_dump(mode="json") for item in physical]
+        source_fingerprint = canonical_json_hash(source_payload)
         foundation = foundation.model_copy(update={"source_fingerprint": source_fingerprint})
         if stored is not None:
             latest, _ = stored
@@ -951,6 +1023,7 @@ class SyncCloudService:
                     tenant_id=expected_tenant_id,
                     branch_id=expected_branch_id,
                     credential_kid=expected_credential_kid,
+                    schema_version=schema_version,
                 )
         revision = await self.repo.next_read_snapshot_revision(
             tenant_id=expected_tenant_id,
@@ -963,6 +1036,7 @@ class SyncCloudService:
             suppliers=suppliers,
             inventory=inventory,
             chunk_size=get_settings().EDGE_READ_SNAPSHOT_CHUNK_SIZE,
+            physical=physical,
         )
         envelope, chunks = build_read_snapshot_manifest(
             ReadSnapshotScope(
@@ -975,6 +1049,7 @@ class SyncCloudService:
             credential_kid=expected_credential_kid,
             credential_digest=credential_digest,
             source_generated_at=utc_now(),
+            schema_version=cast(Literal[1, 2], schema_version),
         )
         await self.repo.publish_read_snapshot(envelope=envelope, chunks=chunks)
         return envelope
@@ -989,12 +1064,14 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> ChunkRead:
         manifest = await self.read_snapshot_manifest(
             edge_node_id=edge_node_id,
             tenant_id=tenant_id,
             branch_id=branch_id,
             credential_kid=credential_kid,
+            schema_version=schema_version,
         )
         if manifest.manifest.snapshot_id != snapshot_id:
             raise NotFoundError("Read snapshot not found")
@@ -1035,12 +1112,14 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> list[ChunkRead]:
         manifest = await self.read_snapshot_manifest(
             edge_node_id=edge_node_id,
             tenant_id=tenant_id,
             branch_id=branch_id,
             credential_kid=credential_kid,
+            schema_version=schema_version,
         )
         if manifest.manifest.snapshot_id != snapshot_id:
             raise NotFoundError("Read snapshot not found")

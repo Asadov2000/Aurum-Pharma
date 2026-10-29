@@ -751,6 +751,7 @@ class SyncCloudRepository:
         branch_id: UUID,
         edge_node_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> tuple[SyncReadSnapshot, list[SyncReadSnapshotComponent]] | None:
         result = await self.session.execute(
             select(SyncReadSnapshot)
@@ -760,6 +761,7 @@ class SyncCloudRepository:
                 SyncReadSnapshot.node_id == edge_node_id,
                 SyncReadSnapshot.credential_kid == credential_kid,
                 SyncReadSnapshot.status == "ready",
+                SyncReadSnapshot.schema_version == schema_version,
             )
             .order_by(SyncReadSnapshot.source_revision.desc())
             .limit(1)
@@ -2017,6 +2019,18 @@ class SyncEdgeRepository:
             )
         )
 
+    async def lock_read_snapshot_install(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+            {"scope": (f"edge-read:{tenant_id}:{branch_id}:" f"{edge_node_id}")},
+        )
+
     async def install_read_snapshot(
         self,
         *,
@@ -2025,14 +2039,10 @@ class SyncEdgeRepository:
         projection: IndexedReadProjection,
     ) -> None:
         manifest = envelope.manifest
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
-            {
-                "scope": (
-                    f"edge-read:{manifest.tenant_id}:{manifest.branch_id}:"
-                    f"{manifest.edge_node_id}"
-                )
-            },
+        await self.lock_read_snapshot_install(
+            tenant_id=manifest.tenant_id,
+            branch_id=manifest.branch_id,
+            edge_node_id=manifest.edge_node_id,
         )
         scope_values = {
             "snapshot_id": manifest.snapshot_id,
@@ -2087,7 +2097,9 @@ class SyncEdgeRepository:
             insert(SyncReadProjection).values(
                 **projection_scope,
                 source_revision=manifest.source_revision,
-                projection_version=1,
+                projection_version=manifest.schema_version,
+                payload=[row.model_dump(mode="json") for row in projection.physical],
+                physical_count=len(projection.physical),
                 status="building",
                 foundation_payload=projection.foundation.model_dump(mode="json"),
                 catalog_count=len(projection.catalog),
