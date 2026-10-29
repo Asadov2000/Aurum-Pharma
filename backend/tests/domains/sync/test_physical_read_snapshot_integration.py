@@ -1,11 +1,11 @@
 """Physical bootstrap reads only fresh synthetic facts on disposable PostgreSQL CI."""
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -38,10 +38,14 @@ from tests.domains.incoming.test_unit_acceptance import (
     set_receiving_context,
 )
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
+from tests.domains.inventory.test_physical_writeoff_posting import post as post_writeoff
+from tests.domains.inventory.test_physical_writeoff_posting import selection as writeoff_selection
+from tests.domains.inventory.test_unit_cost_ledger_v2 import priced_source
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
     PhysicalSource,
     cart_line,
     dispense,
+    packs,
     receive_source,
 )
 from tests.domains.pos.test_unit_physical_checkout_preparation import facts
@@ -252,6 +256,87 @@ async def test_physical_export_keeps_initial_history_pack_ordinals_and_exact_cos
     assert lot.cost.initial_cost == initial
     assert lot.cost.remaining_cost == initial - saved_cost
     assert await facts(db_session) == before
+
+
+@pytest.mark.parametrize("blister", [None, 10])
+@pytest.mark.parametrize(
+    ("price", "expected_remaining"),
+    [
+        (Decimal("0.00"), Decimal("0.00")),
+        (Decimal("0.01"), Decimal("0.01")),
+        (Decimal("10.00"), Decimal("9.34")),
+    ],
+)
+async def test_export_subtracts_posted_writeoff_once_from_original_cost_basis(
+    db_session: AsyncSession,
+    blister: int | None,
+    price: Decimal,
+    expected_remaining: Decimal,
+) -> None:
+    source = await priced_source(db_session, quantity=2, price=price, blister=blister)
+    await dispense(db_session, source, (cart_line(source, "unit", 1),))
+    pack_id = (await packs(db_session, source))[0][0]
+    selected = (
+        writeoff_selection(closed=1, pack_id=pack_id, loose=1)
+        if blister is None
+        else writeoff_selection(closed=1, pack_id=pack_id, blisters=((1, 1),))
+    )
+    operation_id = uuid4()
+    result = await post_writeoff(db_session, source, selected, operation_id=operation_id)
+    before_replay = await facts(db_session)
+    assert await post_writeoff(db_session, source, selected, operation_id=operation_id) == result
+    assert await facts(db_session) == before_replay
+    await db_session.execute(
+        text(
+            "UPDATE tenant_catalog SET base_price=99,unit_sale_preparation="
+            "jsonb_set(unit_sale_preparation,'{units_per_pack}','60'::jsonb) WHERE id=:id"
+        ),
+        {"id": source.incoming.stock.catalog_id},
+    )
+    runtime = await repeatable_context(db_session)
+    before_export = await facts(db_session)
+    exported = await read_physical_source_facts(
+        db_session, tenant_id=runtime.stock.tenant_id, branch_id=runtime.stock.branch_id
+    )
+    records = build_physical_source_records(
+        exported, tenant_id=runtime.stock.tenant_id, branch_id=runtime.stock.branch_id
+    )
+    lot = next(row for row in records if isinstance(row, PhysicalLotRecord))
+    assert lot.id == source.lot_id and lot.packaging == source.packaging
+    assert lot.closed_packs == 0
+    assert [(pack.id, pack.pack_ordinal, pack.remaining_units) for pack in lot.opened_packs] == [
+        (pack_id, 1, 28)
+    ]
+    assert lot.cost.status == "known"
+    assert lot.cost.initial_cost == price * 2
+    assert lot.cost.remaining_cost == expected_remaining
+    assert await facts(db_session) == before_export
+
+
+@pytest.mark.parametrize("missing", ["cost_version", "cost_amount"])
+async def test_incomplete_writeoff_money_stays_unknown_without_reconstructing_basis(
+    db_session: AsyncSession, missing: str
+) -> None:
+    source = await priced_source(db_session, quantity=2)
+    await post_writeoff(db_session, source, writeoff_selection(closed=1))
+    runtime = await repeatable_context(db_session)
+    exported = await read_physical_source_facts(
+        db_session, tenant_id=runtime.stock.tenant_id, branch_id=runtime.stock.branch_id
+    )
+    assert len(exported.writeoff_costs) == 1
+    saved = exported.writeoff_costs[0]
+    incomplete = saved.model_copy(update={missing: None})
+    records = build_physical_source_records(
+        replace(exported, writeoff_costs=(incomplete,)),
+        tenant_id=runtime.stock.tenant_id,
+        branch_id=runtime.stock.branch_id,
+    )
+    lot = next(row for row in records if isinstance(row, PhysicalLotRecord))
+    assert lot.cost.status == "unknown"
+    assert lot.cost.initial_cost is None and lot.cost.remaining_cost is None
+    assert lot.purchase_cost_per_pack == Decimal("10.00")
+    assert lot.initial_closed_packs == 2 and lot.closed_packs == 1
+    assert exported.writeoff_costs == (saved,)
 
 
 async def test_signed_physical_install_restores_facts_and_redacts_both_audit_images(

@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.catalog.models import TenantCatalog
+from app.domains.catalog.unit_sales import MAX_BASE_UNITS
 from app.domains.incoming.models import IncomingDocument, IncomingItem
 from app.domains.inventory.unit_ledger_models import (
     UnitStockEntry,
@@ -21,7 +23,26 @@ from app.domains.inventory.unit_ledger_v2_models import (
     UnitStockMovementV2,
     UnitStockOpenedPackV2,
 )
-from app.domains.sync.physical_read_snapshot import MAX_PHYSICAL_RECORDS, PhysicalOpeningBasisRecord
+from app.domains.sync.physical_read_snapshot import (
+    MAX_PHYSICAL_RECORDS,
+    Money,
+    PhysicalOpeningBasisRecord,
+)
+
+
+class PhysicalWriteoffCostRecord(BaseModel):
+    """Monetary source facts; incomplete evidence stays explicitly unknown."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: UUID
+    tenant_id: UUID
+    branch_id: UUID
+    catalog_id: UUID
+    lot_id: UUID
+    units_taken: int = Field(strict=True, gt=0, le=MAX_BASE_UNITS)
+    cost_version: int | None = Field(strict=True, ge=1)
+    cost_amount: Money | None
 
 
 @dataclass(frozen=True)
@@ -35,6 +56,7 @@ class PhysicalSourceFacts:
     legacy_entries: tuple[UnitStockEntry, ...]
     legacy_sources: dict[UUID, UUID]
     opening_basis: tuple[PhysicalOpeningBasisRecord, ...]
+    writeoff_costs: tuple[PhysicalWriteoffCostRecord, ...] = ()
 
 
 async def assert_physical_source_context(session: AsyncSession) -> None:
@@ -53,6 +75,25 @@ async def read_physical_source_facts(
 ) -> PhysicalSourceFacts:
     await assert_physical_source_context(session)
     with session.no_autoflush:
+        writeoff_rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT e.id,e.tenant_id,e.branch_id,e.catalog_id,e.lot_id,"
+                        "e.units_taken,e.cost_version,e.cost_amount "
+                        "FROM public.physical_writeoff_entry e "
+                        "JOIN public.physical_writeoff_command c "
+                        "ON (c.tenant_id,c.id,c.branch_id,c.lot_id)="
+                        "(e.tenant_id,e.operation_id,e.branch_id,e.lot_id) "
+                        "WHERE e.tenant_id=:tenant AND e.branch_id=:branch "
+                        "ORDER BY e.lot_id,e.operation_id,e.entry_order LIMIT :limit"
+                    ),
+                    {"tenant": tenant_id, "branch": branch_id, "limit": MAX_PHYSICAL_RECORDS + 1},
+                )
+            )
+            .mappings()
+            .all()
+        )
         opening_rows = (
             (
                 await session.execute(
@@ -172,6 +213,7 @@ async def read_physical_source_facts(
             legacy_packs,
             legacy_entries,
             sources,
+            writeoff_rows,
         )
     ):
         raise ValueError("Physical snapshot source limit exceeded")
@@ -198,4 +240,5 @@ async def read_physical_source_facts(
         legacy_entries,
         legacy_sources,
         opening_basis,
+        tuple(PhysicalWriteoffCostRecord.model_validate(dict(row)) for row in writeoff_rows),
     )
