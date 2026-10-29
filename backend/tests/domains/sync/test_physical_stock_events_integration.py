@@ -442,6 +442,7 @@ async def test_privileged_support_catalog_write_cannot_leave_an_enabled_stream_g
 )
 async def test_catalog_fanout_and_reserved_financial_stream_fail_closed_before_mixed_branch_locks(
     db_session: AsyncSession,
+    db_engine: AsyncEngine,
     maintenance_engine: AsyncEngine,
     catalog_first: bool,
     financial_savepoint: bool,
@@ -451,6 +452,20 @@ async def test_catalog_fanout_and_reserved_financial_stream_fail_closed_before_m
     request = await saved_request(db_session, source.sale)
     context = runtime(db_session)
     await db_session.commit()
+    async with AsyncSession(db_engine, expire_on_commit=False) as support:
+        async with support.begin():
+            assert str(await support.scalar(text("SELECT current_database()"))).endswith("_test")
+            assert await support.scalar(text("SELECT session_user")) == "aurum_support"
+            await support.execute(
+                text(
+                    "SELECT set_config('app.support_session','true',true),"
+                    "set_config('app.tenant_id',:tenant,true),set_config('app.user_id',:actor,true)"
+                ),
+                {"tenant": str(context.stock.tenant_id), "actor": str(context.actor_id)},
+            )
+            other = await FoundationService(FoundationRepository(support)).create_branch(
+                tenant_id=context.stock.tenant_id, fields={"name": "Independent stock stream"}
+            )
     await enable_stock_gate(db_session, maintenance_engine)
     await enable_retail_gate(db_session, maintenance_engine)
     async with AsyncSession(maintenance_engine, expire_on_commit=False) as owner:
@@ -459,9 +474,6 @@ async def test_catalog_fanout_and_reserved_financial_stream_fail_closed_before_m
             await owner.execute(
                 text("SELECT set_config('app.tenant_id',:tenant,true)"),
                 {"tenant": str(context.stock.tenant_id)},
-            )
-            other = await FoundationService(FoundationRepository(owner)).create_branch(
-                tenant_id=context.stock.tenant_id, fields={"name": "Independent stock stream"}
             )
             await owner.execute(
                 text(
