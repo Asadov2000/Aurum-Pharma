@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "ready_for_publication",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-receiver-02",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
@@ -38,7 +38,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Publish approved seroval1.6.8 and reviewed security-invoker test classification; full final-head CI, exact-head merge, main tree proof.",
+  "remaining_step": "All8 final-head CI success, new52 test proof, expected-head merge, verify current main tree. Cloud idle, no additional product writes.",
   "failure_counters": {
     "receiver_db_fixture": {
       "consecutive": 0,
@@ -156,9 +156,11 @@
   "merged_tree": null,
   "completed_at": null,
   "ci": {
-    "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
-    "workflow": "b7e4e743-3e78-4f93-8074-9c7cc2a25235",
-    "state": "dependency_audit_failed_backend_and_e2e_running"
+    "head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
+    "workflow": "369614c3-901c-429c-a75c-d71d9de42c22",
+    "state": "running",
+    "backend": 3753,
+    "gate": 3754
   },
   "main_tree_matches_tested_head": false,
   "runtime": {
@@ -185,5 +187,12 @@
     "cause": "Required quarantine audit changes protected_facts audit_log snapshot; physical/financial checks and denial passed",
     "green_jobs": 6
   },
-  "published_head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2"
+  "published_head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
+  "previous_ci": {
+    "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
+    "workflow": "b7e4e743-3e78-4f93-8074-9c7cc2a25235",
+    "backend": 3744,
+    "cause": "First invoker-registry assertion failure plus newly announced seroval high advisories; fixed and reviewed",
+    "receiver_tests_success": 48
+  }
 }
