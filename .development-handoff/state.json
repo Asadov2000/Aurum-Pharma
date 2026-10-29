@@ -155,10 +155,12 @@
   "head_tree": "335208dd03e9db5488c567ad7f585da5c463b631",
   "ci": {
     "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
-    "status": "waiting_for_workflow",
+    "status": "running",
     "previous_workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-    "new_case_result": "pending"
+    "new_case_result": "pending",
+    "workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
+    "backend_job": 3798
   },
-  "updated_at": "2026-10-29 09:57:38 UTC",
+  "updated_at": "2026-10-29 09:59:38 UTC",
   "pending_changes": null
 }
