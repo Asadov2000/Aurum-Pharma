@@ -208,9 +208,11 @@
     "previous_workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
     "previous_backend_passed": 7171,
     "previous_new_success": 138,
-    "new_case_result": "pending"
+    "new_case_result": "pending",
+    "backend_job": 3817,
+    "gate_job": 3818
   },
-  "updated_at": "2026-10-29 12:03:20 UTC",
+  "updated_at": "2026-10-29 12:07:20 UTC",
   "pending_changes": null,
   "support": {
     "case": 18248399,
