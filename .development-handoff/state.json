@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
   "control_stage_id": "E6-03",
   "owner": "local",
-  "phase": "design",
+  "phase": "implementation_and_qa",
   "run_id": "local-2026-10-29-edge-physical-snapshot-01",
   "branch": "codex/unit-edge-physical-snapshot",
   "base_sha": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
@@ -32,8 +32,20 @@
     "Preserve existing v1 JSON/hash contracts, fail closed old reader, no unauthorized purchase-cost disclosure or activation",
     "Full exact-head CI; expected-head PR merge; current main tree proof"
   ],
-  "remaining_step": "Finish architecture/source/QA design, implement isolated versioned bootstrap, targeted tests and full CI",
-  "failure_counters": {},
+  "remaining_step": "Finish strict v1/v2 source/projection and initialization basis, fresh signature verification on private read; independent review, pure tests/static, disposable full CI, protected merge.",
+  "failure_counters": {
+    "v1_target_mypy": {
+      "consecutive": 0,
+      "step": "targeted mypy",
+      "cause": "Heterogeneous source tuple inferred shared SQLAlchemy Base",
+      "fix": "Explicit UnitStockOpenedPack|UnitStockEntry sequence annotation",
+      "resolved": "targeted mypy success"
+    },
+    "v1_format": {
+      "consecutive": 0,
+      "resolved": "Black/Ruff pass; E501 corrected without rule changes"
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-RECEIVER-01",
@@ -59,5 +71,16 @@
     "application": "not changed or restarted",
     "shared_database": "not accessed or changed",
     "deployment": false
+  },
+  "design": {
+    "transport": "Explicit opt-in signed read-only snapshot v2; existing three components and v1 roots preserved",
+    "storage": "Existing immutable sync_read_projection.payload (already audit-redacted), physical_count; no operational stock writes",
+    "source": "REPEATABLE READ, exact original identities/counts/pack states and historical basis, unknown cost retained",
+    "review_fixes": [
+      "SQL payload name avoids audit cost leakage",
+      "Private read must freshly authenticate every supplied credential and stored chunk",
+      "Legacy physical v1 remains distinct, no invented blisters",
+      "Original per-pack initialization and monetary basis retained"
+    ]
   }
 }
