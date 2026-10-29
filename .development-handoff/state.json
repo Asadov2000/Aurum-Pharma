@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "awaiting_dependency_approval",
+  "phase": "approved_security_update",
   "run_id": "local-2026-10-29-edge-receiver-02",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -38,7 +38,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Wait dependency approval; existing backend/E2E CI may finish and can be inspected read-only. No dependency edits/install or new CI attempt until approved.",
+  "remaining_step": "Apply approved seroval1.6.8 only; validate using existing archived locked pnpm9.12.0. Wait current backend results before publishing next full CI.",
   "failure_counters": {
     "receiver_db_fixture": {
       "consecutive": 0,
@@ -65,10 +65,10 @@
       "cause": "New advisory feed flags seroval1.6.3 for GHSA-97r2-qh9m-474h, GHSA-wp97-x4hv-qvhp, GHSA-7rv5-mrxv-xcr9",
       "fixed_version": "1.6.8",
       "version_verified": "GitHub primary advisories + npm registry metadata",
-      "approval": "pending"
+      "approval": "Explicit user approval 2026-10-29: Да, обновить seroval и продолжить PR #435"
     }
   },
-  "blocker": "Explicit AGENTS.md dependency approval requested: seroval 1.6.3 to 1.6.8, package.json override and necessary pnpm lock entries only. No approval yet.",
+  "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
     "pr": 434,
@@ -118,7 +118,7 @@
     "workflow": "b7e4e743-3e78-4f93-8074-9c7cc2a25235",
     "state": "dependency_audit_failed_backend_and_e2e_running"
   },
-  "main_tree_matches_tested_head": true,
+  "main_tree_matches_tested_head": false,
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "primary_checkout_clean": true,
