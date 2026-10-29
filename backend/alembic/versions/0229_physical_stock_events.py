@@ -361,7 +361,15 @@ BEGIN
   RAISE EXCEPTION 'physical_stock_record_too_large' USING ERRCODE='23514'; END IF;
  old_branch:=current_setting('app.branch_id',true);
  PERFORM set_config('app.branch_id',saved.branch_id::TEXT,true);
- SELECT * INTO position FROM public.reserve_sync_event_position(saved.tenant_id,saved.branch_id);
+ PERFORM public.assert_current_branch_writer(saved.tenant_id,saved.branch_id,NULL,false);
+ -- Keep the existing checkpoint complete even when native deferred guards have
+ -- been made IMMEDIATE. The locked next position is local until its outbox exists.
+ SELECT stream.id AS stream_id,stream.writer_node_id AS origin_node_id,
+  stream.writer_epoch,stream.last_sequence+1 AS sequence,
+  stream.current_checksum AS previous_checksum,
+  stream.current_projection_checksum AS previous_projection_checksum
+ INTO STRICT position FROM public.sync_stream stream
+ WHERE stream.tenant_id=saved.tenant_id AND stream.branch_id=saved.branch_id FOR UPDATE;
  IF (position.origin_node_id,position.writer_epoch) IS DISTINCT FROM
    (saved.origin_node_id,saved.writer_epoch) THEN
   RAISE EXCEPTION 'physical_stock_writer_changed' USING ERRCODE='23514'; END IF;
@@ -398,8 +406,15 @@ BEGIN
  VALUES(saved.tenant_id,saved.id,saved.branch_id,saved.origin_node_id,saved.writer_epoch,position.sequence,
   position.previous_checksum,position.previous_projection_checksum,fingerprint,envelope,
  saved.created_by);
- PERFORM public.finalize_sync_event_position(position.stream_id,position.sequence,checksum,
- projection);
+ UPDATE public.sync_stream stream SET last_sequence=position.sequence,
+  current_checksum=checksum,current_projection_checksum=projection
+ WHERE stream.id=position.stream_id AND stream.tenant_id=saved.tenant_id
+  AND stream.branch_id=saved.branch_id AND stream.writer_node_id=position.origin_node_id
+  AND stream.writer_epoch=position.writer_epoch
+  AND (stream.last_sequence,stream.current_checksum,stream.current_projection_checksum)=
+      (position.sequence-1,position.previous_checksum,position.previous_projection_checksum);
+ IF NOT FOUND THEN
+  RAISE EXCEPTION 'physical_stock_stream_checkpoint_conflict' USING ERRCODE='40001'; END IF;
  PERFORM set_config('app.branch_id',coalesce(old_branch,''),true);
  RETURN;
 END $$;
