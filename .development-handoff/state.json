@@ -9,7 +9,7 @@
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
+  "expected_head": "decca8268b2e5195c30016f1f090dfd6526a7660",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "All8 CI success on47aa plus proof181new cases, fresh main/head/cloud ownership then protected merge and tested-tree main proof",
+  "remaining_step": "Full exact-head all8 CI on decca; all181new cases without skips; fresh main/head/cloud ownership then protected merge/tested-tree proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -99,7 +99,7 @@
       "status": "Approved fix applied; await next backend CI result"
     },
     "incoming_price_e2e": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "E2E incoming-unit-preparation.spec.ts16/132",
       "cause": "Edited sale price reverted to initial price after fast modal reopen and packaging toggle; stale detail cache",
       "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
@@ -108,17 +108,30 @@
       "previous_e2e_result": "success",
       "proof": "166passed,1flaky; no HTTP/auth/timeout error; price comparison categories only",
       "fix_commit": "7295c084",
-      "status": "Price cache fix with deterministic regression13pass; remote E2E pending"
+      "status": "Resolved: E2E3808 and frontend3805success on47aa",
+      "previous_consecutive": 1
     },
     "writeoff_cost_source_acl": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Raw physical_writeoff_entry intentionally not granted to aurum_app",
       "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
       "job": 3798,
       "fix": "Owner guarded bounded source RPC; raw ACL and RLS unchanged",
       "fix_commit": "47aa4107",
       "local_checks": "mypy/Ruff/Black pass;8negative cases collected;independent review approved",
-      "status": "awaiting full CI"
+      "status": "Resolved: all16cost positive/negative cases success on47aa",
+      "previous_consecutive": 1
+    },
+    "stock_immediate_checkpoint": {
+      "consecutive": 1,
+      "step": "backend test_config_initialization_standalone_open_and_writeoff_share_exact_branch_history",
+      "head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
+      "job": 3809,
+      "cause": "SET CONSTRAINTS ALL IMMEDIATE validates reserved stream sequence before source outbox insert",
+      "message": "Sync stream checkpoint is not backed by its outbox event",
+      "fix_commit": "decca826",
+      "fix": "Locked local nextposition; existing authority checks; outbox+immutableevent then single guarded complete checkpoint UPDATE; no constraint mode/nativeguard changes",
+      "local_validation": "Ruff/Black/mypy and7617collection pass; independent full-chain review approves; existing forced/deferred/nativeguard regressions retained"
     }
   },
   "blocker": null,
@@ -187,17 +200,17 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "0b798b9eecf30d6129915295c71f0adc2f137e6e",
+  "head_tree": "a0e1f0ebd78cf4f7c60ad9559e4a2733a7c07805",
   "ci": {
-    "head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
+    "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
+    "workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
     "status": "running",
-    "previous_workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
-    "new_case_result": "pending",
-    "workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
-    "backend_job": 3809,
-    "gate_job": 3810
+    "previous_workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
+    "previous_backend_passed": 7171,
+    "previous_new_success": 138,
+    "new_case_result": "pending"
   },
-  "updated_at": "2026-10-29 11:13:38 UTC",
+  "updated_at": "2026-10-29 12:03:20 UTC",
   "pending_changes": null,
   "support": {
     "case": 18248399,
