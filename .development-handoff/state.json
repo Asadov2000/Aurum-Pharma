@@ -4,14 +4,14 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "final_review",
+  "phase": "ci_running_followup_review",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
+  "expected_head": "16013e66c95bf46247600f0e1da3b7befe14be62",
   "validated_sha": null,
-  "pr": null,
+  "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Close savepoint-safe stream-lock marker and final permission tests, then exact final collection/static checks, full CI and main",
+  "remaining_step": "Review explicit immutable initialization provenance and 2 actual legacy transition regressions, publish follow-up same PR, final-head full CI and protected merge",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -84,12 +84,12 @@
     "new_reducer": 41,
     "new_receiver": 23,
     "pure_passed_with_regressions": 207,
-    "full_backend_collected": 7606,
-    "new_stage_cases": 170,
+    "full_backend_collected": 7609,
+    "new_stage_cases": 173,
     "mypy_sources": 524,
     "snapshot_cost_target_mypy": "2 files pass",
     "db_tests": "collected only; disposable full CI required",
-    "architecture": "one savepoint reservation marker issue being fixed"
+    "architecture": "Savepoint marker and read-only permission fixes passed static checks; explicit immutable initialization provenance final review"
   },
   "design": {
     "stream": "One existing stream; schema5 stock commands/config revisions and checkout companion; existing retail v1/v3/v4 hashes unchanged",
@@ -98,5 +98,14 @@
     "legacy": "v1 stock writes explicitly invalidate baseline and ready=false",
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
-  }
+  },
+  "head_tree": "87157a7d7bc425fe0de4ee6e2d0616c6a518a2c3",
+  "ci": {
+    "head": "16013e66c95bf46247600f0e1da3b7befe14be62",
+    "workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
+    "backend_job": 3785,
+    "status": "running",
+    "new_case_result": "pending"
+  },
+  "updated_at": "2026-10-29 09:25:45 UTC"
 }
