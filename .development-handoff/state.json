@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci_test_audit_expectation",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "a04a8e54-5989-4b93-9e73-774ee79540c5:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,14 +33,14 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Full exact-head all8 CI and181new cases without skips; protected merge and tested-tree main proof",
+  "remaining_step": "Correct receive audit expectation preserving stricter exact audit checks; full exact-head CI then protected merge",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
       "previous_consecutive": 2,
       "step": "Ruff test_runtime_role_privileges.py",
       "cause": "Existing ACL test exceeded 50 statements (54 then51)",
-      "approval": "Explicit user approval: Да, исправить и продолжить этот этап",
+      "approval": "Explicit user approval: Р”Р°, РёСЃРїСЂР°РІРёС‚СЊ Рё РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЌС‚РѕС‚ СЌС‚Р°Рї",
       "fix": "Move one unchanged awaited column check into existing _assert_all_stock_column_privileges helper",
       "resolved": "Ruff and Black pass; all assertion/call AST sets preserved",
       "proposal": ".codex/unit-edge-stock-events-2026-10-29/acl-limit-proposal.patch"
@@ -93,7 +93,7 @@
       "source_sha256": "99b2a625688e523d31ed84f47fe54938b0a17ca4a767661010326b219640997a",
       "proposal_applied": true,
       "proposal_review": "Minimal three hunks; git apply --check passed; SESSION_USER and runtime gates preserved",
-      "approval": "Explicit user approval: Да, исправить и продолжить PR #437",
+      "approval": "Explicit user approval: Р”Р°, РёСЃРїСЂР°РІРёС‚СЊ Рё РїСЂРѕРґРѕР»Р¶РёС‚СЊ PR #437",
       "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain",
       "fix_commit": "6af677e2",
       "status": "Resolved: later final-head3817 passed migration roundtrip"
@@ -136,13 +136,23 @@
       "status": "Resolved:29 actual gated source scenarios passed on decca"
     },
     "branch_bootstrap_fixture": {
-      "consecutive": 1,
+      "consecutive": 0,
       "job": 3817,
       "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
       "cause": "Test calls native branch initializer through actual aurum_migrator; SESSION_USER requires real aurum_app/support",
       "fix": "Use real aurum_support db_engine setup before gates; production guards unchanged",
       "fix_commit": "8f95e8c6",
-      "local_validation": "Ruff/Black/diff pass;target34/full7617 collection;independent root review;noDB"
+      "local_validation": "Ruff/Black/diff pass;target34/full7617 collection;independent root review;noDB",
+      "previous_consecutive": 1,
+      "status": "Resolved:all34sourceintegration passed on8f95"
+    },
+    "receive_audit_expectation": {
+      "consecutive": 1,
+      "head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
+      "job": 3821,
+      "cause": "Success receive legitimately inserts technical projection audit; test incorrectly demands entire prior audit unchanged",
+      "evidence": "Only audit_log differs;22business tables identical;apply/verify/replay succeeded;all34source andmaterializer passed",
+      "fix": "Assertexacttechnicalauditinsert, immutableoldaudit/businessfacts, fullsnapshotunchangedonreplay"
     }
   },
   "blocker": null,
@@ -216,14 +226,16 @@
   "ci": {
     "head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
     "workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
-    "status": "running",
+    "status": "backend_shard_failed",
     "previous_workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
     "previous_backend_passed": 7199,
     "previous_new_success": 166,
     "backend_job": 3821,
-    "gate_job": 3826
+    "gate_job": 3826,
+    "frontend_passed": 3260,
+    "e2e_passed": 167
   },
-  "updated_at": "2026-10-29T13:26:40.031Z",
+  "updated_at": "2026-10-29T14:00:38.047Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
