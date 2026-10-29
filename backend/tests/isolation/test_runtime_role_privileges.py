@@ -298,6 +298,7 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "read_physical_writeoff_cost_source",
     "trg_sync_stream_reservation_transaction",
     "physical_stock_time",
     "physical_stock_pack_state",
@@ -821,6 +822,7 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "read_physical_writeoff_cost_source",
     "reserve_retail_checkout_event_position",
     "store_retail_checkout_event",
     "training_checkout_sale_write_allowed",
@@ -1879,6 +1881,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
         "reserve_retail_checkout_event_position",
+        "read_physical_writeoff_cost_source",
         "store_retail_checkout_event",
         "training_checkout_sale_write_allowed",
         "post_unit_legacy_transition",

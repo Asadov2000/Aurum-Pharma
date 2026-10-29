@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.errors import PermissionDeniedError, ServiceUnavailableError
@@ -41,6 +42,7 @@ from tests.domains.incoming.test_unit_acceptance import db_session as receiving_
 from tests.domains.inventory.test_physical_writeoff_posting import post as post_writeoff
 from tests.domains.inventory.test_physical_writeoff_posting import selection as writeoff_selection
 from tests.domains.inventory.test_unit_cost_ledger_v2 import priced_source
+from tests.domains.inventory.test_unit_ledger import seed_ledger_context
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
     PhysicalSource,
     cart_line,
@@ -337,6 +339,88 @@ async def test_incomplete_writeoff_money_stays_unknown_without_reconstructing_ba
     assert lot.purchase_cost_per_pack == Decimal("10.00")
     assert lot.initial_closed_packs == 2 and lot.closed_packs == 1
     assert exported.writeoff_costs == (saved,)
+
+
+@pytest.mark.parametrize(
+    "denial",
+    ["no-cost-permission", "inactive-actor", "foreign-tenant", "foreign-branch", "raw-table"],
+)
+async def test_writeoff_cost_source_requires_live_cost_authority_and_exact_scope(
+    db_session: AsyncSession,
+    db_engine: AsyncEngine,
+    maintenance_engine: AsyncEngine,
+    denial: str,
+) -> None:
+    source = await priced_source(db_session, quantity=2)
+    await post_writeoff(db_session, source, writeoff_selection(closed=1))
+    context = cast(ReceivingRuntime, db_session.info["receiving_runtime"])
+    await db_session.commit()
+    actor_id = context.actor_id
+    tenant_id, branch_id = context.stock.tenant_id, context.stock.branch_id
+    if denial in ("no-cost-permission", "inactive-actor"):
+        actor_id = await seed_receiving_actor(
+            db_engine,
+            maintenance_engine,
+            context.stock,
+            permissions=("batches.view",) if denial == "no-cost-permission" else None,
+        )
+    if denial == "inactive-actor":
+        async with maintenance_engine.begin() as owner:
+            await owner.execute(
+                text("UPDATE app_user SET status='blocked' WHERE id=:actor"), {"actor": actor_id}
+            )
+    if denial in ("foreign-tenant", "foreign-branch"):
+        async with AsyncSession(db_engine) as support:
+            async with support.begin():
+                await support.execute(text("SELECT set_config('app.support_session','true',true)"))
+                foreign = await seed_ledger_context(support)
+        branch_id = foreign.branch_id
+        if denial == "foreign-tenant":
+            tenant_id = foreign.tenant_id
+    await repeatable_context(db_session)
+    before = await read_physical_source_facts(
+        db_session, tenant_id=context.stock.tenant_id, branch_id=context.stock.branch_id
+    )
+    assert len(before.writeoff_costs) == 1
+    await set_receiving_context(db_session, context.stock, actor_id)
+    query = (
+        "SELECT * FROM public.physical_writeoff_entry"
+        if denial == "raw-table"
+        else "SELECT * FROM public.read_physical_writeoff_cost_source(:tenant,:branch,10001)"
+    )
+    with pytest.raises(DBAPIError) as refused:
+        async with db_session.begin_nested():
+            await db_session.execute(text(query), {"tenant": tenant_id, "branch": branch_id})
+    assert getattr(refused.value.orig, "sqlstate", None) == "42501"
+    if denial != "raw-table":
+        assert "physical_writeoff_cost_read_denied" in str(refused.value.orig)
+    await set_receiving_context(db_session, context.stock, context.actor_id)
+    after = await read_physical_source_facts(
+        db_session, tenant_id=context.stock.tenant_id, branch_id=context.stock.branch_id
+    )
+    assert after.writeoff_costs == before.writeoff_costs
+
+
+@pytest.mark.parametrize("limit", [None, 0, 10002])
+async def test_writeoff_cost_source_cannot_disable_its_history_bound(
+    db_session: AsyncSession, limit: int | None
+) -> None:
+    context = await repeatable_context(db_session)
+    with pytest.raises(DBAPIError) as refused:
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text(
+                    "SELECT * FROM public.read_physical_writeoff_cost_source"
+                    "(:tenant,:branch,:limit)"
+                ),
+                {
+                    "tenant": context.stock.tenant_id,
+                    "branch": context.stock.branch_id,
+                    "limit": limit,
+                },
+            )
+    assert getattr(refused.value.orig, "sqlstate", None) == "22023"
+    assert "physical_writeoff_cost_read_limit_invalid" in str(refused.value.orig)
 
 
 async def test_signed_physical_install_restores_facts_and_redacts_both_audit_images(

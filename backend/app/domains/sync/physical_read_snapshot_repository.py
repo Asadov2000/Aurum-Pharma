@@ -79,14 +79,9 @@ async def read_physical_source_facts(
             (
                 await session.execute(
                     text(
-                        "SELECT e.id,e.tenant_id,e.branch_id,e.catalog_id,e.lot_id,"
-                        "e.units_taken,e.cost_version,e.cost_amount "
-                        "FROM public.physical_writeoff_entry e "
-                        "JOIN public.physical_writeoff_command c "
-                        "ON (c.tenant_id,c.id,c.branch_id,c.lot_id)="
-                        "(e.tenant_id,e.operation_id,e.branch_id,e.lot_id) "
-                        "WHERE e.tenant_id=:tenant AND e.branch_id=:branch "
-                        "ORDER BY e.lot_id,e.operation_id,e.entry_order LIMIT :limit"
+                        "SELECT id,tenant_id,branch_id,catalog_id,lot_id,"
+                        "units_taken,cost_version,cost_amount "
+                        "FROM public.read_physical_writeoff_cost_source(:tenant,:branch,:limit)"
                     ),
                     {"tenant": tenant_id, "branch": branch_id, "limit": MAX_PHYSICAL_RECORDS + 1},
                 )

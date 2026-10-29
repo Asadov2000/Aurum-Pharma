@@ -21,6 +21,7 @@ TABLES = (
     "sync_physical_stock_baseline",
 )
 FUNCTIONS = (
+    "read_physical_writeoff_cost_source(uuid,uuid,integer)",
     "trg_sync_stream_reservation_transaction()",
     "physical_stock_time(timestamptz)",
     "physical_stock_pack_state(jsonb)",
@@ -50,6 +51,37 @@ def _sql(sql: str) -> None:
 
 
 SQL = """
+CREATE FUNCTION public.read_physical_writeoff_cost_source(
+ p_tenant UUID,p_branch UUID,p_limit INTEGER)
+RETURNS TABLE(id UUID,tenant_id UUID,branch_id UUID,catalog_id UUID,lot_id UUID,
+ units_taken BIGINT,cost_version INTEGER,cost_amount NUMERIC)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ -- This private read exports historical costs, never comments or command input.
+ -- SESSION_USER remains the actual caller while CURRENT_USER is the owner.
+ IF SESSION_USER<>'aurum_app' OR p_tenant IS NULL OR p_branch IS NULL
+  OR p_tenant IS DISTINCT FROM public.current_tenant_id()
+  OR public.is_support_session() OR public.is_tenant_support_session()
+  OR NOT EXISTS(SELECT 1 FROM public.app_user u
+    WHERE u.id=public.current_app_user_id() AND u.status='active')
+  OR NOT EXISTS(SELECT 1 FROM public.branch b WHERE b.id=p_branch AND b.tenant_id=p_tenant)
+  OR NOT coalesce(public.tenant_actor_has_scoped_permission(
+    p_tenant,'batches.view',p_branch),false)
+  OR NOT coalesce(public.tenant_actor_has_scoped_permission(
+    p_tenant,'batches.view_costs',p_branch),false) THEN
+  RAISE EXCEPTION 'physical_writeoff_cost_read_denied' USING ERRCODE='42501'; END IF;
+ IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 10001 THEN
+  RAISE EXCEPTION 'physical_writeoff_cost_read_limit_invalid' USING ERRCODE='22023'; END IF;
+ IF current_setting('transaction_isolation') NOT IN ('repeatable read','serializable') THEN
+  RAISE EXCEPTION 'physical_writeoff_cost_read_snapshot_required' USING ERRCODE='23514'; END IF;
+ RETURN QUERY SELECT e.id,e.tenant_id,e.branch_id,e.catalog_id,e.lot_id,
+  e.units_taken,e.cost_version,e.cost_amount
+ FROM public.physical_writeoff_entry e JOIN public.physical_writeoff_command c
+  ON (c.tenant_id,c.id,c.branch_id,c.lot_id)=
+     (e.tenant_id,e.operation_id,e.branch_id,e.lot_id)
+ WHERE e.tenant_id=p_tenant AND e.branch_id=p_branch
+ ORDER BY e.lot_id,e.operation_id,e.entry_order LIMIT p_limit;
+END $$;
 CREATE FUNCTION public.trg_sync_stream_reservation_transaction() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
@@ -587,6 +619,10 @@ def upgrade() -> None:
           REVOKE ALL ON FUNCTION public.{signature} FROM PUBLIC,aurum_app,aurum_support,
  aurum_catalog_worker;
         """)
+    _sql("""
+      GRANT EXECUTE ON FUNCTION public.read_physical_writeoff_cost_source(uuid,uuid,integer)
+       TO aurum_app;
+    """)
     for table in TABLES:
         function = (
             "trg_physical_stock_projection_guard"
