@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
   "control_stage_id": "E6-03",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-29-edge-physical-snapshot-01",
   "branch": "codex/unit-edge-physical-snapshot",
   "base_sha": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
   "base_tree": "423bb78718addf96f2c0fb5fed0b8b406280299a",
   "expected_head": "29259c270b00d994d37c6942cf5b0d239765deba",
-  "validated_sha": null,
+  "validated_sha": "29259c270b00d994d37c6942cf5b0d239765deba",
   "pr": 436,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -23,7 +23,7 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (7)",
+  "counter": "2/7 (6)",
   "counter_after_full_completion": "2/7 (6)",
   "scope": "E6-03 only: scoped consistent physical inventory and packaging/cost snapshot; strict version/revision/hash checks and atomic restoration. Legacy v1 unchanged; delivery/producer/activation gates remain closed. No standalone stock operations/refunds/offline grants.",
   "acceptance": [
@@ -32,7 +32,7 @@
     "Preserve existing v1 JSON/hash contracts, fail closed old reader, no unauthorized purchase-cost disclosure or activation",
     "Full exact-head CI; expected-head PR merge; current main tree proof"
   ],
-  "remaining_step": "All8 exact-head CI success, all70 new cases success without skips, expected-head protected merge and current main tree proof",
+  "remaining_step": "E6-03 completed. Next fixed stage E6-04 standalone inventory event synchronization. No next implementation started; cloud idle/ungranted, local continuation owner.",
   "failure_counters": {
     "v1_target_mypy": {
       "consecutive": 0,
@@ -110,13 +110,42 @@
     "workflow": "77e3bc1d-e52d-43d4-853f-183b1ac39ed7",
     "backend": 3765,
     "gate": 3770,
-    "state": "running"
+    "state": "all8success",
+    "contexts": [
+      "tooling-linux",
+      "tooling-windows",
+      "dependency-audit",
+      "production-containers",
+      "frontend",
+      "e2e",
+      "backend",
+      "ci-gate"
+    ],
+    "backend_results": {
+      "passed": 7436,
+      "skipped": 0,
+      "new_stage_passed": 70,
+      "new_stage_skipped": 0
+    },
+    "proof_file": ".codex/unit-edge-physical-snapshot-2026-10-29/final-test-metadata-proof.json",
+    "optional_summary_log_read": {
+      "state": "not_required",
+      "reason": "Numeric frontend/E2E log download hit transient DNS11001; all exact-head statuses and mandatory backend test evidence independently verified",
+      "claims": "No unverified frontend/E2E numeric counts"
+    }
   },
-  "main_tree_matches_tested_head": false,
+  "main_tree_matches_tested_head": true,
   "readiness_limits": {
     "physical_records": 10000,
     "payload_bytes": 8388608,
     "historical_rows": "bounded; reject excess, never truncate",
     "larger_catalog_30_day_workload": "E6-09 not claimed ready"
-  }
+  },
+  "merged_main_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
+  "merged_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
+  "completed_at": "2026-10-29T08:03:23Z",
+  "next_control_stage_id": "E6-04",
+  "fix_commits": [
+    "29259c270b00d994d37c6942cf5b0d239765deba"
+  ]
 }
