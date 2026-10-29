@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "ci_running_followup_review",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "16013e66c95bf46247600f0e1da3b7befe14be62",
+  "expected_head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Review explicit immutable initialization provenance and 2 actual legacy transition regressions, publish follow-up same PR, final-head full CI and protected merge",
+  "remaining_step": "Full eight-job CI on final head and proof all173 new cases executed without skip, then protected merge and tested-tree main proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -44,6 +44,18 @@
       "fix": "Move one unchanged awaited column check into existing _assert_all_stock_column_privileges helper",
       "resolved": "Ruff and Black pass; all assertion/call AST sets preserved",
       "proposal": ".codex/unit-edge-stock-events-2026-10-29/acl-limit-proposal.patch"
+    },
+    "git_push_transport": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "cause": "temporary local DNS failure",
+      "resolved": "DNS resolution recovered; normal push succeeded; exact PR head verified"
+    },
+    "ci_metadata_transport": {
+      "consecutive": 1,
+      "step": "CircleCI public workflow job metadata read",
+      "cause": "TLS handshake timeout before DNS recovery; no CI result inferred",
+      "head": "16013e66c95bf46247600f0e1da3b7befe14be62"
     }
   },
   "blocker": null,
@@ -89,7 +101,7 @@
     "mypy_sources": 524,
     "snapshot_cost_target_mypy": "2 files pass",
     "db_tests": "collected only; disposable full CI required",
-    "architecture": "Savepoint marker and read-only permission fixes passed static checks; explicit immutable initialization provenance final review"
+    "architecture": "Independent review approved explicit immutable normal and closed/opened legacy initialization sources; complete ACL registry; all agents stopped"
   },
   "design": {
     "stream": "One existing stream; schema5 stock commands/config revisions and checkout companion; existing retail v1/v3/v4 hashes unchanged",
@@ -99,13 +111,13 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "87157a7d7bc425fe0de4ee6e2d0616c6a518a2c3",
+  "head_tree": "08d382a30da4f1680fa8accd4b2a461e43287a74",
   "ci": {
-    "head": "16013e66c95bf46247600f0e1da3b7befe14be62",
-    "workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
-    "backend_job": 3785,
+    "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
+    "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
     "status": "running",
+    "superseded_workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
     "new_case_result": "pending"
   },
-  "updated_at": "2026-10-29 09:25:45 UTC"
+  "updated_at": "2026-10-29 09:34:50 UTC"
 }
