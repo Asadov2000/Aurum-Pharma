@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "blocked_waiting_approval",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Fix Windows mocked probe startup without increasing deadlines or changing real TPM runner; retain all assertions; publish same PR and full final-head CI with all173 new case proof",
+  "remaining_step": "Await one-time approval, apply reviewed catalog compatibility patch, preserve pending Windows fixture fix, static checks then same PR final-head CI/all173 new cases and protected merge",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -64,9 +64,41 @@
       "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
       "job": 3790,
       "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0"
+    },
+    "catalog_historical_migration": {
+      "consecutive": 2,
+      "step": "backend Pytest: test_preparation_migration_roundtrip_preserves_legacy_catalog",
+      "cause": "0229 stock capture reads unit_sale_preparation before trusted migrator early return during 0161 roundtrip; UndefinedColumnError",
+      "evidence": [
+        {
+          "head": "16013e66c95bf46247600f0e1da3b7befe14be62",
+          "workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
+          "job": 3785,
+          "recorded": 566,
+          "passed": 565,
+          "failed": 1
+        },
+        {
+          "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
+          "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
+          "job": 3793,
+          "recorded": 566,
+          "passed": 565,
+          "failed": 1
+        }
+      ],
+      "proposal": ".codex/unit-edge-stock-events-2026-10-29/catalog-migration-compat-proposal.patch",
+      "source_sha256": "99b2a625688e523d31ed84f47fe54938b0a17ca4a767661010326b219640997a",
+      "proposal_applied": false,
+      "proposal_review": "Minimal three hunks; git apply --check passed; SESSION_USER and runtime gates preserved"
     }
   },
-  "blocker": null,
+  "blocker": {
+    "requires": "Explicit one-time exception to AGENTS.md two identical failure stop rule for catalog historical migration compatibility",
+    "proposal_applied": false,
+    "live_application": "untouched",
+    "shared_database": "untouched"
+  },
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
     "pr": 436,
@@ -123,10 +155,16 @@
   "ci": {
     "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
     "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-    "status": "windows_tooling_failed_other_jobs_running",
+    "status": "Windows failed; one backend shard failed; other CI jobs may still run, not retriggered",
     "superseded_workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
     "new_case_result": "pending",
     "backend_job": 3793
   },
-  "updated_at": "2026-10-29 09:43:25 UTC"
+  "updated_at": "2026-10-29 09:50:17 UTC",
+  "pending_changes": {
+    "file": "scripts/test-windows-tpm-readiness.ps1",
+    "reason": "Use native Windows cmd mocked fixture instead of cold PowerShell child",
+    "checks": "PowerShell5.1:79pass;pwsh:79pass;diffcheckpass;79 assertions and all deadlines retained; real TPM runner unchanged",
+    "committed": false
+  }
 }
