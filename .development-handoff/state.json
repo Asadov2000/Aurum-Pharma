@@ -4,14 +4,14 @@
   "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
   "control_stage_id": "E6-03",
   "owner": "local",
-  "phase": "implementation_and_qa",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-physical-snapshot-01",
   "branch": "codex/unit-edge-physical-snapshot",
   "base_sha": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
   "base_tree": "423bb78718addf96f2c0fb5fed0b8b406280299a",
-  "expected_head": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
+  "expected_head": "29259c270b00d994d37c6942cf5b0d239765deba",
   "validated_sha": null,
-  "pr": null,
+  "pr": 436,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -32,7 +32,7 @@
     "Preserve existing v1 JSON/hash contracts, fail closed old reader, no unauthorized purchase-cost disclosure or activation",
     "Full exact-head CI; expected-head PR merge; current main tree proof"
   ],
-  "remaining_step": "Finish strict v1/v2 source/projection and initialization basis, fresh signature verification on private read; independent review, pure tests/static, disposable full CI, protected merge.",
+  "remaining_step": "All8 exact-head CI success, all70 new cases success without skips, expected-head protected merge and current main tree proof",
   "failure_counters": {
     "v1_target_mypy": {
       "consecutive": 0,
@@ -44,6 +44,12 @@
     "v1_format": {
       "consecutive": 0,
       "resolved": "Black/Ruff pass; E501 corrected without rule changes"
+    },
+    "untracked_whitespace": {
+      "consecutive": 0,
+      "cause": "CRLF Git warning on three newly created Python files mistaken for whitespace output by existing checker",
+      "fix": "Normalize only those new files to repository LF convention",
+      "resolved": "checker passed all8 untracked files"
     }
   },
   "blocker": null,
@@ -82,5 +88,35 @@
       "Legacy physical v1 remains distinct, no invented blisters",
       "Original per-pack initialization and monetary basis retained"
     ]
+  },
+  "head_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
+  "published_head": "29259c270b00d994d37c6942cf5b0d239765deba",
+  "local_validation": {
+    "new_pure": 53,
+    "existing_golden": 15,
+    "new_integration_collected": 9,
+    "new_migration_collected": 8,
+    "new_stage_tests": 70,
+    "mypy_sources": 520,
+    "replay_target_mypy": 2,
+    "ruff": "pass",
+    "black": "pass",
+    "tracked_and_untracked_whitespace": "pass",
+    "architecture_review": "APPROVE",
+    "qa_review": "APPROVE"
+  },
+  "ci": {
+    "head": "29259c270b00d994d37c6942cf5b0d239765deba",
+    "workflow": "77e3bc1d-e52d-43d4-853f-183b1ac39ed7",
+    "backend": 3765,
+    "gate": 3770,
+    "state": "running"
+  },
+  "main_tree_matches_tested_head": false,
+  "readiness_limits": {
+    "physical_records": 10000,
+    "payload_bytes": 8388608,
+    "historical_rows": "bounded; reject excess, never truncate",
+    "larger_catalog_30_day_workload": "E6-09 not claimed ready"
   }
 }
