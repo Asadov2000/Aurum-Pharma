@@ -35,6 +35,15 @@ def build_physical_source_records(
     tenant_id: UUID,
     branch_id: UUID,
 ) -> tuple[PhysicalRecord, ...]:
+    lot_scope = {lot.id: (lot.tenant_id, lot.branch_id, lot.catalog_id) for lot in facts.lots}
+    if len({row.id for row in facts.writeoff_costs}) != len(facts.writeoff_costs):
+        raise ValueError("Physical write-off cost source contains duplicate entries")
+    if any(
+        (row.tenant_id, row.branch_id) != (tenant_id, branch_id)
+        or lot_scope.get(row.lot_id) != (row.tenant_id, row.branch_id, row.catalog_id)
+        for row in facts.writeoff_costs
+    ):
+        raise ValueError("Physical write-off cost source escapes its lot scope")
     records: list[PhysicalRecord] = [
         PhysicalCatalogConfigRecord(
             id=row.id,
@@ -91,6 +100,11 @@ def build_physical_source_records(
                         (m.units_taken, m.cost_version, m.cost_amount)
                         for m in facts.movements
                         if m.lot_id == lot.id
+                    ]
+                    + [
+                        (entry.units_taken, entry.cost_version, entry.cost_amount)
+                        for entry in facts.writeoff_costs
+                        if entry.lot_id == lot.id
                     ],
                 ),
             )

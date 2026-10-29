@@ -248,6 +248,7 @@ class SyncStream(Base):
     writer_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_reservation_transaction_id: Mapped[int | None] = mapped_column(BigInteger)
     current_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     current_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -411,6 +412,54 @@ class SyncRetailEventAnchor(Base):
         DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
     )
     created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncPhysicalStockAnchor(Base):
+    __tablename__ = "sync_physical_stock_anchor"
+
+    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SyncPhysicalStockProjection(Base):
+    __tablename__ = "sync_physical_stock_projection"
+
+    source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    source_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SyncPhysicalStockBaseline(Base):
+    __tablename__ = "sync_physical_stock_baseline"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    physical_records_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    configuration_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class SyncSaleProjection(Base):

@@ -24,6 +24,8 @@ from app.domains.sync.integrity import (
 from app.domains.sync.models import (
     SyncCursor,
     SyncInboxEvent,
+    SyncPhysicalStockAnchor,
+    SyncPhysicalStockProjection,
     SyncRetailEventAnchor,
     SyncSaleProjection,
 )
@@ -121,6 +123,14 @@ class Repository:
 
     async def get_local_edge_node_id(self) -> UUID:
         return NODE
+
+    async def get_physical_stock_anchor(self, **scope: object) -> SyncPhysicalStockAnchor | None:
+        return None
+
+    async def list_physical_stock_projections(
+        self, **scope: object
+    ) -> list[SyncPhysicalStockProjection]:
+        return []
 
     async def get_retail_event_anchor(self, **scope: object) -> SyncRetailEventAnchor | None:
         self.anchor_lookups.append(scope)

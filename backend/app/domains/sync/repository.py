@@ -26,6 +26,9 @@ from app.domains.sync.models import (
     SyncInboxEvent,
     SyncNode,
     SyncOutboxEvent,
+    SyncPhysicalStockAnchor,
+    SyncPhysicalStockBaseline,
+    SyncPhysicalStockProjection,
     SyncQuarantineIncident,
     SyncReadBarcodeProjection,
     SyncReadCatalogProjection,
@@ -1673,6 +1676,93 @@ class SyncEdgeRepository:
         """Rollback one retail event without retaining an incomplete inbox/cursor."""
         async with self.session.begin_nested():
             yield
+
+    async def get_physical_stock_anchor(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        event_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        sequence: int | None = None,
+    ) -> SyncPhysicalStockAnchor | None:
+        query = select(SyncPhysicalStockAnchor).where(
+            SyncPhysicalStockAnchor.tenant_id == tenant_id,
+            SyncPhysicalStockAnchor.branch_id == branch_id,
+            SyncPhysicalStockAnchor.target_edge_node_id == edge_node_id,
+        )
+        if event_id is not None:
+            query = query.where(SyncPhysicalStockAnchor.event_id == event_id)
+        else:
+            query = query.where(
+                SyncPhysicalStockAnchor.origin_node_id == origin_node_id,
+                SyncPhysicalStockAnchor.writer_epoch == writer_epoch,
+                SyncPhysicalStockAnchor.sequence == sequence,
+            )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def get_physical_stock_projection(
+        self, event_id: UUID
+    ) -> SyncPhysicalStockProjection | None:
+        return await self.session.get(SyncPhysicalStockProjection, event_id)
+
+    async def get_physical_stock_baseline(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        snapshot_id: UUID,
+    ) -> SyncPhysicalStockBaseline | None:
+        return await self.session.get(
+            SyncPhysicalStockBaseline, (tenant_id, branch_id, edge_node_id, snapshot_id)
+        )
+
+    async def insert_physical_stock_projection(
+        self, envelope: SyncEventEnvelope
+    ) -> SyncPhysicalStockProjection:
+        statement = (
+            insert(SyncPhysicalStockProjection)
+            .values(
+                source_event_id=envelope.event_id,
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                operation_id=envelope.operation_id,
+                source_id=envelope.aggregate_id,
+                payload=envelope.payload,
+                source_payload_hash=envelope.payload_hash,
+                projection_hash=envelope.projection_hash,
+            )
+            .returning(SyncPhysicalStockProjection)
+        )
+        return (await self.session.execute(statement)).scalar_one()
+
+    async def list_physical_stock_projections(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
+        after_sequence: int,
+    ) -> list[SyncPhysicalStockProjection]:
+        result = await self.session.scalars(
+            select(SyncPhysicalStockProjection)
+            .where(
+                SyncPhysicalStockProjection.tenant_id == tenant_id,
+                SyncPhysicalStockProjection.branch_id == branch_id,
+                SyncPhysicalStockProjection.origin_node_id == origin_node_id,
+                SyncPhysicalStockProjection.writer_epoch == writer_epoch,
+                SyncPhysicalStockProjection.sequence > after_sequence,
+            )
+            .order_by(SyncPhysicalStockProjection.sequence)
+        )
+        return list(result)
 
     async def get_retail_event_anchor(
         self,

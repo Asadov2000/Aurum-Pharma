@@ -61,12 +61,22 @@ from app.domains.sync.models import (
     SyncInboxEvent,
     SyncNode,
     SyncOutboxEvent,
+    SyncPhysicalStockProjection,
     SyncReadSnapshot,
     SyncReadSnapshotComponent,
     SyncSaleProjection,
     SyncWriterActivation,
 )
 from app.domains.sync.physical_read_snapshot import PhysicalRecord
+from app.domains.sync.physical_stock_events import (
+    EVENT_TYPE as PHYSICAL_STOCK_EVENT_TYPE,
+)
+from app.domains.sync.physical_stock_events import (
+    PhysicalStockChange,
+    PhysicalStockEventAnchor,
+    decode_physical_stock_event,
+    encode_physical_stock_event,
+)
 from app.domains.sync.read_snapshot import (
     REQUIRED_COMPONENTS,
     ChunkDescriptor,
@@ -140,7 +150,11 @@ class _EnvelopeError(ValueError):
 
 def _require_compatible_delivery(rows: Sequence[SyncOutboxEvent]) -> None:
     """Keep unsupported retail events in order until their receiver is ready."""
-    if any(row.event_type in {"pos.sale.completed.v3", "pos.sale.completed.v4"} for row in rows):
+    if any(
+        row.event_type
+        in {"pos.sale.completed.v3", "pos.sale.completed.v4", PHYSICAL_STOCK_EVENT_TYPE}
+        for row in rows
+    ):
         raise BusinessRuleError("Retail event delivery requires a compatible receiver")
 
 
@@ -1781,6 +1795,20 @@ class SyncEdgeApplyService:
     async def _validate_retail_slot(self, envelope: SyncEventEnvelope) -> None:
         if self._edge_node_id is None:
             raise _EnvelopeError("retail_anchor_scope_unavailable")
+        stock = await self.repo.get_physical_stock_anchor(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+        )
+        if stock is not None and (
+            stock.event_id != envelope.event_id
+            or envelope.schema_version != 5
+            or envelope.event_type != PHYSICAL_STOCK_EVENT_TYPE
+        ):
+            raise _EnvelopeError("physical_stock_anchor_mismatch")
         row = await self.repo.get_retail_event_anchor_by_position(
             tenant_id=envelope.tenant_id,
             branch_id=envelope.branch_id,
@@ -1795,6 +1823,44 @@ class SyncEdgeApplyService:
             or envelope.event_type != f"pos.sale.completed.v{envelope.schema_version}"
         ):
             raise _EnvelopeError("retail_anchor_mismatch")
+
+    async def _physical_stock_result(
+        self,
+        envelope: SyncEventEnvelope,
+        *,
+        previous_checksums: tuple[str, str] | None = None,
+    ) -> PhysicalStockChange:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("physical_stock_anchor_scope_unavailable")
+        row = await self.repo.get_physical_stock_anchor(
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+        )
+        if row is None:
+            raise _EnvelopeError("physical_stock_anchor_missing")
+        if previous_checksums is not None and (
+            row.previous_source_checksum != previous_checksums[0]
+            or row.previous_projection_checksum != previous_checksums[1]
+        ):
+            raise _EnvelopeError("physical_stock_anchor_checkpoint_mismatch")
+        try:
+            anchor = PhysicalStockEventAnchor(
+                tenant_id=row.tenant_id,
+                branch_id=row.branch_id,
+                origin_node_id=row.origin_node_id,
+                writer_epoch=row.writer_epoch,
+                sequence=row.sequence,
+                previous_source_checksum=row.previous_source_checksum,
+                previous_projection_checksum=row.previous_projection_checksum,
+                event_fingerprint=row.event_fingerprint,
+            )
+            return decode_physical_stock_event(
+                encode_physical_stock_event(envelope, anchor=anchor), anchor=anchor
+            )
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("physical_stock_anchor_mismatch") from exc
 
     async def _retail_result(
         self,
@@ -2108,6 +2174,8 @@ class SyncEdgeApplyService:
                 try:
                     if envelope.schema_version in (3, 4):
                         await self._retail_result(envelope)
+                    elif envelope.schema_version == 5:
+                        await self._physical_stock_result(envelope)
                 except _EnvelopeError as exc:
                     reason_code = exc.reason_code
                 else:
@@ -2144,6 +2212,68 @@ class SyncEdgeApplyService:
         return None, False
 
     async def _apply_new_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        if envelope.schema_version == 5:
+            return await self._apply_stock_event(
+                cursor=cursor, envelope=envelope, applied=applied, duplicates=duplicates
+            )
+        return await self._apply_new_sale_event(
+            cursor=cursor, envelope=envelope, applied=applied, duplicates=duplicates
+        )
+
+    async def _apply_stock_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        try:
+            await self._physical_stock_result(
+                envelope, previous_checksums=(cursor.source_checksum, cursor.projection_checksum)
+            )
+        except _EnvelopeError as exc:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code=exc.reason_code,
+                applied=applied,
+                duplicates=duplicates,
+            )
+        if await self.repo.get_physical_stock_projection(envelope.event_id) is not None:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="physical_stock_projection_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+        async with self.repo.event_savepoint():
+            inbox = await self.repo.insert_inbox(envelope, status="received")
+            await self.repo.insert_physical_stock_projection(envelope)
+            await self.repo.mark_inbox(
+                inbox, status="applied", reason_code=None, applied_at=utc_now()
+            )
+            await self.repo.update_cursor(
+                cursor,
+                last_sequence=envelope.sequence,
+                last_event_id=envelope.event_id,
+                source_checksum=envelope.stream_checksum,
+                projection_checksum=envelope.projection_checksum,
+                status="synced",
+            )
+        return None
+
+    async def _apply_new_sale_event(
         self,
         *,
         cursor: SyncCursor,
@@ -2453,12 +2583,22 @@ class SyncEdgeApplyService:
         )
         if cursor is None:
             raise NotFoundError("Edge sync cursor not found")
-        rows = await self.repo.list_sale_projections(
+        sale_rows = await self.repo.list_sale_projections(
             tenant_id=tenant_id,
             branch_id=branch_id,
             origin_node_id=origin_node_id,
             writer_epoch=writer_epoch,
             after_sequence=cursor.start_sequence,
+        )
+        stock_rows = await self.repo.list_physical_stock_projections(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
+            after_sequence=cursor.start_sequence,
+        )
+        rows: list[SyncSaleProjection | SyncPhysicalStockProjection] = sorted(
+            [*sale_rows, *stock_rows], key=lambda row: row.sequence
         )
         expected_sequence = cursor.start_sequence + 1
         checksum = cursor.start_projection_checksum
@@ -2466,11 +2606,40 @@ class SyncEdgeApplyService:
         valid = True
         for row in rows:
             try:
-                projection_hash, next_source_checksum = await self._verified_projection_checksums(
-                    row,
-                    previous_source_checksum=source_checksum,
-                    previous_projection_checksum=checksum,
-                )
+                if isinstance(row, SyncPhysicalStockProjection):
+                    inbox = await self.repo.get_inbox_event(row.source_event_id)
+                    if inbox is None or inbox.status != "applied":
+                        raise ValueError("Physical projection has no applied source")
+                    envelope = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+                    await self._validate_retail_slot(envelope)
+                    change = await self._physical_stock_result(
+                        envelope, previous_checksums=(source_checksum, checksum)
+                    )
+                    if (
+                        row.tenant_id != envelope.tenant_id
+                        or row.branch_id != envelope.branch_id
+                        or row.origin_node_id != envelope.origin_node_id
+                        or row.writer_epoch != envelope.writer_epoch
+                        or row.sequence != envelope.sequence
+                        or row.operation_id != change.operation_id
+                        or row.source_id != change.source_id
+                        or row.source_payload_hash != envelope.payload_hash
+                        or canonical_json_bytes(row.payload)
+                        != canonical_json_bytes(change.model_dump(mode="json"))
+                    ):
+                        raise ValueError("Physical projection differs from its source")
+                    projection_hash = canonical_json_hash(row.payload)
+                    next_source_checksum = envelope.stream_checksum
+                    aggregate_id = row.source_id
+                else:
+                    projection_hash, next_source_checksum = (
+                        await self._verified_projection_checksums(
+                            row,
+                            previous_source_checksum=source_checksum,
+                            previous_projection_checksum=checksum,
+                        )
+                    )
+                    aggregate_id = row.sale_id
             except (ValueError, TypeError, OverflowError):
                 valid = False
                 break
@@ -2482,7 +2651,7 @@ class SyncEdgeApplyService:
                 origin_node_id=row.origin_node_id,
                 writer_epoch=row.writer_epoch,
                 sequence=row.sequence,
-                sale_id=row.sale_id,
+                sale_id=aggregate_id,
                 projection_hash=projection_hash,
             )
             source_checksum = next_source_checksum

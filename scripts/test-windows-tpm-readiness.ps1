@@ -77,34 +77,58 @@ foreach ($response in $invalidResponses) {
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $fixtureRoot = Join-Path $repoRoot (".codex/tpm readiness tests " + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
-$fixturePath = Join-Path $fixtureRoot "fake probe.ps1"
+$isWindowsFixture = $env:OS -eq "Windows_NT"
+$fixtureName = if ($isWindowsFixture) { "fake probe.cmd" } else { "fake probe.ps1" }
+$fixturePath = Join-Path $fixtureRoot $fixtureName
 try {
     $missing = Get-WindowsTpmReadiness -RepoRoot $fixtureRoot
     $expectedMissing = if ($env:OS -eq "Windows_NT") { "not-built" } else { "not-supported" }
     Assert-Equal $missing.Status $expectedMissing "a fixture without the fixed artifact never runs native TPM"
 
-    $powershellExecutable = (Get-Process -Id $PID).Path
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $fixturePath + '"'
-    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value ("[Console]::Out.WriteLine('" + $positive + "'); exit 0")
-    $success = Invoke-TpmReadinessProcess -ExecutablePath $powershellExecutable -Arguments $arguments -TimeoutMilliseconds 10000
+    if ($isWindowsFixture) {
+        # Avoid cold PowerShell startup consuming the process deadline on Windows CI.
+        # Use only cmd built-ins, so timeout cleanup leaves no child process behind.
+        $probeExecutable = Join-Path $env:SystemRoot "System32/cmd.exe"
+        $arguments = '/d /s /c ""' + $fixturePath + '""'
+        $fixtures = @{
+            Success = "@echo off`r`necho $positive`r`nexit /b 0"
+            Failed = "@echo off`r`necho $positive`r`nexit /b 2"
+            UnexpectedStderr = "@echo off`r`necho $positive`r`necho diagnostic 1>&2`r`nexit /b 0"
+            LargeStderr = "@echo off`r`nfor /l %%i in (1,1,1024) do @echo $(('x' * 256)) 1>&2`r`nexit /b 1"
+            Timeout = "@echo off`r`n:wait`r`ngoto wait"
+        }
+    }
+    else {
+        $probeExecutable = (Get-Process -Id $PID).Path
+        $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $fixturePath + '"'
+        $fixtures = @{
+            Success = "[Console]::Out.WriteLine('" + $positive + "'); exit 0"
+            Failed = "[Console]::Out.WriteLine('" + $positive + "'); exit 2"
+            UnexpectedStderr = "[Console]::Out.WriteLine('" + $positive + "'); [Console]::Error.WriteLine('diagnostic'); exit 0"
+            LargeStderr = "[Console]::Error.WriteLine(('x' * 262144)); exit 1"
+            Timeout = "[System.Threading.Thread]::Sleep(10000)"
+        }
+    }
+    Set-Content -LiteralPath $fixturePath -Encoding ASCII -Value $fixtures.Success
+    $success = Invoke-TpmReadinessProcess -ExecutablePath $probeExecutable -Arguments $arguments -TimeoutMilliseconds 10000
     Assert-Equal $success.Status "observed" "runner accepts a successful strict response through a path containing spaces"
 
-    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value ("[Console]::Out.WriteLine('" + $positive + "'); exit 2")
-    $failed = Invoke-TpmReadinessProcess -ExecutablePath $powershellExecutable -Arguments $arguments -TimeoutMilliseconds 10000
+    Set-Content -LiteralPath $fixturePath -Encoding ASCII -Value $fixtures.Failed
+    $failed = Invoke-TpmReadinessProcess -ExecutablePath $probeExecutable -Arguments $arguments -TimeoutMilliseconds 10000
     Assert-Equal $failed.Status "unavailable" "a positive stdout with a failing process stays unavailable"
 
-    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value ("[Console]::Out.WriteLine('" + $positive + "'); [Console]::Error.WriteLine('diagnostic'); exit 0")
-    $unexpectedStderr = Invoke-TpmReadinessProcess -ExecutablePath $powershellExecutable -Arguments $arguments -TimeoutMilliseconds 10000
+    Set-Content -LiteralPath $fixturePath -Encoding ASCII -Value $fixtures.UnexpectedStderr
+    $unexpectedStderr = Invoke-TpmReadinessProcess -ExecutablePath $probeExecutable -Arguments $arguments -TimeoutMilliseconds 10000
     Assert-Equal $unexpectedStderr.Status "unavailable" "a nominal success accompanied by stderr cannot claim an observation"
 
-    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value "[Console]::Error.WriteLine(('x' * 262144)); exit 1"
-    $stderr = Invoke-TpmReadinessProcess -ExecutablePath $powershellExecutable -Arguments $arguments -TimeoutMilliseconds 10000
+    Set-Content -LiteralPath $fixturePath -Encoding ASCII -Value $fixtures.LargeStderr
+    $stderr = Invoke-TpmReadinessProcess -ExecutablePath $probeExecutable -Arguments $arguments -TimeoutMilliseconds 10000
     Assert-Equal $stderr.Status "unavailable" "large stderr is drained without deadlock"
     Assert-Equal (($stderr | ConvertTo-Json -Compress).Contains(('x' * 20))) $false "raw native diagnostics are not exposed in the result"
 
-    Set-Content -LiteralPath $fixturePath -Encoding UTF8 -Value "[System.Threading.Thread]::Sleep(10000)"
+    Set-Content -LiteralPath $fixturePath -Encoding ASCII -Value $fixtures.Timeout
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $timedOut = Invoke-TpmReadinessProcess -ExecutablePath $powershellExecutable -Arguments $arguments -TimeoutMilliseconds 200
+    $timedOut = Invoke-TpmReadinessProcess -ExecutablePath $probeExecutable -Arguments $arguments -TimeoutMilliseconds 200
     $timer.Stop()
     Assert-Equal $timedOut.Status "timeout" "runner reports the bounded deadline"
     Assert-Equal ($timer.ElapsedMilliseconds -lt 5000) $true "timeout does not wait for fixture completion"
