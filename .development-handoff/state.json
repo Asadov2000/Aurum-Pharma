@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "ci_pending",
-  "run_id": "local-2026-10-28-edge-receiver-01",
+  "phase": "fix_ci",
+  "run_id": "local-2026-10-29-edge-receiver-02",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
-  "base_tree": "ad755d766c5b95bc98ec69e482aa4d94dc253664",
+  "base_tree": "46b0f2aa6c550a5a573f92229f3be21a862c9f52",
   "expected_head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
   "validated_sha": null,
   "pr": 435,
@@ -18,13 +18,13 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "cloud_cursor": "d6ce913b-bd0c-4daf-ab6a-d84563d909df:1",
-  "local_product_writes_stopped": true,
+  "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (8)",
-  "counter_after_full_completion": "2/7 (8)",
+  "counter_after_full_completion": "2/7 (7)",
   "remaining_stage_plan": ".codex/edge-remaining-stages-2026-10-28.json",
   "scope": "E6-02 only: trusted v3/v4 receiver, versioned historical projection, atomic inbox/cursor/checksums, exact replay and verify. No delivery activation, stock effects, shared DB or runtime changes.",
   "acceptance": [
@@ -38,15 +38,24 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Test-only owner provisioning fixed; wait second exact-head full8 CI, no new work or writers. Merge only final success.",
+  "remaining_step": "Fix only audit expectation in denied receive test: all prior audit and financial/stock state immutable, exactly one incident audit expected. First owner provisioning failure resolved; second cause has one failure. Then full exact-head CI.",
   "failure_counters": {
     "receiver_db_fixture": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "backend Pytest",
       "head": "2cb742e3f19024110ed43304425faa2d866623dc",
       "cause": "Integration fixture called SyncAdminService.create_node with cashier runtime; INSERT sync_node correctly denied",
       "fix": "QA to provision test Edge through schema owner on disposable CI DB; preserve runtime privileges",
-      "fix_head": "d86207048f09897aaaaf501b3137ccd2b198ec00"
+      "fix_head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
+      "resolved_by": "d86207048f09897aaaaf501b3137ccd2b198ec00; new failure occurs after successful owner setup"
+    },
+    "quarantine_audit_assertion": {
+      "consecutive": 1,
+      "step": "backend Pytest",
+      "head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
+      "cause": "Denied receive correctly inserts immutable quarantine audit; test incorrectly asserts complete audit snapshot unchanged",
+      "test": "test_real_receiver_rejects_absent_or_other_nodes_protected_anchor[missing]",
+      "fix": "Preserve all previous rows and physical/financial state; require exactly one precise incident audit"
     }
   },
   "blocker": null,
@@ -96,7 +105,8 @@
   "ci": {
     "head": "d86207048f09897aaaaf501b3137ccd2b198ec00",
     "workflow": "c624217a-eeb2-42ed-9235-3559823b34e0",
-    "state": "pending"
+    "state": "failed",
+    "green_jobs": 6
   },
   "main_tree_matches_tested_head": true,
   "runtime": {
@@ -114,5 +124,6 @@
     "backend": 3726,
     "cause": "Both failing pytest shards called administrative node creation as cashier in shared test helper; runtime denied correctly",
     "green_jobs": 6
-  }
+  },
+  "previous_run_id": "local-2026-10-28-edge-receiver-01"
 }
