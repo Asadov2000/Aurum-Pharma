@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "ci_pending",
+  "phase": "awaiting_dependency_approval",
   "run_id": "local-2026-10-29-edge-receiver-02",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
@@ -38,7 +38,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "Await full CI for precise test-only quarantine audit fix on ff39bbaf; require all52 newtests and eight contexts, expected-head merge. No product/runtime/DB/cloud writes.",
+  "remaining_step": "Wait dependency approval; existing backend/E2E CI may finish and can be inspected read-only. No dependency edits/install or new CI attempt until approved.",
   "failure_counters": {
     "receiver_db_fixture": {
       "consecutive": 0,
@@ -57,9 +57,18 @@
       "test": "test_real_receiver_rejects_absent_or_other_nodes_protected_anchor[missing]",
       "fix": "Preserve all previous rows and physical/financial state; require exactly one precise incident audit",
       "fix_head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2"
+    },
+    "seroval_audit": {
+      "consecutive": 1,
+      "step": "Audit JavaScript dependencies",
+      "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
+      "cause": "New advisory feed flags seroval1.6.3 for GHSA-97r2-qh9m-474h, GHSA-wp97-x4hv-qvhp, GHSA-7rv5-mrxv-xcr9",
+      "fixed_version": "1.6.8",
+      "version_verified": "GitHub primary advisories + npm registry metadata",
+      "approval": "pending"
     }
   },
-  "blocker": null,
+  "blocker": "Explicit AGENTS.md dependency approval requested: seroval 1.6.3 to 1.6.8, package.json override and necessary pnpm lock entries only. No approval yet.",
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-ATOMIC-EVENTS-01",
     "pr": 434,
@@ -107,7 +116,7 @@
   "ci": {
     "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
     "workflow": "b7e4e743-3e78-4f93-8074-9c7cc2a25235",
-    "state": "pending"
+    "state": "dependency_audit_failed_backend_and_e2e_running"
   },
   "main_tree_matches_tested_head": true,
   "runtime": {
