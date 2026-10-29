@@ -234,7 +234,8 @@ CREATE FUNCTION public.trg_physical_catalog_revision() RETURNS TRIGGER
 LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
  IF TG_OP='INSERT' THEN NEW.physical_config_revision:=1;
- ELSIF NEW.unit_sale_preparation IS DISTINCT FROM OLD.unit_sale_preparation
+ ELSIF to_jsonb(NEW)->'unit_sale_preparation'
+  IS DISTINCT FROM to_jsonb(OLD)->'unit_sale_preparation'
   OR NEW.base_price IS DISTINCT FROM OLD.base_price THEN
   NEW.physical_config_revision:=OLD.physical_config_revision+1;
  ELSE NEW.physical_config_revision:=OLD.physical_config_revision; END IF;
@@ -245,6 +246,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE tenant UUID; branch UUID; source UUID; kind TEXT; captured JSONB; occurred TIMESTAMPTZ;
  stream public.sync_stream%ROWTYPE; gate RECORD; old_branch TEXT; unsupported BOOLEAN:=false;
 BEGIN
+ -- Historical owner/migrator rehearsals may temporarily remove additive columns.
+ IF SESSION_USER IN ('aurum_schema_owner','aurum_migrator') THEN RETURN NEW; END IF;
  tenant:=NEW.tenant_id; source:=NEW.id; occurred:=clock_timestamp();
  IF TG_TABLE_NAME IN ('unit_stock_operation','unit_stock_entry','unit_stock_lot',
  'unit_stock_opened_pack') THEN
@@ -274,8 +277,6 @@ BEGIN
   occurred:=NEW.created_at;
  END IF;
  -- Only source triggers may create bindings; caller-controlled GUCs are not evidence.
- -- Owner/migrator provisioning is deliberately separate from live source writes.
- IF SESSION_USER IN ('aurum_schema_owner','aurum_migrator') THEN RETURN NEW; END IF;
  IF SESSION_USER NOT IN ('aurum_app','aurum_catalog_worker') THEN unsupported:=true; END IF;
  IF SESSION_USER='aurum_app' THEN
   IF public.is_tenant_support_session() THEN unsupported:=true; END IF;
