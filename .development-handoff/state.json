@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "design",
+  "phase": "final_review",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -33,8 +33,19 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Finalize minimal API/source classification; implement with independent backend/QA/security review, target tests and complete CI",
-  "failure_counters": {},
+  "remaining_step": "Close savepoint-safe stream-lock marker and final permission tests, then exact final collection/static checks, full CI and main",
+  "failure_counters": {
+    "runtime_acl_plr0915": {
+      "consecutive": 0,
+      "previous_consecutive": 2,
+      "step": "Ruff test_runtime_role_privileges.py",
+      "cause": "Existing ACL test exceeded 50 statements (54 then51)",
+      "approval": "Explicit user approval: Да, исправить и продолжить этот этап",
+      "fix": "Move one unchanged awaited column check into existing _assert_all_stock_column_privileges helper",
+      "resolved": "Ruff and Black pass; all assertion/call AST sets preserved",
+      "proposal": ".codex/unit-edge-stock-events-2026-10-29/acl-limit-proposal.patch"
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
@@ -65,7 +76,27 @@
     {
       "id": "PHYSICAL-SNAPSHOT-WRITEOFF-COST-01",
       "cause": "Snapshot remaining cost currently subtracts dispense movements but omits posted physical writeoff entries",
-      "status": "to_fix_with_regression"
+      "status": "implemented_with_8_collected_regressions_pending_CI"
     }
-  ]
+  ],
+  "local_validation": {
+    "new_contracts": 54,
+    "new_reducer": 41,
+    "new_receiver": 23,
+    "pure_passed_with_regressions": 207,
+    "full_backend_collected": 7606,
+    "new_stage_cases": 170,
+    "mypy_sources": 524,
+    "snapshot_cost_target_mypy": "2 files pass",
+    "db_tests": "collected only; disposable full CI required",
+    "architecture": "one savepoint reservation marker issue being fixed"
+  },
+  "design": {
+    "stream": "One existing stream; schema5 stock commands/config revisions and checkout companion; existing retail v1/v3/v4 hashes unchanged",
+    "effects": "Only inventory events own physical read projection effects, no unit_stock writes on receive",
+    "baseline": "Independent owner-protected snapshot/checkpoint/hash binding; source_revision is not sequence",
+    "legacy": "v1 stock writes explicitly invalidate baseline and ready=false",
+    "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
+    "audit": "Dedicated technical allowlist, no global redactor changes"
+  }
 }
