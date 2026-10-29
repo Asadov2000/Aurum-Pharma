@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Full eight-job CI on final head and proof all173 new cases executed without skip, then protected merge and tested-tree main proof",
+  "remaining_step": "Fix Windows mocked probe startup without increasing deadlines or changing real TPM runner; retain all assertions; publish same PR and full final-head CI with all173 new case proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -52,10 +52,18 @@
       "resolved": "DNS resolution recovered; normal push succeeded; exact PR head verified"
     },
     "ci_metadata_transport": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "cause": "temporary TLS handshake timeout",
+      "resolved": "bounded pinned workflow and job metadata reads succeeded after local DNS recovery"
+    },
+    "windows_tpm_fixture_startup": {
       "consecutive": 1,
-      "step": "CircleCI public workflow job metadata read",
-      "cause": "TLS handshake timeout before DNS recovery; no CI result inferred",
-      "head": "16013e66c95bf46247600f0e1da3b7befe14be62"
+      "step": "tooling-windows: powershell test-windows-tpm-readiness",
+      "cause": "PowerShell test child cold startup exceeded 10000ms: expected observed, got timeout",
+      "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
+      "job": 3790,
+      "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0"
     }
   },
   "blocker": null,
@@ -115,9 +123,10 @@
   "ci": {
     "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
     "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-    "status": "running",
+    "status": "windows_tooling_failed_other_jobs_running",
     "superseded_workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
-    "new_case_result": "pending"
+    "new_case_result": "pending",
+    "backend_job": 3793
   },
-  "updated_at": "2026-10-29 09:34:50 UTC"
+  "updated_at": "2026-10-29 09:43:25 UTC"
 }
