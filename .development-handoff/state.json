@@ -53,9 +53,8 @@
     },
     "ci_metadata_transport": {
       "consecutive": 0,
-      "previous_consecutive": 1,
-      "cause": "temporary TLS handshake timeout",
-      "resolved": "bounded pinned workflow and job metadata reads succeeded after local DNS recovery"
+      "cause": "Intermittent TLS handshake failures on PC",
+      "resolved": "GitHub statuses remained usable; pinned public metadata recovered; final workflow read succeeded"
     },
     "windows_tpm_fixture_startup": {
       "consecutive": 0,
@@ -191,11 +190,14 @@
   "head_tree": "0b798b9eecf30d6129915295c71f0adc2f137e6e",
   "ci": {
     "head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
-    "status": "pending",
+    "status": "running",
     "previous_workflow": "16aa7d94-9bdb-4e52-92bc-649748509647",
-    "new_case_result": "pending"
+    "new_case_result": "pending",
+    "workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
+    "backend_job": 3809,
+    "gate_job": 3810
   },
-  "updated_at": "2026-10-29 11:10:53 UTC",
+  "updated_at": "2026-10-29 11:13:38 UTC",
   "pending_changes": null,
   "support": {
     "case": 18248399,
