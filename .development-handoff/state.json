@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "generation": 18,
-  "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
-  "control_stage_id": "E6-03",
+  "generation": 19,
+  "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
+  "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-10-29-edge-physical-snapshot-01",
-  "branch": "codex/unit-edge-physical-snapshot",
-  "base_sha": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
-  "base_tree": "423bb78718addf96f2c0fb5fed0b8b406280299a",
-  "expected_head": "29259c270b00d994d37c6942cf5b0d239765deba",
-  "validated_sha": "29259c270b00d994d37c6942cf5b0d239765deba",
-  "pr": 436,
+  "phase": "design",
+  "run_id": "local-2026-10-29-edge-stock-events-01",
+  "branch": "codex/unit-edge-stock-events",
+  "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
+  "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
+  "expected_head": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -19,47 +19,37 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (6)",
-  "counter_after_full_completion": "2/7 (6)",
-  "scope": "E6-03 only: scoped consistent physical inventory and packaging/cost snapshot; strict version/revision/hash checks and atomic restoration. Legacy v1 unchanged; delivery/producer/activation gates remain closed. No standalone stock operations/refunds/offline grants.",
+  "counter_after_full_completion": "2/7 (5)",
+  "scope": "E6-04 only: common-stream immutable standalone physical stock/config events, trusted receive/read projection and mixed history verification; no repeated sale/refund stock effects, no operational receiver stock writes or gate/lease/delivery activation.",
   "acceptance": [
-    "Source data is one coherent tenant/branch revision with catalog packaging configuration and exact physical lots/opened packs/remainders and known or explicitly unknown historical cost",
-    "Validate shape, scope, revision and hashes, no duplicate or cross-linked references; atomic restore/promotion; replay no duplicate inventory",
-    "Preserve existing v1 JSON/hash contracts, fail closed old reader, no unauthorized purchase-cost disclosure or activation",
-    "Full exact-head CI; expected-head PR merge; current main tree proof"
+    "Current-transaction source/writer/gate bound stock events commit atomically with actual standalone operation and outbox; packaging/price history remains exact",
+    "Standalone dispense/open/writeoff and config revisions represented once; initialize/reconciliation/block changes explicit events or fail-closed baseline requirement; no silent gaps",
+    "Trusted receive exact replay/order/scope/hash validation and atomic common inbox/projection/cursor; mixed sale-stock history verifies; legacy v1/v3/v4 unchanged",
+    "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
+    "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "E6-03 completed. Next fixed stage E6-04 standalone inventory event synchronization. No next implementation started; cloud idle/ungranted, local continuation owner.",
-  "failure_counters": {
-    "v1_target_mypy": {
-      "consecutive": 0,
-      "step": "targeted mypy",
-      "cause": "Heterogeneous source tuple inferred shared SQLAlchemy Base",
-      "fix": "Explicit UnitStockOpenedPack|UnitStockEntry sequence annotation",
-      "resolved": "targeted mypy success"
-    },
-    "v1_format": {
-      "consecutive": 0,
-      "resolved": "Black/Ruff pass; E501 corrected without rule changes"
-    },
-    "untracked_whitespace": {
-      "consecutive": 0,
-      "cause": "CRLF Git warning on three newly created Python files mistaken for whitespace output by existing checker",
-      "fix": "Normalize only those new files to repository LF convention",
-      "resolved": "checker passed all8 untracked files"
-    }
-  },
+  "remaining_step": "Finalize minimal API/source classification; implement with independent backend/QA/security review, target tests and complete CI",
+  "failure_counters": {},
   "blocker": null,
   "previous_completed": {
-    "work_item_id": "UNIT-EDGE-RECEIVER-01",
-    "pr": 435,
-    "head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
-    "main": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
-    "tree": "423bb78718addf96f2c0fb5fed0b8b406280299a",
-    "ci": "all8success;new52success"
+    "work_item_id": "UNIT-EDGE-PHYSICAL-SNAPSHOT-01",
+    "pr": 436,
+    "head": "29259c270b00d994d37c6942cf5b0d239765deba",
+    "main": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
+    "tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
+    "ci": "all8success;new70success"
+  },
+  "runtime": {
+    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "primary_checkout_clean": true,
+    "application": "not changed or restarted",
+    "shared_database": "not accessed or changed",
+    "deployment": false
   },
   "baseline_findings": [
     {
@@ -71,81 +61,11 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "runtime": {
-    "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
-    "primary_checkout_clean": true,
-    "application": "not changed or restarted",
-    "shared_database": "not accessed or changed",
-    "deployment": false
-  },
-  "design": {
-    "transport": "Explicit opt-in signed read-only snapshot v2; existing three components and v1 roots preserved",
-    "storage": "Existing immutable sync_read_projection.payload (already audit-redacted), physical_count; no operational stock writes",
-    "source": "REPEATABLE READ, exact original identities/counts/pack states and historical basis, unknown cost retained",
-    "review_fixes": [
-      "SQL payload name avoids audit cost leakage",
-      "Private read must freshly authenticate every supplied credential and stored chunk",
-      "Legacy physical v1 remains distinct, no invented blisters",
-      "Original per-pack initialization and monetary basis retained"
-    ]
-  },
-  "head_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "published_head": "29259c270b00d994d37c6942cf5b0d239765deba",
-  "local_validation": {
-    "new_pure": 53,
-    "existing_golden": 15,
-    "new_integration_collected": 9,
-    "new_migration_collected": 8,
-    "new_stage_tests": 70,
-    "mypy_sources": 520,
-    "replay_target_mypy": 2,
-    "ruff": "pass",
-    "black": "pass",
-    "tracked_and_untracked_whitespace": "pass",
-    "architecture_review": "APPROVE",
-    "qa_review": "APPROVE"
-  },
-  "ci": {
-    "head": "29259c270b00d994d37c6942cf5b0d239765deba",
-    "workflow": "77e3bc1d-e52d-43d4-853f-183b1ac39ed7",
-    "backend": 3765,
-    "gate": 3770,
-    "state": "all8success",
-    "contexts": [
-      "tooling-linux",
-      "tooling-windows",
-      "dependency-audit",
-      "production-containers",
-      "frontend",
-      "e2e",
-      "backend",
-      "ci-gate"
-    ],
-    "backend_results": {
-      "passed": 7436,
-      "skipped": 0,
-      "new_stage_passed": 70,
-      "new_stage_skipped": 0
-    },
-    "proof_file": ".codex/unit-edge-physical-snapshot-2026-10-29/final-test-metadata-proof.json",
-    "optional_summary_log_read": {
-      "state": "not_required",
-      "reason": "Numeric frontend/E2E log download hit transient DNS11001; all exact-head statuses and mandatory backend test evidence independently verified",
-      "claims": "No unverified frontend/E2E numeric counts"
+  "known_review_findings": [
+    {
+      "id": "PHYSICAL-SNAPSHOT-WRITEOFF-COST-01",
+      "cause": "Snapshot remaining cost currently subtracts dispense movements but omits posted physical writeoff entries",
+      "status": "to_fix_with_regression"
     }
-  },
-  "main_tree_matches_tested_head": true,
-  "readiness_limits": {
-    "physical_records": 10000,
-    "payload_bytes": 8388608,
-    "historical_rows": "bounded; reject excess, never truncate",
-    "larger_catalog_30_day_workload": "E6-09 not claimed ready"
-  },
-  "merged_main_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
-  "merged_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "completed_at": "2026-10-29T08:03:23Z",
-  "next_control_stage_id": "E6-04",
-  "fix_commits": [
-    "29259c270b00d994d37c6942cf5b0d239765deba"
   ]
 }
