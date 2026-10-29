@@ -22,6 +22,7 @@ from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
 )
 from tests.domains.inventory.test_unit_physical_blocking import set_blocked
 from tests.domains.pos.test_retail_checkout_source_integration import protected_facts
+from tests.domains.pos.test_unit_return import runtime
 from tests.domains.sync.test_physical_stock_events_integration import (
     Captured,
     app_context,
@@ -119,6 +120,58 @@ async def prepared_case(
     return case
 
 
+def assert_only_projection_audit_added(
+    before: dict[str, list[object]],
+    after: dict[str, list[object]],
+    case: ReceiveCase,
+    actor_id: UUID,
+) -> None:
+    assert {key: value for key, value in after.items() if key != "audit_log"} == {
+        key: value for key, value in before.items() if key != "audit_log"
+    }
+    previous = before["audit_log"]
+    current = after["audit_log"]
+    assert len(current) == len(previous) + 1
+    assert all(row in current for row in previous)
+    added = [row for row in current if row not in previous]
+    assert len(added) == 1
+    audit = added[0]
+    assert isinstance(audit, dict)
+    event = case.source.event
+    assert {
+        key: audit[key]
+        for key in (
+            "tenant_id",
+            "user_id",
+            "action",
+            "table_name",
+            "record_id",
+            "old_values",
+            "changed_fields",
+        )
+    } == {
+        "tenant_id": str(event.tenant_id),
+        "user_id": str(actor_id),
+        "action": "INSERT",
+        "table_name": "sync_physical_stock_projection",
+        "record_id": str(event.event_id),
+        "old_values": None,
+        "changed_fields": None,
+    }
+    assert audit["new_values"] == {
+        "source_event_id": str(event.event_id),
+        "tenant_id": str(event.tenant_id),
+        "branch_id": str(event.branch_id),
+        "origin_node_id": str(event.origin_node_id),
+        "writer_epoch": event.writer_epoch,
+        "sequence": event.sequence,
+        "operation_id": str(event.operation_id),
+        "source_id": str(event.aggregate_id),
+        "source_payload_hash": event.payload_hash,
+        "projection_hash": event.projection_hash,
+    }
+
+
 @pytest.mark.parametrize("kind", ["dispense", "writeoff", "block", "catalog_config"])
 async def test_real_receive_replay_and_verification_never_repeat_source_effects(
     db_session: AsyncSession,
@@ -139,11 +192,15 @@ async def test_real_receive_replay_and_verification_never_repeat_source_effects(
         writer_epoch=case.source.event.writer_epoch,
     )
     assert verified.status == "synced"
+    after_first_apply = await protected_facts(db_session)
+    assert_only_projection_audit_added(
+        before, after_first_apply, case, runtime(db_session).actor_id
+    )
     await db_session.commit()
     await edge_context(db_session, case)
     replay = await SyncEdgeApplyService(SyncEdgeRepository(db_session)).apply(case.pull())
     assert replay.applied == 0 and replay.duplicates == 1
-    assert await protected_facts(db_session) == before
+    assert await protected_facts(db_session) == after_first_apply
     assert len(await captured(db_session)) == 1
 
 
