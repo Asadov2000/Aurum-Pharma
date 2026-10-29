@@ -210,7 +210,35 @@ async def test_real_receiver_rejects_absent_or_other_nodes_protected_anchor(
     assert refused.source_checksum == case.candidate.anchor.previous_source_checksum
     assert refused.projection_checksum == case.candidate.anchor.previous_projection_checksum
     assert await db_session.get(SyncSaleProjection, case.source.sale_id) is None
-    assert await protected_facts(db_session) == before
+    after = await protected_facts(db_session)
+    assert {table: rows for table, rows in after.items() if table != "audit_log"} == {
+        table: rows for table, rows in before.items() if table != "audit_log"
+    }
+    before_audit = before["audit_log"]
+    after_audit = after["audit_log"]
+    before_by_id = {row["id"]: row for row in before_audit if isinstance(row, dict)}
+    after_by_id = {row["id"]: row for row in after_audit if isinstance(row, dict)}
+    assert len(before_by_id) == len(before_audit)
+    assert len(after_by_id) == len(after_audit)
+    assert {key: row for key, row in after_by_id.items() if key in before_by_id} == before_by_id
+    new_ids = after_by_id.keys() - before_by_id.keys()
+    assert len(after_audit) == len(before_audit) + 1
+    assert len(new_ids) == 1
+    audit = after_by_id[new_ids.pop()]
+    assert refused.incident is not None
+    assert refused.incident.reason_code == "retail_anchor_missing"
+    assert audit["tenant_id"] == str(case.source.tenant_id)
+    assert audit["user_id"] is None
+    assert audit["action"] == "INSERT"
+    assert audit["table_name"] == "sync_quarantine_incident"
+    assert audit["record_id"] == str(refused.incident.incident_id)
+    assert audit["old_values"] is None and audit["new_values"] is None
+    assert audit["metadata"] == {
+        "edge_node_id": str(case.node_id),
+        "cursor_status": "quarantined",
+        "reason_code": "retail_anchor_missing",
+        "last_applied_sequence": case.envelope.sequence - 1,
+    }
 
 
 @pytest.mark.parametrize("failure", ["projection", "inbox", "cursor"])
