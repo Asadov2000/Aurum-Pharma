@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RECEIVER-01",
   "control_stage_id": "E6-02",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-29-edge-receiver-02",
   "branch": "codex/unit-edge-receiver",
   "base_sha": "524ca37af16fc36465dad56bd193706981da7292",
   "base_tree": "46b0f2aa6c550a5a573f92229f3be21a862c9f52",
   "expected_head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
-  "validated_sha": null,
+  "validated_sha": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
   "pr": 435,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -23,7 +23,7 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (8)",
+  "counter": "2/7 (7)",
   "counter_after_full_completion": "2/7 (7)",
   "remaining_stage_plan": ".codex/edge-remaining-stages-2026-10-28.json",
   "scope": "E6-02 only: trusted v3/v4 receiver, versioned historical projection, atomic inbox/cursor/checksums, exact replay and verify. No delivery activation, stock effects, shared DB or runtime changes.",
@@ -38,7 +38,7 @@
     "Unapproved dependencies/stack/protected UI/paid resources",
     "Separate event stream, second financial/stock balance, enabling receiver/new offline capabilities or cloud product authoring"
   ],
-  "remaining_step": "All8 final-head CI success, new52 test proof, expected-head merge, verify current main tree. Cloud idle, no additional product writes.",
+  "remaining_step": "E6-02 completed. Next fixed control stage is E6-03 physical snapshot bootstrap; no next implementation started. Local owns continuation, cloud remains idle and ungranted.",
   "failure_counters": {
     "receiver_db_fixture": {
       "consecutive": 0,
@@ -57,26 +57,29 @@
       "test": "test_real_receiver_rejects_absent_or_other_nodes_protected_anchor[missing]",
       "fix": "Preserve all previous rows and physical/financial state; require exactly one precise incident audit",
       "fix_head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
-      "resolved_by": "3744 partial metadata proves all48 receiver pure+integration tests success; remaining4 migration tests are in other shard"
+      "resolved_by": "all52 new tests success, no skips, backend3753 final-head full CI success"
     },
     "seroval_audit": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "Audit JavaScript dependencies",
       "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
       "cause": "New advisory feed flags seroval1.6.3 for GHSA-97r2-qh9m-474h, GHSA-wp97-x4hv-qvhp, GHSA-7rv5-mrxv-xcr9",
       "fixed_version": "1.6.8",
       "version_verified": "GitHub primary advisories + npm registry metadata",
-      "approval": "Explicit user approval 2026-10-29: Да, обновить seroval и продолжить PR #435"
+      "approval": "Explicit user approval 2026-10-29: Да, обновить seroval и продолжить PR #435",
+      "fix_head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
+      "resolved_by": "dependency-audit3749 success on approved1.6.8"
     },
     "guard_security_classification": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "backend Pytest",
       "head": "ff39bbaf8083661bbafaeb4d7bf9d1684807d1a2",
       "test": "test_runtime_role_has_only_row_level_table_privileges",
       "cause": "New ordinary invoker guard incorrectly listed in test SECURITY DEFINER=True loop; SQL owner checks and ACL are correct",
       "fix": "Move only guard name to invoker=False registry loop; preserve every security assertion",
       "fix_head": "5d6ccc5a6bbbb11e6041984d79235582502ad9a8",
-      "review": "Backend and independent QA approved; Ruff/Black/diff check pass"
+      "review": "Backend and independent QA approved; Ruff/Black/diff check pass",
+      "resolved_by": "backend3753 success and all8 final-head CI success"
     }
   },
   "blocker": null,
@@ -152,17 +155,36 @@
       "scope": "20 test caller files; old callback bodies/assertions unchanged; pure regression actual218/223/224/226"
     }
   ],
-  "merged_main_sha": null,
-  "merged_tree": null,
-  "completed_at": null,
+  "merged_main_sha": "0138921ee58e5fa412802f17344f0e33eacc4ba4",
+  "merged_tree": "423bb78718addf96f2c0fb5fed0b8b406280299a",
+  "completed_at": "2026-10-29T06:46:36Z",
   "ci": {
     "head": "5af822733c6bebb6b586989200c2dde4d3a8b9a2",
     "workflow": "369614c3-901c-429c-a75c-d71d9de42c22",
-    "state": "running",
+    "state": "all8success",
     "backend": 3753,
-    "gate": 3754
+    "gate": 3754,
+    "contexts": [
+      "tooling-linux",
+      "tooling-windows",
+      "dependency-audit",
+      "production-containers",
+      "frontend",
+      "e2e",
+      "backend",
+      "ci-gate"
+    ],
+    "backend_results": {
+      "passed": 7365,
+      "skipped": 1,
+      "new_stage_passed": 52,
+      "new_stage_skipped": 0
+    },
+    "frontend_passed": 3259,
+    "e2e_passed": 167,
+    "proof_file": ".codex/unit-edge-receiver-2026-10-28/final-test-metadata-proof.json"
   },
-  "main_tree_matches_tested_head": false,
+  "main_tree_matches_tested_head": true,
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "primary_checkout_clean": true,
@@ -194,5 +216,6 @@
     "backend": 3744,
     "cause": "First invoker-registry assertion failure plus newly announced seroval high advisories; fixed and reviewed",
     "receiver_tests_success": 48
-  }
+  },
+  "next_control_stage_id": "E6-03"
 }
