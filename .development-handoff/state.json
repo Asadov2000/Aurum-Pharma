@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "fixing_ci_test_audit_expectation",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
+  "expected_head": "c9416270faa8870ca120f9f0736fd992b9b522ef",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "a04a8e54-5989-4b93-9e73-774ee79540c5:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Correct receive audit expectation preserving stricter exact audit checks; full exact-head CI then protected merge",
+  "remaining_step": "Full exact-head all8 CI +181new withoutskips; protected merge/testedtree proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -152,7 +152,9 @@
       "job": 3821,
       "cause": "Success receive legitimately inserts technical projection audit; test incorrectly demands entire prior audit unchanged",
       "evidence": "Only audit_log differs;22business tables identical;apply/verify/replay succeeded;all34source andmaterializer passed",
-      "fix": "Assertexacttechnicalauditinsert, immutableoldaudit/businessfacts, fullsnapshotunchangedonreplay"
+      "fix": "Assertexacttechnicalauditinsert, immutableoldaudit/businessfacts, fullsnapshotunchangedonreplay",
+      "fix_commit": "c9416270",
+      "local_validation": "Exact10field new_values/no payload/cost, immutable oldaudit/businessfacts, replay full equality;RuffBlack/9target7617fullcollection pass"
     }
   },
   "blocker": null,
@@ -222,20 +224,16 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "00362e809a179fd4d9f554d06304fd92d142ebc6",
+  "head_tree": "87e57f5068fa28aa9536f229dd29fb91667eeab4",
   "ci": {
-    "head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
-    "workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
-    "status": "backend_shard_failed",
-    "previous_workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
-    "previous_backend_passed": 7199,
-    "previous_new_success": 166,
-    "backend_job": 3821,
-    "gate_job": 3826,
-    "frontend_passed": 3260,
-    "e2e_passed": 167
+    "head": "c9416270faa8870ca120f9f0736fd992b9b522ef",
+    "workflow": "e76021aa-cde9-49e4-8326-153551db7191",
+    "status": "running",
+    "previous_workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
+    "previous_frontend_passed": 3260,
+    "previous_e2e_passed": 167
   },
-  "updated_at": "2026-10-29T14:00:38.047Z",
+  "updated_at": "2026-10-29T14:05:05.570Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
