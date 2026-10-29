@@ -128,6 +128,10 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "sync_physical_stock_event",
+    "sync_physical_stock_anchor",
+    "sync_physical_stock_projection",
+    "sync_physical_stock_baseline",
     "sync_retail_event_anchor",
     "pos_retail_checkout_event",
     "pos_retail_checkout_origin",
@@ -182,6 +186,8 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "sync_physical_stock_producer_gate",
+    "sync_physical_stock_source",
     "sync_retail_event_producer_gate",
     "physical_writeoff_command",
     "physical_writeoff_entry",
@@ -260,6 +266,20 @@ SYNC_OUTBOX_INSERT_COLUMNS = {
     "projection_checksum",
 }
 
+PHYSICAL_STOCK_PROJECTION_INSERT_COLUMNS = {
+    "source_event_id",
+    "tenant_id",
+    "branch_id",
+    "origin_node_id",
+    "writer_epoch",
+    "sequence",
+    "operation_id",
+    "source_id",
+    "payload",
+    "source_payload_hash",
+    "projection_hash",
+}
+
 RUNTIME_VIEWS = {
     "v_active_subscription",
     "v_batch_with_expiry_status",
@@ -278,6 +298,19 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_sync_stream_reservation_transaction",
+    "physical_stock_time",
+    "physical_stock_pack_state",
+    "physical_stock_initial_lot",
+    "physical_stock_source_payload",
+    "trg_physical_stock_capture",
+    "trg_physical_catalog_revision",
+    "emit_physical_stock_source",
+    "trg_physical_stock_complete",
+    "trg_physical_stock_audit",
+    "trg_physical_stock_private_guard",
+    "trg_physical_stock_projection_guard",
+    "trg_physical_stock_sale_slot",
     "trg_retail_edge_anchor_guard",
     "retail_event_canonical_json",
     "retail_event_hash",
@@ -1244,6 +1277,13 @@ WHERE attributes.attrelid = 'public.sync_outbox'::REGCLASS
 ORDER BY attributes.attname
 """
 
+PHYSICAL_STOCK_PROJECTION_COLUMN_PRIVILEGES_SQL = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+    "public.sync_outbox", "public.sync_physical_stock_projection"
+)
+SYNC_STREAM_COLUMN_PRIVILEGES_SQL = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+    "public.sync_outbox", "public.sync_stream"
+)
+
 
 UNIT_STOCK_COLUMN_PRIVILEGES_SQL = """
 SELECT
@@ -1289,6 +1329,7 @@ async def _assert_all_stock_column_privileges(conn: AsyncConnection) -> None:
     _assert_physical_v2_column_privileges(
         list((await conn.execute(text(PHYSICAL_V2_COLUMN_PRIVILEGES_SQL))).mappings())
     )
+    await _assert_physical_stock_projection_columns(conn)
 
 
 def _assert_physical_v2_column_privileges(rows: list[RowMapping]) -> None:
@@ -1730,6 +1771,15 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_sync_stream_reservation_transaction",
+        "physical_stock_initial_lot",
+        "physical_stock_source_payload",
+        "trg_physical_stock_capture",
+        "emit_physical_stock_source",
+        "trg_physical_stock_complete",
+        "trg_physical_stock_audit",
+        "trg_physical_stock_projection_guard",
+        "trg_physical_stock_sale_slot",
         "trg_retail_event_capture",
         "assert_retail_event_source",
         "trg_retail_checkout_event_required",
@@ -1809,6 +1859,10 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
         "trg_retail_edge_anchor_guard",
+        "physical_stock_time",
+        "physical_stock_pack_state",
+        "trg_physical_catalog_revision",
+        "trg_physical_stock_private_guard",
         "trg_unit_legacy_transition_immutable",
         "physical_writeoff_selection",
         "retail_event_canonical_json",
@@ -1835,6 +1889,19 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert posting["app_can_execute"] is True
         assert posting["support_can_execute"] is False
         assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+async def _assert_physical_stock_projection_columns(conn: AsyncConnection) -> None:
+    result = await conn.execute(text(PHYSICAL_STOCK_PROJECTION_COLUMN_PRIVILEGES_SQL))
+    columns = list(result.mappings())
+    assert {
+        row["attname"] for row in columns if row["can_insert"]
+    } == PHYSICAL_STOCK_PROJECTION_INSERT_COLUMNS
+    assert not any(row["can_update"] for row in columns)
+    stream_result = await conn.execute(text(SYNC_STREAM_COLUMN_PRIVILEGES_SQL))
+    stream_columns = list(stream_result.mappings())
+    assert "last_reservation_transaction_id" in {row["attname"] for row in stream_columns}
+    assert not any(row["can_insert"] or row["can_update"] for row in stream_columns)
 
 
 async def test_runtime_role_has_only_row_level_table_privileges(
