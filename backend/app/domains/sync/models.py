@@ -623,7 +623,7 @@ class SyncReadSnapshot(Base):
     __tablename__ = "sync_read_snapshot"
     __table_args__ = (
         CheckConstraint("status IN ('draft', 'ready')", name="ck_sync_read_snapshot_status"),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_schema_version"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_schema_version"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_source_revision"),
         CheckConstraint(
             "manifest_hash ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_manifest_hash"
@@ -711,7 +711,7 @@ class SyncReadSnapshotComponent(Base):
             "component IN ('foundation', 'catalog', 'inventory')",
             name="ck_sync_read_snapshot_component_name",
         ),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_component_schema"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_component_schema"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_component_revision"),
         CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_component_items"),
         CheckConstraint("chunk_count > 0", name="ck_sync_read_snapshot_component_chunks"),
@@ -769,7 +769,7 @@ class SyncReadSnapshotChunk(Base):
     __tablename__ = "sync_read_snapshot_chunk"
     __table_args__ = (
         CheckConstraint("chunk_index >= 0", name="ck_sync_read_snapshot_chunk_index"),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_chunk_schema"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_chunk_schema"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_chunk_revision"),
         CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_chunk_items"),
         CheckConstraint(
@@ -876,7 +876,7 @@ class SyncReadProjection(Base):
 
     __tablename__ = "sync_read_projection"
     __table_args__ = (
-        CheckConstraint("projection_version = 1", name="ck_sync_read_projection_version"),
+        CheckConstraint("projection_version IN (1,2)", name="ck_sync_read_projection_version"),
         CheckConstraint("status IN ('building', 'ready')", name="ck_sync_read_projection_status"),
         CheckConstraint(
             "catalog_count >= 0 AND supplier_count >= 0 AND inventory_count >= 0",
@@ -918,6 +918,12 @@ class SyncReadProjection(Base):
         Integer, nullable=False, server_default=text("1")
     )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'building'"))
+    physical_payload: Mapped[list[dict[str, object]]] = mapped_column(
+        "payload", JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    physical_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     foundation_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     catalog_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     supplier_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
