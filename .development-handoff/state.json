@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci_test_fixture",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
@@ -18,8 +18,8 @@
   "cloud_product_grant": false,
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
-  "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": true,
+  "cloud_cursor": "a04a8e54-5989-4b93-9e73-774ee79540c5:1",
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Full exact-head all8 CI on decca; all181new cases without skips; fresh main/head/cloud ownership then protected merge/tested-tree proof",
+  "remaining_step": "Correct branch setup fixture, rerun full exact-head CI; all181new success then protected merge",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -68,7 +68,7 @@
       "previous_consecutive": 1
     },
     "catalog_historical_migration": {
-      "consecutive": 2,
+      "consecutive": 0,
       "step": "backend Pytest: test_preparation_migration_roundtrip_preserves_legacy_catalog",
       "cause": "0229 stock capture reads unit_sale_preparation before trusted migrator early return during 0161 roundtrip; UndefinedColumnError",
       "evidence": [
@@ -96,7 +96,7 @@
       "approval": "Explicit user approval: Да, исправить и продолжить PR #437",
       "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain",
       "fix_commit": "6af677e2",
-      "status": "Approved fix applied; await next backend CI result"
+      "status": "Resolved: later final-head3817 passed migration roundtrip"
     },
     "incoming_price_e2e": {
       "consecutive": 0,
@@ -123,7 +123,7 @@
       "previous_consecutive": 1
     },
     "stock_immediate_checkpoint": {
-      "consecutive": 1,
+      "consecutive": 0,
       "step": "backend test_config_initialization_standalone_open_and_writeoff_share_exact_branch_history",
       "head": "47aa41070c99b39a04344c81cfd83f54fc61b6c9",
       "job": 3809,
@@ -131,7 +131,16 @@
       "message": "Sync stream checkpoint is not backed by its outbox event",
       "fix_commit": "decca826",
       "fix": "Locked local nextposition; existing authority checks; outbox+immutableevent then single guarded complete checkpoint UPDATE; no constraint mode/nativeguard changes",
-      "local_validation": "Ruff/Black/mypy and7617collection pass; independent full-chain review approves; existing forced/deferred/nativeguard regressions retained"
+      "local_validation": "Ruff/Black/mypy and7617collection pass; independent full-chain review approves; existing forced/deferred/nativeguard regressions retained",
+      "previous_consecutive": 1,
+      "status": "Resolved:29 actual gated source scenarios passed on decca"
+    },
+    "branch_bootstrap_fixture": {
+      "consecutive": 1,
+      "job": 3817,
+      "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
+      "cause": "Test calls native branch initializer through actual aurum_migrator; SESSION_USER requires real aurum_app/support",
+      "fix": "Use real aurum_support db_engine setup before gates; production guards unchanged"
     }
   },
   "blocker": null,
@@ -204,15 +213,17 @@
   "ci": {
     "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
     "workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
-    "status": "running",
+    "status": "failed",
     "previous_workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
     "previous_backend_passed": 7171,
     "previous_new_success": 138,
     "new_case_result": "pending",
     "backend_job": 3817,
-    "gate_job": 3818
+    "gate_job": 3818,
+    "backend_passed": 7199,
+    "new_success": 166
   },
-  "updated_at": "2026-10-29 12:07:20 UTC",
+  "updated_at": "2026-10-29T13:20:05.071Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
