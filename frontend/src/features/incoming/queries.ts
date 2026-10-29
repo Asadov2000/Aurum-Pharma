@@ -16,6 +16,7 @@ import {
   type IncomingDocumentCreatePayload,
   type IncomingAcceptPayload,
   type IncomingDocumentUpdatePayload,
+  type IncomingDocumentWithItems,
   type IncomingItemCreatePayload,
   type IncomingItemUpdatePayload,
   type IncomingSearchParams,
@@ -96,7 +97,13 @@ export function useUpdateIncomingItem() {
       itemId: string;
       payload: IncomingItemUpdatePayload;
     }) => updateIncomingItem(args.documentId, args.itemId, args.payload),
-    onSuccess: (_data, vars) => {
+    onSuccess: async (data, vars) => {
+      await qc.cancelQueries({ queryKey: incomingKeys.doc(vars.documentId) });
+      qc.setQueryData<IncomingDocumentWithItems>(incomingKeys.doc(vars.documentId), (current) =>
+        current
+          ? { ...current, items: current.items.map((item) => (item.id === data.id ? data : item)) }
+          : undefined,
+      );
       void qc.invalidateQueries({ queryKey: incomingKeys.doc(vars.documentId) });
       void qc.invalidateQueries({ queryKey: ["incoming", "list"] });
     },
