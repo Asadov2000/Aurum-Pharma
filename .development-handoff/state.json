@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
   "expected_head": "c9416270faa8870ca120f9f0736fd992b9b522ef",
-  "validated_sha": null,
+  "validated_sha": "c9416270faa8870ca120f9f0736fd992b9b522ef",
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -23,7 +23,7 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (6)",
+  "counter": "2/7 (5)",
   "counter_after_full_completion": "2/7 (5)",
   "scope": "E6-04 only: common-stream immutable standalone physical stock/config events, trusted receive/read projection and mixed history verification; no repeated sale/refund stock effects, no operational receiver stock writes or gate/lease/delivery activation.",
   "acceptance": [
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Full exact-head all8 CI +181new withoutskips; protected merge/testedtree proof",
+  "remaining_step": "E6-04 complete; next fixed stage E6-05 requires fresh main/code/PR/owner recon before implementation",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -147,14 +147,16 @@
       "status": "Resolved:all34sourceintegration passed on8f95"
     },
     "receive_audit_expectation": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
       "job": 3821,
       "cause": "Success receive legitimately inserts technical projection audit; test incorrectly demands entire prior audit unchanged",
       "evidence": "Only audit_log differs;22business tables identical;apply/verify/replay succeeded;all34source andmaterializer passed",
       "fix": "Assertexacttechnicalauditinsert, immutableoldaudit/businessfacts, fullsnapshotunchangedonreplay",
       "fix_commit": "c9416270",
-      "local_validation": "Exact10field new_values/no payload/cost, immutable oldaudit/businessfacts, replay full equality;RuffBlack/9target7617fullcollection pass"
+      "local_validation": "Exact10field new_values/no payload/cost, immutable oldaudit/businessfacts, replay full equality;RuffBlack/9target7617fullcollection pass",
+      "previous_consecutive": 1,
+      "status": "Resolved:all9receiveintegration andfull7617cases success"
     }
   },
   "blocker": null,
@@ -187,12 +189,12 @@
     {
       "id": "PHYSICAL-SNAPSHOT-WRITEOFF-COST-01",
       "cause": "Snapshot remaining cost currently subtracts dispense movements but omits posted physical writeoff entries",
-      "status": "implemented_with_8_collected_regressions_pending_CI"
+      "status": "resolved; full final-head CI success and merged main"
     },
     {
       "id": "INCOMING-ITEM-PRICE-STALE-CACHE-01",
       "cause": "PATCH invalidates without publishing returned item; reopening can pin old item and subsequent checkbox save posts old price",
-      "status": "minimal hook fix implemented; deterministic regression being checked; E2E unchanged"
+      "status": "resolved; full final-head CI success and merged main"
     }
   ],
   "local_validation": {
@@ -228,23 +230,65 @@
   "ci": {
     "head": "c9416270faa8870ca120f9f0736fd992b9b522ef",
     "workflow": "e76021aa-cde9-49e4-8326-153551db7191",
-    "status": "running",
+    "status": "success",
     "previous_workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
     "previous_frontend_passed": 3260,
     "previous_e2e_passed": 167,
     "backend_job": 3832,
     "gate_job": 3834,
-    "backend_partial": {
-      "passed": 3809,
-      "new_passed": 121,
-      "failed": 0,
-      "completed_shards": 1
-    },
+    "backend_partial": null,
     "frontend_passed": 3260,
     "e2e_passed": 167,
-    "jobs_success": 6
+    "jobs_success": 8,
+    "backend_total": 7617,
+    "backend_passed": 7617,
+    "new_success": 181,
+    "new_skipped": 0,
+    "duplicate_identities": 0,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/46da7ff1-b669-48c6-a4b4-83ca3c7db3ae"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/6f269df0-533d-4d7a-83c4-46e0a574df05"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/6e8c9e7e-feb5-4a66-b82b-69610cf8e0a8"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/411959b1-8e0b-40b3-bf16-2bef4b17721e"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/55853940-15d1-43b7-b459-941989edef23"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/4e287533-eb7b-4a73-b450-7ec2f5fa9e15"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/07db8ebf-a949-4cc3-9336-27ec33ce3086"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/e76021aa-cde9-49e4-8326-153551db7191/job/0165f433-3cdb-44af-b848-4cb4fc73886e"
+      }
+    ]
   },
-  "updated_at": "2026-10-29T14:40:21.596Z",
+  "updated_at": "2026-10-29T14:47:28.663Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
@@ -252,5 +296,9 @@
     "purpose": "Request human/integrations engineering review and supported readonly CircleCI MCP web configuration; mismatch not asserted as proven",
     "proof": ".codex/unit-edge-stock-events-2026-10-29/openai-support-reply.jpg",
     "reply_status": "Reply sent once; later reread found no new reply"
-  }
+  },
+  "merged_main": "1824cfc9b20437bb78ce8c499faa93231da38f97",
+  "merged_tree": "87e57f5068fa28aa9536f229dd29fb91667eeab4",
+  "tested_tree_matches_main": true,
+  "next_stage": "E6-05"
 }
