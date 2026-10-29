@@ -1730,7 +1730,6 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
-        "trg_retail_edge_anchor_guard",
         "trg_retail_event_capture",
         "assert_retail_event_source",
         "trg_retail_checkout_event_required",
@@ -1809,6 +1808,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["support_can_execute"] is False
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
+        "trg_retail_edge_anchor_guard",
         "trg_unit_legacy_transition_immutable",
         "physical_writeoff_selection",
         "retail_event_canonical_json",
