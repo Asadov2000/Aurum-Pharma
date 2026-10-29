@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "applying_approved_ci_fixes",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
+  "expected_head": "5ae26794f0546261411b28dbcb527a1a809047c4",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "c41868f6-69ae-4c22-aac9-176085326fed:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Apply approved exact-hash catalog patch, retain verified Windows fixture fix, static checks and same PR final-head CI",
+  "remaining_step": "Full final-head eight-job CI; prove all173 new tests executed; protected merge and tested-tree main proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -63,7 +63,9 @@
       "cause": "PowerShell test child cold startup exceeded 10000ms: expected observed, got timeout",
       "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
       "job": 3790,
-      "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0"
+      "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
+      "status": "Native Windows mocked fixture fixed;79checks pass inPS5andpwsh;remoteCIpending",
+      "fix_commit": "5ae26794"
     },
     "catalog_historical_migration": {
       "consecutive": 2,
@@ -89,10 +91,12 @@
       ],
       "proposal": ".codex/unit-edge-stock-events-2026-10-29/catalog-migration-compat-proposal.patch",
       "source_sha256": "99b2a625688e523d31ed84f47fe54938b0a17ca4a767661010326b219640997a",
-      "proposal_applied": false,
+      "proposal_applied": true,
       "proposal_review": "Minimal three hunks; git apply --check passed; SESSION_USER and runtime gates preserved",
       "approval": "Explicit user approval: Да, исправить и продолжить PR #437",
-      "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain"
+      "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain",
+      "fix_commit": "6af677e2",
+      "status": "Approved fix applied; await next backend CI result"
     }
   },
   "blocker": null,
@@ -148,20 +152,13 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "08d382a30da4f1680fa8accd4b2a461e43287a74",
+  "head_tree": "335208dd03e9db5488c567ad7f585da5c463b631",
   "ci": {
-    "head": "82b754a08c736d5bcd515ce6ec93a787325375a0",
-    "workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
-    "status": "Windows failed; one backend shard failed; other CI jobs may still run, not retriggered",
-    "superseded_workflow": "096f891e-6560-4caa-8c93-8c2ae8b70bb5",
-    "new_case_result": "pending",
-    "backend_job": 3793
+    "head": "5ae26794f0546261411b28dbcb527a1a809047c4",
+    "status": "waiting_for_workflow",
+    "previous_workflow": "a97b52ac-bd96-4320-bfbf-492b60684bc0",
+    "new_case_result": "pending"
   },
-  "updated_at": "2026-10-29 09:56:00 UTC",
-  "pending_changes": {
-    "file": "scripts/test-windows-tpm-readiness.ps1",
-    "reason": "Use native Windows cmd mocked fixture instead of cold PowerShell child",
-    "checks": "PowerShell5.1:79pass;pwsh:79pass;diffcheckpass;79 assertions and all deadlines retained; real TPM runner unchanged",
-    "committed": false
-  }
+  "updated_at": "2026-10-29 09:57:38 UTC",
+  "pending_changes": null
 }
