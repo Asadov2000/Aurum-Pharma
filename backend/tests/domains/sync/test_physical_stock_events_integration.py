@@ -19,12 +19,18 @@ from app.domains.sync.physical_stock_events import (
 from app.domains.sync.schemas import SyncEventEnvelope
 from tests.domains.incoming.test_unit_acceptance import db_session as receiving_session_fixture
 from tests.domains.incoming.test_unit_acceptance import set_receiving_context
+from tests.domains.inventory.test_legacy_opened_transition import partial_source, physical_source
+from tests.domains.inventory.test_legacy_transition_posting import post as post_transition
+from tests.domains.inventory.test_legacy_transition_source import accepted_batch, record_count
 from tests.domains.inventory.test_physical_writeoff_posting import post as post_writeoff
 from tests.domains.inventory.test_physical_writeoff_posting import selection
 from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
     cart_line,
     dispense,
     receive_source,
+)
+from tests.domains.inventory.test_unit_ledger_v2_dispensing import (
+    remaining as remaining_units,
 )
 from tests.domains.inventory.test_unit_physical_blocking import set_blocked
 from tests.domains.pos.test_physical_cash_checkout import complete as complete_cash
@@ -174,6 +180,14 @@ async def test_config_initialization_standalone_open_and_writeoff_share_exact_br
         assert following.anchor.previous_source_checksum == previous.event.stream_checksum
         assert following.anchor.previous_projection_checksum == previous.event.projection_checksum
     opened = next(row.change for row in events if row.change.source_kind == "dispense")
+    initialized = next(row.change for row in events if row.change.source_kind == "initialize")
+    assert initialized.initializations[0].closed_packs == 2
+    assert (
+        await db_session.scalar(
+            text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
+        )
+        == 0
+    )
     assert opened.source_id == command_id and opened.source_owner == "standalone"
     assert {m.kind for m in opened.movements} == {"pack_open", "unit_take"}
     assert {m.id for m in opened.movements} == {m.id for m in first.movements}
@@ -481,3 +495,55 @@ async def test_catalog_fanout_and_reserved_financial_stream_fail_closed_before_m
     assert "physical_stock_mixed_branch_transaction" in str(denied.value.orig)
     assert await protected_facts(db_session) == before
     assert await captured(db_session) == ()
+
+
+@pytest.mark.parametrize("opened_basis", [False, True], ids=["closed", "opened"])
+async def test_gated_legacy_transition_preserves_original_basis_after_same_transaction_consumption(
+    db_session: AsyncSession,
+    maintenance_engine: AsyncEngine,
+    opened_basis: bool,
+) -> None:
+    if opened_basis:
+        legacy = await partial_source(db_session)
+        batch_id, record_id = legacy.batch_id, legacy.record_id
+    else:
+        batch_id = await accepted_batch(db_session)
+        record_id = await record_count(db_session, batch_id)
+    await db_session.commit()
+    await enable_stock_gate(db_session, maintenance_engine)
+    await app_context(db_session)
+    command_id = uuid4()
+    transition = await post_transition(db_session, batch_id, record_id, command_id)
+    source = await physical_source(db_session, transition["lot_id"])
+    await dispense(db_session, source, (cart_line(source, "unit", 1),))
+    await post_writeoff(db_session, source, selection(closed=1))
+    await finish_sources(db_session)
+    events = await captured(db_session)
+    assert [row.change.source_kind for row in events] == [
+        "legacy_transition",
+        "dispense",
+        "writeoff",
+    ]
+    initialized = events[0].change
+    assert initialized.source_id == transition["operation_id"]
+    assert len(initialized.initializations) == 1
+    initial = initialized.initializations[0]
+    assert initial.id == source.lot_id
+    assert initial.closed_packs == initial.initial_closed_packs == (1 if opened_basis else 2)
+    assert initial.initial_opened_packs == int(opened_basis)
+    assert initial.initial_opened_units == (15 if opened_basis else 0)
+    assert [pack.remaining_units for pack in initial.opened_packs] == ([15] if opened_basis else [])
+    assert len(initial.opening_basis) == int(opened_basis)
+    assert (
+        initial.cost.status == "known" and initial.cost.remaining_cost == initial.cost.initial_cost
+    )
+    assert await remaining_units(db_session, source) == (14 if opened_basis else 29)
+    assert (
+        await db_session.scalar(
+            text("SELECT closed_packs FROM unit_stock_lot_v2 WHERE id=:id"), {"id": source.lot_id}
+        )
+        == 0
+    )
+    assert await post_transition(db_session, batch_id, record_id, command_id) == transition
+    await finish_sources(db_session)
+    assert await captured(db_session) == events

@@ -302,6 +302,7 @@ CUSTOM_FUNCTIONS = {
     "physical_stock_time",
     "physical_stock_pack_state",
     "physical_stock_initial_lot",
+    "physical_stock_initial_source",
     "physical_stock_source_payload",
     "trg_physical_stock_capture",
     "trg_physical_catalog_revision",
@@ -1773,6 +1774,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
     for name in (
         "trg_sync_stream_reservation_transaction",
         "physical_stock_initial_lot",
+        "physical_stock_initial_source",
         "physical_stock_source_payload",
         "trg_physical_stock_capture",
         "emit_physical_stock_source",

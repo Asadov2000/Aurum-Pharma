@@ -25,6 +25,7 @@ FUNCTIONS = (
     "physical_stock_time(timestamptz)",
     "physical_stock_pack_state(jsonb)",
     "physical_stock_initial_lot(uuid,uuid)",
+    "physical_stock_initial_source(uuid,uuid)",
     "physical_stock_source_payload(uuid,uuid)",
     "trg_physical_stock_capture()",
     "trg_physical_catalog_revision()",
@@ -96,11 +97,71 @@ BEGIN
   'cost',jsonb_build_object('status','known','version',1,
     'initial_cost',amount::NUMERIC(14,2)::TEXT,'remaining_cost',amount::NUMERIC(14,2)::TEXT));
 END $$;
+CREATE FUNCTION public.physical_stock_initial_source(p_tenant UUID,p_operation UUID)
+RETURNS TABLE(lot_id UUID,source_kind TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE o public.unit_stock_operation_v2%ROWTYPE; e public.unit_stock_entry_v2%ROWTYPE;
+ l public.unit_stock_lot_v2%ROWTYPE; j public.unit_legacy_transition%ROWTYPE;
+ i public.incoming_item%ROWTYPE; d public.incoming_document%ROWTYPE;
+BEGIN
+ SELECT * INTO o FROM public.unit_stock_operation_v2
+  WHERE tenant_id=p_tenant AND id=p_operation;
+ SELECT * INTO e FROM public.unit_stock_entry_v2
+  WHERE tenant_id=p_tenant AND operation_id=p_operation;
+ SELECT * INTO l FROM public.unit_stock_lot_v2 WHERE tenant_id=p_tenant AND id=e.lot_id;
+ IF o.id IS NULL OR e.id IS NULL OR l.id IS NULL
+  OR o.kind<>'initialize' OR o.sale_format<>'pack' OR e.kind<>'initialize'
+  OR (e.branch_id,e.catalog_id,e.source_item_id,e.base_units) IS DISTINCT FROM
+     (o.branch_id,o.catalog_id,o.source_item_id,o.base_units)
+  OR (l.branch_id,l.catalog_id,l.source_item_id,l.packaging) IS DISTINCT FROM
+     (o.branch_id,o.catalog_id,o.source_item_id,o.packaging) THEN
+  RAISE EXCEPTION 'physical_stock_initial_source_invalid' USING ERRCODE='23514'; END IF;
+ SELECT * INTO j FROM public.unit_legacy_transition
+  WHERE tenant_id=p_tenant AND operation_id=p_operation;
+ IF j.id IS NOT NULL THEN
+  IF (j.lot_id,j.source_item_id,j.branch_id,j.catalog_id) IS DISTINCT FROM
+     (l.id,o.source_item_id,o.branch_id,o.catalog_id) THEN
+   RAISE EXCEPTION 'physical_stock_initial_source_invalid' USING ERRCODE='23514'; END IF;
+  IF j.initialization_version=2 THEN
+   PERFORM public.assert_unit_legacy_opened_complete(p_tenant,o.source_item_id);
+  ELSE
+   PERFORM public.assert_unit_legacy_transition_complete(p_tenant,o.source_item_id);
+  END IF;
+  RETURN QUERY SELECT l.id,'legacy_transition'::TEXT;
+  RETURN;
+ END IF;
+ -- This is initialization evidence, not a statement about today's remainder.
+ -- Later dispensing/write-off events own their changes to the current balance.
+ SELECT * INTO i FROM public.incoming_item WHERE tenant_id=p_tenant AND id=o.source_item_id;
+ SELECT * INTO d FROM public.incoming_document WHERE tenant_id=p_tenant AND id=i.document_id;
+ IF i.id IS NULL OR d.id IS NULL OR d.status<>'accepted'
+  OR d.accepted_at IS NULL OR d.accepted_by IS NULL
+  OR i.created_batch_id IS NOT NULL OR i.created_unit_lot_id IS NOT NULL
+  OR i.created_unit_lot_v2_id IS DISTINCT FROM l.id
+  OR i.unit_packaging_snapshot_v2 IS NULL OR i.unit_packaging_preparation IS NULL
+  OR i.currency<>'TJS' OR d.currency<>'TJS' OR i.qty<=0 OR i.qty<>trunc(i.qty)
+  OR o.id IS DISTINCT FROM public.unit_incoming_uuid5(
+    'aurum-unit-incoming-v2:'||p_tenant||':'||i.id)
+  OR o.request_hash IS DISTINCT FROM public.unit_incoming_v2_fingerprint(p_tenant,i.id)
+  OR (o.branch_id,o.catalog_id,o.quantity,o.base_units) IS DISTINCT FROM
+     (d.branch_id,i.catalog_id,i.qty::BIGINT,
+      (i.qty*(i.unit_packaging_snapshot_v2->>'units_per_pack')::INTEGER)::BIGINT)
+  OR (l.id,l.packaging,l.expires_at,l.initial_closed_packs,l.purchase_cost_per_pack,
+      l.cost_version,l.initial_opened_packs,l.initial_opened_units,l.initial_opened_cost)
+     IS DISTINCT FROM
+     (public.unit_incoming_uuid5('aurum-unit-lot-v2:'||p_tenant||':'||o.id),
+      i.unit_packaging_snapshot_v2,i.expires_at,i.qty::BIGINT,i.purchase_price,1,0,0,0::NUMERIC)
+  OR e.closed_delta IS DISTINCT FROM i.qty::BIGINT
+  OR EXISTS(SELECT 1 FROM public.incoming_draft_row
+    WHERE tenant_id=p_tenant AND document_id=d.id AND status='pending') THEN
+  RAISE EXCEPTION 'physical_stock_initial_source_invalid' USING ERRCODE='23514'; END IF;
+ RETURN QUERY SELECT l.id,'initialize'::TEXT;
+END $$;
 CREATE FUNCTION public.physical_stock_source_payload(p_tenant UUID,p_event UUID) RETURNS JSONB
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE s public.sync_physical_stock_source%ROWTYPE; result JSONB; movements JSONB;
  c public.unit_stock_cart_command_v2%ROWTYPE; sale UUID; financial_event UUID;
- lot UUID; kind TEXT; item UUID;
+ lot UUID; kind TEXT;
 BEGIN
  SELECT * INTO STRICT s FROM public.sync_physical_stock_source
   WHERE tenant_id=p_tenant AND id=p_event;
@@ -113,14 +174,8 @@ BEGIN
  IF s.source_kind IN ('catalog_config','block','baseline_required') THEN
   RETURN result||s.captured_payload;
  ELSIF s.source_kind='initialize' THEN
-  SELECT l.id,l.source_item_id INTO STRICT lot,item FROM public.unit_stock_lot_v2 l
-   JOIN public.unit_stock_entry_v2 e ON e.tenant_id=l.tenant_id AND e.lot_id=l.id
-   WHERE e.tenant_id=s.tenant_id AND e.operation_id=s.source_id AND e.kind='initialize';
-  PERFORM public.assert_unit_incoming_v2_source(s.tenant_id,item,true);
-  kind:='initialize';
-  IF EXISTS(SELECT 1 FROM public.unit_legacy_transition
-    WHERE tenant_id=s.tenant_id AND operation_id=s.source_id) THEN kind:='legacy_transition';
- END IF;
+  SELECT evidence.lot_id,evidence.source_kind INTO STRICT lot,kind
+   FROM public.physical_stock_initial_source(s.tenant_id,s.source_id) evidence;
   RETURN result||jsonb_build_object('source_kind',kind,'initializations',
     jsonb_build_array(public.physical_stock_initial_lot(s.tenant_id,lot)));
  ELSIF s.source_kind='dispense' THEN
