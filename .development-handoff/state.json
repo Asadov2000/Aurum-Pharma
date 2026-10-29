@@ -40,7 +40,7 @@
       "previous_consecutive": 2,
       "step": "Ruff test_runtime_role_privileges.py",
       "cause": "Existing ACL test exceeded 50 statements (54 then51)",
-      "approval": "Explicit user approval: Р”Р°, РёСЃРїСЂР°РІРёС‚СЊ Рё РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЌС‚РѕС‚ СЌС‚Р°Рї",
+      "approval": "Explicit user approval: Да, исправить и продолжить этот этап",
       "fix": "Move one unchanged awaited column check into existing _assert_all_stock_column_privileges helper",
       "resolved": "Ruff and Black pass; all assertion/call AST sets preserved",
       "proposal": ".codex/unit-edge-stock-events-2026-10-29/acl-limit-proposal.patch"
@@ -93,7 +93,7 @@
       "source_sha256": "99b2a625688e523d31ed84f47fe54938b0a17ca4a767661010326b219640997a",
       "proposal_applied": true,
       "proposal_review": "Minimal three hunks; git apply --check passed; SESSION_USER and runtime gates preserved",
-      "approval": "Explicit user approval: Р”Р°, РёСЃРїСЂР°РІРёС‚СЊ Рё РїСЂРѕРґРѕР»Р¶РёС‚СЊ PR #437",
+      "approval": "Explicit user approval: Да, исправить и продолжить PR #437",
       "approval_scope": "One prepared catalog migration compatibility fix and subsequent CI attempt; other repeated-failure rules remain",
       "fix_commit": "6af677e2",
       "status": "Resolved: later final-head3817 passed migration roundtrip"
@@ -231,9 +231,11 @@
     "status": "running",
     "previous_workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
     "previous_frontend_passed": 3260,
-    "previous_e2e_passed": 167
+    "previous_e2e_passed": 167,
+    "backend_job": 3832,
+    "gate_job": 3834
   },
-  "updated_at": "2026-10-29T14:05:05.570Z",
+  "updated_at": "2026-10-29T14:07:37.020Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
