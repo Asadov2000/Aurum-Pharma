@@ -233,9 +233,18 @@
     "previous_frontend_passed": 3260,
     "previous_e2e_passed": 167,
     "backend_job": 3832,
-    "gate_job": 3834
+    "gate_job": 3834,
+    "backend_partial": {
+      "passed": 3809,
+      "new_passed": 121,
+      "failed": 0,
+      "completed_shards": 1
+    },
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "jobs_success": 6
   },
-  "updated_at": "2026-10-29T14:07:37.020Z",
+  "updated_at": "2026-10-29T14:40:21.596Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
