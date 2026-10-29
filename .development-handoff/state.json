@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
   "control_stage_id": "E6-04",
   "owner": "local",
-  "phase": "fixing_ci_test_fixture",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-29-edge-stock-events-01",
   "branch": "codex/unit-edge-stock-events",
   "base_sha": "84fc87ed1bafbb756cc0c9e42c3834162b7d3f8c",
   "base_tree": "45a4012e1b49fd4bcbe103440661f5e0874c4137",
-  "expected_head": "decca8268b2e5195c30016f1f090dfd6526a7660",
+  "expected_head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
   "validated_sha": null,
   "pr": 437,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -19,7 +19,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "a04a8e54-5989-4b93-9e73-774ee79540c5:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -33,7 +33,7 @@
     "Historical remaining costs include posted standalone writeoff facts, unknown remains unknown; no current-price substitution",
     "Full exact-head CI and all new tests; protected merge and tested-tree current main proof"
   ],
-  "remaining_step": "Correct branch setup fixture, rerun full exact-head CI; all181new success then protected merge",
+  "remaining_step": "Full exact-head all8 CI and181new cases without skips; protected merge and tested-tree main proof",
   "failure_counters": {
     "runtime_acl_plr0915": {
       "consecutive": 0,
@@ -140,7 +140,9 @@
       "job": 3817,
       "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
       "cause": "Test calls native branch initializer through actual aurum_migrator; SESSION_USER requires real aurum_app/support",
-      "fix": "Use real aurum_support db_engine setup before gates; production guards unchanged"
+      "fix": "Use real aurum_support db_engine setup before gates; production guards unchanged",
+      "fix_commit": "8f95e8c6",
+      "local_validation": "Ruff/Black/diff pass;target34/full7617 collection;independent root review;noDB"
     }
   },
   "blocker": null,
@@ -209,21 +211,16 @@
     "permissions": "Fresh current actor branch read+cost permission for private materializer; unsupported runtime writers fail closed under enabled gate",
     "audit": "Dedicated technical allowlist, no global redactor changes"
   },
-  "head_tree": "a0e1f0ebd78cf4f7c60ad9559e4a2733a7c07805",
+  "head_tree": "00362e809a179fd4d9f554d06304fd92d142ebc6",
   "ci": {
-    "head": "decca8268b2e5195c30016f1f090dfd6526a7660",
-    "workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
-    "status": "failed",
-    "previous_workflow": "84bcf5fd-7d26-4e97-be01-ee25f8e9b736",
-    "previous_backend_passed": 7171,
-    "previous_new_success": 138,
-    "new_case_result": "pending",
-    "backend_job": 3817,
-    "gate_job": 3818,
-    "backend_passed": 7199,
-    "new_success": 166
+    "head": "8f95e8c63439bb38f009bd41567da1fc9eedce79",
+    "workflow": "15a24ec2-93df-4d9f-975a-44ecbe8bbfca",
+    "status": "running",
+    "previous_workflow": "f4caa6c3-aee3-4cca-920f-6ebc8aa66e42",
+    "previous_backend_passed": 7199,
+    "previous_new_success": 166
   },
-  "updated_at": "2026-10-29T13:20:05.071Z",
+  "updated_at": "2026-10-29T13:23:06.960Z",
   "pending_changes": null,
   "support": {
     "case": 18248399,
