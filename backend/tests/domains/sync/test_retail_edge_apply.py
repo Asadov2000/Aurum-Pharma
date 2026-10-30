@@ -27,6 +27,8 @@ from app.domains.sync.models import (
     SyncPhysicalStockAnchor,
     SyncPhysicalStockProjection,
     SyncRetailEventAnchor,
+    SyncRetailRefundAnchor,
+    SyncRetailRefundProjection,
     SyncSaleProjection,
 )
 from app.domains.sync.repository import SyncEdgeRepository
@@ -126,6 +128,14 @@ class Repository:
 
     async def get_physical_stock_anchor(self, **scope: object) -> SyncPhysicalStockAnchor | None:
         return None
+
+    async def get_retail_refund_anchor(self, **scope: object) -> SyncRetailRefundAnchor | None:
+        return None
+
+    async def list_retail_refund_projections(
+        self, **scope: object
+    ) -> list[SyncRetailRefundProjection]:
+        return []
 
     async def list_physical_stock_projections(
         self, **scope: object

@@ -25,6 +25,7 @@ from app.domains.sync.physical_stock_projection import (
 )
 from app.domains.sync.repository import SyncEdgeRepository
 from app.domains.sync.schemas import SyncEventEnvelope
+from app.domains.sync.service import SyncEdgeApplyService
 
 
 class PhysicalStockEventRepository:
@@ -59,6 +60,27 @@ class PhysicalStockEventRepository:
             encode_physical_stock_event(envelope, anchor=anchor), anchor=anchor
         )
         return envelope, anchor
+
+
+async def _financial_anchor(
+    repository: SyncEdgeRepository, event: SyncEventEnvelope, edge_node_id: UUID
+) -> RetailSaleEventAnchor:
+    reader = (
+        repository.get_retail_refund_anchor
+        if event.schema_version == 6
+        else repository.get_retail_event_anchor
+    )
+    saved = await reader(
+        event_id=event.event_id,
+        tenant_id=event.tenant_id,
+        branch_id=event.branch_id,
+        edge_node_id=edge_node_id,
+    )
+    if saved is None:
+        raise ValueError("Financial source lacks its independent anchor")
+    if event.schema_version == 6:
+        await SyncEdgeApplyService(repository).validate_refund_projection(event)
+    return RetailSaleEventAnchor.model_validate(saved, from_attributes=True)
 
 
 async def materialize_physical_stock_projection(
@@ -131,6 +153,8 @@ async def materialize_physical_stock_projection(
         raise ValueError("Physical projection requires a newer trusted baseline")
     stock_anchors: dict[UUID, PhysicalStockEventAnchor] = {}
     retail_anchors: dict[UUID, RetailSaleEventAnchor] = {}
+    refund_anchors: dict[UUID, RetailSaleEventAnchor] = {}
+    financial_anchors = {3: retail_anchors, 4: retail_anchors, 6: refund_anchors}
     events = [SyncEventEnvelope.model_validate(row, from_attributes=True) for row in rows]
     for event in events:
         if event.schema_version == 5:
@@ -148,17 +172,9 @@ async def materialize_physical_stock_projection(
             projection = await repository.get_physical_stock_projection(event.event_id)
             if projection is None or projection.payload != event.payload:
                 raise ValueError("Physical projection differs from its applied source")
-        elif event.schema_version in (3, 4):
-            retail = await repository.get_retail_event_anchor(
-                event_id=event.event_id,
-                tenant_id=tenant_id,
-                branch_id=branch_id,
-                edge_node_id=edge_node_id,
-            )
-            if retail is None:
-                raise ValueError("Retail source lacks its independent anchor")
-            retail_anchors[event.event_id] = RetailSaleEventAnchor.model_validate(
-                retail, from_attributes=True
+        elif event.schema_version in financial_anchors:
+            financial_anchors[event.schema_version][event.event_id] = await _financial_anchor(
+                repository, event, edge_node_id
             )
     result = reduce_physical_stock_projection(
         baseline_records=physical_records,
@@ -167,6 +183,7 @@ async def materialize_physical_stock_projection(
         events=events,
         stock_anchors=stock_anchors,
         retail_anchors=retail_anchors,
+        refund_anchors=refund_anchors,
     )
     if (
         result.last_sequence != cursor.last_sequence

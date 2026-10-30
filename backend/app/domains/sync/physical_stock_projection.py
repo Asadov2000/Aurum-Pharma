@@ -16,6 +16,10 @@ from uuid import UUID
 from pydantic import Field
 
 from app.domains.inventory.unit_stock_v2 import OpenedPackV2, _opened_units
+from app.domains.pos.retail_refund_events import (
+    retail_refund_event_fingerprint,
+    validate_retail_refund_event,
+)
 from app.domains.pos.retail_sale_event_storage import (
     RetailSaleEventAnchor,
     decode_retail_sale_event,
@@ -511,6 +515,7 @@ def _apply_event(
     projection_checksum: str,
     stock_anchors: Mapping[UUID, PhysicalStockEventAnchor],
     retail_anchors: Mapping[UUID, RetailSaleEventAnchor],
+    refund_anchors: Mapping[UUID, RetailSaleEventAnchor],
 ) -> None:
     if envelope.schema_version == 5:
         stock_anchor = stock_anchors.get(envelope.event_id)
@@ -532,6 +537,26 @@ def _apply_event(
         if checkout.is_test or checkout.stock_command_id in state.checkout:
             raise ValueError("Physical projection cannot repeat or project training checkout")
         state.checkout[checkout.stock_command_id] = checkout.sale_id, checkout.event_id
+    elif envelope.schema_version == 6:
+        refund_anchor = refund_anchors.get(envelope.event_id)
+        if refund_anchor is None:
+            raise ValueError("Refund event has no independently trusted anchor")
+        _anchor_checkpoint(refund_anchor, source_checksum, projection_checksum)
+        if (
+            refund_anchor.tenant_id != envelope.tenant_id
+            or refund_anchor.branch_id != envelope.branch_id
+            or refund_anchor.origin_node_id != envelope.origin_node_id
+            or refund_anchor.writer_epoch != envelope.writer_epoch
+            or refund_anchor.sequence != envelope.sequence
+            or refund_anchor.event_fingerprint != retail_refund_event_fingerprint(envelope)
+        ):
+            raise ValueError("Refund event differs from its independently trusted anchor")
+        validate_retail_refund_event(
+            envelope,
+            previous_source_checksum=source_checksum,
+            previous_projection_checksum=projection_checksum,
+        )
+        # A paid refund records quarantine, never replenishes available inventory.
     elif envelope.schema_version == 1:
         _legacy_event(envelope, source_checksum, projection_checksum)
     else:
@@ -554,6 +579,7 @@ def reduce_physical_stock_projection(
     events: Sequence[SyncEventEnvelope],
     stock_anchors: Mapping[UUID, PhysicalStockEventAnchor],
     retail_anchors: Mapping[UUID, RetailSaleEventAnchor],
+    refund_anchors: Mapping[UUID, RetailSaleEventAnchor] | None = None,
 ) -> PhysicalStockProjection:
     """Fold one bounded coherent epoch, requiring protected caller-supplied evidence.
 
@@ -597,6 +623,7 @@ def reduce_physical_stock_projection(
             projection_checksum=projection,
             stock_anchors=stock_anchors,
             retail_anchors=retail_anchors,
+            refund_anchors=refund_anchors if refund_anchors is not None else {},
         )
         seen[envelope.event_id] = digest
         operations.add(envelope.operation_id)
