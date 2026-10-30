@@ -128,6 +128,10 @@ APPEND_ONLY_TABLES = {
 }
 
 READ_ONLY_TABLES = {
+    "sync_retail_refund_source",
+    "sync_retail_refund_event",
+    "sync_retail_refund_anchor",
+    "sync_retail_refund_projection",
     "sync_physical_stock_event",
     "sync_physical_stock_anchor",
     "sync_physical_stock_projection",
@@ -186,6 +190,7 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "sync_retail_refund_producer_gate",
     "sync_physical_stock_producer_gate",
     "sync_physical_stock_source",
     "sync_retail_event_producer_gate",
@@ -298,6 +303,14 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "trg_retail_refund_private_guard",
+    "trg_retail_refund_audit",
+    "trg_retail_refund_capture",
+    "retail_refund_source_payload",
+    "emit_retail_refund_source",
+    "trg_retail_refund_complete",
+    "trg_retail_refund_projection_guard",
+    "trg_retail_refund_other_slot",
     "read_physical_writeoff_cost_source",
     "trg_sync_stream_reservation_transaction",
     "physical_stock_time",
@@ -1326,6 +1339,7 @@ PHYSICAL_V2_COLUMN_PRIVILEGES_SQL = UNIT_STOCK_COLUMN_PRIVILEGES_SQL.replace(
 
 
 async def _assert_all_stock_column_privileges(conn: AsyncConnection) -> None:
+    await _assert_retail_refund_projection_columns(conn)
     _assert_unit_stock_column_privileges(
         list((await conn.execute(text(UNIT_STOCK_COLUMN_PRIVILEGES_SQL))).mappings())
     )
@@ -1774,6 +1788,13 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for name in (
+        "trg_retail_refund_audit",
+        "trg_retail_refund_capture",
+        "retail_refund_source_payload",
+        "emit_retail_refund_source",
+        "trg_retail_refund_complete",
+        "trg_retail_refund_projection_guard",
+        "trg_retail_refund_other_slot",
         "trg_sync_stream_reservation_transaction",
         "physical_stock_initial_lot",
         "physical_stock_initial_source",
@@ -1863,6 +1884,7 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     for name in (
         "trg_retail_edge_anchor_guard",
+        "trg_retail_refund_private_guard",
         "physical_stock_time",
         "physical_stock_pack_state",
         "trg_physical_catalog_revision",
@@ -1894,6 +1916,28 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
         assert posting["app_can_execute"] is True
         assert posting["support_can_execute"] is False
         assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+async def _assert_retail_refund_projection_columns(conn: AsyncConnection) -> None:
+    query = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+        "public.sync_outbox", "public.sync_retail_refund_projection"
+    )
+    columns = list((await conn.execute(text(query))).mappings())
+    assert {row["attname"] for row in columns if row["can_insert"]} == {
+        "source_event_id",
+        "tenant_id",
+        "branch_id",
+        "parent_sale_id",
+        "origin_node_id",
+        "writer_epoch",
+        "sequence",
+        "operation_id",
+        "source_id",
+        "payload",
+        "source_payload_hash",
+        "projection_hash",
+    }
+    assert not any(row["can_update"] for row in columns)
 
 
 async def _assert_physical_stock_projection_columns(conn: AsyncConnection) -> None:

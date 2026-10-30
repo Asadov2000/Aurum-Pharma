@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import Uuid, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,8 @@ from app.domains.sync.models import (
     SyncReadSnapshotCursor,
     SyncReadSupplierProjection,
     SyncRetailEventAnchor,
+    SyncRetailRefundAnchor,
+    SyncRetailRefundProjection,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -97,9 +99,14 @@ def _is_projection_operation_collision(exc: IntegrityError) -> bool:
     constraint_name = getattr(exc.orig, "constraint_name", None) or getattr(
         cause, "constraint_name", None
     )
-    return constraint_name == "uq_sync_sale_projection_operation" or (
-        "uq_sync_sale_projection_operation" in str(exc)
-    )
+    constraints = {
+        "uq_sync_sale_projection_operation",
+        "uq_sync_retail_refund_projection_operation",
+        "uq_sync_retail_refund_projection_source_sale",
+        "uq_sync_retail_refund_projection_sequence",
+        "sync_retail_refund_projection_pkey",
+    }
+    return constraint_name in constraints or any(name in str(exc) for name in constraints)
 
 
 def _substring_pattern(value: str) -> str:
@@ -1676,6 +1683,157 @@ class SyncEdgeRepository:
         """Rollback one retail event without retaining an incomplete inbox/cursor."""
         async with self.session.begin_nested():
             yield
+
+    async def get_retail_refund_anchor(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        event_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        sequence: int | None = None,
+    ) -> SyncRetailRefundAnchor | None:
+        query = select(SyncRetailRefundAnchor).where(
+            SyncRetailRefundAnchor.tenant_id == tenant_id,
+            SyncRetailRefundAnchor.branch_id == branch_id,
+            SyncRetailRefundAnchor.target_edge_node_id == edge_node_id,
+        )
+        if event_id is not None:
+            query = query.where(SyncRetailRefundAnchor.event_id == event_id)
+        else:
+            query = query.where(
+                SyncRetailRefundAnchor.origin_node_id == origin_node_id,
+                SyncRetailRefundAnchor.writer_epoch == writer_epoch,
+                SyncRetailRefundAnchor.sequence == sequence,
+            )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def get_retail_refund_projection(
+        self, event_id: UUID
+    ) -> SyncRetailRefundProjection | None:
+        return await self.session.get(SyncRetailRefundProjection, event_id)
+
+    async def get_retail_refund_projection_by_source(
+        self, *, tenant_id: UUID, source_id: UUID
+    ) -> SyncRetailRefundProjection | None:
+        query = select(SyncRetailRefundProjection).where(
+            SyncRetailRefundProjection.tenant_id == tenant_id,
+            SyncRetailRefundProjection.source_id == source_id,
+        )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def insert_retail_refund_projection(
+        self, envelope: SyncEventEnvelope, *, parent_sale_id: UUID
+    ) -> SyncRetailRefundProjection:
+        statement = (
+            insert(SyncRetailRefundProjection)
+            .values(
+                source_event_id=envelope.event_id,
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                parent_sale_id=parent_sale_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                operation_id=envelope.operation_id,
+                source_id=envelope.aggregate_id,
+                payload=envelope.payload,
+                source_payload_hash=envelope.payload_hash,
+                projection_hash=envelope.projection_hash,
+            )
+            .returning(SyncRetailRefundProjection)
+        )
+        try:
+            return (await self.session.execute(statement)).scalar_one()
+        except IntegrityError as exc:
+            if _is_projection_operation_collision(exc):
+                raise SyncProjectionOperationCollision from exc
+            raise
+
+    async def list_retail_refund_projections(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        parent_sale_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        after_sequence: int | None = None,
+    ) -> list[SyncRetailRefundProjection]:
+        query = select(SyncRetailRefundProjection).where(
+            SyncRetailRefundProjection.tenant_id == tenant_id,
+            SyncRetailRefundProjection.branch_id == branch_id,
+        )
+        if parent_sale_id is not None:
+            query = query.where(SyncRetailRefundProjection.parent_sale_id == parent_sale_id)
+        if origin_node_id is not None:
+            query = query.where(SyncRetailRefundProjection.origin_node_id == origin_node_id)
+        if writer_epoch is not None:
+            query = query.where(SyncRetailRefundProjection.writer_epoch == writer_epoch)
+        if after_sequence is not None:
+            query = query.where(SyncRetailRefundProjection.sequence > after_sequence)
+        return list(
+            await self.session.scalars(
+                query.order_by(
+                    SyncRetailRefundProjection.writer_epoch, SyncRetailRefundProjection.sequence
+                ).limit(10_001)
+            )
+        )
+
+    async def get_sale_projection_for_update(self, sale_id: UUID) -> SyncSaleProjection | None:
+        """Serialize refund history with a transaction mutex, using SELECT-only ACL."""
+        query = (
+            select(SyncSaleProjection)
+            .where(
+                SyncSaleProjection.sale_id == sale_id,
+                SyncSaleProjection.tenant_id == func.current_tenant_id(),
+                SyncSaleProjection.branch_id
+                == func.nullif(func.current_setting("app.branch_id", True), "").cast(Uuid),
+            )
+            .execution_options(populate_existing=True)
+        )
+        parent = (await self.session.execute(query)).scalar_one_or_none()
+        if parent is None:
+            return None
+        await self.lock_retail_refund_parents(
+            tenant_id=parent.tenant_id,
+            branch_id=parent.branch_id,
+            parent_sale_ids=(parent.sale_id,),
+        )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def lock_retail_refund_parents(
+        self, *, tenant_id: UUID, branch_id: UUID, parent_sale_ids: tuple[UUID, ...]
+    ) -> None:
+        """One transaction mutex serializes the branch's refunds across epoch cursors.
+
+        No UPDATE privilege is granted to the immutable parent projection. The
+        existing scoped parent read prevents foreign or invented IDs acquiring a
+        mutex. All refund batches and per-event checks use this same key; reads
+        for verification and materialization never call this method.
+        """
+        query = (
+            select(SyncSaleProjection.sale_id)
+            .where(
+                SyncSaleProjection.tenant_id == tenant_id,
+                SyncSaleProjection.branch_id == branch_id,
+                SyncSaleProjection.tenant_id == func.current_tenant_id(),
+                SyncSaleProjection.branch_id
+                == func.nullif(func.current_setting("app.branch_id", True), "").cast(Uuid),
+                SyncSaleProjection.sale_id.in_(parent_sale_ids),
+            )
+            .limit(1)
+        )
+        if await self.session.scalar(query) is None:
+            return
+        await self.session.execute(
+            text(
+                "SELECT pg_catalog.pg_advisory_xact_lock(" "pg_catalog.hashtextextended(:scope,0))"
+            ),
+            {"scope": f"aurum-retail-refund-history:{tenant_id}:{branch_id}"},
+        )
 
     async def get_physical_stock_anchor(
         self,
