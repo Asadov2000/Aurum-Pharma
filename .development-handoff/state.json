@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "fixing_ci_tenant_access",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-  "expected_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
+  "expected_head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
   "validated_sha": null,
   "pr": 438,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "Await7764backendtests/147new on6d9427ad,then all8gate success and protectedmerge/testedtreeproof",
+  "remaining_step": "Finalhead all8CI and7764tests/147newsuccess, protectedmerge andtestedtreeproof",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -60,15 +60,16 @@
       "previous_consecutive": 1
     },
     "legacy_support_policy_reference": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
       "job": 3857,
       "step": "test_foundation_rls.py184",
       "cause": "Five newRLS policy clauses reference legacyis_support_session(), forbidden byexistingarchitectureinvariant;actualrole/tenant/forgedflag assertionspassed",
       "fix": "Removeonly5redundantNOTlegacyhelperclauses fromRLS;actualsessionroles+verifiedsupport/actor/tenantbranchEdge/permissions retained;nativecommandguards unchanged",
       "local_validation": "RuffBlackdiff pass;independentreview actual0062helper falseforallapp;88DDL/11policies recorded zero legacyrefs;2nativeguards preserved",
-      "status": "Reviewed5policyfix published;awaitnewhead foundation invariant",
-      "fix_commit": "6d9427ad"
+      "status": "Resolved: foundation invariant passes on6d9427ad/job3862",
+      "fix_commit": "6d9427ad",
+      "previous_consecutive": 1
     },
     "manual_access_table_coverage": {
       "consecutive": 1,
@@ -76,7 +77,9 @@
       "job": 3862,
       "step": "test_manual_access_migrations_roundtrip line386",
       "cause": "Five new tables were included only in later_tables, omitted from four rehearsal SQL lists and generic tenant/POS access triggers",
-      "fix": "Add same a00 POS barrier as0227/0229 to all5tables; include all4rehearsal SQL lists; preserve assertions"
+      "fix": "Add same a00 POS barrier as0227/0229 to all5tables; include all4rehearsal SQL lists; preserve assertions",
+      "fix_commit": "531d493d",
+      "local_validation": "Ruff/Black3files pass;static93DDL/5barriers/5matching74tablelists;independentDBandQAreviews;4DBtests collectedonly"
     }
   },
   "blocker": null,
@@ -105,7 +108,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:18:20.393Z",
+  "updated_at": "2026-10-30T07:22:45.853Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -118,30 +121,18 @@
     "new_stage_cases": 147,
     "migration_tool_passed": 12
   },
-  "head_tree": "6957dd0bf8f88852a75905fcb6f6fab27d619a32",
+  "head_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
   "ci": {
-    "head": "6d9427adda92b36c391941957ff0e32d3b441d58",
-    "workflow": "a817ce15-b2bf-474b-a477-629062315416",
-    "status": "running",
-    "previous_failed_workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
-    "previous_passed": 7468,
-    "previous_new_passed": 147,
-    "previous_failure": "Legacy helper inRLS policytext only;5references removed",
+    "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
+    "status": "starting",
+    "previous_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
+    "previous_workflow": "a817ce15-b2bf-474b-a477-629062315416",
+    "previous_backend_job": 3862,
     "previous_frontend_passed": 3260,
     "previous_e2e_passed": 167,
-    "backend_job": 3862,
-    "gate_job": 3866,
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "e2e_failures": 0,
-    "completed_success_jobs": [
-      "tooling-windows",
-      "tooling-linux",
-      "production-containers",
-      "frontend",
-      "e2e",
-      "dependency-audit"
-    ]
+    "previous_failed_test": "manual access rehearsal table coverage",
+    "expected_backend_total": 7764,
+    "expected_new": 147
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
   "pending_changes": null
