@@ -108,7 +108,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:42:52.427Z",
+  "updated_at": "2026-10-30T07:50:41.138Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -141,10 +141,27 @@
       "tooling-linux",
       "production-containers",
       "frontend",
-      "dependency-audit"
+      "dependency-audit",
+      "e2e"
     ],
-    "frontend_passed": 3260
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "e2e_failures": 0
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
-  "pending_changes": null
+  "pending_changes": null,
+  "cloud_last_verified": {
+    "at": "2026-10-30T07:50:41.138Z",
+    "thread_id": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
+    "host": "durable",
+    "status": "idle",
+    "latest_turn": "completed",
+    "cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
+    "scheduler": "PAUSED"
+  },
+  "runtime_checkout_verified": {
+    "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
+    "clean": true,
+    "at": "2026-10-30T07:50:41.138Z"
+  }
 }
