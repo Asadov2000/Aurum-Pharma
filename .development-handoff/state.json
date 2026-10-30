@@ -108,7 +108,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:22:45.853Z",
+  "updated_at": "2026-10-30T07:42:52.427Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -124,7 +124,7 @@
   "head_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
   "ci": {
     "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-    "status": "starting",
+    "status": "running",
     "previous_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
     "previous_workflow": "a817ce15-b2bf-474b-a477-629062315416",
     "previous_backend_job": 3862,
@@ -132,7 +132,18 @@
     "previous_e2e_passed": 167,
     "previous_failed_test": "manual access rehearsal table coverage",
     "expected_backend_total": 7764,
-    "expected_new": 147
+    "expected_new": 147,
+    "workflow": "658f8523-fe65-4d85-a1ea-30112b51684e",
+    "backend_job": 3872,
+    "gate_job": 3874,
+    "completed_success_jobs": [
+      "tooling-windows",
+      "tooling-linux",
+      "production-containers",
+      "frontend",
+      "dependency-audit"
+    ],
+    "frontend_passed": 3260
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
   "pending_changes": null
