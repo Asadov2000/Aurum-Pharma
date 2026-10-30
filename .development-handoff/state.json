@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-10-30-native-preparation-01",
   "branch": "codex/unit-edge-native-preparation",
   "base_sha": "6b586a78bc4323b6550a869c7bb83e6027859367",
-  "expected_head": "6b586a78bc4323b6550a869c7bb83e6027859367",
+  "expected_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28",
   "validated_sha": null,
-  "pr": null,
+  "pr": 440,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -31,7 +31,7 @@
     "Separate preparation state, no financial/stock/outbox DML and DenyAll runtime preserved",
     "Full exact-head CI and protected PR main merge"
   ],
-  "remaining_step": "Implement narrow native preparation and real-login disposable CI proof; no financial executor.",
+  "remaining_step": "PR440 full CI including actual native LOGIN and disposable migration rehearsal; inspect failures, protected merge only after success",
   "failure_counters": {
     "test_import_order": {
       "consecutive": 0,
@@ -87,7 +87,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-30T09:53:06.492Z",
+  "updated_at": "2026-10-30T10:04:31.247Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -96,5 +96,15 @@
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
+  },
+  "head_tree": "26da7fb5e07fd5aba2f3cae1de0f8cd46ddc621d",
+  "local_validation": {
+    "targeted_passed": 147,
+    "new_unit_passed": 25,
+    "ruff": "app/tests pass",
+    "black": "1064 files full pass and additional ACL file targeted pass",
+    "mypy_sources": 528,
+    "new_db_tests": 3,
+    "real_login_scenarios": "pending CI"
   }
 }
