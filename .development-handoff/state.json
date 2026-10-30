@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "local_validation",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-  "expected_head": "1824cfc9b20437bb78ce8c499faa93231da38f97",
+  "expected_head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
   "validated_sha": null,
-  "pr": null,
+  "pr": 438,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "Finish mutex permissions review, finalstatic/collection; publishsameWorkID PR and fullCI",
+  "remaining_step": "All8mandatoryCI +147newcases success onfinalhead;protectedmerge/testedtree currentmain proof",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -74,14 +74,23 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T05:47:09.155Z",
+  "updated_at": "2026-10-30T05:55:02.374Z",
   "local_validation": {
-    "selected_pure_passed": 220,
+    "selected_pure_passed": 223,
     "mypy_sources": 526,
     "ruff": "app/tests pass",
     "black": "1058files pass",
     "native_sql": "DDLsplit88upgrade21downgrade;independentsecurityreviewapproved;executionpendingCI",
     "db_tests": "collected only; Docker not running, no localservicesstarted",
-    "lock_review": "Parent SELECT FORUPDATE would require absent UPDATEprivilege; replacing with one transaction branch advisory mutex, no grants expanded"
-  }
+    "lock_review": "One transaction advisory mutex per validatedtenant/branch;noUPDATEgrants;3SQLcompilationregressionspass;readonlynolocks",
+    "full_backend_collected": 7764,
+    "new_stage_cases": 147
+  },
+  "head_tree": "422a8bf77d448469e048e3509ce3f151dcfb0898",
+  "ci": {
+    "head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
+    "workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
+    "status": "running"
+  },
+  "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED"
 }
