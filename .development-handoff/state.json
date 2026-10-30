@@ -48,7 +48,7 @@
       "fix": "Extract sharedfinancialanchor reader; unchangedlimit; Ruffpass"
     },
     "cluster_migration_head": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
       "workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
       "job": 3845,
@@ -56,7 +56,8 @@
       "cause": "Newhead230 doesnotmatch role-contract maximum229; initialshellassertionfailsbeforeDBroundtrip",
       "fix_commit": "2ba6364a",
       "fix": "Advance onlyknownsupported revision to230;12existingmigrationtooltests pass",
-      "status": "Await new exactheadCI; unknownfutureversionsstillrefused"
+      "status": "Resolved:bothnewheadbackendshards passed cluster-safe migration roundtrip and enteredPytest",
+      "previous_consecutive": 1
     }
   },
   "blocker": null,
@@ -85,7 +86,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T06:07:03.282Z",
+  "updated_at": "2026-10-30T06:13:17.548Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -103,7 +104,11 @@
     "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
     "workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
     "status": "running",
-    "previous_failed_workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d"
+    "previous_failed_workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
+    "backend_job": 3857,
+    "gate_job": 3858,
+    "migration_roundtrip": "bothshards success",
+    "jobs_success": 3
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED"
 }
