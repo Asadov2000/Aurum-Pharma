@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 21,
+  "generation": 22,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "bridge_accepted",
-  "run_id": "local-2026-10-30-retail-admission-01",
-  "branch": "codex/unit-edge-retail-admission",
-  "base_sha": "e9badfb06115e09901512a1267199a34afc5c44d",
-  "expected_head": "5e43278c7094ca753caf7296d679f766d840e06d",
-  "validated_sha": "5e43278c7094ca753caf7296d679f766d840e06d",
-  "pr": 439,
+  "phase": "implementing",
+  "run_id": "local-2026-10-30-native-preparation-01",
+  "branch": "codex/unit-edge-native-preparation",
+  "base_sha": "6b586a78bc4323b6550a869c7bb83e6027859367",
+  "expected_head": "6b586a78bc4323b6550a869c7bb83e6027859367",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,21 +18,20 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "E6-06: internal physical/mixed cash command bridge to existing lease v1, exact scope/current writer/capability/saved confirmation, transactional result guard. Native Edge DB execution, app-only services, public delivery and runtime activation stay closed; no new lease/capabilities/operations.",
+  "scope": "E6-06 native nonfinancial preparation: actual per-node DB role binding, current writer/cashier, saved physical/mixed confirmation, locks; no checkout execution or activation.",
   "acceptance": [
-    "Existing lease v1 reauthorizes each call/replay; full signed/principal/command scope and lease identity match",
-    "Trusted transaction-bound writer/node/capability/saved confirmation checks before execution; scope/kind/result/cash-only verification inside rollback boundary",
-    "Real existing lease pipeline integration denies expiry/revocation/unconfirmed/session/commit failures without reaching execution",
-    "Default DenyAll verifier and execution port; no route, wire changes, dependency/DB/runtime/UI changes",
-    "Full exact-head CI gate and tested-tree protected main merge"
+    "Preserve single public dispatcher, owner/OID/ACL and legacy behavior",
+    "Native identity, current writer/cashier scope and saved confirmation validated with least privilege and transaction locks",
+    "Separate preparation state, no financial/stock/outbox DML and DenyAll runtime preserved",
+    "Full exact-head CI and protected PR main merge"
   ],
-  "remaining_step": "PR439 bridge is accepted in main. Continue the same E6-06 work item with real narrow native Edge DB identity/dispatcher and execution adapter. Fresh recon required; no cloud product grant.",
+  "remaining_step": "Implement narrow native preparation and real-login disposable CI proof; no financial executor.",
   "failure_counters": {
     "test_import_order": {
       "consecutive": 0,
@@ -84,98 +83,16 @@
     "scheduler": "PAUSED"
   },
   "cloud_recheck": {
-    "status": "verified idle before merge, no cloud product grant"
+    "status": "user confirmed task stopped and automatic continuation disabled",
+    "confirmed_by": "user",
+    "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-30T09:20:18.791Z",
+  "updated_at": "2026-10-30T09:53:06.492Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
     "Real native Edge database execution adapter with narrow identity/dispatcher and actual writer/capability/resource enforcement; existing app-only services cannot substitute for it."
   ],
-  "local_validation": {
-    "new_tests_passed": 122,
-    "new_counts": {
-      "test_edge_retail_cash": 97,
-      "test_edge_retail_cash_lease_v1": 25
-    },
-    "style": "targeted Ruff/Black pass",
-    "mypy": "app module and new tests (follow-imports=silent) pass",
-    "selected_passed": 481,
-    "mypy_sources": 527,
-    "black_files": 1061,
-    "ruff": "app/tests pass",
-    "backend_collected": 7886
-  },
-  "head_tree": "05760049bf4e765fabbff04736dd75b7f436eb50",
-  "ci": {
-    "head": "5e43278c7094ca753caf7296d679f766d840e06d",
-    "status": "success",
-    "expected_backend_total": 7886,
-    "expected_new": 122,
-    "workflow": "a7e90594-6e4b-4c16-9d56-59576b6de786",
-    "backend_job": 3886,
-    "gate_job": 3890,
-    "completed_success_jobs": [
-      "tooling-linux",
-      "tooling-windows",
-      "production-containers",
-      "frontend",
-      "dependency-audit",
-      "e2e",
-      "backend",
-      "ci-gate"
-    ],
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "e2e_failures": 0,
-    "e2e_artifact_read": "success after transient DNS resolution recovered",
-    "backend_passed": 7886,
-    "new_passed": 122,
-    "skipped": 0,
-    "duplicates": 0,
-    "backend_evidence": {
-      "head": "5e43278c7094ca753caf7296d679f766d840e06d",
-      "workflow": "a7e90594-6e4b-4c16-9d56-59576b6de786",
-      "job": 3886,
-      "status": "success",
-      "total": 7886,
-      "totals": {
-        "success": 7886
-      },
-      "new_counts": {
-        "tests.domains.pos.test_edge_retail_cash": 97,
-        "tests.domains.pos.test_edge_retail_cash_lease_v1": 25
-      },
-      "new_results": {
-        "success": 122
-      },
-      "duplicates": 0,
-      "failures": [],
-      "known_regressions": [
-        {
-          "test": "tests.isolation.test_foundation_rls::test_tenant_a_does_not_see_branches_of_tenant_b",
-          "result": "success"
-        },
-        {
-          "test": "tests.isolation.test_manual_access_migrations::test_manual_access_migrations_roundtrip",
-          "result": "success"
-        }
-      ],
-      "accepted": true
-    }
-  },
-  "completion": {
-    "pr": 439,
-    "merged": true,
-    "main": "6b586a78bc4323b6550a869c7bb83e6027859367",
-    "merged_at": "2026-10-30T09:17:18Z",
-    "tested_head": "5e43278c7094ca753caf7296d679f766d840e06d",
-    "tested_tree": "05760049bf4e765fabbff04736dd75b7f436eb50",
-    "main_tree": "05760049bf4e765fabbff04736dd75b7f436eb50",
-    "tree_match": true,
-    "closes_control_stage": false,
-    "remaining_control_stages": 4
-  },
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
