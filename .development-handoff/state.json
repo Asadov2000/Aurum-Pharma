@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "All8CI and7764tests/147new success onfinalhead;protectedmerge/testedtreeproof",
+  "remaining_step": "Await7764backendtests/147new on6d9427ad,then all8gate success and protectedmerge/testedtreeproof",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -97,7 +97,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T06:45:44.220Z",
+  "updated_at": "2026-10-30T07:09:37.637Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -120,7 +120,20 @@
     "previous_new_passed": 147,
     "previous_failure": "Legacy helper inRLS policytext only;5references removed",
     "previous_frontend_passed": 3260,
-    "previous_e2e_passed": 167
+    "previous_e2e_passed": 167,
+    "backend_job": 3862,
+    "gate_job": 3866,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "e2e_failures": 0,
+    "completed_success_jobs": [
+      "tooling-windows",
+      "tooling-linux",
+      "production-containers",
+      "frontend",
+      "e2e",
+      "dependency-audit"
+    ]
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
   "pending_changes": null
