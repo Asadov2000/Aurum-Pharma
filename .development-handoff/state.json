@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-30-retail-admission-01",
   "branch": "codex/unit-edge-retail-admission",
   "base_sha": "e9badfb06115e09901512a1267199a34afc5c44d",
-  "expected_head": "e9badfb06115e09901512a1267199a34afc5c44d",
+  "expected_head": "5e43278c7094ca753caf7296d679f766d840e06d",
   "validated_sha": null,
-  "pr": null,
+  "pr": 439,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,12 +18,12 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (4)",
-  "counter_after_full_completion": "2/7 (3)",
+  "counter_after_full_completion": "2/7 (4)",
   "scope": "E6-06: internal physical/mixed cash command bridge to existing lease v1, exact scope/current writer/capability/saved confirmation, transactional result guard. Native Edge DB execution, app-only services, public delivery and runtime activation stay closed; no new lease/capabilities/operations.",
   "acceptance": [
     "Existing lease v1 reauthorizes each call/replay; full signed/principal/command scope and lease identity match",
@@ -33,7 +33,20 @@
     "Full exact-head CI gate and tested-tree protected main merge"
   ],
   "remaining_step": "Implement module and independent unit/real lease pipeline tests; early style/type checks; full CI and protected merge.",
-  "failure_counters": {},
+  "failure_counters": {
+    "test_import_order": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "cause": "Ruff I001 new integration imports",
+      "fix": "Sorted imports; targeted Ruff passes"
+    },
+    "test_fixture_mypy": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "cause": "Additional direct tests mypy followed pre-existing fixture test modules; four local dynamic replace type errors fixed",
+      "fix": "New tests pass follow-imports=silent; global app check pending, configs unchanged"
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
@@ -72,5 +85,31 @@
   "cloud_recheck": {
     "status": "latest host read403; no product grant or schedulers changed"
   },
-  "updated_at": "2026-10-30T08:22:17.267Z"
+  "updated_at": "2026-10-30T08:38:19.932Z",
+  "closes_control_stage": false,
+  "counter_after_full_E6_06": "2/7 (3)",
+  "remaining_control_stage_work": [
+    "Real native Edge database execution adapter with narrow identity/dispatcher and actual writer/capability/resource enforcement; existing app-only services cannot substitute for it."
+  ],
+  "local_validation": {
+    "new_tests_passed": 122,
+    "new_counts": {
+      "test_edge_retail_cash": 97,
+      "test_edge_retail_cash_lease_v1": 25
+    },
+    "style": "targeted Ruff/Black pass",
+    "mypy": "app module and new tests (follow-imports=silent) pass",
+    "selected_passed": 481,
+    "mypy_sources": 527,
+    "black_files": 1061,
+    "ruff": "app/tests pass",
+    "backend_collected": 7886
+  },
+  "head_tree": "05760049bf4e765fabbff04736dd75b7f436eb50",
+  "ci": {
+    "head": "5e43278c7094ca753caf7296d679f766d840e06d",
+    "status": "starting",
+    "expected_backend_total": 7886,
+    "expected_new": 122
+  }
 }
