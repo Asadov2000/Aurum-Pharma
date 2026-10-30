@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "design",
+  "phase": "local_validation",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
@@ -31,8 +31,23 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "Confirm minimal contract/source/capture/receive design before implementation",
-  "failure_counters": {},
+  "remaining_step": "Finish mutex permissions review, finalstatic/collection; publishsameWorkID PR and fullCI",
+  "failure_counters": {
+    "delivery_gate_v6": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "step": "new delivery gate regression",
+      "cause": "Existing explicit version denylist omitted new v6",
+      "fix": "Add pos.sale.refunded.v6 to same gate, all220selectedtests pass"
+    },
+    "materializer_branches": {
+      "consecutive": 0,
+      "previous_consecutive": 1,
+      "step": "Ruff PLR0912",
+      "cause": "Newv6anchor branch exceeded existing12branchlimit",
+      "fix": "Extract sharedfinancialanchor reader; unchangedlimit; Ruffpass"
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
@@ -59,5 +74,14 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T05:12:36.046Z"
+  "updated_at": "2026-10-30T05:47:09.155Z",
+  "local_validation": {
+    "selected_pure_passed": 220,
+    "mypy_sources": 526,
+    "ruff": "app/tests pass",
+    "black": "1058files pass",
+    "native_sql": "DDLsplit88upgrade21downgrade;independentsecurityreviewapproved;executionpendingCI",
+    "db_tests": "collected only; Docker not running, no localservicesstarted",
+    "lock_review": "Parent SELECT FORUPDATE would require absent UPDATEprivilege; replacing with one transaction branch advisory mutex, no grants expanded"
+  }
 }
