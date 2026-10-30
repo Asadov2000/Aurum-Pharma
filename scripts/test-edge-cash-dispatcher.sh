@@ -54,6 +54,9 @@ cleanup() {
         -v tenant_id="$tenant_id" \
         -v cashier_id="$cashier_id" <<'SQL'
 BEGIN;
+DROP FUNCTION IF EXISTS public.edge_inputs_ci_catalog_update(uuid);
+DROP FUNCTION IF EXISTS public.edge_inputs_ci_lot_update(uuid);
+DROP FUNCTION IF EXISTS public.edge_inputs_ci_pack_update(uuid);
 DO $cleanup$
 DECLARE
   relation REGCLASS;
@@ -76,6 +79,17 @@ $cleanup$;
 DELETE FROM public.audit_log WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.pos_unit_cash_intent WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.pos_unit_cart_item WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_movement_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_opened_pack_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_cart_line_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_cart_command_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_entry_v2 WHERE tenant_id = :'tenant_id'::UUID;
+UPDATE public.incoming_item SET created_unit_lot_v2_id=NULL WHERE tenant_id=:'tenant_id'::UUID;
+DELETE FROM public.unit_stock_lot_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.unit_stock_operation_v2 WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.incoming_item WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.incoming_document WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.supplier WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.user_assignment WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.access_role_version_permission
 WHERE role_version_id IN (
@@ -189,7 +203,8 @@ INSERT INTO public.role (id, tenant_id, name, level, is_active)
 SELECT role_id, tenant_id, 'Edge cashier role', 4, true
 FROM edge_dispatcher_context;
 INSERT INTO public.role_permission (role_id, permission_code)
-SELECT role_id, 'pos.sell' FROM edge_dispatcher_context;
+SELECT role_id, permission_code FROM edge_dispatcher_context
+CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize')) permissions(permission_code);
 INSERT INTO public.access_role_version (
   id, role_id, tenant_id, version, name, status, creation_xid, published_at
 )
@@ -199,7 +214,8 @@ FROM edge_dispatcher_context;
 INSERT INTO public.access_role_version_permission (
   role_version_id, permission_code
 )
-SELECT role_version_id, 'pos.sell' FROM edge_dispatcher_context;
+SELECT role_version_id, permission_code FROM edge_dispatcher_context
+CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize')) permissions(permission_code);
 INSERT INTO public.branch (id, tenant_id, name, is_active)
 SELECT branch_id, tenant_id, 'Edge branch', true
 FROM edge_dispatcher_context;
@@ -253,8 +269,8 @@ INSERT INTO public.sync_writer_epoch (
   activated_at, fenced_at
 )
 SELECT tenant_id, branch_id, 1, pg_catalog.gen_random_uuid(), cloud_node_id,
-       NULL, 'cloud_full', 'fenced', zero_hash, zero_hash, 0, zero_hash,
-       zero_hash, zero_hash, zero_hash, 0, now(), now(), now()
+       NULL, 'cloud_full', 'active', zero_hash, zero_hash, 0, zero_hash,
+       zero_hash, zero_hash, zero_hash, 0, now(), now(), NULL
 FROM edge_dispatcher_context;
 INSERT INTO public.sync_node (
   id, tenant_id, branch_id, register_id, node_kind, mode, status,
@@ -270,40 +286,11 @@ SELECT edge_node_id, tenant_id, branch_id, register_id, 'edge',
        now(), now() + interval '1 day', cloud_node_id, 1, 0,
        zero_hash, zero_hash
 FROM edge_dispatcher_context;
-INSERT INTO public.sync_writer_activation (
-  activation_id, tenant_id, branch_id, writer_epoch, writer_node_id,
-  allowed_register_id, capability, state, root_source_checksum,
-  root_projection_checksum, last_sequence, current_source_checksum,
-  current_projection_checksum, previous_writer_epoch,
-  previous_terminal_sequence, previous_terminal_source_checksum,
-  previous_terminal_projection_checksum, bootstrap_snapshot_hash,
-  activation_manifest_hash, receipt_baseline_seq, prepare_request_hash,
-  prepared_at, ready_at, activated_at
-)
-SELECT activation_id, tenant_id, branch_id, 2, edge_node_id, register_id,
-       'cash_sale_v1', 'activated', zero_hash, zero_hash, 0, zero_hash,
-       zero_hash, 1, 0, zero_hash, zero_hash, zero_hash, zero_hash, 0,
-       pg_catalog.repeat('d', 64), now(), now(), now()
-FROM edge_dispatcher_context;
-INSERT INTO public.sync_writer_epoch (
-  tenant_id, branch_id, writer_epoch, activation_id, writer_node_id,
-  allowed_register_id, capability, state, root_source_checksum,
-  root_projection_checksum, last_sequence, current_source_checksum,
-  current_projection_checksum, previous_writer_epoch,
-  previous_terminal_sequence, previous_terminal_source_checksum,
-  previous_terminal_projection_checksum, bootstrap_snapshot_hash,
-  activation_manifest_hash, receipt_baseline_seq, prepared_at, activated_at
-)
-SELECT tenant_id, branch_id, 2, activation_id, edge_node_id, register_id,
-       'cash_sale_v1', 'active', zero_hash, zero_hash, 0, zero_hash,
-       zero_hash, 1, 0, zero_hash, zero_hash, zero_hash, zero_hash, 0,
-       now(), now()
-FROM edge_dispatcher_context;
 INSERT INTO public.sync_stream (
   tenant_id, branch_id, writer_node_id, writer_epoch, last_sequence,
   current_checksum, current_projection_checksum
 )
-SELECT tenant_id, branch_id, edge_node_id, 2, 0, zero_hash, zero_hash
+SELECT tenant_id, branch_id, cloud_node_id, 1, 0, zero_hash, zero_hash
 FROM edge_dispatcher_context;
 
 ALTER TABLE public.sync_writer_epoch ENABLE TRIGGER USER;
@@ -460,6 +447,169 @@ FROM public.dispatch_edge_cash_sale_v1(
 SQL
 }
 
+# Receive real physical stock through the same guarded journal protocol as the
+# app service. All source/journal writes retain their existing triggers. The
+# second catalog is deliberately absent from the cart and must never leak.
+physical_stock="$(psql_super \
+    -v tenant_id="$tenant_id" -v cashier_id="$cashier_id" \
+    -v branch_id="$branch_id" -v edge_node_id="$edge_node_id" \
+    -v retail_catalog_id="$retail_catalog_id" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE edge_inputs_receiving ON COMMIT DROP AS
+SELECT which, :'tenant_id'::UUID AS tenant_id, :'branch_id'::UUID AS branch_id,
+  :'cashier_id'::UUID AS cashier_id,
+  CASE which WHEN 'cart' THEN :'retail_catalog_id'::UUID ELSE gen_random_uuid() END AS catalog_id,
+  gen_random_uuid() AS supplier_id,gen_random_uuid() AS document_id,
+  gen_random_uuid() AS item_id,gen_random_uuid() AS command_id,gen_random_uuid() AS line_id,
+  NULL::UUID AS operation_id,NULL::UUID AS lot_id,NULL::UUID AS pack_id,
+  NULL::TEXT AS receive_hash,NULL::TEXT AS cart_hash,
+  '{"version":1,"unit":"tablet","units_per_pack":10,"dispense_step":1}'::JSONB AS packaging_v1,
+  '{"version":2,"unit":"tablet","units_per_pack":10,
+    "units_per_blister":5,"dispense_step":1}'::JSONB AS packaging_v2
+FROM (VALUES ('cart'),('unrelated')) names(which);
+GRANT SELECT ON edge_inputs_receiving TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
+SELECT set_config('app.tenant_id',:'tenant_id',true),
+  set_config('app.branch_id',:'branch_id',true),set_config('app.user_id',:'cashier_id',true),
+  set_config('app.edge_node_id','',true)
+\gset
+INSERT INTO public.tenant_catalog(id,tenant_id,brand_name,dispensing_type,base_price,
+  is_active,unit_sale_preparation)
+SELECT catalog_id,tenant_id,'Unrelated physical stock','otc',10,true,
+  '{"version":1,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
+    "dispense_step":1,"state":"prepared","unit_price":"1.00"}'::JSONB
+FROM edge_inputs_receiving WHERE which='unrelated';
+INSERT INTO public.supplier(id,tenant_id,operation_id,create_request_fingerprint,name,created_by)
+SELECT supplier_id,tenant_id,gen_random_uuid(),repeat('a',64),'Native inputs test supplier',cashier_id
+FROM edge_inputs_receiving;
+INSERT INTO public.incoming_document(id,tenant_id,operation_id,branch_id,supplier_id,
+  document_date,total_amount,created_by)
+SELECT document_id,tenant_id,gen_random_uuid(),branch_id,supplier_id,CURRENT_DATE,10,cashier_id
+FROM edge_inputs_receiving;
+INSERT INTO public.incoming_item(id,tenant_id,operation_id,document_id,catalog_id,
+  expires_at,qty,purchase_price,sale_price,unit_packaging_preparation,unit_packaging_snapshot_v2)
+SELECT item_id,tenant_id,gen_random_uuid(),document_id,catalog_id,CURRENT_DATE+365,
+  2,5,10,packaging_v1,packaging_v2 FROM edge_inputs_receiving;
+RESET SESSION AUTHORIZATION;
+-- Private calculations are fixture values, not grants to the app identity.
+UPDATE edge_inputs_receiving SET
+  operation_id=public.unit_incoming_uuid5('aurum-unit-incoming-v2:'||tenant_id||':'||item_id),
+  receive_hash=public.unit_incoming_v2_fingerprint(tenant_id,item_id);
+UPDATE edge_inputs_receiving SET
+  lot_id=public.unit_incoming_uuid5('aurum-unit-lot-v2:'||tenant_id||':'||operation_id);
+UPDATE edge_inputs_receiving SET
+  pack_id=public.unit_incoming_uuid5('aurum-unit-open-v2:'||tenant_id||':'||command_id||':'||lot_id||':1'),
+  cart_hash=encode(sha256(convert_to(replace(json_build_array('aurum-unit-cart-v2:1',
+    tenant_id::TEXT,branch_id::TEXT,json_build_array(json_build_array(line_id::TEXT,
+      catalog_id::TEXT,2,'tablet',10,5,1,'unit',1)))::TEXT,' ',''),'UTF8')),'hex');
+SET SESSION AUTHORIZATION aurum_app;
+INSERT INTO public.unit_stock_operation_v2(tenant_id,id,branch_id,catalog_id,source_item_id,
+  packaging,kind,sale_format,quantity,base_units,request_hash,created_by)
+SELECT tenant_id,operation_id,branch_id,catalog_id,item_id,packaging_v2,
+  'initialize','pack',2,20,receive_hash,cashier_id FROM edge_inputs_receiving;
+INSERT INTO public.unit_stock_lot_v2(tenant_id,id,branch_id,catalog_id,source_item_id,
+  packaging,expires_at,initial_closed_packs,closed_packs,purchase_cost_per_pack,cost_version,created_by)
+SELECT tenant_id,lot_id,branch_id,catalog_id,item_id,packaging_v2,CURRENT_DATE+365,
+  2,0,5,1,cashier_id FROM edge_inputs_receiving;
+UPDATE public.incoming_item item SET created_unit_lot_v2_id=context.lot_id
+FROM edge_inputs_receiving context WHERE item.id=context.item_id AND item.tenant_id=context.tenant_id;
+INSERT INTO public.unit_stock_entry_v2(tenant_id,id,branch_id,catalog_id,source_item_id,
+  operation_id,lot_id,kind,closed_delta,base_units,created_by)
+SELECT tenant_id,gen_random_uuid(),branch_id,catalog_id,item_id,operation_id,lot_id,
+  'initialize',2,20,cashier_id FROM edge_inputs_receiving;
+UPDATE public.incoming_document document SET status='accepted',accepted_at=statement_timestamp(),
+  accepted_by=context.cashier_id
+FROM edge_inputs_receiving context WHERE document.id=context.document_id;
+SET CONSTRAINTS ALL IMMEDIATE;
+SET CONSTRAINTS ALL DEFERRED;
+INSERT INTO public.unit_stock_cart_command_v2(tenant_id,id,branch_id,actor_id,request_hash,created_by)
+SELECT tenant_id,command_id,branch_id,cashier_id,cart_hash,cashier_id
+FROM edge_inputs_receiving WHERE which='cart';
+INSERT INTO public.unit_stock_cart_line_v2(tenant_id,command_id,line_id,position,catalog_id,
+  packaging,sale_format,quantity,base_units,created_by)
+SELECT tenant_id,command_id,line_id,0,catalog_id,packaging_v2,'unit',1,1,cashier_id
+FROM edge_inputs_receiving WHERE which='cart';
+INSERT INTO public.unit_stock_movement_v2(tenant_id,id,branch_id,catalog_id,command_id,
+  line_id,lot_id,pack_id,kind,entry_order,closed_delta,units_taken,after_state,
+  sealed_start,sealed_count,created_by)
+SELECT tenant_id,gen_random_uuid(),branch_id,catalog_id,command_id,line_id,lot_id,pack_id,
+  'pack_open',0,-1,0,
+  '{"intact_blisters":[1,2],"opened_blisters":[],"loose_units":0}'::JSONB,1,1,cashier_id
+FROM edge_inputs_receiving WHERE which='cart';
+INSERT INTO public.unit_stock_movement_v2(tenant_id,id,branch_id,catalog_id,command_id,
+  line_id,lot_id,pack_id,kind,entry_order,closed_delta,units_taken,before_state,after_state,created_by)
+SELECT tenant_id,gen_random_uuid(),branch_id,catalog_id,command_id,line_id,lot_id,pack_id,
+  'unit_take',1,0,1,
+  '{"intact_blisters":[1,2],"opened_blisters":[],"loose_units":0}'::JSONB,
+  '{"intact_blisters":[2],"opened_blisters":[{"number":1,"remaining_units":4}],"loose_units":0}'::JSONB,
+  cashier_id FROM edge_inputs_receiving WHERE which='cart';
+SET CONSTRAINTS ALL IMMEDIATE;
+RESET SESSION AUTHORIZATION;
+SELECT lot_id||'|'||pack_id FROM edge_inputs_receiving WHERE which='cart';
+COMMIT;
+SQL
+)"
+old_ifs=$IFS
+IFS='|'
+set -- $physical_stock
+IFS=$old_ifs
+physical_lot_id=$1
+physical_pack_id=$2
+
+# Receiving above ran under the real cloud writer. Only now assemble the
+# synthetic Edge activation, using the same fixture-only trigger suspension
+# as initial writer provisioning. Product guards remain unchanged.
+psql_super -v tenant_id="$tenant_id" -v branch_id="$branch_id" \
+    -v edge_node_id="$edge_node_id" -v register_id="$register_id" \
+    -v activation_id="$activation_id" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE edge_dispatcher_context ON COMMIT DROP AS
+SELECT :'tenant_id'::UUID AS tenant_id,:'branch_id'::UUID AS branch_id,
+  :'edge_node_id'::UUID AS edge_node_id,:'register_id'::UUID AS register_id,
+  :'activation_id'::UUID AS activation_id,repeat('0',64) AS zero_hash;
+ALTER TABLE public.sync_writer_activation DISABLE TRIGGER USER;
+ALTER TABLE public.sync_writer_epoch DISABLE TRIGGER USER;
+ALTER TABLE public.sync_stream DISABLE TRIGGER USER;
+UPDATE public.sync_writer_epoch SET state='fenced',fenced_at=statement_timestamp()
+WHERE tenant_id=:'tenant_id'::UUID AND branch_id=:'branch_id'::UUID AND writer_epoch=1;
+INSERT INTO public.sync_writer_activation (
+  activation_id, tenant_id, branch_id, writer_epoch, writer_node_id,
+  allowed_register_id, capability, state, root_source_checksum,
+  root_projection_checksum, last_sequence, current_source_checksum,
+  current_projection_checksum, previous_writer_epoch,
+  previous_terminal_sequence, previous_terminal_source_checksum,
+  previous_terminal_projection_checksum, bootstrap_snapshot_hash,
+  activation_manifest_hash, receipt_baseline_seq, prepare_request_hash,
+  prepared_at, ready_at, activated_at
+)
+SELECT activation_id, tenant_id, branch_id, 2, edge_node_id, register_id,
+       'cash_sale_v1', 'activated', zero_hash, zero_hash, 0, zero_hash,
+       zero_hash, 1, 0, zero_hash, zero_hash, zero_hash, zero_hash, 0,
+       pg_catalog.repeat('d', 64), now(), now(), now()
+FROM edge_dispatcher_context;
+INSERT INTO public.sync_writer_epoch (
+  tenant_id, branch_id, writer_epoch, activation_id, writer_node_id,
+  allowed_register_id, capability, state, root_source_checksum,
+  root_projection_checksum, last_sequence, current_source_checksum,
+  current_projection_checksum, previous_writer_epoch,
+  previous_terminal_sequence, previous_terminal_source_checksum,
+  previous_terminal_projection_checksum, bootstrap_snapshot_hash,
+  activation_manifest_hash, receipt_baseline_seq, prepared_at, activated_at
+)
+SELECT tenant_id, branch_id, 2, activation_id, edge_node_id, register_id,
+       'cash_sale_v1', 'active', zero_hash, zero_hash, 0, zero_hash,
+       zero_hash, 1, 0, zero_hash, zero_hash, zero_hash, zero_hash, 0,
+       now(), now()
+FROM edge_dispatcher_context;
+UPDATE public.sync_stream SET writer_node_id=:'edge_node_id'::UUID,writer_epoch=2
+WHERE tenant_id=:'tenant_id'::UUID AND branch_id=:'branch_id'::UUID;
+ALTER TABLE public.sync_stream ENABLE TRIGGER USER;
+ALTER TABLE public.sync_writer_epoch ENABLE TRIGGER USER;
+ALTER TABLE public.sync_writer_activation ENABLE TRIGGER USER;
+COMMIT;
+SQL
+
+
 # Seed immutable confirmations through their real app-role guards. The native
 # preparation below uses a separate authenticated per-node LOGIN connection.
 retail_payloads="$(psql_super \
@@ -586,6 +736,10 @@ SELECT jsonb_build_object(
     WHERE tenant_id=:'tenant_id'::UUID),
   'stock_movements',(SELECT count(*) FROM public.unit_stock_movement_v2
     WHERE tenant_id=:'tenant_id'::UUID),
+  'physical_lots',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id)
+    FROM public.unit_stock_lot_v2 row WHERE tenant_id=:'tenant_id'::UUID),
+  'physical_packs',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id)
+    FROM public.unit_stock_opened_pack_v2 row WHERE tenant_id=:'tenant_id'::UUID),
   'physical_checkouts',(SELECT count(*) FROM public.pos_physical_checkout
     WHERE tenant_id=:'tenant_id'::UUID),
   'mixed_checkouts',(SELECT count(*) FROM public.pos_mixed_checkout
@@ -600,6 +754,7 @@ SQL
 }
 
 retail_before="$(retail_facts)"
+inputs_lock_payload=""
 old_ifs=$IFS
 IFS='
 '
@@ -617,6 +772,60 @@ SELECT :'result'::JSONB->>'state'='prepared_not_executed'
   AND NOT :'result'::JSONB ?| ARRAY['receipt_number','payments','stock_command_id'];
 SQL
 )" = "t"
+    inputs_payload="$(psql_super -v payload="$retail_payload" <<'SQL'
+SELECT jsonb_set(:'payload'::JSONB,'{profile}','"retail_cash.inputs.v1"'::JSONB);
+SQL
+)"
+    inputs_hash="$(retail_hash "$inputs_payload")"
+    inputs_result="$(retail_call "$inputs_payload" "$inputs_hash")"
+    test "$inputs_result" = "$(retail_call "$inputs_payload" "$inputs_hash")"
+    inputs_lock_payload=${inputs_lock_payload:-$inputs_payload}
+    test "$(psql_super -v result="$inputs_result" -v prepared="$retail_first" \
+        -v payload="$inputs_payload" -v tenant_id="$tenant_id" -v branch_id="$branch_id" \
+        -v retail_catalog_id="$retail_catalog_id" -v catalog_id="$catalog_id" \
+        -v lot_id="$physical_lot_id" -v pack_id="$physical_pack_id" -v batch_id="$batch_id" <<'SQL'
+WITH input AS (SELECT :'result'::JSONB AS snapshot)
+SELECT snapshot->>'state'='locked_inputs_not_executed'
+ AND snapshot->'schema_version'='1'::JSONB
+ AND snapshot-ARRAY['schema_version','state','preparation','saved_quote','stock_date',
+   'catalogs','physical_stock','legacy_stock']='{}'::JSONB
+ AND snapshot->'preparation'=:'prepared'::JSONB
+ AND snapshot->'saved_quote'=(SELECT quote_payload FROM public.pos_unit_cash_intent
+   WHERE tenant_id=:'tenant_id'::UUID AND id=(:'payload'::JSONB->'confirmation'->>'operation_id')::UUID)
+ AND snapshot->>'stock_date'=to_char(clock_timestamp() AT TIME ZONE 'Asia/Dushanbe','YYYY-MM-DD')
+ AND snapshot->'physical_stock'=jsonb_build_array(jsonb_build_object(
+   'id',lot.id,'tenant_id',lot.tenant_id,'branch_id',lot.branch_id,'catalog_id',lot.catalog_id,
+   'expires_at',lot.expires_at,'created_at',to_char(lot.created_at AT TIME ZONE 'UTC',
+     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'packaging',lot.packaging,'closed_packs',1,'is_blocked',false,
+   'opened_packs',jsonb_build_array(jsonb_build_object('id',pack.id,
+     'opened_at',to_char(pack.opened_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+     'intact_blisters',jsonb_build_array(2),
+     'opened_blisters',jsonb_build_array(jsonb_build_object('number',1,'remaining_units',4)),
+     'loose_units',0))))
+ AND (SELECT array_agg(entry->>'id' ORDER BY entry->>'id')
+   FROM jsonb_array_elements(snapshot->'catalogs') entry)=CASE
+   WHEN :'payload'::JSONB->>'kind'='mixed_cash' THEN
+     (SELECT array_agg(id ORDER BY id) FROM (VALUES (:'retail_catalog_id'),(:'catalog_id')) ids(id))
+   ELSE ARRAY[:'retail_catalog_id'] END
+ AND (SELECT bool_and(entry->>'tenant_id'=:'tenant_id' AND NOT entry ? 'purchase_price')
+   FROM jsonb_array_elements(snapshot->'catalogs') entry)
+ AND CASE WHEN :'payload'::JSONB->>'kind'='mixed_cash' THEN
+   jsonb_array_length(snapshot->'legacy_stock')=1
+   AND snapshot->'legacy_stock'->0->>'id'=:'batch_id'
+   AND snapshot->'legacy_stock'->0->>'qty_remaining'='20.000'
+   AND snapshot->'legacy_stock'->0->>'sale_price'='10.00'
+   AND snapshot->'legacy_stock'->0->>'branch_id'=:'branch_id'
+ ELSE snapshot->'legacy_stock'='[]'::JSONB END
+ AND snapshot::TEXT !~ 'purchase_cost|purchase_price|original_pack_cost|cost_amount'
+FROM input CROSS JOIN public.unit_stock_lot_v2 lot
+JOIN public.unit_stock_opened_pack_v2 pack ON pack.lot_id=lot.id
+WHERE lot.id=:'lot_id'::UUID AND pack.id=:'pack_id'::UUID;
+SQL
+)" = "t"
+    if retail_call "$inputs_payload" "$(psql_super -c "SELECT repeat('0',64)")" >/dev/null 2>&1; then
+        echo "Native retail inputs accepted an invalid hash" >&2
+        exit 1
+    fi
     for retail_mutation in foreign_scope stale_epoch saved_mismatch wrong_kind null_kind; do
         altered_payload="$(psql_super -v payload="$retail_payload" \
             -v mutation="$retail_mutation" <<'SQL'
@@ -635,9 +844,156 @@ SQL
             echo "Native retail preparation accepted $retail_mutation" >&2
             exit 1
         fi
+        altered_inputs="$(psql_super -v payload="$altered_payload" <<'SQL'
+SELECT jsonb_set(:'payload'::JSONB,'{profile}','"retail_cash.inputs.v1"'::JSONB);
+SQL
+)"
+        if retail_call "$altered_inputs" "$(retail_hash "$altered_inputs")" >/dev/null 2>&1; then
+            echo "Native retail inputs accepted $retail_mutation" >&2
+            exit 1
+        fi
     done
 done
 IFS=$old_ifs
+test "$retail_before" = "$(retail_facts)"
+
+# Prove that granted UPDATE(id) permits row locks but cannot mutate a visible
+# row. Test-only fixed functions run as the actual dispatcher owner under the
+# same SESSION_USER as a node. They accept no SQL or relation names.
+psql_super -v edge_role="$edge_role" <<'SQL'
+BEGIN;
+GRANT CREATE ON SCHEMA public TO aurum_edge_cash_owner;
+SET LOCAL ROLE aurum_edge_cash_owner;
+CREATE FUNCTION public.edge_inputs_ci_catalog_update(p_id UUID) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET row_security=on AS $$
+BEGIN
+ PERFORM 1 FROM public.tenant_catalog WHERE id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'CI row not visible'; END IF;
+ UPDATE public.tenant_catalog SET id=id WHERE id=p_id;
+ RAISE EXCEPTION 'CI write unexpectedly succeeded';
+END $$;
+CREATE FUNCTION public.edge_inputs_ci_lot_update(p_id UUID) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET row_security=on AS $$
+BEGIN
+ PERFORM 1 FROM public.unit_stock_lot_v2 WHERE id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'CI row not visible'; END IF;
+ UPDATE public.unit_stock_lot_v2 SET id=id WHERE id=p_id;
+ RAISE EXCEPTION 'CI write unexpectedly succeeded';
+END $$;
+CREATE FUNCTION public.edge_inputs_ci_pack_update(p_id UUID) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET row_security=on AS $$
+BEGIN
+ PERFORM 1 FROM public.unit_stock_opened_pack_v2 WHERE id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'CI row not visible'; END IF;
+ UPDATE public.unit_stock_opened_pack_v2 SET id=id WHERE id=p_id;
+ RAISE EXCEPTION 'CI write unexpectedly succeeded';
+END $$;
+REVOKE ALL ON FUNCTION public.edge_inputs_ci_catalog_update(UUID),
+ public.edge_inputs_ci_lot_update(UUID),public.edge_inputs_ci_pack_update(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.edge_inputs_ci_catalog_update(UUID),
+ public.edge_inputs_ci_lot_update(UUID),public.edge_inputs_ci_pack_update(UUID) TO :"edge_role";
+RESET ROLE;
+REVOKE CREATE ON SCHEMA public FROM aurum_edge_cash_owner;
+COMMIT;
+SQL
+
+for relation in catalog lot pack; do
+    case "$relation" in
+        catalog) row_id=$retail_catalog_id ;;
+        lot) row_id=$physical_lot_id ;;
+        pack) row_id=$physical_pack_id ;;
+    esac
+    if denial="$(PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
+        --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
+        --dbname "$POSTGRES_DB" -v tenant_id="$tenant_id" -v branch_id="$branch_id" \
+        -v edge_node_id="$edge_node_id" -v row_id="$row_id" \
+        -v function_name="edge_inputs_ci_${relation}_update" 2>&1 <<'SQL'
+\set VERBOSITY sqlstate
+BEGIN;
+SELECT set_config('app.tenant_id',:'tenant_id',true),
+  set_config('app.branch_id',:'branch_id',true),set_config('app.edge_node_id',:'edge_node_id',true)
+\gset
+SELECT public.:"function_name"(:'row_id'::UUID);
+COMMIT;
+SQL
+)"; then
+        echo "Native inputs unexpectedly permitted $relation UPDATE" >&2
+        exit 1
+    fi
+    case "$denial" in
+        *42501*|*55000*) ;;
+        *) echo "Native inputs UPDATE did not prove visible-row refusal: $relation" >&2; exit 1 ;;
+    esac
+done
+psql_super <<'SQL'
+DROP FUNCTION public.edge_inputs_ci_catalog_update(UUID);
+DROP FUNCTION public.edge_inputs_ci_lot_update(UUID);
+DROP FUNCTION public.edge_inputs_ci_pack_update(UUID);
+SQL
+test "$retail_before" = "$(retail_facts)"
+
+# The node retains all resource locks until its outer transaction ends. A
+# separate maintenance LOGIN must time out; no second node connection is used.
+inputs_hash="$(retail_hash "$inputs_lock_payload")"
+lock_application="aurum-input-lock-$edge_node_id"
+PGAPPNAME="$lock_application" PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
+    --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
+    --dbname "$POSTGRES_DB" -v payload="$inputs_lock_payload" -v request_hash="$inputs_hash" \
+    >/dev/null <<'SQL' &
+BEGIN;
+SELECT public.dispatch_edge_cash_sale_v1(
+ (:'payload'::JSONB->'confirmation'->>'operation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'activation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'writer_epoch')::BIGINT,
+ (:'payload'::JSONB->'scope'->>'user_id')::UUID,:'payload'::JSONB,:'request_hash')
+\gset
+SELECT pg_sleep(12);
+ROLLBACK;
+SQL
+lock_holder_pid=$!
+ready=false
+attempt=0
+while [ "$attempt" -lt 50 ]; do
+    if [ "$(psql_super -v application="$lock_application" <<'SQL'
+SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=:'application'
+ AND wait_event='PgSleep' AND state='active');
+SQL
+)" = "t" ]; then
+        ready=true
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+if [ "$ready" != true ]; then
+    wait "$lock_holder_pid" || true
+    echo "Native inputs lock holder did not become ready" >&2
+    exit 1
+fi
+psql_super -v catalog_id="$retail_catalog_id" -v lot_id="$physical_lot_id" \
+    -v pack_id="$physical_pack_id" -v batch_id="$batch_id" <<'SQL'
+BEGIN;
+SET LOCAL lock_timeout='200ms';
+CREATE TEMP TABLE locked_input_rows(relation REGCLASS,id UUID) ON COMMIT DROP;
+INSERT INTO locked_input_rows VALUES ('public.tenant_catalog',:'catalog_id'::UUID),
+ ('public.unit_stock_lot_v2',:'lot_id'::UUID),
+ ('public.unit_stock_opened_pack_v2',:'pack_id'::UUID),('public.batch',:'batch_id'::UUID);
+DO $locks$
+DECLARE row RECORD; affected BIGINT;
+BEGIN
+ FOR row IN SELECT * FROM locked_input_rows LOOP
+  BEGIN
+   EXECUTE format('SELECT id FROM %s WHERE id=$1 FOR NO KEY UPDATE',row.relation) USING row.id;
+   GET DIAGNOSTICS affected=ROW_COUNT;
+   IF affected<>1 THEN RAISE EXCEPTION 'CI lock probe has no matching row'; END IF;
+   RAISE EXCEPTION 'Native inputs did not retain a resource lock';
+  EXCEPTION WHEN lock_not_available THEN NULL;
+  END;
+ END LOOP;
+END $locks$;
+ROLLBACK;
+SQL
+wait "$lock_holder_pid"
 test "$retail_before" = "$(retail_facts)"
 
 # Role attributes are checked on every preparation, not only at enrollment.
@@ -675,7 +1031,11 @@ SELECT NOT has_table_privilege(:'edge_role','public.pos_unit_cash_intent','SELEC
   AND NOT has_function_privilege('aurum_app',
     'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE')
   AND NOT has_function_privilege('aurum_support',
-    'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE');
+    'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE')
+  AND NOT has_any_column_privilege(:'edge_role','public.unit_stock_lot_v2','SELECT,INSERT,UPDATE')
+  AND NOT has_any_column_privilege(:'edge_role','public.unit_stock_opened_pack_v2','SELECT,INSERT,UPDATE')
+  AND NOT has_function_privilege(:'edge_role',
+    'public.lock_edge_retail_cash_inputs_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE');
 SQL
 )" = "t"
 

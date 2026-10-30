@@ -861,7 +861,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 231 THEN
+        IF revision_number < 1 OR revision_number > 232 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -1336,6 +1336,45 @@ BEGIN
                 cashier_user_id, revision_hash, expected_total_amount,
                 cash_tendered, currency, quote_payload
             ) ON public.pos_unit_cash_intent TO aurum_edge_cash_owner;
+        END IF;
+        IF current_revision::INTEGER >= 232 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.lock_edge_retail_cash_inputs_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail inputs helper definition is unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.lock_edge_retail_cash_inputs_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.lock_edge_retail_cash_inputs_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                id, tenant_id, branch_id, catalog_id, expires_at, created_at,
+                packaging, closed_packs, is_blocked
+            ) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                id, tenant_id, branch_id, catalog_id, lot_id, opened_at, state,
+                remaining_units
+            ) ON public.unit_stock_opened_pack_v2 TO aurum_edge_cash_owner;
+            -- Row-lock privilege only. Migration 0232 adds restrictive false
+            -- UPDATE checks; neither these grants nor the helper permit DML.
+            GRANT UPDATE (id) ON public.tenant_catalog, public.unit_stock_lot_v2,
+                public.unit_stock_opened_pack_v2 TO aurum_edge_cash_owner;
         END IF;
     END IF;
 
