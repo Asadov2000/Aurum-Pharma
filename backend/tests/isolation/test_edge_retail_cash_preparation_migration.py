@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -66,12 +67,33 @@ def _assert_private_helper(connection: Connection) -> None:
     )
 
 
+@pytest.mark.parametrize("owner_execute", [False, True])
 async def test_native_preparation_roundtrip_preserves_dispatcher_and_narrow_acl(
     maintenance_engine: AsyncEngine,
+    owner_execute: bool,
 ) -> None:
     def rehearse(connection: Connection) -> None:
         assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
         assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+        connection.execute(text("RESET ROLE"))
+        connection.execute(text("SET LOCAL ROLE aurum_edge_cash_owner"))
+        statement = (
+            f"GRANT EXECUTE ON FUNCTION {DISPATCHER} TO aurum_edge_cash_owner"
+            if owner_execute
+            else f"REVOKE EXECUTE ON FUNCTION {DISPATCHER} FROM aurum_edge_cash_owner"
+        )
+        connection.execute(text(statement))
+        connection.execute(text("RESET ROLE"))
+        connection.execute(text("SET LOCAL ROLE aurum_schema_owner"))
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT has_function_privilege('aurum_edge_cash_owner',"
+                    f"'{DISPATCHER}','EXECUTE')"
+                )
+            )
+            is owner_execute
+        )
         before = connection.execute(DISPATCHER_SNAPSHOT).one()
         before_access = connection.execute(INTENT_ACCESS).all()
         before_policy = connection.execute(INTENT_POLICY).one()

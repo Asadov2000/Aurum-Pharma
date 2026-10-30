@@ -49,10 +49,24 @@ def _patch_dispatcher(*, reverse: bool = False) -> None:
     # CREATE OR REPLACE retains the public function's OID, owner and exact ACL.
     # PostgreSQL requires schema CREATE even for replacement. Its temporary grant
     # exists only in the migration transaction and never survives migration success.
+    owner_can_execute = (
+        op.get_bind()
+        .exec_driver_sql(
+            f"SELECT has_function_privilege('aurum_edge_cash_owner','{SIGNATURE}','EXECUTE')"
+        )
+        .scalar_one()
+    )
     op.execute("GRANT CREATE ON SCHEMA public TO aurum_edge_cash_owner")
     op.execute("RESET ROLE")
     op.execute("SET LOCAL ROLE aurum_edge_cash_owner")
+    # Repeated role bootstrap may revoke the owner's own EXECUTE. PostgreSQL's
+    # PL/pgSQL validator still requires it when replacing an owned function.
+    # Restore the exact absence of that privilege after validation completes.
+    if not owner_can_execute:
+        op.execute(f"GRANT EXECUTE ON FUNCTION {SIGNATURE} TO aurum_edge_cash_owner")
     op.get_bind().exec_driver_sql(definition.replace(old, new, 1))
+    if not owner_can_execute:
+        op.execute(f"REVOKE EXECUTE ON FUNCTION {SIGNATURE} FROM aurum_edge_cash_owner")
     op.execute("RESET ROLE")
     op.execute("SET LOCAL ROLE aurum_schema_owner")
     op.execute("REVOKE CREATE ON SCHEMA public FROM aurum_edge_cash_owner")
