@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "native_preparation_accepted",
   "run_id": "local-2026-10-30-native-preparation-01",
   "branch": "codex/unit-edge-native-preparation",
   "base_sha": "6b586a78bc4323b6550a869c7bb83e6027859367",
   "expected_head": "b11492b6871b5efb12f83f4aeb9193172f69bc95",
-  "validated_sha": null,
+  "validated_sha": "b11492b6871b5efb12f83f4aeb9193172f69bc95",
   "pr": 440,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "Separate preparation state, no financial/stock/outbox DML and DenyAll runtime preserved",
     "Full exact-head CI and protected PR main merge"
   ],
-  "remaining_step": "PR440 full CI including actual native LOGIN and disposable migration rehearsal; inspect failures, protected merge only after success",
+  "remaining_step": "PR440 native nonfinancial preparation accepted in main; continue same E6-06 with actual monetary execution, fresh repricing/stock/authorization and rollback-safe result adapter. Runtime remains closed; fresh recon before writes.",
   "failure_counters": {
     "test_import_order": {
       "consecutive": 0,
@@ -48,18 +48,20 @@
       "status": "Optional direct-test import check baseline not retried; own new tests pass targeted silent-import check, mandatory full app mypy passes527files"
     },
     "native_migration_validator": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Historical migration replacement after hardened bootstrap lacked dispatcher owner's EXECUTE",
       "fix": "Temporary owner EXECUTE restored exactly; bootstrap now restores only the new helper and twelve intent SELECT columns",
-      "status": "fix published, full CI pending",
-      "failed_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28"
+      "status": "Resolved: all7915 backend tests and real native LOGIN pass on final head",
+      "failed_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28",
+      "previous_consecutive": 1
     },
     "native_policy_catalog_type": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "New migration rehearsal compared PostgreSQL internal char bytes to text",
       "fix": "Select polcmd::TEXT, preserve the same policy assertion",
-      "status": "fix published; final-head full CI pending",
-      "failed_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28"
+      "status": "Resolved: all7915 backend tests and real native LOGIN pass on final head",
+      "failed_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28",
+      "previous_consecutive": 1
     }
   },
   "blocker": null,
@@ -101,11 +103,12 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-30T10:53:27.698Z",
+  "updated_at": "2026-10-30T11:31:30.174Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
-    "Real native Edge database execution adapter with narrow identity/dispatcher and actual writer/capability/resource enforcement; existing app-only services cannot substitute for it."
+    "Native monetary execution adapter with fresh repricing/stock and payment-plan authorization, transactional financial/result/replay enforcement; preparation alone cannot substitute.",
+    "Review strict Edge column-ACL normalization on repeat bootstrap before runtime activation; no additional control stage is introduced."
   ],
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -123,9 +126,59 @@
   },
   "ci": {
     "head": "b11492b6871b5efb12f83f4aeb9193172f69bc95",
-    "status": "pending",
+    "status": "success",
     "workflow": "4c4dc7f4-d5d4-41e5-b64c-dd5834f10de7",
     "expected_backend_total": 7915,
-    "expected_new": 29
-  }
+    "expected_new": 29,
+    "backend_job": 3927,
+    "gate_job": 3930,
+    "backend_passed": 7915,
+    "new_passed": 29,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "skipped": 0,
+    "duplicates": 0,
+    "completed_success_jobs": [
+      "tooling-linux",
+      "tooling-windows",
+      "production-containers",
+      "frontend",
+      "dependency-audit",
+      "e2e",
+      "backend",
+      "ci-gate"
+    ],
+    "native_login": "Both CI nodes pass Edge dispatcher and identity lifecycle scenarios",
+    "new_counts": {
+      "tests.domains.pos.test_edge_retail_cash_repository": 25,
+      "tests.isolation.test_edge_retail_cash_preparation": 2,
+      "tests.isolation.test_edge_retail_cash_preparation_migration": 2
+    }
+  },
+  "completion": {
+    "pr": 440,
+    "merged": true,
+    "main": "c5e11b91134501990437cbd7ca4e716b1c864431",
+    "merged_at": "2026-10-30T11:30:27Z",
+    "tested_head": "b11492b6871b5efb12f83f4aeb9193172f69bc95",
+    "tested_tree": "5d4a578e8ac2c6b42dd457daac0f7581a29fbf98",
+    "main_tree": "5d4a578e8ac2c6b42dd457daac0f7581a29fbf98",
+    "tree_match": true,
+    "closes_control_stage": false,
+    "remaining_control_stages": 4
+  },
+  "accepted_increments": [
+    {
+      "pr": 439,
+      "kind": "lease_v1_bridge",
+      "main": "6b586a78bc4323b6550a869c7bb83e6027859367",
+      "closes_control_stage": false
+    },
+    {
+      "pr": 440,
+      "kind": "native_nonfinancial_preparation",
+      "main": "c5e11b91134501990437cbd7ca4e716b1c864431",
+      "closes_control_stage": false
+    }
+  ]
 }
