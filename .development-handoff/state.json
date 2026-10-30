@@ -41,10 +41,12 @@
       "fix": "Sorted imports; targeted Ruff passes"
     },
     "test_fixture_mypy": {
-      "consecutive": 0,
+      "consecutive": 1,
       "previous_consecutive": 1,
       "cause": "Additional direct tests mypy followed pre-existing fixture test modules; four local dynamic replace type errors fixed",
-      "fix": "New tests pass follow-imports=silent; global app check pending, configs unchanged"
+      "fix": "New tests pass follow-imports=silent; global app check pending, configs unchanged",
+      "required": false,
+      "status": "Optional direct-test import check baseline not retried; own new tests pass targeted silent-import check, mandatory full app mypy passes527files"
     }
   },
   "blocker": null,
@@ -85,7 +87,7 @@
   "cloud_recheck": {
     "status": "latest host read403; no product grant or schedulers changed"
   },
-  "updated_at": "2026-10-30T08:38:19.932Z",
+  "updated_at": "2026-10-30T08:46:47.748Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -108,8 +110,16 @@
   "head_tree": "05760049bf4e765fabbff04736dd75b7f436eb50",
   "ci": {
     "head": "5e43278c7094ca753caf7296d679f766d840e06d",
-    "status": "starting",
+    "status": "running",
     "expected_backend_total": 7886,
-    "expected_new": 122
+    "expected_new": 122,
+    "workflow": "a7e90594-6e4b-4c16-9d56-59576b6de786",
+    "backend_job": 3886,
+    "gate_job": 3890,
+    "completed_success_jobs": [
+      "tooling-linux",
+      "tooling-windows",
+      "dependency-audit"
+    ]
   }
 }
