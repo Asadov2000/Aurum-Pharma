@@ -8,7 +8,7 @@
   "run_id": "local-2026-10-30-native-preparation-01",
   "branch": "codex/unit-edge-native-preparation",
   "base_sha": "6b586a78bc4323b6550a869c7bb83e6027859367",
-  "expected_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28",
+  "expected_head": "2d6d9ca46571898f2d512056e92502c0f52caa1d",
   "validated_sha": null,
   "pr": 440,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -46,6 +46,13 @@
       "fix": "New tests pass follow-imports=silent; global app check pending, configs unchanged",
       "required": false,
       "status": "Optional direct-test import check baseline not retried; own new tests pass targeted silent-import check, mandatory full app mypy passes527files"
+    },
+    "native_migration_validator": {
+      "consecutive": 1,
+      "cause": "Historical migration replacement after hardened bootstrap lacked dispatcher owner's EXECUTE",
+      "fix": "Temporary owner EXECUTE restored exactly; bootstrap now restores only the new helper and twelve intent SELECT columns",
+      "status": "fix published, full CI pending",
+      "failed_head": "37fbf3b31b684831ed241da9e8aafd7683f65f28"
     }
   },
   "blocker": null,
@@ -87,7 +94,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-30T10:04:31.247Z",
+  "updated_at": "2026-10-30T10:19:38.217Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -97,14 +104,14 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "26da7fb5e07fd5aba2f3cae1de0f8cd46ddc621d",
+  "head_tree": "d7c287999f82d5aeedcea5a0ea108ec204cba9b1",
   "local_validation": {
-    "targeted_passed": 147,
+    "targeted_passed": 159,
     "new_unit_passed": 25,
     "ruff": "app/tests pass",
     "black": "1064 files full pass and additional ACL file targeted pass",
     "mypy_sources": 528,
-    "new_db_tests": 3,
+    "new_db_tests": 4,
     "real_login_scenarios": "pending CI"
   }
 }
