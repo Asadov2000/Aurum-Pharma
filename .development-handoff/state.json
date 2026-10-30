@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci_tenant_access",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -69,6 +69,14 @@
       "local_validation": "RuffBlackdiff pass;independentreview actual0062helper falseforallapp;88DDL/11policies recorded zero legacyrefs;2nativeguards preserved",
       "status": "Reviewed5policyfix published;awaitnewhead foundation invariant",
       "fix_commit": "6d9427ad"
+    },
+    "manual_access_table_coverage": {
+      "consecutive": 1,
+      "head": "6d9427adda92b36c391941957ff0e32d3b441d58",
+      "job": 3862,
+      "step": "test_manual_access_migrations_roundtrip line386",
+      "cause": "Five new tables were included only in later_tables, omitted from four rehearsal SQL lists and generic tenant/POS access triggers",
+      "fix": "Add same a00 POS barrier as0227/0229 to all5tables; include all4rehearsal SQL lists; preserve assertions"
     }
   },
   "blocker": null,
@@ -97,7 +105,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:09:37.637Z",
+  "updated_at": "2026-10-30T07:18:20.393Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
