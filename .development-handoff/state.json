@@ -8,7 +8,7 @@
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-  "expected_head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
+  "expected_head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
   "validated_sha": null,
   "pr": 438,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -46,6 +46,17 @@
       "step": "Ruff PLR0912",
       "cause": "Newv6anchor branch exceeded existing12branchlimit",
       "fix": "Extract sharedfinancialanchor reader; unchangedlimit; Ruffpass"
+    },
+    "cluster_migration_head": {
+      "consecutive": 1,
+      "head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
+      "workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
+      "job": 3845,
+      "step": "Verify cluster-safe migration roundtrip",
+      "cause": "Newhead230 doesnotmatch role-contract maximum229; initialshellassertionfailsbeforeDBroundtrip",
+      "fix_commit": "2ba6364a",
+      "fix": "Advance onlyknownsupported revision to230;12existingmigrationtooltests pass",
+      "status": "Await new exactheadCI; unknownfutureversionsstillrefused"
     }
   },
   "blocker": null,
@@ -74,7 +85,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T05:55:02.374Z",
+  "updated_at": "2026-10-30T06:07:03.282Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -84,13 +95,15 @@
     "db_tests": "collected only; Docker not running, no localservicesstarted",
     "lock_review": "One transaction advisory mutex per validatedtenant/branch;noUPDATEgrants;3SQLcompilationregressionspass;readonlynolocks",
     "full_backend_collected": 7764,
-    "new_stage_cases": 147
+    "new_stage_cases": 147,
+    "migration_tool_passed": 12
   },
-  "head_tree": "422a8bf77d448469e048e3509ce3f151dcfb0898",
+  "head_tree": "385dc2e035058893972d8a09fb1590900c29882f",
   "ci": {
-    "head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
-    "workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
-    "status": "running"
+    "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
+    "workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
+    "status": "running",
+    "previous_failed_workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d"
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED"
 }
