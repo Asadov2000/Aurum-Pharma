@@ -25,7 +25,7 @@ INTENT_ACCESS = text(
     "AND attnum>0 AND NOT attisdropped ORDER BY attnum"
 )
 INTENT_POLICY = text(
-    "SELECT polroles,polcmd,pg_get_expr(polqual,polrelid) FROM pg_policy "
+    "SELECT polroles,polcmd::TEXT,pg_get_expr(polqual,polrelid) FROM pg_policy "
     "WHERE polrelid='public.pos_unit_cash_intent'::regclass "
     "AND polname='edge_cash_saved_confirmation'"
 )
