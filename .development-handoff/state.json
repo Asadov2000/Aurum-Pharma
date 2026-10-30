@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 20,
-  "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
-  "control_stage_id": "E6-05",
+  "generation": 21,
+  "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
+  "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-10-30-edge-refund-events-01",
-  "branch": "codex/unit-edge-refund-events",
-  "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-  "expected_head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-  "validated_sha": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-  "pr": 438,
+  "phase": "implementing",
+  "run_id": "local-2026-10-30-retail-admission-01",
+  "branch": "codex/unit-edge-retail-admission",
+  "base_sha": "e9badfb06115e09901512a1267199a34afc5c44d",
+  "expected_head": "e9badfb06115e09901512a1267199a34afc5c44d",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,80 +18,30 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
   "counter": "2/7 (4)",
-  "counter_after_full_completion": "2/7 (4)",
-  "scope": "E6-05 only: committed physical/mixed cash/electronic refund events linked to exact original sale, immutable financial/history facts and read-only restoration without repeated payouts or stock effects. No public delivery/offline activation/deployment.",
+  "counter_after_full_completion": "2/7 (3)",
+  "scope": "E6-06: internal physical/mixed cash command bridge to existing lease v1, exact scope/current writer/capability/saved confirmation, transactional result guard. Native Edge DB execution, app-only services, public delivery and runtime activation stay closed; no new lease/capabilities/operations.",
   "acceptance": [
-    "All four persisted refund paths produce exact transaction-bound stream evidence or fail closed under owner default-off gate",
-    "Exact source/parent/branch/writer identity and immutable monetary/stock facts; repeat and rollback safe",
-    "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
-    "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
+    "Existing lease v1 reauthorizes each call/replay; full signed/principal/command scope and lease identity match",
+    "Trusted transaction-bound writer/node/capability/saved confirmation checks before execution; scope/kind/result/cash-only verification inside rollback boundary",
+    "Real existing lease pipeline integration denies expiry/revocation/unconfirmed/session/commit failures without reaching execution",
+    "Default DenyAll verifier and execution port; no route, wire changes, dependency/DB/runtime/UI changes",
+    "Full exact-head CI gate and tested-tree protected main merge"
   ],
-  "remaining_step": "Next fixed stage E6-06: permissions, limitations and admission of autonomous POS; fresh recon and one local writer required. No cloud product grant.",
-  "failure_counters": {
-    "delivery_gate_v6": {
-      "consecutive": 0,
-      "previous_consecutive": 1,
-      "step": "new delivery gate regression",
-      "cause": "Existing explicit version denylist omitted new v6",
-      "fix": "Add pos.sale.refunded.v6 to same gate, all220selectedtests pass"
-    },
-    "materializer_branches": {
-      "consecutive": 0,
-      "previous_consecutive": 1,
-      "step": "Ruff PLR0912",
-      "cause": "Newv6anchor branch exceeded existing12branchlimit",
-      "fix": "Extract sharedfinancialanchor reader; unchangedlimit; Ruffpass"
-    },
-    "cluster_migration_head": {
-      "consecutive": 0,
-      "head": "68e7ae94a3470c9abbf6697864dea8794f189bf2",
-      "workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
-      "job": 3845,
-      "step": "Verify cluster-safe migration roundtrip",
-      "cause": "Newhead230 doesnotmatch role-contract maximum229; initialshellassertionfailsbeforeDBroundtrip",
-      "fix_commit": "2ba6364a",
-      "fix": "Advance onlyknownsupported revision to230;12existingmigrationtooltests pass",
-      "status": "Resolved:bothnewheadbackendshards passed cluster-safe migration roundtrip and enteredPytest",
-      "previous_consecutive": 1
-    },
-    "legacy_support_policy_reference": {
-      "consecutive": 0,
-      "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
-      "job": 3857,
-      "step": "test_foundation_rls.py184",
-      "cause": "Five newRLS policy clauses reference legacyis_support_session(), forbidden byexistingarchitectureinvariant;actualrole/tenant/forgedflag assertionspassed",
-      "fix": "Removeonly5redundantNOTlegacyhelperclauses fromRLS;actualsessionroles+verifiedsupport/actor/tenantbranchEdge/permissions retained;nativecommandguards unchanged",
-      "local_validation": "RuffBlackdiff pass;independentreview actual0062helper falseforallapp;88DDL/11policies recorded zero legacyrefs;2nativeguards preserved",
-      "status": "Resolved: foundation invariant passes on6d9427ad/job3862",
-      "fix_commit": "6d9427ad",
-      "previous_consecutive": 1
-    },
-    "manual_access_table_coverage": {
-      "consecutive": 0,
-      "head": "6d9427adda92b36c391941957ff0e32d3b441d58",
-      "job": 3862,
-      "step": "test_manual_access_migrations_roundtrip line386",
-      "cause": "Five new tables were included only in later_tables, omitted from four rehearsal SQL lists and generic tenant/POS access triggers",
-      "fix": "Add same a00 POS barrier as0227/0229 to all5tables; include all4rehearsal SQL lists; preserve assertions",
-      "fix_commit": "531d493d",
-      "local_validation": "Ruff/Black3files pass;static93DDL/5barriers/5matching74tablelists;independentDBandQAreviews;4DBtests collectedonly",
-      "previous_consecutive": 1,
-      "status": "Resolved: manual migration roundtrip succeeds on531d493d/job3872"
-    }
-  },
+  "remaining_step": "Implement module and independent unit/real lease pipeline tests; early style/type checks; full CI and protected merge.",
+  "failure_counters": {},
   "blocker": null,
   "previous_completed": {
-    "work_item_id": "UNIT-EDGE-STOCK-EVENTS-01",
-    "pr": 437,
-    "head": "c9416270faa8870ca120f9f0736fd992b9b522ef",
-    "main": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-    "tree": "87e57f5068fa28aa9536f229dd29fb91667eeab4",
-    "ci": "all8success;7617backend;181new;3260frontend;167browser"
+    "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
+    "pr": 438,
+    "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
+    "main": "e9badfb06115e09901512a1267199a34afc5c44d",
+    "tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
+    "ci": "all8success;7764backend;147new;3260frontend;167browser"
   },
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -110,100 +60,6 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T08:08:12.142Z",
-  "local_validation": {
-    "selected_pure_passed": 223,
-    "mypy_sources": 526,
-    "ruff": "app/tests pass",
-    "black": "1058files pass",
-    "native_sql": "DDLsplit88upgrade21downgrade;independentsecurityreviewapproved;executionpendingCI",
-    "db_tests": "collected only; Docker not running, no localservicesstarted",
-    "lock_review": "One transaction advisory mutex per validatedtenant/branch;noUPDATEgrants;3SQLcompilationregressionspass;readonlynolocks",
-    "full_backend_collected": 7764,
-    "new_stage_cases": 147,
-    "migration_tool_passed": 12,
-    "final_migration": {
-      "statements": 93,
-      "policies": 11,
-      "legacy_policy_refs": 0,
-      "pos_access_triggers": 5,
-      "rehearsal_table_sets": 5,
-      "table_count_per_set": 74
-    }
-  },
-  "head_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
-  "ci": {
-    "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-    "status": "success",
-    "previous_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
-    "previous_workflow": "a817ce15-b2bf-474b-a477-629062315416",
-    "previous_backend_job": 3862,
-    "previous_frontend_passed": 3260,
-    "previous_e2e_passed": 167,
-    "previous_failed_test": "manual access rehearsal table coverage",
-    "expected_backend_total": 7764,
-    "expected_new": 147,
-    "workflow": "658f8523-fe65-4d85-a1ea-30112b51684e",
-    "backend_job": 3872,
-    "gate_job": 3874,
-    "completed_success_jobs": [
-      "tooling-linux",
-      "tooling-windows",
-      "production-containers",
-      "frontend",
-      "dependency-audit",
-      "e2e",
-      "backend",
-      "ci-gate"
-    ],
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "e2e_failures": 0,
-    "backend_passed": 7764,
-    "new_passed": 147,
-    "skipped": 0,
-    "duplicates": 0,
-    "backend_evidence": {
-      "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-      "workflow": "658f8523-fe65-4d85-a1ea-30112b51684e",
-      "job": 3872,
-      "status": "success",
-      "total": 7764,
-      "totals": {
-        "success": 7764
-      },
-      "new_counts": {
-        "tests.domains.pos.test_retail_refund_events": 60,
-        "tests.domains.sync.test_retail_refund_events_integration": 18,
-        "tests.domains.sync.test_retail_refund_stock_projection": 16,
-        "tests.domains.sync.test_00_retail_refund_event_migration": 3,
-        "tests.domains.sync.test_retail_refund_receive": 34,
-        "tests.domains.sync.test_retail_refund_receive_integration": 16
-      },
-      "new_results": {
-        "success": 147
-      },
-      "duplicates": 0,
-      "failures": [],
-      "known_regressions": [
-        {
-          "test": "tests.isolation.test_foundation_rls::test_tenant_a_does_not_see_branches_of_tenant_b",
-          "result": "success"
-        },
-        {
-          "test": "tests.isolation.test_manual_access_migrations::test_manual_access_migrations_roundtrip",
-          "result": "success"
-        }
-      ],
-      "accepted": true
-    }
-  },
-  "cloud_recheck": {
-    "last_poll": "unavailable_after_verified_idle_snapshot",
-    "last_verified_idle_at": "2026-10-30T07:50:41.138Z",
-    "grant": false
-  },
-  "pending_changes": null,
   "cloud_last_verified": {
     "at": "2026-10-30T07:50:41.138Z",
     "thread_id": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -213,22 +69,8 @@
     "cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
     "scheduler": "PAUSED"
   },
-  "runtime_checkout_verified": {
-    "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
-    "clean": true,
-    "at": "2026-10-30T07:50:41.138Z"
+  "cloud_recheck": {
+    "status": "latest host read403; no product grant or schedulers changed"
   },
-  "next_stage_id": "E6-06",
-  "next_stage_name": "Права, ограничения и допуск автономной кассы",
-  "completion": {
-    "pr": 438,
-    "merged": true,
-    "main": "e9badfb06115e09901512a1267199a34afc5c44d",
-    "merged_at": "2026-10-30T08:04:48Z",
-    "tested_head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-    "tested_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
-    "main_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
-    "tree_match": true,
-    "remaining_control_stages": 4
-  }
+  "updated_at": "2026-10-30T08:22:17.267Z"
 }
