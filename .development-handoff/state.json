@@ -87,7 +87,7 @@
   "cloud_recheck": {
     "status": "latest host read403; no product grant or schedulers changed"
   },
-  "updated_at": "2026-10-30T08:59:17.192Z",
+  "updated_at": "2026-10-30T09:05:33.855Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -121,8 +121,12 @@
       "tooling-windows",
       "dependency-audit",
       "frontend",
-      "production-containers"
+      "production-containers",
+      "e2e"
     ],
-    "frontend_passed": 3260
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "e2e_failures": 0,
+    "e2e_artifact_read": "success after transient DNS resolution recovered"
   }
 }
