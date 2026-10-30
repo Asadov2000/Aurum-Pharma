@@ -506,13 +506,13 @@ def upgrade() -> None:
       GRANT SELECT ON public.sync_retail_refund_source,public.sync_retail_refund_event TO aurum_app;
       CREATE POLICY scoped_reader ON public.sync_retail_refund_source FOR SELECT TO aurum_app
        USING(session_user='aurum_app' AND NOT public.is_tenant_support_session()
-        AND NOT public.is_support_session() AND tenant_id=public.current_tenant_id()
+        AND tenant_id=public.current_tenant_id()
         AND EXISTS(SELECT 1 FROM public.app_user
          WHERE id=public.current_app_user_id() AND status='active')
         AND public.tenant_actor_has_scoped_permission(tenant_id,'pos.refund',branch_id));
       CREATE POLICY scoped_reader ON public.sync_retail_refund_event FOR SELECT TO aurum_app
        USING(session_user='aurum_app' AND NOT public.is_tenant_support_session()
-        AND NOT public.is_support_session() AND tenant_id=public.current_tenant_id()
+        AND tenant_id=public.current_tenant_id()
         AND EXISTS(SELECT 1 FROM public.app_user
          WHERE id=public.current_app_user_id() AND status='active')
         AND public.tenant_actor_has_scoped_permission(tenant_id,'pos.refund',branch_id)
@@ -527,7 +527,7 @@ def upgrade() -> None:
             AND branch_id=NULLIF(current_setting('app.branch_id',true),'')::UUID
             AND NULLIF(current_setting('app.edge_node_id',true),'') IS NOT NULL
             AND (session_user='aurum_support' OR (session_user='aurum_app'
-             AND NOT public.is_tenant_support_session() AND NOT public.is_support_session())));
+             AND NOT public.is_tenant_support_session())));
         """)
     _sql("""
       DROP POLICY scoped_reader ON public.sync_retail_refund_anchor;
@@ -537,7 +537,7 @@ def upgrade() -> None:
         AND branch_id=NULLIF(current_setting('app.branch_id',true),'')::UUID
         AND target_edge_node_id=NULLIF(current_setting('app.edge_node_id',true),'')::UUID
         AND (session_user='aurum_support' OR (session_user='aurum_app'
-         AND NOT public.is_tenant_support_session() AND NOT public.is_support_session())));
+         AND NOT public.is_tenant_support_session())));
       GRANT INSERT(source_event_id,tenant_id,branch_id,parent_sale_id,origin_node_id,writer_epoch,
        sequence,operation_id,source_id,payload,source_payload_hash,projection_hash)
        ON public.sync_retail_refund_projection TO aurum_app;
@@ -545,7 +545,7 @@ def upgrade() -> None:
        WITH CHECK(session_user='aurum_app' AND tenant_id=public.current_tenant_id()
         AND branch_id=NULLIF(current_setting('app.branch_id',true),'')::UUID
         AND NULLIF(current_setting('app.edge_node_id',true),'') IS NOT NULL
-        AND NOT public.is_tenant_support_session() AND NOT public.is_support_session());
+        AND NOT public.is_tenant_support_session());
     """)
 
 
