@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "fixing_ci_rls_policy",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
-  "expected_head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
+  "expected_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
   "validated_sha": null,
   "pr": 438,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "Collectother shard result;publishreviewedRLSfix;fullfinalheadCI +147new success thenprotectedmerge",
+  "remaining_step": "All8CI and7764tests/147new success onfinalhead;protectedmerge/testedtreeproof",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -67,7 +67,8 @@
       "cause": "Five newRLS policy clauses reference legacyis_support_session(), forbidden byexistingarchitectureinvariant;actualrole/tenant/forgedflag assertionspassed",
       "fix": "Removeonly5redundantNOTlegacyhelperclauses fromRLS;actualsessionroles+verifiedsupport/actor/tenantbranchEdge/permissions retained;nativecommandguards unchanged",
       "local_validation": "RuffBlackdiff pass;independentreview actual0062helper falseforallapp;88DDL/11policies recorded zero legacyrefs;2nativeguards preserved",
-      "status": "Prepared unpublished fix; awaitother shard evidence"
+      "status": "Reviewed5policyfix published;awaitnewhead foundation invariant",
+      "fix_commit": "6d9427ad"
     }
   },
   "blocker": null,
@@ -96,7 +97,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T06:40:37.745Z",
+  "updated_at": "2026-10-30T06:45:44.220Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -109,22 +110,18 @@
     "new_stage_cases": 147,
     "migration_tool_passed": 12
   },
-  "head_tree": "385dc2e035058893972d8a09fb1590900c29882f",
+  "head_tree": "6957dd0bf8f88852a75905fcb6f6fab27d619a32",
   "ci": {
-    "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
-    "workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
-    "status": "backend_shard_failed",
-    "previous_failed_workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
-    "backend_job": 3857,
-    "gate_job": 3858,
-    "migration_roundtrip": "bothshards success",
-    "jobs_success": 3,
-    "partial": {
-      "passed": 3586,
-      "failed": 1,
-      "new_passed": 94
-    }
+    "head": "6d9427adda92b36c391941957ff0e32d3b441d58",
+    "workflow": "a817ce15-b2bf-474b-a477-629062315416",
+    "status": "running",
+    "previous_failed_workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
+    "previous_passed": 7468,
+    "previous_new_passed": 147,
+    "previous_failure": "Legacy helper inRLS policytext only;5references removed",
+    "previous_frontend_passed": 3260,
+    "previous_e2e_passed": 167
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
-  "pending_changes": "Five redundant legacy support function references removed from RLS only"
+  "pending_changes": null
 }
