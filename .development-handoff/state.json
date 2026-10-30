@@ -87,7 +87,7 @@
   "cloud_recheck": {
     "status": "latest host read403; no product grant or schedulers changed"
   },
-  "updated_at": "2026-10-30T08:46:47.748Z",
+  "updated_at": "2026-10-30T08:59:17.192Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -119,7 +119,10 @@
     "completed_success_jobs": [
       "tooling-linux",
       "tooling-windows",
-      "dependency-audit"
-    ]
+      "dependency-audit",
+      "frontend",
+      "production-containers"
+    ],
+    "frontend_passed": 3260
   }
 }
