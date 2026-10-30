@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
   "expected_head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-  "validated_sha": null,
+  "validated_sha": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
   "pr": 438,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -22,7 +22,7 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
-  "counter": "2/7 (5)",
+  "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
   "scope": "E6-05 only: committed physical/mixed cash/electronic refund events linked to exact original sale, immutable financial/history facts and read-only restoration without repeated payouts or stock effects. No public delivery/offline activation/deployment.",
   "acceptance": [
@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "Finalhead all8CI and7764tests/147newsuccess, protectedmerge andtestedtreeproof",
+  "remaining_step": "Next fixed stage E6-06: permissions, limitations and admission of autonomous POS; fresh recon and one local writer required. No cloud product grant.",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -110,7 +110,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:55:44.037Z",
+  "updated_at": "2026-10-30T08:08:12.142Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -121,12 +121,20 @@
     "lock_review": "One transaction advisory mutex per validatedtenant/branch;noUPDATEgrants;3SQLcompilationregressionspass;readonlynolocks",
     "full_backend_collected": 7764,
     "new_stage_cases": 147,
-    "migration_tool_passed": 12
+    "migration_tool_passed": 12,
+    "final_migration": {
+      "statements": 93,
+      "policies": 11,
+      "legacy_policy_refs": 0,
+      "pos_access_triggers": 5,
+      "rehearsal_table_sets": 5,
+      "table_count_per_set": 74
+    }
   },
   "head_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
   "ci": {
     "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
-    "status": "running",
+    "status": "success",
     "previous_head": "6d9427adda92b36c391941957ff0e32d3b441d58",
     "previous_workflow": "a817ce15-b2bf-474b-a477-629062315416",
     "previous_backend_job": 3862,
@@ -139,27 +147,62 @@
     "backend_job": 3872,
     "gate_job": 3874,
     "completed_success_jobs": [
-      "tooling-windows",
       "tooling-linux",
+      "tooling-windows",
       "production-containers",
       "frontend",
       "dependency-audit",
-      "e2e"
+      "e2e",
+      "backend",
+      "ci-gate"
     ],
     "frontend_passed": 3260,
     "e2e_passed": 167,
     "e2e_failures": 0,
-    "backend_partial": {
-      "passed": 3882,
-      "new_passed": 94,
-      "failed": 0,
+    "backend_passed": 7764,
+    "new_passed": 147,
+    "skipped": 0,
+    "duplicates": 0,
+    "backend_evidence": {
+      "head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
+      "workflow": "658f8523-fe65-4d85-a1ea-30112b51684e",
+      "job": 3872,
+      "status": "success",
+      "total": 7764,
+      "totals": {
+        "success": 7764
+      },
+      "new_counts": {
+        "tests.domains.pos.test_retail_refund_events": 60,
+        "tests.domains.sync.test_retail_refund_events_integration": 18,
+        "tests.domains.sync.test_retail_refund_stock_projection": 16,
+        "tests.domains.sync.test_00_retail_refund_event_migration": 3,
+        "tests.domains.sync.test_retail_refund_receive": 34,
+        "tests.domains.sync.test_retail_refund_receive_integration": 16
+      },
+      "new_results": {
+        "success": 147
+      },
       "duplicates": 0,
-      "shards_succeeded": 1,
-      "shards_running": 1,
-      "old_foundation_and_manual_regressions": "both success"
+      "failures": [],
+      "known_regressions": [
+        {
+          "test": "tests.isolation.test_foundation_rls::test_tenant_a_does_not_see_branches_of_tenant_b",
+          "result": "success"
+        },
+        {
+          "test": "tests.isolation.test_manual_access_migrations::test_manual_access_migrations_roundtrip",
+          "result": "success"
+        }
+      ],
+      "accepted": true
     }
   },
-  "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
+  "cloud_recheck": {
+    "last_poll": "unavailable_after_verified_idle_snapshot",
+    "last_verified_idle_at": "2026-10-30T07:50:41.138Z",
+    "grant": false
+  },
   "pending_changes": null,
   "cloud_last_verified": {
     "at": "2026-10-30T07:50:41.138Z",
@@ -174,5 +217,18 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true,
     "at": "2026-10-30T07:50:41.138Z"
+  },
+  "next_stage_id": "E6-06",
+  "next_stage_name": "Права, ограничения и допуск автономной кассы",
+  "completion": {
+    "pr": 438,
+    "merged": true,
+    "main": "e9badfb06115e09901512a1267199a34afc5c44d",
+    "merged_at": "2026-10-30T08:04:48Z",
+    "tested_head": "531d493dc0bff17a7a8d33aab1a2b041d6c620af",
+    "tested_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
+    "main_tree": "4b8f4b8e21174102bef32225e15427a9dda4804c",
+    "tree_match": true,
+    "remaining_control_stages": 4
   }
 }
