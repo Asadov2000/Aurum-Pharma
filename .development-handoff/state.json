@@ -72,14 +72,16 @@
       "previous_consecutive": 1
     },
     "manual_access_table_coverage": {
-      "consecutive": 1,
+      "consecutive": 0,
       "head": "6d9427adda92b36c391941957ff0e32d3b441d58",
       "job": 3862,
       "step": "test_manual_access_migrations_roundtrip line386",
       "cause": "Five new tables were included only in later_tables, omitted from four rehearsal SQL lists and generic tenant/POS access triggers",
       "fix": "Add same a00 POS barrier as0227/0229 to all5tables; include all4rehearsal SQL lists; preserve assertions",
       "fix_commit": "531d493d",
-      "local_validation": "Ruff/Black3files pass;static93DDL/5barriers/5matching74tablelists;independentDBandQAreviews;4DBtests collectedonly"
+      "local_validation": "Ruff/Black3files pass;static93DDL/5barriers/5matching74tablelists;independentDBandQAreviews;4DBtests collectedonly",
+      "previous_consecutive": 1,
+      "status": "Resolved: manual migration roundtrip succeeds on531d493d/job3872"
     }
   },
   "blocker": null,
@@ -108,7 +110,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T07:50:41.138Z",
+  "updated_at": "2026-10-30T07:55:44.037Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -146,7 +148,16 @@
     ],
     "frontend_passed": 3260,
     "e2e_passed": 167,
-    "e2e_failures": 0
+    "e2e_failures": 0,
+    "backend_partial": {
+      "passed": 3882,
+      "new_passed": 94,
+      "failed": 0,
+      "duplicates": 0,
+      "shards_succeeded": 1,
+      "shards_running": 1,
+      "old_foundation_and_manual_regressions": "both success"
+    }
   },
   "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
   "pending_changes": null,
