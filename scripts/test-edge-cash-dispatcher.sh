@@ -74,6 +74,8 @@ BEGIN
 END
 $cleanup$;
 DELETE FROM public.audit_log WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.pos_unit_cash_intent WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.pos_unit_cart_item WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.user_assignment WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.access_role_version_permission
 WHERE role_version_id IN (
@@ -139,6 +141,7 @@ SELECT
   pg_catalog.gen_random_uuid() AS register_id,
   pg_catalog.gen_random_uuid() AS shift_id,
   pg_catalog.gen_random_uuid() AS catalog_id,
+  pg_catalog.gen_random_uuid() AS retail_catalog_id,
   pg_catalog.gen_random_uuid() AS batch_id,
   pg_catalog.gen_random_uuid() AS cloud_node_id,
   pg_catalog.gen_random_uuid() AS edge_node_id,
@@ -219,6 +222,14 @@ INSERT INTO public.tenant_catalog (
   id, tenant_id, brand_name, dispensing_type, base_price, is_active
 )
 SELECT catalog_id, tenant_id, 'Edge test medicine', 'otc', 10.00, true
+FROM edge_dispatcher_context;
+INSERT INTO public.tenant_catalog (
+  id, tenant_id, brand_name, dispensing_type, base_price, is_active,
+  unit_sale_preparation
+)
+SELECT retail_catalog_id, tenant_id, 'Edge retail preparation medicine', 'otc', 10.00, true,
+       '{"version":1,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
+         "dispense_step":1,"state":"prepared","unit_price":"1.00"}'::JSONB
 FROM edge_dispatcher_context;
 INSERT INTO public.batch (
   id, tenant_id, branch_id, catalog_id, batch_number, expires_at,
@@ -360,7 +371,7 @@ SELECT pg_catalog.concat_ws(
   '|', tenant_id, cashier_id, branch_id, register_id, catalog_id,
   batch_id, edge_node_id, activation_id,
   'aurum_edge_node_' || pg_catalog.replace(edge_node_id::TEXT, '-', ''),
-  role_password
+  role_password, retail_catalog_id
 )
 FROM edge_dispatcher_context;
 COMMIT;
@@ -382,6 +393,7 @@ activation_id=$8
 edge_role=$9
 shift 9
 edge_password=$1
+retail_catalog_id=$2
 
 request_hash() {
     psql_super \
@@ -447,6 +459,225 @@ FROM public.dispatch_edge_cash_sale_v1(
 ) AS result(payload);
 SQL
 }
+
+# Seed immutable confirmations through their real app-role guards. The native
+# preparation below uses a separate authenticated per-node LOGIN connection.
+retail_payloads="$(psql_super \
+    -v tenant_id="$tenant_id" \
+    -v cashier_id="$cashier_id" \
+    -v branch_id="$branch_id" \
+    -v register_id="$register_id" \
+    -v catalog_id="$catalog_id" \
+    -v retail_catalog_id="$retail_catalog_id" \
+    -v batch_id="$batch_id" \
+    -v edge_node_id="$edge_node_id" \
+    -v activation_id="$activation_id" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE retail_preparation_context ON COMMIT DROP AS
+SELECT kind, pg_catalog.gen_random_uuid() AS sale_id,
+       pg_catalog.gen_random_uuid() AS line_id,
+       pg_catalog.gen_random_uuid() AS legacy_id,
+       pg_catalog.gen_random_uuid() AS operation_id,
+       :'tenant_id'::UUID AS tenant_id, :'cashier_id'::UUID AS cashier_id,
+       :'branch_id'::UUID AS branch_id, :'register_id'::UUID AS register_id,
+       :'catalog_id'::UUID AS catalog_id, :'batch_id'::UUID AS batch_id,
+       :'retail_catalog_id'::UUID AS retail_catalog_id,
+       :'edge_node_id'::UUID AS edge_node_id, :'activation_id'::UUID AS activation_id,
+       (SELECT id FROM public.shift WHERE tenant_id=:'tenant_id'::UUID
+         AND register_id=:'register_id'::UUID AND status='open') AS shift_id
+FROM (VALUES ('physical_cash'), ('mixed_cash')) kinds(kind);
+GRANT SELECT ON retail_preparation_context TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
+SELECT set_config('app.tenant_id', :'tenant_id', true) AS tenant_scope,
+       set_config('app.branch_id', :'branch_id', true) AS branch_scope,
+       set_config('app.user_id', :'cashier_id', true) AS cashier_scope,
+       set_config('app.edge_node_id', :'edge_node_id', true) AS writer_scope
+\gset
+INSERT INTO public.sale(id,tenant_id,branch_id,register_id,shift_id,cashier_user_id)
+SELECT sale_id,tenant_id,branch_id,register_id,shift_id,cashier_id
+FROM retail_preparation_context;
+INSERT INTO public.sale_item(id,tenant_id,sale_id,catalog_id,batch_id,qty,
+  unit_price,total_price,currency,discount_amount,position)
+SELECT legacy_id,tenant_id,sale_id,catalog_id,batch_id,1,10,10,'TJS',0,1
+FROM retail_preparation_context WHERE kind='mixed_cash';
+UPDATE public.sale SET total_amount=10
+WHERE id IN (SELECT sale_id FROM retail_preparation_context WHERE kind='mixed_cash');
+INSERT INTO public.pos_unit_cart_item(id,tenant_id,branch_id,sale_id,catalog_id,
+  position,sale_format,physical_packaging,quantity,discount_amount)
+SELECT line_id,tenant_id,branch_id,sale_id,retail_catalog_id,1,'unit',
+  '{"version":2,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
+    "dispense_step":1}'::JSONB,1,0
+FROM retail_preparation_context;
+INSERT INTO public.pos_unit_cash_intent(tenant_id,id,branch_id,sale_id,register_id,
+  shift_id,cashier_user_id,request_hash,revision_hash,expected_total_amount,
+  cash_tendered,change_amount,currency,quote_payload,created_by)
+SELECT tenant_id,operation_id,branch_id,sale_id,register_id,shift_id,cashier_id,
+  repeat('b',64),repeat('c',64),CASE kind WHEN 'mixed_cash' THEN 11 ELSE 1 END,
+  CASE kind WHEN 'mixed_cash' THEN 16 ELSE 6 END,5,'TJS',
+  jsonb_build_object('schema_version',2,'state','draft_quote','tenant_id',tenant_id,
+    'branch_id',branch_id,'sale_id',sale_id,'register_id',register_id,'shift_id',shift_id,
+    'cashier_id',cashier_id,'lines',
+    CASE kind WHEN 'mixed_cash' THEN jsonb_build_array(jsonb_build_object(
+      'inventory_kind','legacy_pack','id',legacy_id,'position',1,'catalog_id',catalog_id,
+      'batch_id',batch_id,'quantity','1.000','original_retail_unit_price','10.00',
+      'gross_amount','10.00','discount_amount','0.00','net_amount','10.00',
+      'money_version',1,'currency','TJS')) ELSE '[]'::JSONB END
+    ||jsonb_build_array(jsonb_build_object('inventory_kind','physical_unit','id',line_id,
+      'position',CASE kind WHEN 'mixed_cash' THEN 2 ELSE 1 END,'catalog_id',retail_catalog_id,
+      'packaging',jsonb_build_object('version',2,'unit','tablet','units_per_pack',10,
+        'units_per_blister',5,'dispense_step',1),'sale_format','unit','quantity',1,
+      'base_units',1,'original_retail_unit_price','1.00','gross_amount','1.00',
+      'discount_amount','0.00','net_amount','1.00','money_version',1,'currency','TJS')),
+    'total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,'currency','TJS'),
+  cashier_id
+FROM retail_preparation_context;
+RESET SESSION AUTHORIZATION;
+SELECT jsonb_build_object('profile','retail_cash.prepare.v1','kind',kind,
+  'scope',jsonb_build_object('activation_id',activation_id,'tenant_id',tenant_id,
+    'branch_id',branch_id,'edge_node_id',edge_node_id,'register_id',register_id,
+    'writer_epoch',2,'user_id',cashier_id,'capability','cash_sale_v1'),
+  'confirmation',jsonb_build_object('schema_version',2,'operation_id',operation_id,
+    'sale_id',sale_id,'expected_revision_hash',repeat('c',64),
+    'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
+    'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,'currency','TJS'))
+FROM retail_preparation_context ORDER BY kind;
+COMMIT;
+SQL
+)"
+
+retail_hash() {
+    psql_super -v payload="$1" <<'SQL'
+SELECT encode(sha256(convert_to(public.edge_canonical_jsonb(:'payload'::JSONB),'UTF8')),'hex');
+SQL
+}
+
+retail_call() {
+    PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
+        --host "$postgres_host" --port "$postgres_port" \
+        --username "$edge_role" --dbname "$POSTGRES_DB" \
+        -v payload="$1" -v request_hash="$2" <<'SQL'
+-- GUC values are deliberately untrusted. Binding must come from SESSION_USER.
+BEGIN;
+SELECT set_config('app.tenant_id','00000000-0000-4000-8000-000000000000',true) AS spoof_tenant,
+       set_config('app.edge_node_id','00000000-0000-4000-8000-000000000000',true) AS spoof_node
+\gset
+SELECT public.dispatch_edge_cash_sale_v1(
+  (:'payload'::JSONB->'confirmation'->>'operation_id')::UUID,
+  (:'payload'::JSONB->'scope'->>'activation_id')::UUID,
+  (:'payload'::JSONB->'scope'->>'writer_epoch')::BIGINT,
+  (:'payload'::JSONB->'scope'->>'user_id')::UUID,:'payload'::JSONB,:'request_hash');
+COMMIT;
+SQL
+}
+
+retail_facts() {
+    psql_super -v tenant_id="$tenant_id" <<'SQL'
+SELECT jsonb_build_object(
+  'sales',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.sale row
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'batch',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.batch row
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'shift',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.shift row
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'payments',(SELECT count(*) FROM public.sale_payment WHERE tenant_id=:'tenant_id'::UUID),
+  'commands',(SELECT count(*) FROM public.edge_cash_command WHERE tenant_id=:'tenant_id'::UUID),
+  'outbox',(SELECT count(*) FROM public.sync_outbox WHERE tenant_id=:'tenant_id'::UUID),
+  'stock_commands',(SELECT count(*) FROM public.unit_stock_cart_command_v2
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'stock_movements',(SELECT count(*) FROM public.unit_stock_movement_v2
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'physical_checkouts',(SELECT count(*) FROM public.pos_physical_checkout
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'mixed_checkouts',(SELECT count(*) FROM public.pos_mixed_checkout
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'stream',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.sync_stream row
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'receipt_counter',(SELECT jsonb_agg(to_jsonb(row) ORDER BY to_jsonb(row)::TEXT)
+    FROM public.register_receipt_counter row WHERE tenant_id=:'tenant_id'::UUID),
+  'audit',(SELECT count(*) FROM public.audit_log WHERE tenant_id=:'tenant_id'::UUID)
+);
+SQL
+}
+
+retail_before="$(retail_facts)"
+old_ifs=$IFS
+IFS='
+'
+for retail_payload in $retail_payloads; do
+    retail_request_hash="$(retail_hash "$retail_payload")"
+    retail_first="$(retail_call "$retail_payload" "$retail_request_hash")"
+    test "$retail_first" = "$(retail_call "$retail_payload" "$retail_request_hash")"
+    test "$(psql_super -v result="$retail_first" -v payload="$retail_payload" <<'SQL'
+SELECT :'result'::JSONB->>'state'='prepared_not_executed'
+  AND :'result'::JSONB->'schema_version'='1'::JSONB
+  AND :'result'::JSONB->'scope'=:'payload'::JSONB->'scope'
+  AND :'result'::JSONB->'kind'=:'payload'::JSONB->'kind'
+  AND :'result'::JSONB->'sale_id'=:'payload'::JSONB->'confirmation'->'sale_id'
+  AND :'result'::JSONB->'saved_confirmation'=:'payload'::JSONB->'confirmation'
+  AND NOT :'result'::JSONB ?| ARRAY['receipt_number','payments','stock_command_id'];
+SQL
+)" = "t"
+    for retail_mutation in foreign_scope stale_epoch saved_mismatch wrong_kind null_kind; do
+        altered_payload="$(psql_super -v payload="$retail_payload" \
+            -v mutation="$retail_mutation" <<'SQL'
+SELECT CASE :'mutation'
+ WHEN 'foreign_scope' THEN jsonb_set(:'payload'::JSONB,'{scope,tenant_id}',
+   to_jsonb(gen_random_uuid()))
+ WHEN 'stale_epoch' THEN jsonb_set(:'payload'::JSONB,'{scope,writer_epoch}','1')
+ WHEN 'saved_mismatch' THEN jsonb_set(:'payload'::JSONB,'{confirmation,expected_revision_hash}',
+   to_jsonb(repeat('d',64)))
+ WHEN 'null_kind' THEN jsonb_set(:'payload'::JSONB,'{kind}','null')
+ ELSE jsonb_set(:'payload'::JSONB,'{kind}',to_jsonb(CASE
+   WHEN :'payload'::JSONB->>'kind'='mixed_cash' THEN 'physical_cash' ELSE 'mixed_cash' END)) END;
+SQL
+)"
+        if retail_call "$altered_payload" "$(retail_hash "$altered_payload")" >/dev/null 2>&1; then
+            echo "Native retail preparation accepted $retail_mutation" >&2
+            exit 1
+        fi
+    done
+done
+IFS=$old_ifs
+test "$retail_before" = "$(retail_facts)"
+
+# Role attributes are checked on every preparation, not only at enrollment.
+psql_super -v edge_role="$edge_role" <<'SQL'
+ALTER ROLE :"edge_role" CONNECTION LIMIT 2;
+SQL
+if retail_call "$retail_payload" "$retail_request_hash" >/dev/null 2>&1; then
+    echo "Native retail preparation accepted unsafe node role attributes" >&2
+    exit 1
+fi
+psql_super -v edge_role="$edge_role" <<'SQL'
+ALTER ROLE :"edge_role" CONNECTION LIMIT 1;
+SQL
+test "$retail_before" = "$(retail_facts)"
+
+psql_super -v cashier_id="$cashier_id" <<'SQL'
+UPDATE public.app_user SET status='blocked' WHERE id=:'cashier_id'::UUID;
+SQL
+blocked_cashier_facts="$(retail_facts)"
+if retail_call "$retail_payload" "$retail_request_hash" >/dev/null 2>&1; then
+    echo "Native retail preparation accepted a blocked cashier" >&2
+    exit 1
+fi
+test "$blocked_cashier_facts" = "$(retail_facts)"
+psql_super -v cashier_id="$cashier_id" <<'SQL'
+UPDATE public.app_user SET status='active' WHERE id=:'cashier_id'::UUID;
+SQL
+retail_call "$retail_payload" "$retail_request_hash" >/dev/null
+
+test "$(psql_super -v edge_role="$edge_role" <<'SQL'
+SELECT NOT has_table_privilege(:'edge_role','public.pos_unit_cash_intent','SELECT')
+  AND NOT has_any_column_privilege(:'edge_role','public.pos_unit_cash_intent','SELECT')
+  AND NOT has_function_privilege(:'edge_role',
+    'public.prepare_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE')
+  AND NOT has_function_privilege('aurum_app',
+    'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE')
+  AND NOT has_function_privilege('aurum_support',
+    'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)','EXECUTE');
+SQL
+)" = "t"
 
 operation_one="$(psql_super -c 'SELECT pg_catalog.gen_random_uuid()')"
 hash_two_items="$(request_hash '2' '20.00')"
@@ -534,6 +765,10 @@ SQL
 revoked_operation="$(psql_super -c 'SELECT pg_catalog.gen_random_uuid()')"
 if edge_call "$revoked_operation" '1' '10.00' "$hash_one_item" >/dev/null 2>&1; then
     echo "Dispatcher accepted a command from a revoked Edge node" >&2
+    exit 1
+fi
+if retail_call "$retail_payload" "$retail_request_hash" >/dev/null 2>&1; then
+    echo "Native retail preparation accepted a revoked Edge node" >&2
     exit 1
 fi
 
