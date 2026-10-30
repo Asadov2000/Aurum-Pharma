@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-REFUND-EVENTS-01",
   "control_stage_id": "E6-05",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci_rls_policy",
   "run_id": "local-2026-10-30-edge-refund-events-01",
   "branch": "codex/unit-edge-refund-events",
   "base_sha": "1824cfc9b20437bb78ce8c499faa93231da38f97",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "Trusted receive and verification preserve historical refund/parent relationships; no repeated stock or external-payment effects; old event bytes/hash unchanged",
     "Full final-head all8CI, allnewtests executed without skips; protected merge and tested-tree currentmain proof"
   ],
-  "remaining_step": "All8mandatoryCI +147newcases success onfinalhead;protectedmerge/testedtree currentmain proof",
+  "remaining_step": "Collectother shard result;publishreviewedRLSfix;fullfinalheadCI +147new success thenprotectedmerge",
   "failure_counters": {
     "delivery_gate_v6": {
       "consecutive": 0,
@@ -58,6 +58,16 @@
       "fix": "Advance onlyknownsupported revision to230;12existingmigrationtooltests pass",
       "status": "Resolved:bothnewheadbackendshards passed cluster-safe migration roundtrip and enteredPytest",
       "previous_consecutive": 1
+    },
+    "legacy_support_policy_reference": {
+      "consecutive": 1,
+      "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
+      "job": 3857,
+      "step": "test_foundation_rls.py184",
+      "cause": "Five newRLS policy clauses reference legacyis_support_session(), forbidden byexistingarchitectureinvariant;actualrole/tenant/forgedflag assertionspassed",
+      "fix": "Removeonly5redundantNOTlegacyhelperclauses fromRLS;actualsessionroles+verifiedsupport/actor/tenantbranchEdge/permissions retained;nativecommandguards unchanged",
+      "local_validation": "RuffBlackdiff pass;independentreview actual0062helper falseforallapp;88DDL/11policies recorded zero legacyrefs;2nativeguards preserved",
+      "status": "Prepared unpublished fix; awaitother shard evidence"
     }
   },
   "blocker": null,
@@ -86,7 +96,7 @@
       "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
     }
   ],
-  "updated_at": "2026-10-30T06:13:17.548Z",
+  "updated_at": "2026-10-30T06:40:37.745Z",
   "local_validation": {
     "selected_pure_passed": 223,
     "mypy_sources": 526,
@@ -103,12 +113,18 @@
   "ci": {
     "head": "2ba6364a50afb2d2b484e43baee19b76bb1b9ac2",
     "workflow": "e8c6be78-e750-4844-b060-732df4b47adb",
-    "status": "running",
+    "status": "backend_shard_failed",
     "previous_failed_workflow": "7c821ad3-cedb-46e0-bd1e-b65b5d0d3e6d",
     "backend_job": 3857,
     "gate_job": 3858,
     "migration_roundtrip": "bothshards success",
-    "jobs_success": 3
+    "jobs_success": 3,
+    "partial": {
+      "passed": 3586,
+      "failed": 1,
+      "new_passed": 94
+    }
   },
-  "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED"
+  "cloud_recheck": "Initialturnverifiedidle/no grant;later durablehostunavailable;controlownerlocal unchanged, no new product PRs onGitHub, schedulersPAUSED",
+  "pending_changes": "Five redundant legacy support function references removed from RLS only"
 }
