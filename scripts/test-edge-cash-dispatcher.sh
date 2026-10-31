@@ -603,6 +603,8 @@ SELECT tenant_id, branch_id, 2, activation_id, edge_node_id, register_id,
 FROM edge_dispatcher_context;
 UPDATE public.sync_stream SET writer_node_id=:'edge_node_id'::UUID,writer_epoch=2
 WHERE tenant_id=:'tenant_id'::UUID AND branch_id=:'branch_id'::UUID;
+-- Resolve the deferred stream foreign keys before changing trigger metadata.
+SET CONSTRAINTS ALL IMMEDIATE;
 ALTER TABLE public.sync_stream ENABLE TRIGGER USER;
 ALTER TABLE public.sync_writer_epoch ENABLE TRIGGER USER;
 ALTER TABLE public.sync_writer_activation ENABLE TRIGGER USER;
