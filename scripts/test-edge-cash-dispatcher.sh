@@ -1286,8 +1286,19 @@ SQL
         test "$(PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
             --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
             --dbname "$POSTGRES_DB" -v row_id="$draft_row_id" \
+            -v payload="$1" -v request_hash="$(retail_hash "$1")" \
             -v function_name="edge_draft_ci_${draft_relation}_update" <<'SQL'
+BEGIN;
+-- Establish the same authenticated context and retained locks as production.
+-- The probe must observe a real row, never bypass RLS or accept zero updates.
+SELECT public.dispatch_edge_cash_sale_v1(
+ (:'payload'::JSONB->'confirmation'->>'operation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'activation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'writer_epoch')::BIGINT,
+ (:'payload'::JSONB->'scope'->>'user_id')::UUID,:'payload'::JSONB,:'request_hash')
+\gset
 SELECT public.:"function_name"(:'row_id'::UUID);
+COMMIT;
 SQL
 )" = "t"
     done
