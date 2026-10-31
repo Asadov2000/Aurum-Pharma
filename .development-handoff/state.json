@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_pending",
+  "phase": "fixing_first_ci_failures",
   "run_id": "local-2026-10-31-native-repricing-01",
   "branch": "codex/unit-edge-native-repricing",
   "base_sha": "382eae567e713897e642ed2bb07a0e2aa315e786",
@@ -31,20 +31,17 @@
     "No financial/stock effects; preserve dispatcher, existing profiles, RLS/ACL and DenyAll",
     "Complete final-head CI and protected PR merge"
   ],
-  "remaining_step": "Full exact-head CI, diagnose first failures if any, protected merge and verify main tree",
+  "remaining_step": "Review and publish fixture and historical-test fixes, then full exact-head CI",
   "failure_counters": {
-    "current": {
-      "consecutive": 0,
-      "cause": null
-    },
-    "optional_inventory_partial_import": {
+    "native_fixture_hash_privilege": {
       "consecutive": 1,
-      "required": false,
-      "cause": "existing import-cycle on optional standalone inventory discount test; not retried, full collection and actual ORM pricing smoke passed"
+      "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
+      "cause": "aurum_app fixture directly called private canonical helper; reviewed maintenance precomputation fix ready"
     },
-    "black_config_selection": {
-      "consecutive": 0,
-      "resolved": "Explicit backend pyproject config; full1077 pass; no baseline files reformatted"
+    "old_inputs_migration_roundtrip": {
+      "consecutive": 1,
+      "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
+      "cause": "0232 test attempted direct downgrade under 0233, breaking an expected dispatcher marker; correct later-revision ordering being added"
     }
   },
   "blocker": null,
@@ -90,7 +87,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-31T11:57:29Z",
+  "updated_at": "2026-10-31T12:33:51Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -119,9 +116,17 @@
   "ci": {
     "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
     "workflow": "5f1e62ac-b92c-4143-b3a2-4889e849d371",
-    "status": "running",
+    "status": "failed: two distinct first-occurrence test harness causes",
     "expected_backend_total": 7990,
-    "expected_new": 45
+    "expected_new": 45,
+    "confirmed_success": [
+      "tooling-linux",
+      "tooling-windows",
+      "dependency-audit",
+      "frontend",
+      "e2e",
+      "production-containers"
+    ]
   },
   "completion": null,
   "accepted_increments": [
