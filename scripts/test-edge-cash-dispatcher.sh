@@ -613,7 +613,9 @@ SELECT line_id,tenant_id,branch_id,sale_id,retail_catalog_id,1,'unit',
   '{"version":2,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
     "dispense_step":1}'::JSONB,1,0
 FROM retail_preparation_context;
-WITH quoted AS (
+RESET SESSION AUTHORIZATION;
+-- Fingerprints are fixture calculations, not new privileges for aurum_app.
+CREATE TEMP TABLE retail_preparation_quotes ON COMMIT DROP AS
 SELECT context.*,jsonb_build_object('schema_version',2,'state','draft_quote','tenant_id',tenant_id,
     'branch_id',branch_id,'sale_id',sale_id,'register_id',register_id,'shift_id',shift_id,
     'cashier_id',cashier_id,'lines',
@@ -629,23 +631,30 @@ SELECT context.*,jsonb_build_object('schema_version',2,'state','draft_quote','te
       'base_units',1,'original_retail_unit_price','1.00','gross_amount','1.00',
       'discount_amount','0.00','net_amount','1.00','money_version',1,'currency','TJS')),
     'total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,'currency','TJS') AS quote
-FROM retail_preparation_context context
-)
+FROM retail_preparation_context context;
+ALTER TABLE retail_preparation_quotes ADD COLUMN revision_hash TEXT,
+ ADD COLUMN cash_request_hash TEXT;
+UPDATE retail_preparation_quotes SET revision_hash=
+ encode(sha256(convert_to(public.edge_canonical_jsonb(quote),'UTF8')),'hex');
+UPDATE retail_preparation_quotes SET cash_request_hash=
+ encode(sha256(convert_to('aurum-cash-intent-v1:'||public.edge_canonical_jsonb(
+   jsonb_build_object('schema_version',2,'operation_id',operation_id,'sale_id',sale_id,
+     'expected_revision_hash',revision_hash,
+     'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
+     'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,
+     'currency','TJS')),'UTF8')),'hex');
+GRANT SELECT ON retail_preparation_quotes TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
 INSERT INTO public.pos_unit_cash_intent(tenant_id,id,branch_id,sale_id,register_id,
   shift_id,cashier_user_id,request_hash,revision_hash,expected_total_amount,
   cash_tendered,change_amount,currency,quote_payload,created_by)
 SELECT tenant_id,operation_id,branch_id,sale_id,register_id,shift_id,cashier_id,
-  encode(sha256(convert_to('aurum-cash-intent-v1:'||public.edge_canonical_jsonb(
-    jsonb_build_object('schema_version',2,'operation_id',operation_id,'sale_id',sale_id,
-      'expected_revision_hash',encode(sha256(convert_to(
-        public.edge_canonical_jsonb(quote),'UTF8')),'hex'),
-      'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
-      'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,
-      'currency','TJS')),'UTF8')),'hex'),
-  encode(sha256(convert_to(public.edge_canonical_jsonb(quote),'UTF8')),'hex'),
+  cash_request_hash,revision_hash,
   CASE kind WHEN 'mixed_cash' THEN 11 ELSE 1 END,
   CASE kind WHEN 'mixed_cash' THEN 16 ELSE 6 END,5,'TJS',quote,cashier_id
-FROM quoted;
+FROM retail_preparation_quotes;
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE retail_preparation_plans ON COMMIT DROP AS
 WITH requests AS (
  SELECT context.*,intent.quote_payload AS quote,intent.revision_hash AS revision,
    jsonb_build_object('sale_id',context.sale_id,
@@ -665,14 +674,18 @@ WITH requests AS (
    'payments',request->'payments','cash_tendered',NULL) AS plan
  FROM requests
 )
+SELECT plans.*,
+ encode(sha256(convert_to(public.edge_canonical_jsonb(jsonb_build_object(
+   'kind','unit_payment_intent_request_v1','request',request)),'UTF8')),'hex') AS request_hash,
+ encode(sha256(convert_to(public.edge_canonical_jsonb(plan),'UTF8')),'hex') AS plan_hash
+FROM plans;
+GRANT SELECT ON retail_preparation_plans TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
 INSERT INTO public.pos_unit_payment_plan_intent(
  tenant_id,id,branch_id,sale_id,register_id,shift_id,cashier_user_id,
  request_hash,plan_hash,request_payload,change_amount,quote_payload,created_by)
 SELECT tenant_id,plan_id,branch_id,sale_id,register_id,shift_id,cashier_id,
- encode(sha256(convert_to(public.edge_canonical_jsonb(jsonb_build_object(
-   'kind','unit_payment_intent_request_v1','request',request)),'UTF8')),'hex'),
- encode(sha256(convert_to(public.edge_canonical_jsonb(plan),'UTF8')),'hex'),
- request,0,quote,cashier_id FROM plans;
+ request_hash,plan_hash,request,0,quote,cashier_id FROM retail_preparation_plans;
 INSERT INTO public.pos_unit_payment_plan_binding(
  tenant_id,id,sale_id,branch_id,cashier_user_id,created_by)
 SELECT tenant_id,plan_id,sale_id,branch_id,cashier_id,cashier_id
