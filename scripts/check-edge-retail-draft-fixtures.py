@@ -53,7 +53,9 @@ def main() -> int:
         if expected not in {"ok", "conflict", "business"}:
             raise RuntimeError("Native snapshot expectation is invalid")
         try:
-            draft = EdgeRetailCashDraftV1.model_validate(row["draft"])
+            draft = EdgeRetailCashDraftV1.model_validate_json(
+                json.dumps(row["draft"], ensure_ascii=False, allow_nan=False)
+            )
             checked = check_edge_retail_cash_draft(draft)
         except (ConflictError, BusinessRuleError) as error:
             category = "conflict" if isinstance(error, ConflictError) else "business"
