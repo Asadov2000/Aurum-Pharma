@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_pending_after_test_harness_fixes",
+  "phase": "ci_pending_after_native_probe_context_fix",
   "run_id": "local-2026-10-31-native-repricing-01",
   "branch": "codex/unit-edge-native-repricing",
   "base_sha": "382eae567e713897e642ed2bb07a0e2aa315e786",
-  "expected_head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
+  "expected_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
   "validated_sha": null,
   "pr": 442,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,14 +34,19 @@
   "remaining_step": "Complete exact-head CI, diagnose failures if any, protected merge and verify main tree",
   "failure_counters": {
     "native_fixture_hash_privilege": {
-      "consecutive": 1,
-      "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
-      "cause": "aurum_app fixture directly called private canonical helper; reviewed maintenance precomputation fix ready"
+      "consecutive": 0,
+      "resolved_on": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b"
     },
     "old_inputs_migration_roundtrip": {
+      "consecutive": 0,
+      "resolved_on": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
+      "proof": "both Pytest nodes successful"
+    },
+    "native_mutation_probe_context": {
       "consecutive": 1,
-      "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
-      "cause": "0232 test attempted direct downgrade under 0233, breaking an expected dispatcher marker; correct later-revision ordering being added"
+      "failed_head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
+      "fix_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
+      "independent_review": "approve"
     }
   },
   "blocker": null,
@@ -87,7 +92,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-31T12:38:40Z",
+  "updated_at": "2026-10-31T13:18:44Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -98,7 +103,7 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "5d4a578e8ac2c6b42dd457daac0f7581a29fbf98",
+  "head_tree": "6e328de1f38a67f30625e9a37f0d360e83a02fff",
   "local_validation": {
     "targeted_passed": 245,
     "new_pure": 37,
@@ -114,10 +119,10 @@
     "shared_db": "not accessed"
   },
   "ci": {
-    "head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
-    "workflow": "cdeae8a0-ad94-43d2-b466-75051c37ac26",
-    "backend_job": 3997,
-    "gate_job": 4002,
+    "head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
+    "workflow": "1e709df2-c85e-48fa-9edd-5a0e9babdcd0",
+    "backend_job": 4005,
+    "gate_job": 4010,
     "status": "running",
     "expected_backend_total": 7990,
     "expected_new": 45
@@ -148,9 +153,10 @@
   ],
   "increment_id": "native-current-cart-repricing",
   "previous_ci": {
-    "head": "3c3eeb7c3d073485f2def0c1649e2177aff60bfa",
-    "workflow": "5f1e62ac-b92c-4143-b3a2-4889e849d371",
-    "backend_job": 3988,
-    "status": "failed; two distinct first-occurrence harness failures"
+    "head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
+    "workflow": "cdeae8a0-ad94-43d2-b466-75051c37ac26",
+    "backend_job": 3997,
+    "pytest_both_nodes": "success",
+    "status": "failed: mutation probe outside dispatcher-established context"
   }
 }
