@@ -103,16 +103,16 @@ jobs:
           command: "bash ../.circleci/scripts/backend-11.sh"
           working_directory: "~/project/backend"
       - run:
+          name: "Pytest"
+          command: "bash ../.circleci/scripts/backend-15.sh"
+          working_directory: "~/project/backend"
+      - run:
           name: "Verify Edge cash dispatcher boundary"
           command: "bash ../.circleci/scripts/backend-16.sh"
           working_directory: "~/project/backend"
       - run:
           name: "Verify inactive Edge database identity lifecycle"
           command: "bash ../.circleci/scripts/backend-17.sh"
-          working_directory: "~/project/backend"
-      - run:
-          name: "Pytest"
-          command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"
       - run:
           name: "Stop MinIO"
