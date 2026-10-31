@@ -303,6 +303,7 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "lock_edge_retail_cash_inputs_v1",
     "prepare_edge_retail_cash_v1",
     "trg_retail_refund_private_guard",
     "trg_retail_refund_audit",
