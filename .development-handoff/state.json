@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_pending_after_json_transport_fix",
+  "phase": "merged_verified",
   "run_id": "local-2026-10-31-native-repricing-01",
   "branch": "codex/unit-edge-native-repricing",
   "base_sha": "382eae567e713897e642ed2bb07a0e2aa315e786",
   "expected_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
-  "validated_sha": null,
+  "validated_sha": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
   "pr": 442,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": false,
@@ -31,7 +31,7 @@
     "No financial/stock effects; preserve dispatcher, existing profiles, RLS/ACL and DenyAll",
     "Complete final-head CI and protected PR merge"
   ],
-  "remaining_step": "Complete exact-head CI, diagnose failures if any, protected merge and verify main tree",
+  "remaining_step": "No active writes. Next increment: remaining E6-06 transactional native monetary execution adapter; review column ACL normalization before runtime activation. A new ownership claim is required before product edits.",
   "failure_counters": {
     "native_fixture_hash_privilege": {
       "consecutive": 0,
@@ -46,22 +46,23 @@
       "resolved_on": "898975c2acb692aa48dc45e5efc38405cf222ae5"
     },
     "native_checker_json_mode": {
-      "consecutive": 1,
+      "consecutive": 0,
       "failed_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
       "fix_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
       "independent_review": "approve",
-      "local_full_cli_transport_smoke": 19
+      "local_full_cli_transport_smoke": 19,
+      "resolved_on": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
+      "verified_by": "Actual CI native SQL and 19 host JSON checks per node, both nodes successful"
     }
   },
   "blocker": null,
   "previous_completed": {
-    "pr": 440,
+    "pr": 441,
     "merged": true,
-    "main": "c5e11b91134501990437cbd7ca4e716b1c864431",
-    "merged_at": "2026-10-30T11:30:27Z",
-    "tested_head": "b11492b6871b5efb12f83f4aeb9193172f69bc95",
-    "tested_tree": "5d4a578e8ac2c6b42dd457daac0f7581a29fbf98",
-    "main_tree": "5d4a578e8ac2c6b42dd457daac0f7581a29fbf98",
+    "main": "382eae567e713897e642ed2bb07a0e2aa315e786",
+    "tested_head": "13220d71456ff88d5407bcec649d4a38a5554936",
+    "tested_tree": "6f52eb1deaf6954b2b1dec969a11cd7fea8c91d7",
+    "main_tree": "6f52eb1deaf6954b2b1dec969a11cd7fea8c91d7",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4
@@ -96,7 +97,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-31T14:00:54Z",
+  "updated_at": "2026-10-31T14:42:41.578Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -128,12 +129,64 @@
     "workflow": "23aae6d6-2613-4558-a875-e99813190720",
     "backend_job": 4017,
     "gate_job": 4018,
-    "status": "running",
+    "status": "success",
     "attempt": 4,
     "expected_backend_total": 7990,
-    "expected_new": 45
+    "expected_new": 45,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success"
+      }
+    ],
+    "backend_passed": 7990,
+    "new_passed": 45,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "native_snapshot_cases_per_node": 19,
+    "native_nodes_passed": 2,
+    "identity_lifecycle_nodes_passed": 2
   },
-  "completion": null,
+  "completion": {
+    "pr": 442,
+    "merged": true,
+    "main": "8f8acf7d7c00c9f67658889ad1374d9354de3c5e",
+    "merged_at": "2026-10-31T14:40:56Z",
+    "tested_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
+    "tested_tree": "1dc3f2123ef57107270fa3559d80eec01c3e0cdc",
+    "main_tree": "1dc3f2123ef57107270fa3559d80eec01c3e0cdc",
+    "tree_match": true,
+    "closes_control_stage": false,
+    "remaining_control_stages": 4
+  },
   "accepted_increments": [
     {
       "pr": 439,
@@ -154,6 +207,15 @@
       "tested_head": "13220d71456ff88d5407bcec649d4a38a5554936",
       "tree": "6f52eb1deaf6954b2b1dec969a11cd7fea8c91d7",
       "ci": "all8success;7945backend;30new;3260frontend;167browser",
+      "closes_control_stage": false
+    },
+    {
+      "pr": 442,
+      "kind": "native_current_cart_repricing",
+      "main": "8f8acf7d7c00c9f67658889ad1374d9354de3c5e",
+      "tested_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
+      "tree": "1dc3f2123ef57107270fa3559d80eec01c3e0cdc",
+      "ci": "all8success;7990backend;45new;3260frontend;167browser;19nativecases_each_of_2_nodes",
       "closes_control_stage": false
     }
   ],
