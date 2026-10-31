@@ -1039,6 +1039,20 @@ SELECT NOT has_table_privilege(:'edge_role','public.pos_unit_cash_intent','SELEC
 SQL
 )" = "t"
 
+# A genuine per-node LOGIN inherits the executor group but must still be
+# denied direct access to the private helper before any envelope validation.
+if denial="$(PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate -qAt \
+    --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
+    --dbname "$POSTGRES_DB" -c "SELECT public.lock_edge_retail_cash_inputs_v1( \
+      NULL::UUID,NULL::UUID,1,NULL::UUID,'{}'::JSONB,repeat('a',64))" 2>&1)"; then
+    echo "Native node unexpectedly invoked the private inputs helper" >&2
+    exit 1
+fi
+case "$denial" in
+    *42501*) ;;
+    *) echo "Native helper refusal did not prove an access denial" >&2; exit 1 ;;
+esac
+
 operation_one="$(psql_super -c 'SELECT pg_catalog.gen_random_uuid()')"
 hash_two_items="$(request_hash '2' '20.00')"
 first_result="$(edge_call "$operation_one" '2' '20.00' "$hash_two_items")"
