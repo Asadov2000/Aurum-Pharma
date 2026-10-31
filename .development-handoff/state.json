@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_pending_after_native_probe_context_fix",
+  "phase": "ci_pending_after_json_transport_fix",
   "run_id": "local-2026-10-31-native-repricing-01",
   "branch": "codex/unit-edge-native-repricing",
   "base_sha": "382eae567e713897e642ed2bb07a0e2aa315e786",
-  "expected_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
+  "expected_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
   "validated_sha": null,
   "pr": 442,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -39,14 +39,18 @@
     },
     "old_inputs_migration_roundtrip": {
       "consecutive": 0,
-      "resolved_on": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
-      "proof": "both Pytest nodes successful"
+      "resolved_on": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b"
     },
     "native_mutation_probe_context": {
+      "consecutive": 0,
+      "resolved_on": "898975c2acb692aa48dc45e5efc38405cf222ae5"
+    },
+    "native_checker_json_mode": {
       "consecutive": 1,
-      "failed_head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
-      "fix_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
-      "independent_review": "approve"
+      "failed_head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
+      "fix_head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
+      "independent_review": "approve",
+      "local_full_cli_transport_smoke": 19
     }
   },
   "blocker": null,
@@ -92,7 +96,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-10-31T13:18:44Z",
+  "updated_at": "2026-10-31T14:00:54Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -103,7 +107,7 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "6e328de1f38a67f30625e9a37f0d360e83a02fff",
+  "head_tree": "1dc3f2123ef57107270fa3559d80eec01c3e0cdc",
   "local_validation": {
     "targeted_passed": 245,
     "new_pure": 37,
@@ -116,14 +120,16 @@
     "ci_safety": 16,
     "independent_core_security_review": "approve",
     "independent_ci_review": "approve; hash-negative feedback addressed",
-    "shared_db": "not accessed"
+    "shared_db": "not accessed",
+    "cli_json_transport_smoke": "19/19 synthetic cases, actual CLI exit0, no SQL/DB"
   },
   "ci": {
-    "head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
-    "workflow": "1e709df2-c85e-48fa-9edd-5a0e9babdcd0",
-    "backend_job": 4005,
-    "gate_job": 4010,
+    "head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
+    "workflow": "23aae6d6-2613-4558-a875-e99813190720",
+    "backend_job": 4017,
+    "gate_job": 4018,
     "status": "running",
+    "attempt": 4,
     "expected_backend_total": 7990,
     "expected_new": 45
   },
@@ -153,10 +159,11 @@
   ],
   "increment_id": "native-current-cart-repricing",
   "previous_ci": {
-    "head": "67011cc6ea993a8de0a0af3f5812b4fccf50f16b",
-    "workflow": "cdeae8a0-ad94-43d2-b466-75051c37ac26",
-    "backend_job": 3997,
+    "head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
+    "workflow": "1e709df2-c85e-48fa-9edd-5a0e9babdcd0",
+    "backend_job": 4005,
     "pytest_both_nodes": "success",
-    "status": "failed: mutation probe outside dispatcher-established context"
+    "native_sql_script": "completed on node1; checker failed on strict UUID Python-mode parsing",
+    "status": "failed: host-side JSON transport decoding"
   }
 }
