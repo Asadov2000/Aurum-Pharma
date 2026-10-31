@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, localcontext
 from typing import Literal
 from uuid import UUID
 
@@ -14,6 +13,10 @@ from app.domains.inventory.unit_allocation_v2 import (
     UnitCartLineV2,
     UnitCartStockPlanV2,
     plan_unit_cart_stock_v2,
+)
+from app.domains.pos.legacy_checkout_stock import (
+    LegacyCheckoutAllocation,
+    plan_legacy_checkout_allocations,
 )
 from app.domains.pos.models import Sale, SaleItem
 from app.domains.pos.unit_cart_quote import PhysicalUnitDraftQuoteLineV2
@@ -27,17 +30,14 @@ from app.domains.pos.unit_cash_intent_repository import UnitCashIntentRepository
 from app.domains.pos.unit_cash_intent_service import SavedCashIntentV2, UnitCashIntentService
 from app.domains.pos.unit_checkout_preparation import UnitCheckoutPreparationService
 from app.domains.pos.unit_checkout_repository import UnitCheckoutRepository
-from app.domains.pos.unit_contracts import EXACT_CONTEXT
 from app.domains.pos.unit_prescription_repository import UnitPrescriptionRepository
 from app.domains.pos.unit_prescription_service import UnitPrescriptionService
 
-
-@dataclass(frozen=True)
-class LegacyCheckoutAllocation:
-    batch_id: UUID
-    catalog_id: UUID
-    source_item_ids: tuple[UUID, ...]
-    quantity: Decimal
+__all__ = [
+    "LegacyCheckoutAllocation",
+    "MixedPhysicalCheckoutPreparation",
+    "MixedPhysicalCheckoutPreparationService",
+]
 
 
 @dataclass(frozen=True)
@@ -179,14 +179,6 @@ class MixedPhysicalCheckoutPreparationService:
         allocations: list[LegacyCheckoutAllocation] = []
         inventory = InventoryRepository(self.repository.session)
         for catalog_id in sorted({item.catalog_id for item in items}, key=str):
-            selected: dict[UUID, Decimal] = {}
-            sources: dict[UUID, list[UUID]] = {}
-            with localcontext(EXACT_CONTEXT):
-                for item in items:
-                    if item.catalog_id == catalog_id:
-                        selected[item.batch_id] = selected.get(item.batch_id, Decimal(0)) + item.qty
-                        sources.setdefault(item.batch_id, []).append(item.id)
-                needed = sum(selected.values(), Decimal(0))
             candidates = await inventory.fefo_candidates(
                 tenant_id=sale.tenant_id,
                 branch_id=sale.branch_id,
@@ -195,25 +187,11 @@ class MixedPhysicalCheckoutPreparationService:
                 today=today,
                 lock=True,
             )
-            expected: dict[UUID, Decimal] = {}
-            remaining = needed
-            with localcontext(EXACT_CONTEXT):
-                for batch in candidates:
-                    take = min(batch.qty_remaining, remaining)
-                    if take > 0:
-                        expected[batch.id] = take
-                        remaining -= take
-            if remaining > 0:
-                raise BusinessRuleError("Insufficient legacy stock for the entire mixed cart")
-            if selected != expected:
-                raise BusinessRuleError("Legacy cart stock allocation is stale; rebuild the cart")
             allocations.extend(
-                LegacyCheckoutAllocation(
-                    batch_id=batch_id,
-                    catalog_id=catalog_id,
-                    source_item_ids=tuple(sorted(sources[batch_id], key=str)),
-                    quantity=selected[batch_id],
+                plan_legacy_checkout_allocations(
+                    items=tuple(item for item in items if item.catalog_id == catalog_id),
+                    batches=candidates,
+                    today=today,
                 )
-                for batch_id in sorted(selected, key=str)
             )
         return tuple(allocations)

@@ -23,6 +23,7 @@ esac
 export PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")"
 export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-5}"
 export PGOPTIONS="${PGOPTIONS:--c statement_timeout=30000 -c lock_timeout=10000 -c idle_in_transaction_session_timeout=15000}"
+umask 077
 postgres_host="${POSTGRES_HOST:-127.0.0.1}"
 postgres_port="${POSTGRES_PORT:-5432}"
 
@@ -57,6 +58,8 @@ BEGIN;
 DROP FUNCTION IF EXISTS public.edge_inputs_ci_catalog_update(uuid);
 DROP FUNCTION IF EXISTS public.edge_inputs_ci_lot_update(uuid);
 DROP FUNCTION IF EXISTS public.edge_inputs_ci_pack_update(uuid);
+DROP FUNCTION IF EXISTS public.edge_draft_ci_unit_update(uuid);
+DROP FUNCTION IF EXISTS public.edge_draft_ci_rx_update(uuid);
 DO $cleanup$
 DECLARE
   relation REGCLASS;
@@ -77,6 +80,10 @@ BEGIN
 END
 $cleanup$;
 DELETE FROM public.audit_log WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.pos_unit_payment_plan_binding_cancel WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.pos_unit_payment_plan_binding WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.pos_unit_payment_plan_intent WHERE tenant_id = :'tenant_id'::UUID;
+DELETE FROM public.prescription_log WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.pos_unit_cash_intent WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.pos_unit_cart_item WHERE tenant_id = :'tenant_id'::UUID;
 DELETE FROM public.unit_stock_movement_v2 WHERE tenant_id = :'tenant_id'::UUID;
@@ -188,7 +195,7 @@ FROM edge_dispatcher_context;
 INSERT INTO public.tenant_access_policy (tenant_id)
 SELECT tenant_id FROM edge_dispatcher_context;
 INSERT INTO public.tenant_settings (tenant_id, pos_payment_methods)
-SELECT tenant_id, '["cash"]'::JSONB FROM edge_dispatcher_context;
+SELECT tenant_id, '["cash","card"]'::JSONB FROM edge_dispatcher_context;
 INSERT INTO public.app_user (id, email, full_name, home_tenant_id, status)
 SELECT cashier_id,
        'edge-cashier-' || cashier_id::TEXT || '@aurum.test',
@@ -204,7 +211,7 @@ SELECT role_id, tenant_id, 'Edge cashier role', 4, true
 FROM edge_dispatcher_context;
 INSERT INTO public.role_permission (role_id, permission_code)
 SELECT role_id, permission_code FROM edge_dispatcher_context
-CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize')) permissions(permission_code);
+CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize'),('pos.handle_prescription')) permissions(permission_code);
 INSERT INTO public.access_role_version (
   id, role_id, tenant_id, version, name, status, creation_xid, published_at
 )
@@ -215,7 +222,7 @@ INSERT INTO public.access_role_version_permission (
   role_version_id, permission_code
 )
 SELECT role_version_id, permission_code FROM edge_dispatcher_context
-CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize')) permissions(permission_code);
+CROSS JOIN (VALUES ('pos.sell'),('incoming.finalize'),('pos.handle_prescription')) permissions(permission_code);
 INSERT INTO public.branch (id, tenant_id, name, is_active)
 SELECT branch_id, tenant_id, 'Edge branch', true
 FROM edge_dispatcher_context;
@@ -556,7 +563,160 @@ IFS=$old_ifs
 physical_lot_id=$1
 physical_pack_id=$2
 
-# Receiving above ran under the real cloud writer. Only now assemble the
+# Seed immutable confirmations through their real app-role guards. The native
+# preparation below uses a separate authenticated per-node LOGIN connection.
+retail_payloads="$(psql_super \
+    -v tenant_id="$tenant_id" \
+    -v cashier_id="$cashier_id" \
+    -v branch_id="$branch_id" \
+    -v register_id="$register_id" \
+    -v catalog_id="$catalog_id" \
+    -v retail_catalog_id="$retail_catalog_id" \
+    -v batch_id="$batch_id" \
+    -v edge_node_id="$edge_node_id" \
+    -v activation_id="$activation_id" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE retail_preparation_context ON COMMIT DROP AS
+SELECT kind,binding_mode,pg_catalog.gen_random_uuid() AS plan_id,
+       pg_catalog.gen_random_uuid() AS sale_id,
+       pg_catalog.gen_random_uuid() AS line_id,
+       pg_catalog.gen_random_uuid() AS legacy_id,
+       pg_catalog.gen_random_uuid() AS operation_id,
+       :'tenant_id'::UUID AS tenant_id, :'cashier_id'::UUID AS cashier_id,
+       :'branch_id'::UUID AS branch_id, :'register_id'::UUID AS register_id,
+       :'catalog_id'::UUID AS catalog_id, :'batch_id'::UUID AS batch_id,
+       :'retail_catalog_id'::UUID AS retail_catalog_id,
+       :'edge_node_id'::UUID AS edge_node_id, :'activation_id'::UUID AS activation_id,
+       (SELECT id FROM public.shift WHERE tenant_id=:'tenant_id'::UUID
+         AND register_id=:'register_id'::UUID AND status='open') AS shift_id
+FROM (VALUES ('physical_cash','none'),('mixed_cash','none'),
+  ('physical_cash','active'),('physical_cash','cancelled')) kinds(kind,binding_mode);
+GRANT SELECT ON retail_preparation_context TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
+SELECT set_config('app.tenant_id', :'tenant_id', true) AS tenant_scope,
+       set_config('app.branch_id', :'branch_id', true) AS branch_scope,
+       set_config('app.user_id', :'cashier_id', true) AS cashier_scope,
+       set_config('app.edge_node_id', '', true) AS writer_scope
+\gset
+INSERT INTO public.sale(id,tenant_id,branch_id,register_id,shift_id,cashier_user_id)
+SELECT sale_id,tenant_id,branch_id,register_id,shift_id,cashier_id
+FROM retail_preparation_context;
+INSERT INTO public.sale_item(id,tenant_id,sale_id,catalog_id,batch_id,qty,
+  unit_price,total_price,currency,discount_amount,position)
+SELECT legacy_id,tenant_id,sale_id,catalog_id,batch_id,1,10,10,'TJS',0,1
+FROM retail_preparation_context WHERE kind='mixed_cash';
+UPDATE public.sale SET total_amount=10
+WHERE id IN (SELECT sale_id FROM retail_preparation_context WHERE kind='mixed_cash');
+INSERT INTO public.pos_unit_cart_item(id,tenant_id,branch_id,sale_id,catalog_id,
+  position,sale_format,physical_packaging,quantity,discount_amount)
+SELECT line_id,tenant_id,branch_id,sale_id,retail_catalog_id,1,'unit',
+  '{"version":2,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
+    "dispense_step":1}'::JSONB,1,0
+FROM retail_preparation_context;
+RESET SESSION AUTHORIZATION;
+-- Fingerprints are fixture calculations, not new privileges for aurum_app.
+CREATE TEMP TABLE retail_preparation_quotes ON COMMIT DROP AS
+SELECT context.*,jsonb_build_object('schema_version',2,'state','draft_quote','tenant_id',tenant_id,
+    'branch_id',branch_id,'sale_id',sale_id,'register_id',register_id,'shift_id',shift_id,
+    'cashier_id',cashier_id,'lines',
+    CASE kind WHEN 'mixed_cash' THEN jsonb_build_array(jsonb_build_object(
+      'inventory_kind','legacy_pack','id',legacy_id,'position',1,'catalog_id',catalog_id,
+      'batch_id',batch_id,'quantity','1.000','original_retail_unit_price','10.00',
+      'gross_amount','10.00','discount_amount','0.00','net_amount','10.00',
+      'money_version',1,'currency','TJS')) ELSE '[]'::JSONB END
+    ||jsonb_build_array(jsonb_build_object('inventory_kind','physical_unit','id',line_id,
+      'position',CASE kind WHEN 'mixed_cash' THEN 2 ELSE 1 END,'catalog_id',retail_catalog_id,
+      'packaging',jsonb_build_object('version',2,'unit','tablet','units_per_pack',10,
+        'units_per_blister',5,'dispense_step',1),'sale_format','unit','quantity',1,
+      'base_units',1,'original_retail_unit_price','1.00','gross_amount','1.00',
+      'discount_amount','0.00','net_amount','1.00','money_version',1,'currency','TJS')),
+    'total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,'currency','TJS') AS quote
+FROM retail_preparation_context context;
+ALTER TABLE retail_preparation_quotes ADD COLUMN revision_hash TEXT,
+ ADD COLUMN cash_request_hash TEXT;
+UPDATE retail_preparation_quotes SET revision_hash=
+ encode(sha256(convert_to(public.edge_canonical_jsonb(quote),'UTF8')),'hex');
+UPDATE retail_preparation_quotes SET cash_request_hash=
+ encode(sha256(convert_to('aurum-cash-intent-v1:'||public.edge_canonical_jsonb(
+   jsonb_build_object('schema_version',2,'operation_id',operation_id,'sale_id',sale_id,
+     'expected_revision_hash',revision_hash,
+     'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
+     'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,
+     'currency','TJS')),'UTF8')),'hex');
+GRANT SELECT ON retail_preparation_quotes TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
+INSERT INTO public.pos_unit_cash_intent(tenant_id,id,branch_id,sale_id,register_id,
+  shift_id,cashier_user_id,request_hash,revision_hash,expected_total_amount,
+  cash_tendered,change_amount,currency,quote_payload,created_by)
+SELECT tenant_id,operation_id,branch_id,sale_id,register_id,shift_id,cashier_id,
+  cash_request_hash,revision_hash,
+  CASE kind WHEN 'mixed_cash' THEN 11 ELSE 1 END,
+  CASE kind WHEN 'mixed_cash' THEN 16 ELSE 6 END,5,'TJS',quote,cashier_id
+FROM retail_preparation_quotes;
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE retail_preparation_plans ON COMMIT DROP AS
+WITH requests AS (
+ SELECT context.*,intent.quote_payload AS quote,intent.revision_hash AS revision,
+   jsonb_build_object('sale_id',context.sale_id,
+     'expected_revision_hash',intent.revision_hash,
+     'expected_total_amount',intent.quote_payload->'total_amount','currency','TJS',
+     'payments',jsonb_build_array(jsonb_build_object(
+       'method','card','amount',intent.quote_payload->'total_amount')),
+     'cash_tendered',NULL) AS request
+ FROM retail_preparation_context context
+ JOIN public.pos_unit_cash_intent intent ON intent.tenant_id=context.tenant_id
+   AND intent.id=context.operation_id
+ WHERE context.binding_mode IN ('active','cancelled')
+), plans AS (
+ SELECT requests.*,jsonb_build_object('kind','unit_payment_plan_v1',
+   'tenant_id',tenant_id,'branch_id',branch_id,'cashier_id',cashier_id,
+   'sale_id',sale_id,'revision_hash',revision,'currency','TJS',
+   'payments',request->'payments','cash_tendered',NULL) AS plan
+ FROM requests
+)
+SELECT plans.*,
+ encode(sha256(convert_to(public.edge_canonical_jsonb(jsonb_build_object(
+   'kind','unit_payment_intent_request_v1','request',request)),'UTF8')),'hex') AS request_hash,
+ encode(sha256(convert_to(public.edge_canonical_jsonb(plan),'UTF8')),'hex') AS plan_hash
+FROM plans;
+GRANT SELECT ON retail_preparation_plans TO aurum_app;
+SET SESSION AUTHORIZATION aurum_app;
+INSERT INTO public.pos_unit_payment_plan_intent(
+ tenant_id,id,branch_id,sale_id,register_id,shift_id,cashier_user_id,
+ request_hash,plan_hash,request_payload,change_amount,quote_payload,created_by)
+SELECT tenant_id,plan_id,branch_id,sale_id,register_id,shift_id,cashier_id,
+ request_hash,plan_hash,request,0,quote,cashier_id FROM retail_preparation_plans;
+INSERT INTO public.pos_unit_payment_plan_binding(
+ tenant_id,id,sale_id,branch_id,cashier_user_id,created_by)
+SELECT tenant_id,plan_id,sale_id,branch_id,cashier_id,cashier_id
+FROM retail_preparation_context WHERE binding_mode IN ('active','cancelled');
+INSERT INTO public.pos_unit_payment_plan_binding_cancel(
+ tenant_id,id,sale_id,branch_id,cashier_user_id,created_by)
+SELECT tenant_id,plan_id,sale_id,branch_id,cashier_id,cashier_id
+FROM retail_preparation_context WHERE binding_mode='cancelled';
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE retail_preparation_payloads ON COMMIT DROP AS
+SELECT kind,binding_mode,jsonb_build_object('profile','retail_cash.prepare.v1','kind',kind,
+  'scope',jsonb_build_object('activation_id',activation_id,'tenant_id',tenant_id,
+    'branch_id',branch_id,'edge_node_id',edge_node_id,'register_id',register_id,
+    'writer_epoch',2,'user_id',cashier_id,'capability','cash_sale_v1'),
+  'confirmation',jsonb_build_object('schema_version',2,'operation_id',operation_id,
+    'sale_id',sale_id,'expected_revision_hash',(SELECT intent.revision_hash
+      FROM public.pos_unit_cash_intent intent WHERE intent.id=operation_id
+        AND intent.tenant_id=retail_preparation_context.tenant_id),
+    'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
+    'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,'currency','TJS')) AS payload
+FROM retail_preparation_context;
+SELECT payload FROM retail_preparation_payloads WHERE binding_mode='none' ORDER BY kind;
+\o /tmp/aurum-native-bindings.jsonl
+SELECT jsonb_build_object('mode',binding_mode,'payload',payload)
+FROM retail_preparation_payloads WHERE binding_mode<>'none' ORDER BY binding_mode;
+\o
+COMMIT;
+SQL
+)"
+
+# Receiving and draft/payment-plan setup above ran under the real cloud writer. Only now assemble the
 # synthetic Edge activation, using the same fixture-only trigger suspension
 # as initial writer provisioning. Product guards remain unchanged.
 psql_super -v tenant_id="$tenant_id" -v branch_id="$branch_id" \
@@ -612,91 +772,6 @@ COMMIT;
 SQL
 
 
-# Seed immutable confirmations through their real app-role guards. The native
-# preparation below uses a separate authenticated per-node LOGIN connection.
-retail_payloads="$(psql_super \
-    -v tenant_id="$tenant_id" \
-    -v cashier_id="$cashier_id" \
-    -v branch_id="$branch_id" \
-    -v register_id="$register_id" \
-    -v catalog_id="$catalog_id" \
-    -v retail_catalog_id="$retail_catalog_id" \
-    -v batch_id="$batch_id" \
-    -v edge_node_id="$edge_node_id" \
-    -v activation_id="$activation_id" <<'SQL'
-BEGIN;
-CREATE TEMP TABLE retail_preparation_context ON COMMIT DROP AS
-SELECT kind, pg_catalog.gen_random_uuid() AS sale_id,
-       pg_catalog.gen_random_uuid() AS line_id,
-       pg_catalog.gen_random_uuid() AS legacy_id,
-       pg_catalog.gen_random_uuid() AS operation_id,
-       :'tenant_id'::UUID AS tenant_id, :'cashier_id'::UUID AS cashier_id,
-       :'branch_id'::UUID AS branch_id, :'register_id'::UUID AS register_id,
-       :'catalog_id'::UUID AS catalog_id, :'batch_id'::UUID AS batch_id,
-       :'retail_catalog_id'::UUID AS retail_catalog_id,
-       :'edge_node_id'::UUID AS edge_node_id, :'activation_id'::UUID AS activation_id,
-       (SELECT id FROM public.shift WHERE tenant_id=:'tenant_id'::UUID
-         AND register_id=:'register_id'::UUID AND status='open') AS shift_id
-FROM (VALUES ('physical_cash'), ('mixed_cash')) kinds(kind);
-GRANT SELECT ON retail_preparation_context TO aurum_app;
-SET SESSION AUTHORIZATION aurum_app;
-SELECT set_config('app.tenant_id', :'tenant_id', true) AS tenant_scope,
-       set_config('app.branch_id', :'branch_id', true) AS branch_scope,
-       set_config('app.user_id', :'cashier_id', true) AS cashier_scope,
-       set_config('app.edge_node_id', :'edge_node_id', true) AS writer_scope
-\gset
-INSERT INTO public.sale(id,tenant_id,branch_id,register_id,shift_id,cashier_user_id)
-SELECT sale_id,tenant_id,branch_id,register_id,shift_id,cashier_id
-FROM retail_preparation_context;
-INSERT INTO public.sale_item(id,tenant_id,sale_id,catalog_id,batch_id,qty,
-  unit_price,total_price,currency,discount_amount,position)
-SELECT legacy_id,tenant_id,sale_id,catalog_id,batch_id,1,10,10,'TJS',0,1
-FROM retail_preparation_context WHERE kind='mixed_cash';
-UPDATE public.sale SET total_amount=10
-WHERE id IN (SELECT sale_id FROM retail_preparation_context WHERE kind='mixed_cash');
-INSERT INTO public.pos_unit_cart_item(id,tenant_id,branch_id,sale_id,catalog_id,
-  position,sale_format,physical_packaging,quantity,discount_amount)
-SELECT line_id,tenant_id,branch_id,sale_id,retail_catalog_id,1,'unit',
-  '{"version":2,"unit":"tablet","units_per_pack":10,"units_per_blister":5,
-    "dispense_step":1}'::JSONB,1,0
-FROM retail_preparation_context;
-INSERT INTO public.pos_unit_cash_intent(tenant_id,id,branch_id,sale_id,register_id,
-  shift_id,cashier_user_id,request_hash,revision_hash,expected_total_amount,
-  cash_tendered,change_amount,currency,quote_payload,created_by)
-SELECT tenant_id,operation_id,branch_id,sale_id,register_id,shift_id,cashier_id,
-  repeat('b',64),repeat('c',64),CASE kind WHEN 'mixed_cash' THEN 11 ELSE 1 END,
-  CASE kind WHEN 'mixed_cash' THEN 16 ELSE 6 END,5,'TJS',
-  jsonb_build_object('schema_version',2,'state','draft_quote','tenant_id',tenant_id,
-    'branch_id',branch_id,'sale_id',sale_id,'register_id',register_id,'shift_id',shift_id,
-    'cashier_id',cashier_id,'lines',
-    CASE kind WHEN 'mixed_cash' THEN jsonb_build_array(jsonb_build_object(
-      'inventory_kind','legacy_pack','id',legacy_id,'position',1,'catalog_id',catalog_id,
-      'batch_id',batch_id,'quantity','1.000','original_retail_unit_price','10.00',
-      'gross_amount','10.00','discount_amount','0.00','net_amount','10.00',
-      'money_version',1,'currency','TJS')) ELSE '[]'::JSONB END
-    ||jsonb_build_array(jsonb_build_object('inventory_kind','physical_unit','id',line_id,
-      'position',CASE kind WHEN 'mixed_cash' THEN 2 ELSE 1 END,'catalog_id',retail_catalog_id,
-      'packaging',jsonb_build_object('version',2,'unit','tablet','units_per_pack',10,
-        'units_per_blister',5,'dispense_step',1),'sale_format','unit','quantity',1,
-      'base_units',1,'original_retail_unit_price','1.00','gross_amount','1.00',
-      'discount_amount','0.00','net_amount','1.00','money_version',1,'currency','TJS')),
-    'total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,'currency','TJS'),
-  cashier_id
-FROM retail_preparation_context;
-RESET SESSION AUTHORIZATION;
-SELECT jsonb_build_object('profile','retail_cash.prepare.v1','kind',kind,
-  'scope',jsonb_build_object('activation_id',activation_id,'tenant_id',tenant_id,
-    'branch_id',branch_id,'edge_node_id',edge_node_id,'register_id',register_id,
-    'writer_epoch',2,'user_id',cashier_id,'capability','cash_sale_v1'),
-  'confirmation',jsonb_build_object('schema_version',2,'operation_id',operation_id,
-    'sale_id',sale_id,'expected_revision_hash',repeat('c',64),
-    'expected_total_amount',CASE kind WHEN 'mixed_cash' THEN '11.00' ELSE '1.00' END,
-    'cash_tendered',CASE kind WHEN 'mixed_cash' THEN '16.00' ELSE '6.00' END,'currency','TJS'))
-FROM retail_preparation_context ORDER BY kind;
-COMMIT;
-SQL
-)"
-
 retail_hash() {
     psql_super -v payload="$1" <<'SQL'
 SELECT encode(sha256(convert_to(public.edge_canonical_jsonb(:'payload'::JSONB),'UTF8')),'hex');
@@ -704,7 +779,7 @@ SQL
 }
 
 retail_call() {
-    PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
+    PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -v VERBOSITY="${3:-default}" -qAt \
         --host "$postgres_host" --port "$postgres_port" \
         --username "$edge_role" --dbname "$POSTGRES_DB" \
         -v payload="$1" -v request_hash="$2" <<'SQL'
@@ -732,6 +807,21 @@ SELECT jsonb_build_object(
   'shift',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.shift row
     WHERE tenant_id=:'tenant_id'::UUID),
   'payments',(SELECT count(*) FROM public.sale_payment WHERE tenant_id=:'tenant_id'::UUID),
+  'unit_items',(SELECT jsonb_agg(to_jsonb(row) ORDER BY id) FROM public.pos_unit_cart_item row
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'legacy_items',(SELECT jsonb_agg(jsonb_build_object('id',id,'catalog_id',catalog_id,
+    'batch_id',batch_id,'qty',qty,'unit_price',unit_price,'discount_amount',discount_amount,
+    'total_price',total_price,'position',position) ORDER BY id)
+    FROM public.sale_item WHERE tenant_id=:'tenant_id'::UUID),
+  'rx_links',(SELECT jsonb_agg(jsonb_build_object('id',id,'sale_id',sale_id,
+    'sale_item_id',sale_item_id,'unit_cart_item_id',unit_cart_item_id) ORDER BY id)
+    FROM public.prescription_log WHERE tenant_id=:'tenant_id'::UUID),
+  'payment_plans',(SELECT count(*) FROM public.pos_unit_payment_plan_intent
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'payment_bindings',(SELECT count(*) FROM public.pos_unit_payment_plan_binding
+    WHERE tenant_id=:'tenant_id'::UUID),
+  'payment_cancellations',(SELECT count(*) FROM public.pos_unit_payment_plan_binding_cancel
+    WHERE tenant_id=:'tenant_id'::UUID),
   'commands',(SELECT count(*) FROM public.edge_cash_command WHERE tenant_id=:'tenant_id'::UUID),
   'outbox',(SELECT count(*) FROM public.sync_outbox WHERE tenant_id=:'tenant_id'::UUID),
   'stock_commands',(SELECT count(*) FROM public.unit_stock_cart_command_v2
@@ -755,6 +845,9 @@ SELECT jsonb_build_object(
 SQL
 }
 
+umask 077
+draft_fixture_file=/tmp/aurum-edge-draft-fixtures.jsonl
+: > "$draft_fixture_file"
 retail_before="$(retail_facts)"
 inputs_lock_payload=""
 old_ifs=$IFS
@@ -781,6 +874,35 @@ SQL
     inputs_hash="$(retail_hash "$inputs_payload")"
     inputs_result="$(retail_call "$inputs_payload" "$inputs_hash")"
     test "$inputs_result" = "$(retail_call "$inputs_payload" "$inputs_hash")"
+    draft_payload="$(psql_super -v payload="$retail_payload" <<'SQL'
+SELECT jsonb_set(:'payload'::JSONB,'{profile}','"retail_cash.draft.v1"'::JSONB);
+SQL
+)"
+    draft_hash="$(retail_hash "$draft_payload")"
+    draft_result="$(retail_call "$draft_payload" "$draft_hash")"
+    test "$draft_result" = "$(retail_call "$draft_payload" "$draft_hash")"
+    if draft_denial="$(retail_call "$draft_payload" \
+        "$(psql_super -c "SELECT repeat('0',64)")" verbose 2>&1)"; then
+        echo "Native current draft accepted an invalid hash" >&2
+        exit 1
+    fi
+    case "$draft_denial" in
+        *22023*'Invalid native retail draft envelope'*) ;;
+        *) echo "Native current-draft hash refusal has an unexpected cause" >&2; exit 1 ;;
+    esac
+    test "$(psql_super -v result="$draft_result" -v inputs="$inputs_result" <<'SQL'
+SELECT :'result'::JSONB->>'state'='current_draft_not_executed'
+ AND :'result'::JSONB->'inputs'=:'inputs'::JSONB
+ AND jsonb_array_length(:'result'::JSONB->'unit_items')=1
+ AND :'result'::JSONB->'unit_items'->0->>'quantity'='1'
+ AND :'result'::JSONB->'rx_refs'='[]'::JSONB
+ AND :'result'::TEXT !~ 'prescription_number|doctor_name|doctor_license|patient_name|notes';
+SQL
+)" = "t"
+    psql_super -v result="$draft_result" -v payload="$draft_payload" <<'SQL' >> "$draft_fixture_file"
+SELECT jsonb_build_object('case',(:'payload'::JSONB->>'kind')||':baseline',
+  'expect','ok','draft',:'result'::JSONB);
+SQL
     inputs_lock_payload=${inputs_lock_payload:-$inputs_payload}
     test "$(psql_super -v result="$inputs_result" -v prepared="$retail_first" \
         -v payload="$inputs_payload" -v tenant_id="$tenant_id" -v branch_id="$branch_id" \
@@ -852,6 +974,14 @@ SQL
 )"
         if retail_call "$altered_inputs" "$(retail_hash "$altered_inputs")" >/dev/null 2>&1; then
             echo "Native retail inputs accepted $retail_mutation" >&2
+            exit 1
+        fi
+        altered_draft="$(psql_super -v payload="$altered_payload" <<'SQL'
+SELECT jsonb_set(:'payload'::JSONB,'{profile}','"retail_cash.draft.v1"'::JSONB);
+SQL
+)"
+        if retail_call "$altered_draft" "$(retail_hash "$altered_draft")" >/dev/null 2>&1; then
+            echo "Native current draft accepted $retail_mutation" >&2
             exit 1
         fi
     done
@@ -1025,6 +1155,250 @@ UPDATE public.app_user SET status='active' WHERE id=:'cashier_id'::UUID;
 SQL
 retail_call "$retail_payload" "$retail_request_hash" >/dev/null
 
+# An activated electronic plan blocks native cash; its immutable cancellation
+# restores the existing draft behavior. Setup used the real cloud/app guards.
+binding_cases=0
+while IFS= read -r binding_fixture; do
+    binding_mode="$(psql_super -v fixture="$binding_fixture" <<'SQL'
+SELECT :'fixture'::JSONB->>'mode';
+SQL
+)"
+    binding_payload="$(psql_super -v fixture="$binding_fixture" <<'SQL'
+SELECT jsonb_set(:'fixture'::JSONB->'payload','{profile}','"retail_cash.draft.v1"'::JSONB);
+SQL
+)"
+    binding_before="$(retail_facts)"
+    case "$binding_mode" in
+        active)
+            if binding_denial="$(retail_call "$binding_payload" \
+                "$(retail_hash "$binding_payload")" verbose 2>&1)"; then
+                echo "Native cash accepted an active electronic payment binding" >&2
+                exit 1
+            fi
+            case "$binding_denial" in
+                *55000*'Native retail draft has active payment binding'*) ;;
+                *) echo "Native binding refusal has an unexpected cause" >&2; exit 1 ;;
+            esac
+            ;;
+        cancelled)
+            binding_result="$(retail_call "$binding_payload" "$(retail_hash "$binding_payload")")"
+            psql_super -v result="$binding_result" <<'SQL' >> "$draft_fixture_file"
+SELECT jsonb_build_object('case','physical_cash:cancelled','expect','ok','draft',:'result'::JSONB);
+SQL
+            ;;
+        *) echo "Unexpected native binding fixture" >&2; exit 1 ;;
+    esac
+    test "$binding_before" = "$(retail_facts)"
+    binding_cases=$((binding_cases + 1))
+done < /tmp/aurum-native-bindings.jsonl
+test "$binding_cases" -eq 2
+
+# Capture actual changed draft facts through a real native LOGIN. The later
+# host-side pure check consumes only these redacted, fictional snapshots.
+change_current_draft() {
+    psql_super -v payload="$1" -v scenario="$2" <<'SQL'
+BEGIN;
+SET SESSION AUTHORIZATION aurum_app;
+SELECT set_config('app.tenant_id',:'payload'::JSONB->'scope'->>'tenant_id',true),
+  set_config('app.branch_id',:'payload'::JSONB->'scope'->>'branch_id',true),
+  set_config('app.user_id',:'payload'::JSONB->'scope'->>'user_id',true),
+  set_config('app.edge_node_id',:'payload'::JSONB->'scope'->>'edge_node_id',true)
+\gset
+SELECT id FROM public.sale
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID FOR UPDATE
+\gset
+UPDATE public.pos_unit_cart_item
+SET quantity=CASE :'scenario' WHEN 'quantity' THEN 2 ELSE 1 END,
+ discount_amount=CASE :'scenario' WHEN 'discount' THEN 0.10 ELSE 0 END
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID;
+DELETE FROM public.prescription_log
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID;
+INSERT INTO public.prescription_log(tenant_id,sale_id,unit_cart_item_id,notes,created_by)
+SELECT tenant_id,sale_id,CASE WHEN :'scenario'='rx_item' THEN id ELSE NULL END,
+ CASE WHEN :'scenario'='rx_blank' THEN E' \t\n' ELSE 'CI reference' END,
+ (:'payload'::JSONB->'scope'->>'user_id')::UUID
+FROM public.pos_unit_cart_item
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID
+ AND :'scenario' IN ('rx_blank','rx_global','rx_item');
+RESET SESSION AUTHORIZATION;
+-- The maintenance identity changes only fictional fixture catalog settings.
+-- Every table guard remains enabled.
+UPDATE public.tenant_catalog SET
+ dispensing_type=CASE WHEN :'scenario' LIKE 'rx_%' THEN 'prescription' ELSE 'otc' END,
+ unit_sale_preparation=jsonb_set(unit_sale_preparation,'{unit_price}',
+   to_jsonb(CASE :'scenario' WHEN 'price' THEN '1.50' ELSE '1.00' END))
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND id IN (SELECT catalog_id FROM public.pos_unit_cart_item
+   WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+     AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID);
+COMMIT;
+SQL
+}
+verify_current_draft_resources() {
+    psql_super -v edge_role="$edge_role" <<'SQL'
+BEGIN;
+GRANT CREATE ON SCHEMA public TO aurum_edge_cash_owner;
+SET LOCAL ROLE aurum_edge_cash_owner;
+CREATE FUNCTION public.edge_draft_ci_unit_update(p_id UUID) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET row_security=on AS $$
+BEGIN
+ PERFORM 1 FROM public.pos_unit_cart_item WHERE id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'CI draft row not visible'; END IF;
+ BEGIN
+  UPDATE public.pos_unit_cart_item SET id=id WHERE id=p_id;
+ EXCEPTION WHEN insufficient_privilege OR object_not_in_prerequisite_state THEN RETURN true;
+ END;
+ RAISE EXCEPTION 'CI draft write unexpectedly succeeded';
+END $$;
+CREATE FUNCTION public.edge_draft_ci_rx_update(p_id UUID) RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET row_security=on AS $$
+BEGIN
+ PERFORM 1 FROM public.prescription_log WHERE id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'CI Rx row not visible'; END IF;
+ BEGIN
+  UPDATE public.prescription_log SET id=id WHERE id=p_id;
+ EXCEPTION WHEN insufficient_privilege OR object_not_in_prerequisite_state THEN RETURN true;
+ END;
+ RAISE EXCEPTION 'CI Rx write unexpectedly succeeded';
+END $$;
+REVOKE ALL ON FUNCTION public.edge_draft_ci_unit_update(UUID),
+ public.edge_draft_ci_rx_update(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.edge_draft_ci_unit_update(UUID),
+ public.edge_draft_ci_rx_update(UUID) TO :"edge_role";
+RESET ROLE;
+REVOKE CREATE ON SCHEMA public FROM aurum_edge_cash_owner;
+COMMIT;
+SQL
+    for draft_relation in unit rx; do
+        draft_row_id="$(psql_super -v payload="$1" -v relation="$draft_relation" <<'SQL'
+SELECT id FROM public.pos_unit_cart_item
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID AND :'relation'='unit'
+UNION ALL SELECT id FROM public.prescription_log
+WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID AND :'relation'='rx';
+SQL
+)"
+        test "$(PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -qAt \
+            --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
+            --dbname "$POSTGRES_DB" -v row_id="$draft_row_id" \
+            -v payload="$1" -v request_hash="$(retail_hash "$1")" \
+            -v function_name="edge_draft_ci_${draft_relation}_update" <<'SQL'
+BEGIN;
+-- Establish the same authenticated context and retained locks as production.
+-- The probe must observe a real row, never bypass RLS or accept zero updates.
+SELECT public.dispatch_edge_cash_sale_v1(
+ (:'payload'::JSONB->'confirmation'->>'operation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'activation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'writer_epoch')::BIGINT,
+ (:'payload'::JSONB->'scope'->>'user_id')::UUID,:'payload'::JSONB,:'request_hash')
+\gset
+SELECT public.:"function_name"(:'row_id'::UUID);
+COMMIT;
+SQL
+)" = "t"
+    done
+    psql_super <<'SQL'
+DROP FUNCTION public.edge_draft_ci_unit_update(UUID);
+DROP FUNCTION public.edge_draft_ci_rx_update(UUID);
+SQL
+    PGAPPNAME=aurum-current-draft-lock PGPASSWORD="$edge_password" \
+        psql -v ON_ERROR_STOP=1 -qAt --host "$postgres_host" --port "$postgres_port" \
+        --username "$edge_role" --dbname "$POSTGRES_DB" \
+        -v payload="$1" -v request_hash="$(retail_hash "$1")" <<'SQL' >/dev/null &
+BEGIN;
+SELECT public.dispatch_edge_cash_sale_v1(
+ (:'payload'::JSONB->'confirmation'->>'operation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'activation_id')::UUID,
+ (:'payload'::JSONB->'scope'->>'writer_epoch')::BIGINT,
+ (:'payload'::JSONB->'scope'->>'user_id')::UUID,:'payload'::JSONB,:'request_hash')
+\gset
+SELECT pg_sleep(12);
+ROLLBACK;
+SQL
+    draft_lock_pid=$!
+    draft_ready=false
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        if [ "$(psql_super -v edge_role="$edge_role" <<'SQL'
+SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE usename=:'edge_role'
+ AND application_name='aurum-current-draft-lock' AND wait_event='PgSleep');
+SQL
+)" = "t" ]; then
+            draft_ready=true
+            break
+        fi
+        sleep 0.2
+    done
+    if [ "$draft_ready" != true ]; then
+        wait "$draft_lock_pid" || true
+        echo "Current draft lock holder did not become ready" >&2
+        exit 1
+    fi
+    psql_super -v payload="$1" <<'SQL'
+BEGIN;
+SET LOCAL lock_timeout='200ms';
+CREATE TEMP TABLE current_draft_lock_rows(relation REGCLASS,id UUID) ON COMMIT DROP;
+INSERT INTO current_draft_lock_rows
+SELECT 'public.pos_unit_cart_item'::REGCLASS,id FROM public.pos_unit_cart_item
+ WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID
+UNION ALL SELECT 'public.prescription_log'::REGCLASS,id FROM public.prescription_log
+ WHERE tenant_id=(:'payload'::JSONB->'scope'->>'tenant_id')::UUID
+ AND sale_id=(:'payload'::JSONB->'confirmation'->>'sale_id')::UUID;
+DO $locks$
+DECLARE row RECORD; affected BIGINT;
+BEGIN
+ IF (SELECT count(*) FROM current_draft_lock_rows)<>2 THEN
+  RAISE EXCEPTION 'CI draft lock rows missing'; END IF;
+ FOR row IN SELECT * FROM current_draft_lock_rows LOOP
+  BEGIN
+   EXECUTE format('SELECT id FROM %s WHERE id=$1 FOR NO KEY UPDATE',row.relation) USING row.id;
+   GET DIAGNOSTICS affected=ROW_COUNT;
+   IF affected<>1 THEN RAISE EXCEPTION 'CI draft lock row not visible'; END IF;
+   RAISE EXCEPTION 'Native current draft did not retain a lock';
+  EXCEPTION WHEN lock_not_available THEN NULL;
+  END;
+ END LOOP;
+END $locks$;
+ROLLBACK;
+SQL
+    wait "$draft_lock_pid"
+}
+old_ifs=$IFS
+IFS='
+'
+for retail_payload in $retail_payloads; do
+    draft_payload="$(psql_super -v payload="$retail_payload" <<'SQL'
+SELECT jsonb_set(:'payload'::JSONB,'{profile}','"retail_cash.draft.v1"'::JSONB);
+SQL
+)"
+    draft_hash="$(retail_hash "$draft_payload")"
+    for draft_scenario in quantity discount price rx_missing rx_blank rx_global rx_item restored; do
+        change_current_draft "$retail_payload" "$draft_scenario"
+        current_before="$(retail_facts)"
+        draft_result="$(retail_call "$draft_payload" "$draft_hash")"
+        if [ "$draft_scenario" = rx_item ] && [ "$(psql_super -v payload="$retail_payload" <<'SQL'
+SELECT :'payload'::JSONB->>'kind';
+SQL
+)" = physical_cash ]; then
+            verify_current_draft_resources "$draft_payload"
+        fi
+        test "$current_before" = "$(retail_facts)"
+        psql_super -v result="$draft_result" -v payload="$retail_payload" \
+            -v scenario="$draft_scenario" <<'SQL' >> "$draft_fixture_file"
+SELECT jsonb_build_object('case',(:'payload'::JSONB->>'kind')||':'||:'scenario',
+ 'expect',CASE WHEN :'scenario' IN ('quantity','discount','price') THEN 'conflict'
+   WHEN :'scenario' IN ('rx_missing','rx_blank') THEN 'business' ELSE 'ok' END,
+ 'draft',:'result'::JSONB);
+SQL
+    done
+done
+IFS=$old_ifs
+
 test "$(psql_super -v edge_role="$edge_role" <<'SQL'
 SELECT NOT has_table_privilege(:'edge_role','public.pos_unit_cash_intent','SELECT')
   AND NOT has_any_column_privilege(:'edge_role','public.pos_unit_cash_intent','SELECT')
@@ -1053,6 +1427,18 @@ fi
 case "$denial" in
     *42501*) ;;
     *) echo "Native helper refusal did not prove an access denial" >&2; exit 1 ;;
+esac
+
+if denial="$(PGPASSWORD="$edge_password" psql -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate -qAt \
+    --host "$postgres_host" --port "$postgres_port" --username "$edge_role" \
+    --dbname "$POSTGRES_DB" -c "SELECT public.lock_edge_retail_cash_draft_v1( \
+      NULL::UUID,NULL::UUID,1,NULL::UUID,'{}'::JSONB,repeat('a',64))" 2>&1)"; then
+    echo "Native node unexpectedly invoked the private current-draft helper" >&2
+    exit 1
+fi
+case "$denial" in
+    *42501*) ;;
+    *) echo "Native current-draft helper did not prove an access denial" >&2; exit 1 ;;
 esac
 
 operation_one="$(psql_super -c 'SELECT pg_catalog.gen_random_uuid()')"

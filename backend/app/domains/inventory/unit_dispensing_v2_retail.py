@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Context, Decimal, localcontext
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 from uuid import UUID
 
 from pydantic import Field, field_validator
@@ -17,6 +18,23 @@ from app.domains.inventory.unit_dispensing_v2_cost import UnitCartDispenseCostRe
 from app.domains.inventory.unit_ledger_v2_models import UnitStockCartLineV2
 from app.domains.inventory.unit_stock_v2 import SaleFormatV2, UnitPackagingV2, to_base_units_v2
 from app.domains.pos.unit_money import allocate_unit_amount
+
+
+class UnitRetailCatalogV2(Protocol):
+    @property
+    def is_active(self) -> bool: ...
+
+    @property
+    def deleted_at(self) -> datetime | None: ...
+
+    @property
+    def currency(self) -> str: ...
+
+    @property
+    def unit_sale_preparation(self) -> object: ...
+
+    @property
+    def base_price(self) -> Decimal | None: ...
 
 
 class UnitPricedCartLineV2(UnitCartLineV2):
@@ -64,7 +82,7 @@ class UnitCartRetailResultV2:
 
 
 def quote_retail_line_v2(
-    line: UnitCartLineV2, catalog: TenantCatalog, discount: Decimal
+    line: UnitCartLineV2, catalog: TenantCatalog | UnitRetailCatalogV2, discount: Decimal
 ) -> UnitRetailAmountsV2:
     """Use explicit format prices and exact cents, never divide a pack price."""
     if (
