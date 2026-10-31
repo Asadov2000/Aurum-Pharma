@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 
 DISPATCHER = "public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)"
 HELPER = "public.lock_edge_retail_cash_inputs_v1(uuid,uuid,bigint,uuid,jsonb,text)"
@@ -70,6 +73,24 @@ def _assert_downgraded_columns(connection: Connection) -> None:
     assert not connection.execute(POLICIES_SQL).all()
 
 
+@contextmanager
+def _at_inputs_revision(connection: Connection) -> Iterator[None]:
+    directory = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+    later = tuple(directory.iterate_revisions("head", "0232"))
+    head_dispatcher = connection.execute(DISPATCHER_SQL).one()
+    with Operations.context(MigrationContext.configure(connection)):
+        # Later profiles can extend the same dispatcher. Rehearse 0232 only
+        # after removing them in the same order as an actual Alembic downgrade.
+        for revision in later:
+            revision.module.downgrade()
+    yield
+    with Operations.context(MigrationContext.configure(connection)):
+        for revision in reversed(later):
+            revision.module.upgrade()
+    assert connection.execute(DISPATCHER_SQL).one() == head_dispatcher
+    # The outer test always rolls back all DDL, including an assertion failure.
+
+
 def _roundtrip(connection: Connection, owner_execute: bool) -> None:
     assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
     assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
@@ -82,6 +103,11 @@ def _roundtrip(connection: Connection, owner_execute: bool) -> None:
     )
     connection.execute(text("RESET ROLE"))
     connection.execute(text("SET LOCAL ROLE aurum_schema_owner"))
+    with _at_inputs_revision(connection):
+        _inputs_roundtrip(connection)
+
+
+def _inputs_roundtrip(connection: Connection) -> None:
     dispatcher = connection.execute(DISPATCHER_SQL).one()
     prepare = _routine_snapshot(connection, PREPARE)
     helper = _routine_snapshot(connection, HELPER)
