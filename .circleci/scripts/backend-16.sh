@@ -16,3 +16,13 @@ docker exec -i \
   -e AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
   "$POSTGRES_SERVICE_ID" \
   sh /tmp/test-edge-cash-dispatcher.sh
+
+# These are fictional, redacted snapshots, not credentials or execution grants.
+# The native SQL checks retain and test locks; the pure checker only verifies
+# the captured evidence after that transaction has ended.
+draft_fixtures="$(mktemp "$PWD/.edge-draft-check.XXXXXX")"
+trap 'rm -f -- "$draft_fixtures"' EXIT
+docker cp "$POSTGRES_SERVICE_ID:/tmp/aurum-edge-draft-fixtures.jsonl" "$draft_fixtures"
+CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
+  PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
+  poetry run python ../scripts/check-edge-retail-draft-fixtures.py "$draft_fixtures"
