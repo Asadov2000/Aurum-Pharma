@@ -350,6 +350,24 @@ BEGIN
             expected_role
         );
     END LOOP;
+    -- Table-level revocation leaves explicit column ACLs intact. Enrollment
+    -- and revocation both normalize the bound role; no direct table access is
+    -- part of the native identity contract, including explicit system grants.
+    FOR object_record IN
+        SELECT DISTINCT schemas.nspname, relations.relname, column_info.attname
+        FROM pg_catalog.pg_attribute AS column_info
+        JOIN pg_catalog.pg_class AS relations ON relations.oid = column_info.attrelid
+        JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
+        WHERE acl.grantee = current_role_oid
+          AND column_info.attnum > 0 AND NOT column_info.attisdropped
+    LOOP
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM %I',
+            object_record.attname, object_record.nspname, object_record.relname,
+            expected_role
+        );
+    END LOOP;
     FOR object_record IN
         SELECT types.oid::REGTYPE::TEXT AS object_name
         FROM pg_catalog.pg_type AS types

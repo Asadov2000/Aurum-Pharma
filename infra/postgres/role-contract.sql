@@ -665,25 +665,36 @@ END
 $$;
 
 -- Table-level REVOKE does not remove column ACLs. Normalize every explicit
--- column grant before restoring the catalog worker's revision allowlist.
+-- column grant before restoring the catalog worker and Edge owner revision
+-- allowlists. Native LOGIN roles and the executor must retain no direct grants,
+-- including reserved node roles without a valid identity binding.
+-- Edge has no system-column allowlist: revoke its explicit grants in every
+-- schema while preserving the catalog worker's application-schema boundary.
 DO $$
 DECLARE
     target RECORD;
 BEGIN
     FOR target IN
-        SELECT schema.nspname, relation.relname, column_info.attname
+        SELECT DISTINCT schema.nspname, relation.relname, column_info.attname,
+            grantee.rolname
         FROM pg_catalog.pg_attribute AS column_info
         JOIN pg_catalog.pg_class AS relation ON relation.oid = column_info.attrelid
         JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
         JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
-        WHERE grantee.rolname = 'aurum_catalog_worker'
-          AND column_info.attnum > 0 AND NOT column_info.attisdropped
-          AND schema.nspname <> 'information_schema' AND schema.nspname !~ '^pg_'
+        WHERE column_info.attnum > 0 AND NOT column_info.attisdropped
+          AND (
+            (
+                grantee.rolname = 'aurum_catalog_worker'
+                AND schema.nspname <> 'information_schema' AND schema.nspname !~ '^pg_'
+            )
+            OR grantee.rolname IN ('aurum_edge_cash_owner', 'aurum_edge_cash_executor')
+            OR grantee.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+          )
     LOOP
         EXECUTE pg_catalog.format(
-            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM aurum_catalog_worker',
-            target.attname, target.nspname, target.relname
+            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM %I',
+            target.attname, target.nspname, target.relname, target.rolname
         );
     END LOOP;
 END
