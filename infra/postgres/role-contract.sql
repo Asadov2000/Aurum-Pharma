@@ -885,7 +885,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 233 THEN
+        IF revision_number < 1 OR revision_number > 234 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -1437,6 +1437,62 @@ BEGIN
             -- UPDATE checks, including the legacy/global prescription path.
             GRANT UPDATE (id) ON public.pos_unit_cart_item, public.sale_item,
                 public.prescription_log TO aurum_edge_cash_owner;
+        END IF;
+        IF current_revision::INTEGER >= 234 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.replay_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail replay helper definition is unsafe';
+            END IF;
+            IF (
+                SELECT pg_catalog.count(*)
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid IN (
+                    pg_catalog.to_regprocedure('public.assert_physical_checkout(uuid,uuid,boolean)'),
+                    pg_catalog.to_regprocedure('public.assert_mixed_checkout(uuid,uuid,boolean)')
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND routine.prosecdef
+                  AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']::TEXT[]
+            ) <> 2 THEN
+                RAISE EXCEPTION 'Native retail replay validators are unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.replay_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.replay_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            -- Existing schema-owner validators inspect committed immutable
+            -- journals without exposing stock costs or granting table writes.
+            GRANT EXECUTE ON FUNCTION
+                public.assert_physical_checkout(UUID, UUID, BOOLEAN),
+                public.assert_mixed_checkout(UUID, UUID, BOOLEAN)
+                TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                tenant_id, id, sale_id, branch_id, register_id, shift_id,
+                cashier_user_id, cash_intent_id, payment_plan_intent_id,
+                stock_command_id, payment_id, payment_journal_version,
+                request_hash, result_payload, receipt_payload
+            ) ON public.pos_physical_checkout, public.pos_mixed_checkout
+                TO aurum_edge_cash_owner;
         END IF;
     END IF;
 

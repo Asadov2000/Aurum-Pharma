@@ -26,3 +26,10 @@ docker cp "$POSTGRES_SERVICE_ID:/tmp/aurum-edge-draft-fixtures.jsonl" "$draft_fi
 CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
   PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
   poetry run python ../scripts/check-edge-retail-draft-fixtures.py "$draft_fixtures"
+
+# These maintenance-provisioned native anchors are explicitly synthetic: the
+# separate proof exercises genuine LOGIN recovery, not native monetary posting.
+# Its own CI/local *_test guards execute before any Docker or database access.
+CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
+  PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
+  poetry run python ../scripts/test-edge-retail-cash-replay.py

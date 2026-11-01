@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 
 DISPATCHER = "public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)"
 HELPER = "public.lock_edge_retail_cash_draft_v1(uuid,uuid,bigint,uuid,jsonb,text)"
@@ -59,6 +62,21 @@ def _routine(connection: Connection, signature: str) -> tuple[object, ...]:
     )
 
 
+@contextmanager
+def _at_draft_revision(connection: Connection) -> Iterator[None]:
+    directory = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+    later = tuple(directory.iterate_revisions("head", "0233"))
+    head_dispatcher = _routine(connection, DISPATCHER)
+    with Operations.context(MigrationContext.configure(connection)):
+        for revision in later:
+            revision.module.downgrade()
+    yield
+    with Operations.context(MigrationContext.configure(connection)):
+        for revision in reversed(later):
+            revision.module.upgrade()
+    assert _routine(connection, DISPATCHER) == head_dispatcher
+
+
 def _assert_downgraded(connection: Connection) -> None:
     rows = connection.execute(COLUMNS_SQL).all()
     added_tables = {
@@ -85,35 +103,36 @@ def _roundtrip(connection: Connection, owner_execute: bool) -> None:
     )
     connection.execute(text("RESET ROLE"))
     connection.execute(text("SET LOCAL ROLE aurum_schema_owner"))
-    dispatcher = _routine(connection, DISPATCHER)
-    helpers = {signature: _routine(connection, signature) for signature in (PREPARE, INPUTS)}
-    helper = _routine(connection, HELPER)
-    columns = connection.execute(COLUMNS_SQL).all()
-    policies = connection.execute(POLICIES_SQL).all()
-    assert "retail_cash.draft.v1" in str(dispatcher[5])
-    with Operations.context(MigrationContext.configure(connection)):
-        _migration().downgrade()
-        old = _routine(connection, DISPATCHER)
-        assert old[:5] == dispatcher[:5]
-        assert "retail_cash.draft.v1" not in str(old[5])
-        assert "retail_cash.inputs.v1" in str(old[5])
-        assert connection.scalar(text(f"SELECT to_regprocedure('{HELPER}')")) is None
-        _assert_downgraded(connection)
+    with _at_draft_revision(connection):
+        dispatcher = _routine(connection, DISPATCHER)
+        helpers = {signature: _routine(connection, signature) for signature in (PREPARE, INPUTS)}
+        helper = _routine(connection, HELPER)
+        columns = connection.execute(COLUMNS_SQL).all()
+        policies = connection.execute(POLICIES_SQL).all()
+        assert "retail_cash.draft.v1" in str(dispatcher[5])
+        with Operations.context(MigrationContext.configure(connection)):
+            _migration().downgrade()
+            old = _routine(connection, DISPATCHER)
+            assert old[:5] == dispatcher[:5]
+            assert "retail_cash.draft.v1" not in str(old[5])
+            assert "retail_cash.inputs.v1" in str(old[5])
+            assert connection.scalar(text(f"SELECT to_regprocedure('{HELPER}')")) is None
+            _assert_downgraded(connection)
+            for signature, snapshot in helpers.items():
+                assert _routine(connection, signature) == snapshot
+            _migration().upgrade()
+        assert _routine(connection, DISPATCHER) == dispatcher
+        assert _routine(connection, HELPER)[1:] == helper[1:]
         for signature, snapshot in helpers.items():
             assert _routine(connection, signature) == snapshot
-        _migration().upgrade()
-    assert _routine(connection, DISPATCHER) == dispatcher
-    assert _routine(connection, HELPER)[1:] == helper[1:]
-    for signature, snapshot in helpers.items():
-        assert _routine(connection, signature) == snapshot
-    assert connection.execute(COLUMNS_SQL).all() == columns
-    assert connection.execute(POLICIES_SQL).all() == policies
-    assert (
-        connection.scalar(
-            text("SELECT has_schema_privilege('aurum_edge_cash_owner','public','CREATE')")
+        assert connection.execute(COLUMNS_SQL).all() == columns
+        assert connection.execute(POLICIES_SQL).all() == policies
+        assert (
+            connection.scalar(
+                text("SELECT has_schema_privilege('aurum_edge_cash_owner','public','CREATE')")
+            )
+            is False
         )
-        is False
-    )
 
 
 @pytest.mark.parametrize("owner_execute", [False, True])

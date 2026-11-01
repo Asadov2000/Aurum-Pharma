@@ -1,10 +1,14 @@
 """Prove CI database scripts reject unsafe contexts before reading credentials."""
 
+import asyncio
+import builtins
 import os
-from pathlib import Path
+import runpy
 import shutil
 import subprocess
 import unittest
+from pathlib import Path
+from unittest import mock
 
 
 class DisposableCiGuards(unittest.TestCase):
@@ -18,16 +22,36 @@ class DisposableCiGuards(unittest.TestCase):
             # Initialize MSYS separately from the unchanged 5-second guard deadline.
             # This bounded empty command never opens database or credential files.
             subprocess.run(
-                [str(shell), "-c", ":"], capture_output=True, text=True, timeout=30,
+                [str(shell), "-c", ":"],
+                capture_output=True,
+                text=True,
+                timeout=30,
                 check=True,
             )
         cases = (
             ({}, "explicitly disposable"),
             ({"CI": "true"}, "explicitly disposable"),
             ({"CI": "true", "CIRCLECI": "true"}, "explicitly disposable"),
-            ({"CIRCLECI": "true", "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database"}, "explicitly disposable"),
-            ({"CI": "true", "CIRCLECI": "true", "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database"}, "disposable *_test"),
-            ({"CI": "true", "GITHUB_ACTIONS": "true", "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database"}, "disposable *_test"),
+            (
+                {"CIRCLECI": "true", "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database"},
+                "explicitly disposable",
+            ),
+            (
+                {
+                    "CI": "true",
+                    "CIRCLECI": "true",
+                    "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database",
+                },
+                "disposable *_test",
+            ),
+            (
+                {
+                    "CI": "true",
+                    "GITHUB_ACTIONS": "true",
+                    "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database",
+                },
+                "disposable *_test",
+            ),
         )
         for filename in ("test-edge-cash-dispatcher.sh", "test-edge-cash-identity.sh"):
             for overrides, message in cases:
@@ -45,12 +69,113 @@ class DisposableCiGuards(unittest.TestCase):
                     environment.update(overrides)
                     result = subprocess.run(
                         [str(shell), str(root / "scripts" / filename)],
-                        env=environment, capture_output=True, text=True, timeout=5,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
                         check=False,
                     )
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(message, result.stderr)
                     self.assertNotIn("must-not-be-read", result.stderr)
+
+
+class NativeReplayGuards(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.proof = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "scripts/test-edge-retail-cash-replay.py")
+        )
+
+    def environment(self) -> dict[str, str]:
+        return {
+            "CI": "true",
+            "CIRCLECI": "true",
+            "AURUM_DISPOSABLE_DB_CONFIRM": "destroy-this-database",
+            "POSTGRES_SERVICE_ID": "inert-postgres-test",
+            "DATABASE_URL_APP": "postgresql+asyncpg://aurum_app:unused@localhost:5432/aurum_test",
+            "DATABASE_URL_SUPPORT": "postgresql+asyncpg://aurum_support:unused@localhost:5432/aurum_test",
+            "DATABASE_URL_MIGRATION": "postgresql+asyncpg://aurum_migrator:unused@localhost:5432/aurum_test",
+        }
+
+    def assert_early_refusal(self, environment: dict[str, str]) -> None:
+        original_import = builtins.__import__
+
+        def safe_import(name: str, *args: object, **kwargs: object) -> object:
+            if name.split(".", 1)[0] in {"app", "tests", "sqlalchemy"}:
+                raise AssertionError("Runtime dependency imported before rejecting unsafe context")
+            return original_import(name, *args, **kwargs)
+
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("subprocess.run") as docker,
+            mock.patch("builtins.__import__", side_effect=safe_import),
+        ):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(self.proof["main"]())
+            docker.assert_not_called()
+
+    def test_missing_ci_authorization_is_refused_before_runtime_or_docker(self) -> None:
+        for name in (
+            "CI",
+            "CIRCLECI",
+            "AURUM_DISPOSABLE_DB_CONFIRM",
+            "POSTGRES_SERVICE_ID",
+        ):
+            with self.subTest(missing=name):
+                environment = self.environment()
+                environment.pop(name)
+                self.assert_early_refusal(environment)
+
+    def test_unsafe_targets_are_refused_before_runtime_or_docker(self) -> None:
+        changes = (
+            (
+                "DATABASE_URL_APP",
+                "postgresql+asyncpg://aurum_app:unused@localhost:5432/production",
+            ),
+            (
+                "DATABASE_URL_APP",
+                "postgresql+asyncpg://aurum_app:unused@remote.example:5432/aurum_test",
+            ),
+            (
+                "DATABASE_URL_SUPPORT",
+                "postgresql+asyncpg://aurum_support:unused@localhost:5433/aurum_test",
+            ),
+            (
+                "DATABASE_URL_MIGRATION",
+                "postgresql+asyncpg://postgres:unused@localhost:5432/aurum_test",
+            ),
+            (
+                "DATABASE_URL_MIGRATION",
+                "postgresql+asyncpg://aurum_migrator:unused@localhost:5432/other_test",
+            ),
+            (
+                "DATABASE_URL_MIGRATION",
+                "postgresql+asyncpg://aurum_migrator:unused@localhost:0/aurum_test",
+            ),
+            (
+                "DATABASE_URL_APP",
+                "postgresql+asyncpg://aurum_app:unused@localhost:bad/aurum_test",
+            ),
+            (
+                "DATABASE_URL_APP",
+                "postgresql+asyncpg://aurum_app:unused@localhost/aurum_test?host=remote",
+            ),
+            ("POSTGRES_SERVICE_ID", "--unexpected-option"),
+        )
+        for name, value in changes:
+            with self.subTest(field=name, value=value):
+                environment = self.environment()
+                environment[name] = value
+                self.assert_early_refusal(environment)
+
+    def test_explicit_valid_context_requires_no_runtime_dependencies(self) -> None:
+        with (
+            mock.patch.dict(os.environ, self.environment(), clear=True),
+            mock.patch("subprocess.run") as docker,
+        ):
+            self.proof["require_ci_context"]()
+            docker.assert_not_called()
 
 
 if __name__ == "__main__":
