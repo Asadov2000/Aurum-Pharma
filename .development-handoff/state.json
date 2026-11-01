@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 24,
+  "generation": 25,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "merged_verified",
-  "run_id": "local-2026-11-01-edge-column-acl-01",
-  "branch": "codex/edge-column-acl",
-  "base_sha": "8f8acf7d7c00c9f67658889ad1374d9354de3c5e",
-  "expected_head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
-  "validated_sha": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
-  "pr": 443,
+  "phase": "active",
+  "run_id": "local-2026-11-01-native-cash-replay-01",
+  "branch": "codex/edge-retail-cash-replay",
+  "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
+  "expected_head": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,20 +18,20 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "E6-06 prerequisite: normalize explicit system-column Edge ACLs and fail closed on delegated residual grants, preserve exact revision allowlists and unrelated privileges; no monetary execution or activation.",
+  "scope": "E6-06: strictly bound completed native physical/mixed cash command replay using existing immutable edge_cash_command; no new monetary execution or backfill, no historical app-checkout substitution; runtime remains DenyAll.",
   "acceptance": [
-    "Remove injected direct column grants for Edge roles on repeat bootstrap",
-    "Remove node column grants during identity lifecycle; preserve unrelated grants and exact approved profiles",
-    "Real disposable native identity/dispatcher regression checks and all final-head CI successful",
-    "Protected PR merge with unchanged live runtime and shared database"
+    "Strict native identity/activation/epoch/request/result anchor and historical cash validation",
+    "Read-only replay after closed shift/changed writer; no stock/payment/receipt writes or anchor creation",
+    "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
+    "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "No active writes. ACL normalization prerequisite accepted via PR443. Next remaining E6-06 implementation is the native transactional monetary execution adapter, including completed replay and atomic financial/stock/result/event enforcement. Fresh recon and ownership claim required; runtime remains DenyAll.",
+  "remaining_step": "Implement strict anchored native completed cash replay, validate real boundary and explicit fixture limitation; full CI then protected merge.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -76,7 +76,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T14:45:48.408Z",
+  "updated_at": "2026-11-01T14:51:08.360Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -200,7 +200,7 @@
       "closes_control_stage": false
     }
   ],
-  "increment_id": "native-column-acl-normalization",
+  "increment_id": "native-completed-cash-replay",
   "previous_ci": {
     "head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
     "workflow": "1e709df2-c85e-48fa-9edd-5a0e9babdcd0",
