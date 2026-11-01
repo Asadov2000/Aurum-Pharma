@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "active",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-11-01-edge-column-acl-01",
   "branch": "codex/edge-column-acl",
   "base_sha": "8f8acf7d7c00c9f67658889ad1374d9354de3c5e",
-  "expected_head": "8f8acf7d7c00c9f67658889ad1374d9354de3c5e",
+  "expected_head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
   "validated_sha": null,
-  "pr": null,
+  "pr": 443,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -24,14 +24,14 @@
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "E6-06 prerequisite: remove stale explicit column ACLs for Edge owner/executor and reserved node identities during role bootstrap and identity lifecycle; restore exact existing revision allowlists; no runtime activation or monetary execution.",
+  "scope": "E6-06 prerequisite: normalize explicit system-column Edge ACLs and fail closed on delegated residual grants, preserve exact revision allowlists and unrelated privileges; no monetary execution or activation.",
   "acceptance": [
     "Remove injected direct column grants for Edge roles on repeat bootstrap",
     "Remove node column grants during identity lifecycle; preserve unrelated grants and exact approved profiles",
     "Real disposable native identity/dispatcher regression checks and all final-head CI successful",
     "Protected PR merge with unchanged live runtime and shared database"
   ],
-  "remaining_step": "Implement and verify native column ACL normalization prerequisite, then full CI and protected merge. Native monetary adapter remains unfinished.",
+  "remaining_step": "Read exact-head full CI for PR443; inspect new real ACL scenarios on both backend nodes; protected merge after all8success.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -75,7 +75,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T12:24:12.743Z",
+  "updated_at": "2026-11-01T12:32:26.890Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -86,21 +86,13 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "1dc3f2123ef57107270fa3559d80eec01c3e0cdc",
+  "head_tree": "c746e3f91f03bfc18f8077e3afb754e3afb1c06e",
   "local_validation": {
-    "targeted_passed": 245,
-    "new_pure": 37,
-    "new_db": 8,
-    "collected_backend": 7990,
-    "ruff": "pass",
-    "black": "1077 files pass",
-    "mypy_sources": 532,
+    "migration_tool_tests": 12,
     "shell_syntax": "pass",
-    "ci_safety": 16,
-    "independent_core_security_review": "approve",
-    "independent_ci_review": "approve; hash-negative feedback addressed",
-    "shared_db": "not accessed",
-    "cli_json_transport_smoke": "19/19 synthetic cases, actual CLI exit0, no SQL/DB"
+    "windows_wrapper_mock": "pass",
+    "independent_security_review": "approve",
+    "diffcheck": "pass"
   },
   "ci": {
     "head": "a9bd6a3e7b6b55307cee12f4ae4f20a0f64bfb98",
