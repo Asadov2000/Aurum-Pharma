@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "active",
+  "phase": "blocked",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,9 +31,15 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Implement strict anchored native completed cash replay, validate real boundary and explicit fixture limitation; full CI then protected merge.",
-  "failure_counters": {},
-  "blocker": null,
+  "remaining_step": "User exception for Black formatting of only scripts/test-edge-retail-cash-replay.py and scripts/test-disposable-ci-guards.py; apply prepared patch, rerun quality, publish this same increment and complete full CI.",
+  "failure_counters": {
+    "black_ci_scripts": {
+      "consecutive": 2,
+      "reason": "Script formatting mismatch; first invocation default88, second explicit project100. No script changes applied after second failure.",
+      "proposal": ".codex/unit-edge-native-cash-replay-2026-11-01/black-format-proposal.patch"
+    }
+  },
+  "blocker": "Awaiting one-time user exception after two local Black script formatting failures; exact formatting-only proposal prepared, not applied.",
   "previous_completed": {
     "pr": 442,
     "merged": true,
@@ -76,7 +82,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T14:51:08.360Z",
+  "updated_at": "2026-11-01T15:13:48.983Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -89,11 +95,19 @@
   },
   "head_tree": "c746e3f91f03bfc18f8077e3afb754e3afb1c06e",
   "local_validation": {
-    "migration_tool_tests": 12,
+    "targeted_passed": 198,
+    "new_pure_passed": 39,
+    "new_db_collected": 10,
+    "collected_backend": 8039,
+    "ruff": "app/tests/scripts pass",
+    "black_app_tests": "1079 files pass",
+    "mypy": "533 app sources pass",
+    "safety_guard_tests": 4,
+    "backend_runner_tests": 9,
     "shell_syntax": "pass",
-    "windows_wrapper_mock": "pass",
-    "independent_security_review": "approve",
-    "diffcheck": "pass"
+    "independent_SQL_and_security_review": "approve",
+    "native_CI_fixture": "implemented and independently reviewed; not executed yet",
+    "shared_database": "not accessed"
   },
   "ci": {
     "head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
