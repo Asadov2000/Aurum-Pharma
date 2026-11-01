@@ -350,6 +350,37 @@ BEGIN
             expected_role
         );
     END LOOP;
+    -- Application-schema table cleanup excludes explicit system-column grants.
+    -- Enrollment and revocation both normalize the bound role; no direct table
+    -- access is part of its contract, including explicit system grants.
+    FOR object_record IN
+        SELECT DISTINCT schemas.nspname, relations.relname, column_info.attname,
+            column_info.attrelid, column_info.attnum
+        FROM pg_catalog.pg_attribute AS column_info
+        JOIN pg_catalog.pg_class AS relations ON relations.oid = column_info.attrelid
+        JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
+        WHERE acl.grantee = current_role_oid
+          AND column_info.attnum > 0 AND NOT column_info.attisdropped
+    LOOP
+        EXECUTE pg_catalog.format(
+            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM %I',
+            object_record.attname, object_record.nspname, object_record.relname,
+            expected_role
+        );
+        -- A superuser's REVOKE uses the object owner as grantor. Refuse any
+        -- delegated grant left behind instead of affecting unrelated grantees.
+        IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_attribute AS column_info
+            CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
+            WHERE column_info.attrelid = object_record.attrelid
+              AND column_info.attnum = object_record.attnum
+              AND acl.grantee = current_role_oid
+        ) THEN
+            RAISE EXCEPTION 'Column ACL normalization left explicit grants';
+        END IF;
+    END LOOP;
     FOR object_record IN
         SELECT types.oid::REGTYPE::TEXT AS object_name
         FROM pg_catalog.pg_type AS types
