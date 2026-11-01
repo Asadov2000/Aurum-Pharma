@@ -83,7 +83,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T15:19:16.845Z",
+  "updated_at": "2026-11-01T15:39:11.071Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -113,16 +113,26 @@
     "script_full_project_ruff": "pass; import/diagnostic/orchestration corrections verified"
   },
   "ci": {
-    "head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
-    "workflow": "b70c9c1f-7e91-47ed-b045-f6d429e7647d",
-    "backend_job": 4030,
-    "gate_job": 4034,
-    "status": "success",
+    "head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
+    "workflow": "ee9cdc6c-f6b2-4546-a426-02133aa2572b",
+    "backend_job": 4044,
+    "gate_job": 4050,
+    "status": "running",
     "attempt": 1,
+    "expected_backend_total": 8039,
+    "expected_new": 49,
     "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "pending"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "pending"
       },
       {
         "context": "ci/circleci: dependency-audit",
@@ -139,30 +149,9 @@
       {
         "context": "ci/circleci: production-containers",
         "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success"
       }
     ],
-    "backend_passed": 7990,
-    "new_pytest_cases": 0,
-    "backend_duplicates": 0,
-    "backend_skips": 0,
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "native_snapshot_cases_per_node": 19,
-    "native_nodes_passed": 2,
-    "identity_lifecycle_nodes_passed": 2,
-    "column_acl_regressions": "success on both nodes: bootstrap/enroll/revoke, system/custom/public, exact access baseline and delegated-grantor atomic refusal"
+    "updated_at": "2026-11-01T15:39:11.071Z"
   },
   "completion": {
     "pr": 443,
@@ -219,16 +208,60 @@
   ],
   "increment_id": "native-completed-cash-replay",
   "previous_ci": {
-    "head": "898975c2acb692aa48dc45e5efc38405cf222ae5",
-    "workflow": "1e709df2-c85e-48fa-9edd-5a0e9babdcd0",
-    "backend_job": 4005,
-    "pytest_both_nodes": "success",
-    "native_sql_script": "completed on node1; checker failed on strict UUID Python-mode parsing",
-    "status": "failed: host-side JSON transport decoding"
+    "head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
+    "workflow": "b70c9c1f-7e91-47ed-b045-f6d429e7647d",
+    "backend_job": 4030,
+    "gate_job": 4034,
+    "status": "success",
+    "attempt": 1,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success"
+      }
+    ],
+    "backend_passed": 7990,
+    "new_pytest_cases": 0,
+    "backend_duplicates": 0,
+    "backend_skips": 0,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "native_snapshot_cases_per_node": 19,
+    "native_nodes_passed": 2,
+    "identity_lifecycle_nodes_passed": 2,
+    "column_acl_regressions": "success on both nodes: bootstrap/enroll/revoke, system/custom/public, exact access baseline and delegated-grantor atomic refusal"
   },
   "one_time_exceptions": {
     "black_ci_scripts": {
-      "approval": "User said 'дальше' after the explicit request to apply the prepared formatting-only patch and continue this increment.",
+      "approval": "User explicitly replied: 'Да, исправить форматирование и продолжить этот этап'.",
       "scope": "Only scripts/test-edge-retail-cash-replay.py and scripts/test-disposable-ci-guards.py formatting; existing limits unchanged."
     }
   }
