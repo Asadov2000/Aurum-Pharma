@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "implementing",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
@@ -31,13 +31,20 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Inspect full final-head CI including new genuine native LOGIN replay proof on both backend nodes; merge only after all8contexts succeed.",
+  "remaining_step": "Finish reading surviving backend node evidence, correct historical exact-policy assertion without weakening it, publish one fix in PR444 and require a complete new final-head CI.",
   "failure_counters": {
     "black_ci_scripts": {
       "consecutive": 0,
       "reason": "Script formatting mismatch; first invocation default88, second explicit project100. No script changes applied after second failure.",
       "proposal": ".codex/unit-edge-native-cash-replay-2026-11-01/black-format-proposal.patch",
       "resolved": "Approved formatting-only patch applied; exact project Black and Ruff/safety checks successful."
+    },
+    "legacy_mixed_policy_expectation": {
+      "consecutive": 1,
+      "failed_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
+      "step": "CI Pytest",
+      "test": "tests/isolation/test_mixed_cash_checkout_migration.py::test_app_policy_binds_tenant_cashier_and_branch_permission",
+      "reason": "Historical exact policy set omits new edge_cash_replay_read. Preserve old policy assertions; add explicit assertions of the new private SELECT policy."
     }
   },
   "blocker": null,
@@ -83,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T15:39:11.071Z",
+  "updated_at": "2026-11-01T15:48:35.106Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -117,7 +124,7 @@
     "workflow": "ee9cdc6c-f6b2-4546-a426-02133aa2572b",
     "backend_job": 4044,
     "gate_job": 4050,
-    "status": "running",
+    "status": "pytest failed on node1; node0 still running",
     "attempt": 1,
     "expected_backend_total": 8039,
     "expected_new": 49,
