@@ -211,6 +211,40 @@ dispatcher_snapshot() {
     "
 }
 
+identity_snapshot() {
+    psql_super -v edge_role="$edge_role" <<'SQL'
+SELECT md5(jsonb_build_array(
+    (SELECT to_jsonb(role) FROM pg_catalog.pg_roles AS role WHERE rolname = :'edge_role'),
+    (SELECT jsonb_agg(to_jsonb(member) ORDER BY member.roleid, member.member)
+        FROM pg_catalog.pg_auth_members AS member
+        WHERE member.member = :'edge_role'::regrole OR member.roleid = :'edge_role'::regrole),
+    (SELECT to_jsonb(identity) FROM public.edge_cash_node_identity AS identity
+        WHERE database_role = :'edge_role')
+)::TEXT);
+SQL
+}
+
+expect_column_acl_failure() {
+    failure_acl="$(acl_snapshot)"
+    failure_identity="$(identity_snapshot)"
+    if failure_output="$("$@" 2>&1)"; then
+        echo "Alternate-grantor column ACL unexpectedly passed normalization" >&2
+        exit 1
+    fi
+    # Only compare a fixed safe error, never print captured bootstrap output.
+    case "$failure_output" in
+        *'Column ACL normalization left explicit grants'*) ;;
+        *)
+            echo "Alternate-grantor ACL failed for an unexpected reason" >&2
+            exit 1
+            ;;
+    esac
+    test "$(acl_snapshot)" = "$failure_acl"
+    test "$(identity_snapshot)" = "$failure_identity"
+    test "$(dispatcher_snapshot)" = "$expected_dispatcher_snapshot"
+    unset failure_output
+}
+
 inject_column_acl() {
     for probe_role in "$@"; do
         psql_super -v probe_role="$probe_role" <<'SQL'
@@ -377,7 +411,7 @@ CREATE TABLE "edge acl ""probe"."quoted ""table" (
 );
 GRANT USAGE ON SCHEMA "edge acl ""probe" TO :"unrelated_role";
 GRANT SELECT ON TABLE "edge acl ""probe"."quoted ""table" TO :"unrelated_role";
-GRANT UPDATE ("write value"), REFERENCES ("read ""value")
+GRANT SELECT ("read ""value"), UPDATE ("write value"), REFERENCES ("read ""value")
     ON TABLE "edge acl ""probe"."quoted ""table" TO :"unrelated_role" WITH GRANT OPTION;
 SQL
 # Do not derive an apparently clean baseline from a broken allowlist restore.
@@ -406,6 +440,30 @@ inject_column_acl "$edge_role"
 run_identity_action enroll
 assert_normalized_acl
 run_identity_action enroll
+assert_normalized_acl
+
+# REVOKE is restricted to its grantor. A delegated grant must cause an atomic,
+# fail-closed refusal instead of a successful normalization with residual access.
+psql_super -v edge_role="$edge_role" -v unrelated_role="$unrelated_role" <<'SQL'
+SET ROLE :"unrelated_role";
+GRANT SELECT ("read ""value") ON TABLE "edge acl ""probe"."quoted ""table" TO :"edge_role";
+RESET ROLE;
+SELECT 1 / (count(*) = 1)::INTEGER AS delegated
+FROM pg_catalog.pg_attribute AS attribute
+CROSS JOIN LATERAL pg_catalog.aclexplode(attribute.attacl) AS acl
+WHERE attribute.attrelid = '"edge acl ""probe"."quoted ""table"'::regclass
+    AND attribute.attname = 'read "value' AND acl.privilege_type = 'SELECT'
+    AND acl.grantee = :'edge_role'::regrole AND acl.grantor = :'unrelated_role'::regrole
+\gset
+SQL
+test "$(acl_snapshot)" != "$expected_acl_snapshot"
+expect_column_acl_failure run_role_bootstrap
+expect_column_acl_failure run_identity_action enroll
+psql_super -v edge_role="$edge_role" -v unrelated_role="$unrelated_role" <<'SQL'
+SET ROLE :"unrelated_role";
+REVOKE SELECT ("read ""value") ON TABLE "edge acl ""probe"."quoted ""table" FROM :"edge_role";
+RESET ROLE;
+SQL
 assert_normalized_acl
 
 PGAPPNAME=edge_identity_status_tx psql_super -c "
