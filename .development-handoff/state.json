@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "active",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
-  "expected_head": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
+  "expected_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
   "validated_sha": null,
-  "pr": null,
+  "pr": 444,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -31,12 +31,13 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Apply reviewed formatting-only proposal with user continuation, rerun exact project Black/safety checks, publish this same native cash replay increment and full CI.",
+  "remaining_step": "Inspect full final-head CI including new genuine native LOGIN replay proof on both backend nodes; merge only after all8contexts succeed.",
   "failure_counters": {
     "black_ci_scripts": {
-      "consecutive": 2,
+      "consecutive": 0,
       "reason": "Script formatting mismatch; first invocation default88, second explicit project100. No script changes applied after second failure.",
-      "proposal": ".codex/unit-edge-native-cash-replay-2026-11-01/black-format-proposal.patch"
+      "proposal": ".codex/unit-edge-native-cash-replay-2026-11-01/black-format-proposal.patch",
+      "resolved": "Approved formatting-only patch applied; exact project Black and Ruff/safety checks successful."
     }
   },
   "blocker": null,
@@ -82,7 +83,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T15:15:10.890Z",
+  "updated_at": "2026-11-01T15:19:16.845Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -93,7 +94,7 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "c746e3f91f03bfc18f8077e3afb754e3afb1c06e",
+  "head_tree": "973d131c5122ccf2f347f4a9d999f0c026e4e424",
   "local_validation": {
     "targeted_passed": 198,
     "new_pure_passed": 39,
@@ -107,7 +108,9 @@
     "shell_syntax": "pass",
     "independent_SQL_and_security_review": "approve",
     "native_CI_fixture": "implemented and independently reviewed; not executed yet",
-    "shared_database": "not accessed"
+    "shared_database": "not accessed",
+    "black_ci_scripts": "pass",
+    "script_full_project_ruff": "pass; import/diagnostic/orchestration corrections verified"
   },
   "ci": {
     "head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
