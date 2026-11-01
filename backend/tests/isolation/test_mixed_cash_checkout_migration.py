@@ -103,6 +103,7 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
         "support",
         "tenant_actor",
         "mixed_return_read",
+        "edge_cash_replay_read",
     }
     app = next(row for row in policies if row.policyname == "tenant_actor")
     assert app.roles == ["aurum_app"]
@@ -122,6 +123,18 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
     assert "tenant_id = current_tenant_id()" in refund.qual
     assert "tenant_actor_has_scoped_permission" in refund.qual
     assert "pos.refund" in refund.qual and "branch_id" in refund.qual
+    replay = next(row for row in policies if row.policyname == "edge_cash_replay_read")
+    assert replay.roles == ["aurum_edge_cash_owner"]
+    assert replay.cmd == "SELECT"
+    assert replay.with_check is None
+    assert "SESSION_USER" in replay.qual
+    assert "database_role = SESSION_USER" in replay.qual
+    assert "database_role_oid" in replay.qual
+    assert "aurum_edge_node_" in replay.qual
+    assert "tenant_id = pos_mixed_checkout.tenant_id" in replay.qual
+    assert "branch_id = pos_mixed_checkout.branch_id" in replay.qual
+    assert "register_id = pos_mixed_checkout.register_id" in replay.qual
+    assert "cashier_user_id = current_app_user_id()" in replay.qual
 
 
 async def test_mixed_guard_functions_keep_owner_safe_search_path_and_private_acl(
