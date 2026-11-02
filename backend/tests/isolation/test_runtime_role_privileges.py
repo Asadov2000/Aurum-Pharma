@@ -303,6 +303,9 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "edge_mixed_legacy_stock_v1",
+    "emit_native_mixed_retail_event_v1",
+    "complete_edge_mixed_cash_v1",
     "edge_physical_uuid5_v1",
     "edge_physical_pack_take_v1",
     "edge_physical_post_v1",
@@ -1802,6 +1805,9 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
     for row in function_privileges:
         if row["proname"] not in {
+            "edge_mixed_legacy_stock_v1",
+            "emit_native_mixed_retail_event_v1",
+            "complete_edge_mixed_cash_v1",
             "edge_physical_uuid5_v1",
             "edge_physical_pack_take_v1",
             "edge_physical_post_v1",

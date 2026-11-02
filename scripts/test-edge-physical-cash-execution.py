@@ -16,7 +16,7 @@ import os
 import re
 import runpy
 import secrets
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -24,12 +24,49 @@ from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from app.domains.inventory.unit_stock_v2 import SaleFormatV2
-    from app.domains.pos.edge_retail_cash import EdgeRetailCashCommandV1
+    from app.domains.pos.edge_retail_cash import EdgeRetailCashCommandV1, EdgeRetailCashKind
+    from app.domains.pos.mixed_documents import MixedCheckoutResultV4
+    from app.domains.pos.models import Sale
     from app.domains.pos.physical_documents import PhysicalCheckoutResultV3
     from app.domains.sync.offline_auth_lease import VerifiedOfflineLeasePrincipalV1
     from app.domains.sync.schemas import OfflinePosCommand, SignedOfflineAuthLeaseV1
     from sqlalchemy.engine import URL
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+
+type CashResult = PhysicalCheckoutResultV3 | MixedCheckoutResultV4
+type SaleConfigurer = Callable[[AsyncSession, Sale], Awaitable[None]]
+type FaultPoint = tuple[str, str, str, UUID]
+
+
+class NativeCashFixture(Protocol):
+    @property
+    def command(self) -> EdgeRetailCashCommandV1: ...
+
+    @property
+    def lot_id(self) -> UUID: ...
+
+    @property
+    def initial_units(self) -> int: ...
+
+    @property
+    def node_role(self) -> str: ...
+
+    @property
+    def password(self) -> str: ...
+
+    @property
+    def existing_pack_id(self) -> UUID | None: ...
+
+
+class CashCompleter(Protocol):
+    async def __call__(
+        self,
+        native_factory: async_sessionmaker[AsyncSession],
+        fixture: NativeCashFixture,
+        *,
+        fail_call: int | None = None,
+    ) -> CashResult: ...
 
 
 class AdminAPI(Protocol):
@@ -136,7 +173,7 @@ class FixedVerifier:
         return self.principal
 
 
-def lease_fixture(fixture: Fixture) -> tuple[SignedOfflineAuthLeaseV1, FixedVerifier]:
+def lease_fixture(fixture: NativeCashFixture) -> tuple[SignedOfflineAuthLeaseV1, FixedVerifier]:
     from app.domains.sync.offline_auth_lease import VerifiedOfflineLeasePrincipalV1
     from tests.domains.sync.test_offline_auth_lease_pipeline_v1 import _claims, _signed
 
@@ -153,7 +190,7 @@ def lease_fixture(fixture: Fixture) -> tuple[SignedOfflineAuthLeaseV1, FixedVeri
     )
 
 
-def snapshot(admin: AdminAPI, fixture: Fixture) -> str:
+def snapshot(admin: AdminAPI, fixture: NativeCashFixture) -> str:
     tenant = literal(fixture.command.scope.tenant_id)
     tables = (
         "unit_stock_entry_v2",
@@ -184,6 +221,8 @@ async def draft_fixture(
     lines: tuple[tuple[SaleFormatV2, int], ...],
     *,
     existing_fragment: bool = False,
+    configure_sale: SaleConfigurer | None = None,
+    kind: EdgeRetailCashKind = "physical_cash",
 ) -> Fixture:
     from app.domains.pos.edge_retail_cash import EdgeRetailCashCommandV1
     from app.domains.sync.schemas import OfflineAuthScopeV0
@@ -235,6 +274,8 @@ async def draft_fixture(
                 sale_format=sale_format,
                 quantity=quantity,
             )
+        if configure_sale is not None:
+            await configure_sale(session, source.sale)
         request = await saved_request(session, source.sale)
         initial_units = int(
             await session.scalar(
@@ -260,7 +301,7 @@ async def draft_fixture(
         capability="cash_sale_v1",
     )
     return Fixture(
-        EdgeRetailCashCommandV1(kind="physical_cash", scope=scope, confirmation=request),
+        EdgeRetailCashCommandV1(kind=kind, scope=scope, confirmation=request),
         source.stock.lot_id,
         initial_units,
         "aurum_edge_node_" + scope.edge_node_id.hex,
@@ -269,7 +310,7 @@ async def draft_fixture(
     )
 
 
-def provision_active_identity(admin: AdminAPI, fixture: Fixture) -> None:
+def provision_active_identity(admin: AdminAPI, fixture: NativeCashFixture) -> None:
     scope = fixture.command.scope
     # Activation/TPM authority is synthetic. Actual financial tables, their
     # guards and both producer gates remain untouched and enabled throughout.
@@ -361,7 +402,7 @@ COMMIT;
 
 async def complete(
     native_factory: async_sessionmaker[AsyncSession],
-    fixture: Fixture,
+    fixture: NativeCashFixture,
     *,
     fail_call: int | None = None,
 ) -> PhysicalCheckoutResultV3:
@@ -378,7 +419,9 @@ async def complete(
     return result
 
 
-def assert_posted(admin: AdminAPI, fixture: Fixture, result: PhysicalCheckoutResultV3) -> None:
+def assert_posted(
+    admin: AdminAPI, fixture: NativeCashFixture, result: PhysicalCheckoutResultV3
+) -> None:
     scope, operation = fixture.command.scope, fixture.command.confirmation.operation_id
     raw = admin.run(f"""
 SELECT jsonb_build_object(
@@ -430,9 +473,12 @@ SELECT jsonb_build_object(
 
 def assert_allocator_state(
     admin: AdminAPI,
-    fixture: Fixture,
-    result: PhysicalCheckoutResultV3,
+    fixture: NativeCashFixture,
+    result: CashResult,
 ) -> None:
+    from app.domains.pos.physical_documents import PhysicalResultLineV3
+
+    lines = tuple(line for line in result.lines if isinstance(line, PhysicalResultLineV3))
     raw = admin.run(f"""
 SELECT jsonb_build_object(
  'closed',(SELECT closed_packs FROM public.unit_stock_lot_v2
@@ -451,9 +497,9 @@ SELECT jsonb_build_object(
     facts = json.loads(raw)
     movements, packs = facts["movements"], facts["packs"]
     assert len(packs) == 1
-    assert len({line.catalog_id for line in result.lines}) == 1
+    assert len({line.catalog_id for line in lines}) == 1
     if fixture.existing_pack_id is not None:
-        assert [(line.sale_format, line.quantity, line.base_units) for line in result.lines] == [
+        assert [(line.sale_format, line.quantity, line.base_units) for line in lines] == [
             ("unit", 2, 2)
         ]
         before = {
@@ -470,7 +516,7 @@ SELECT jsonb_build_object(
         assert movements == [
             {
                 "kind": "unit_take",
-                "line_id": str(result.lines[0].id),
+                "line_id": str(lines[0].id),
                 "pack_id": str(fixture.existing_pack_id),
                 "units": 2,
                 "closed_delta": 0,
@@ -480,7 +526,7 @@ SELECT jsonb_build_object(
         ]
         assert packs == [{"id": str(fixture.existing_pack_id), "remaining": 3, "state": after}]
     else:
-        assert [(line.sale_format, line.quantity, line.base_units) for line in result.lines] == [
+        assert [(line.sale_format, line.quantity, line.base_units) for line in lines] == [
             ("pack", 1, 30),
             ("blister", 1, 10),
             ("unit", 2, 2),
@@ -497,7 +543,7 @@ SELECT jsonb_build_object(
         assert movements == [
             {
                 "kind": "pack_take",
-                "line_id": str(result.lines[0].id),
+                "line_id": str(lines[0].id),
                 "pack_id": None,
                 "units": 30,
                 "closed_delta": -1,
@@ -506,7 +552,7 @@ SELECT jsonb_build_object(
             },
             {
                 "kind": "pack_open",
-                "line_id": str(result.lines[1].id),
+                "line_id": str(lines[1].id),
                 "pack_id": pack_id,
                 "units": 0,
                 "closed_delta": -1,
@@ -515,7 +561,7 @@ SELECT jsonb_build_object(
             },
             {
                 "kind": "blister_take",
-                "line_id": str(result.lines[1].id),
+                "line_id": str(lines[1].id),
                 "pack_id": pack_id,
                 "units": 10,
                 "closed_delta": 0,
@@ -524,7 +570,7 @@ SELECT jsonb_build_object(
             },
             {
                 "kind": "unit_take",
-                "line_id": str(result.lines[2].id),
+                "line_id": str(lines[2].id),
                 "pack_id": pack_id,
                 "units": 2,
                 "closed_delta": 0,
@@ -537,8 +583,8 @@ SELECT jsonb_build_object(
 
 async def close_shift_fixture(
     app_factory: async_sessionmaker[AsyncSession],
-    fixture: Fixture,
-    result: PhysicalCheckoutResultV3,
+    fixture: NativeCashFixture,
+    result: CashResult,
 ) -> None:
     from app.domains.pos.repository import POSRepository
     from app.domains.pos.service import POSService
@@ -587,7 +633,11 @@ async def close_shift_fixture(
         assert shift.closing_cash_expected == result.total_amount
 
 
-async def assert_native_denials(engine: AsyncEngine) -> None:
+async def assert_native_denials(
+    engine: AsyncEngine,
+    *,
+    extra_statements: tuple[str, ...] = (),
+) -> None:
     from sqlalchemy import text
     from sqlalchemy.exc import DBAPIError
 
@@ -596,6 +646,7 @@ async def assert_native_denials(engine: AsyncEngine) -> None:
         "SET ROLE aurum_app",
         "SET ROLE aurum_schema_owner",
         "SELECT * FROM public.edge_cash_command",
+        *extra_statements,
     ):
         try:
             async with engine.begin() as connection:
@@ -609,7 +660,7 @@ async def assert_native_denials(engine: AsyncEngine) -> None:
 async def assert_envelope_denials(
     factory: async_sessionmaker[AsyncSession],
     admin: AdminAPI,
-    fixture: Fixture,
+    fixture: NativeCashFixture,
 ) -> None:
     from app.domains.pos.edge_physical_cash_execution import physical_completion_payload
     from app.domains.pos.edge_physical_cash_plan import build_edge_physical_cash_plan
@@ -677,7 +728,9 @@ async def assert_envelope_denials(
 async def assert_transaction_denials(
     engine: AsyncEngine,
     admin: AdminAPI,
-    fixture: Fixture,
+    fixture: NativeCashFixture,
+    *,
+    complete_call: CashCompleter = complete,
 ) -> None:
     from app.domains.sync.offline_auth import OfflineAuthContractError
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -688,7 +741,7 @@ async def assert_transaction_denials(
             engine.execution_options(isolation_level=isolation), expire_on_commit=False
         )
         try:
-            await complete(factory, fixture)
+            await complete_call(factory, fixture)
         except OfflineAuthContractError:
             pass
         else:
@@ -699,17 +752,23 @@ async def assert_transaction_denials(
 async def assert_write_fault_rollbacks(
     factory: async_sessionmaker[AsyncSession],
     admin: AdminAPI,
-    fixture: Fixture,
+    fixture: NativeCashFixture,
+    *,
+    complete_call: CashCompleter = complete,
+    fault_points: tuple[FaultPoint, ...] | None = None,
 ) -> None:
     from sqlalchemy.exc import DBAPIError
 
     # Temporary triggers belong only to this guarded disposable CI database.
     # They inject failures; no financial guard is removed or weakened.
-    for table, column, timing in (
-        ("unit_stock_movement_v2", "command_id", "AFTER"),
-        ("sale_payment", "id", "AFTER"),
-        ("edge_cash_command", "operation_id", "BEFORE"),
+    operation = fixture.command.confirmation.operation_id
+    for table, column, timing, identity in fault_points or (
+        ("unit_stock_movement_v2", "command_id", "AFTER", operation),
+        ("sale_payment", "id", "AFTER", operation),
+        ("edge_cash_command", "operation_id", "BEFORE", operation),
     ):
+        assert re.fullmatch(r"[a-z_][a-z0-9_]*", table)
+        assert re.fullmatch(r"[a-z_][a-z0-9_]*", column) and timing in {"BEFORE", "AFTER"}
         token = "native_cash_fault_" + uuid4().hex
         before = snapshot(admin, fixture)
         admin.run(f"""
@@ -717,7 +776,7 @@ CREATE FUNCTION public.{identifier(token)}() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $fault$
 BEGIN
  IF NEW.tenant_id={literal(fixture.command.scope.tenant_id)}::UUID
-  AND NEW.{column}={literal(fixture.command.confirmation.operation_id)}::UUID THEN
+  AND NEW.{column}={literal(identity)}::UUID THEN
   RAISE EXCEPTION 'Disposable native execution rollback proof' USING ERRCODE='P0001';
  END IF;
  RETURN NEW;
@@ -727,7 +786,7 @@ FOR EACH ROW EXECUTE FUNCTION public.{identifier(token)}();
 """)
         try:
             try:
-                await complete(factory, fixture)
+                await complete_call(factory, fixture)
             except DBAPIError as error:
                 if getattr(error.orig, "sqlstate", None) != "P0001":
                     raise  # Preserve the actual driver class, SQLSTATE and safe identifiers.
@@ -745,20 +804,22 @@ async def assert_waiting_login_revocation(
     factory: async_sessionmaker[AsyncSession],
     maintenance: AsyncEngine,
     admin: AdminAPI,
-    fixture: Fixture,
+    fixture: NativeCashFixture,
+    *,
+    complete_call: CashCompleter = complete,
 ) -> None:
     from sqlalchemy import text
     from sqlalchemy.exc import DBAPIError
 
     before = snapshot(admin, fixture)
-    task: asyncio.Task[PhysicalCheckoutResultV3] | None = None
+    task: asyncio.Task[CashResult] | None = None
     try:
         async with maintenance.begin() as owner:
             await owner.execute(
                 text("SELECT id FROM public.unit_stock_lot_v2 WHERE id=:lot FOR UPDATE"),
                 {"lot": fixture.lot_id},
             )
-            task = asyncio.create_task(complete(factory, fixture))
+            task = asyncio.create_task(complete_call(factory, fixture))
             deadline = asyncio.get_running_loop().time() + 15
             while (
                 admin.run(
@@ -795,7 +856,7 @@ async def assert_waiting_login_revocation(
 
 async def check_fixture(
     admin: AdminAPI,
-    fixture: Fixture,
+    fixture: NativeCashFixture,
     app_url: URL,
     diagnostic: Diagnostic,
     maintenance: AsyncEngine,

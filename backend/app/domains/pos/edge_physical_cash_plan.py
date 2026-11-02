@@ -18,7 +18,10 @@ from app.domains.inventory.unit_allocation_v2 import UnitCartLineV2, UnitCartSto
 from app.domains.inventory.unit_stock_v2 import OpenedBlisterV2, OpenedPackV2
 from app.domains.pos.edge_retail_cash_draft import EdgeRetailCashDraftV1
 from app.domains.pos.edge_retail_cash_inputs import MAX_INPUT_BYTES
-from app.domains.pos.edge_retail_cash_repricing import check_edge_retail_cash_draft
+from app.domains.pos.edge_retail_cash_repricing import (
+    EdgeRetailCashCheckedDraftV1,
+    check_edge_retail_cash_draft,
+)
 from app.domains.pos.unit_cart_quote import MixedCartQuoteV2, PhysicalUnitDraftQuoteLineV2
 from app.domains.pos.unit_contracts import FrozenContract
 
@@ -89,7 +92,9 @@ class NativePhysicalCashMovementV1(FrozenContract):
         return self
 
 
-class NativePhysicalCashPlanV1(FrozenContract):
+class NativePhysicalMovementPlanV1(FrozenContract):
+    """Shared wire fields; only physical positions are represented as movements."""
+
     schema_version: Literal[1] = 1
     quote: MixedCartQuoteV2
     stock_request_hash: str = Field(strict=True, pattern=r"^[0-9a-f]{64}$")
@@ -99,8 +104,6 @@ class NativePhysicalCashPlanV1(FrozenContract):
 
     @model_validator(mode="after")
     def complete_physical_oracle(self) -> Self:
-        if any(not isinstance(line, PhysicalUnitDraftQuoteLineV2) for line in self.quote.lines):
-            raise ValueError("native physical plan cannot contain legacy positions")
         if len({movement.id for movement in self.movements}) != len(self.movements):
             raise ValueError("native movement identifiers must be unique")
         if tuple(movement.entry_order for movement in self.movements) != tuple(
@@ -117,6 +120,14 @@ class NativePhysicalCashPlanV1(FrozenContract):
             totals[movement.line_id] = totals.get(movement.line_id, 0) + movement.units_taken
         if totals != expected:
             raise ValueError("native movements must cover every physical position exactly")
+        return self
+
+
+class NativePhysicalCashPlanV1(NativePhysicalMovementPlanV1):
+    @model_validator(mode="after")
+    def physical_only(self) -> Self:
+        if any(not isinstance(line, PhysicalUnitDraftQuoteLineV2) for line in self.quote.lines):
+            raise ValueError("native physical plan cannot contain legacy positions")
         return self
 
 
@@ -222,14 +233,12 @@ def _movement_oracle(
     return tuple(movements)
 
 
-def build_edge_physical_cash_plan(draft: EdgeRetailCashDraftV1) -> NativePhysicalCashPlanV1:
-    """Recompute from current DB-origin facts while the caller retains its locks."""
+def build_native_physical_movement_plan(
+    checked: EdgeRetailCashCheckedDraftV1,
+) -> NativePhysicalMovementPlanV1:
+    """Assemble shared physical fields from freshly checked facts, never authority."""
     from app.domains.inventory.unit_dispensing_v2_contract import physical_cart_fingerprint
 
-    draft = EdgeRetailCashDraftV1.model_validate(draft.model_dump(mode="python"))
-    if draft.inputs.preparation.kind != "physical_cash" or draft.legacy_items:
-        raise BusinessRuleError("Native physical execution does not support mixed checkout")
-    checked = check_edge_retail_cash_draft(draft)
     physical = tuple(
         line for line in checked.quote.lines if isinstance(line, PhysicalUnitDraftQuoteLineV2)
     )
@@ -243,12 +252,11 @@ def build_edge_physical_cash_plan(draft: EdgeRetailCashDraftV1) -> NativePhysica
         )
         for line in physical
     )
-    scope = draft.inputs.preparation.scope
-    plan = NativePhysicalCashPlanV1(
+    plan = NativePhysicalMovementPlanV1(
         quote=checked.quote,
         stock_request_hash=physical_cart_fingerprint(
-            scope.tenant_id,
-            scope.branch_id,
+            checked.quote.tenant_id,
+            checked.quote.branch_id,
             lines,
             tuple(line.discount_amount for line in physical),
         ),
@@ -258,3 +266,14 @@ def build_edge_physical_cash_plan(draft: EdgeRetailCashDraftV1) -> NativePhysica
     if len(encoded.encode("utf-8")) > MAX_INPUT_BYTES:
         raise BusinessRuleError("Native physical movement oracle exceeds the wire bound")
     return plan
+
+
+def build_edge_physical_cash_plan(draft: EdgeRetailCashDraftV1) -> NativePhysicalCashPlanV1:
+    """Recompute from current DB-origin facts while the caller retains its locks."""
+    draft = EdgeRetailCashDraftV1.model_validate(draft.model_dump(mode="python"))
+    if draft.inputs.preparation.kind != "physical_cash" or draft.legacy_items:
+        raise BusinessRuleError("Native physical execution does not support mixed checkout")
+    checked = check_edge_retail_cash_draft(draft)
+    return NativePhysicalCashPlanV1.model_validate(
+        build_native_physical_movement_plan(checked).model_dump(mode="python")
+    )

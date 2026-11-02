@@ -212,6 +212,14 @@ class NativePhysicalExecutionGuards(NativeReplayGuards):
         )
 
 
+class NativeMixedExecutionGuards(NativeReplayGuards):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.proof = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "scripts/test-edge-mixed-cash-execution.py")
+        )
+
+
 class NativePhysicalSmokeGuards(NativeReplayGuards):
     @classmethod
     def setUpClass(cls) -> None:
@@ -229,6 +237,15 @@ class NativePhysicalSmokeGuards(NativeReplayGuards):
         for unsafe in ("aurum_test", "production", "aurum_native_short_test", "../aurum_test"):
             with self.subTest(target=unsafe), self.assertRaises(RuntimeError):
                 self.proof["clone_environment"](environment, unsafe)
+
+    def test_only_fixed_physical_and_mixed_proofs_are_accepted(self) -> None:
+        for kind in ("physical", "mixed"):
+            self.assertEqual(
+                self.proof["proof_script"](kind).name, f"test-edge-{kind}-cash-execution.py"
+            )
+        for kind in ("../mixed", "physical.py", "electronic", "", "/tmp/other"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(RuntimeError, "Unsupported"):
+                asyncio.run(self.proof["main"](kind))
 
     def test_all_test_and_worker_database_urls_follow_the_clone(self) -> None:
         clone = "aurum_native_" + "b" * 32 + "_test"

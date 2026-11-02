@@ -111,6 +111,10 @@ jobs:
           command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database PYTHONPATH=\"$PWD${PYTHONPATH:+:$PYTHONPATH}\" poetry run python ../scripts/test-edge-physical-cash-smoke.py"
           working_directory: "~/project/backend"
       - run:
+          name: "Verify isolated native mixed cash execution"
+          command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database PYTHONPATH=\"$PWD${PYTHONPATH:+:$PYTHONPATH}\" poetry run python ../scripts/test-edge-mixed-cash-smoke.py"
+          working_directory: "~/project/backend"
+      - run:
           name: "Pytest"
           command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"

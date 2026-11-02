@@ -41,3 +41,7 @@ CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
 CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
   PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
   poetry run python ../scripts/test-edge-physical-cash-execution.py
+
+CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
+  PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
+  poetry run python ../scripts/test-edge-mixed-cash-execution.py

@@ -24,6 +24,7 @@ INSERT_COLUMNS = {
         "currency",
         "created_by",
         "checkout_sale_id",
+        "mixed_checkout_sale_id",
     },
     "unit_stock_cart_line_v2": {
         "tenant_id",
@@ -81,6 +82,7 @@ INSERT_COLUMNS = {
         "tenant_id",
         "id",
         "physical_checkout_id",
+        "mixed_checkout_id",
         "sale_id",
         "method",
         "amount",

@@ -101,9 +101,16 @@ def new_native_roles(admin: AdminAPI, before: set[str]) -> list[str]:
     return result
 
 
-def invoke_proof(environment: Mapping[str, str]) -> None:
+def proof_script(kind: str) -> Path:
+    if kind not in {"physical", "mixed"}:
+        raise RuntimeError("Unsupported native smoke proof kind")
+    return Path(__file__).with_name(f"test-edge-{kind}-cash-execution.py")
+
+
+def invoke_proof(environment: Mapping[str, str], kind: str = "physical") -> None:
+    script = proof_script(kind)
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).with_name("test-edge-physical-cash-execution.py"))],
+        [sys.executable, str(script)],
         env=dict(environment),
         capture_output=True,
         text=True,
@@ -122,7 +129,7 @@ def invoke_proof(environment: Mapping[str, str]) -> None:
                 isinstance(failure, dict)
                 and set(failure)
                 == {
-                    "native_physical_execution_proof",
+                    f"native_{kind}_execution_proof",
                     "phase",
                     "error",
                     "site",
@@ -140,10 +147,11 @@ def invoke_proof(environment: Mapping[str, str]) -> None:
                 )
             ):
                 print(json.dumps(failure))
-        raise RuntimeError("Early native physical proof failed on its isolated clone")
+        raise RuntimeError(f"Early native {kind} proof failed on its isolated clone")
 
 
-async def main() -> None:
+async def main(kind: str = "physical") -> None:
+    proof_script(kind)
     require_ci_context()
     container = os.environ["POSTGRES_SERVICE_ID"]
     source = urlsplit(os.environ["DATABASE_URL_APP"]).path.removeprefix("/")
@@ -179,7 +187,7 @@ async def main() -> None:
             f"GRANT CONNECT ON DATABASE {identifier(clone)} TO "
             "aurum_app,aurum_support,aurum_migrator,aurum_schema_owner,aurum_edge_cash_executor;"
         )
-        invoke_proof(environment)
+        invoke_proof(environment, kind)
     finally:
         if clone_oid is not None:
             current_oid = control.run(
@@ -196,7 +204,7 @@ async def main() -> None:
                 control.run(f"DROP ROLE {identifier(role)}")
         if fingerprint(source_admin) != before:
             raise RuntimeError("Original CI database changed during isolated native smoke")
-    print("Isolated native physical smoke passed; original CI data and revision unchanged.")
+    print(f"Isolated native {kind} smoke passed; original CI data and revision unchanged.")
 
 
 if __name__ == "__main__":
