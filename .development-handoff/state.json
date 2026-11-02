@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ready_to_merge",
+  "phase": "merged_verified",
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
@@ -31,7 +31,7 @@
     "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
     "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "ProtectedmergePR445with testedheadSHA; verifyactualmain merge/tree andsavecompletion. No deployment/sharedDB changes.",
+  "remaining_step": "PR445 verified merged. On next continuation freshly inspect main/openPRs/ownership and next incomplete E6-06 scope; do not repeat physical_cash writer. No automatic deployment/sharedDB/runtime source update.",
   "failure_counters": {
     "lease_observation_count": {
       "consecutive": 0,
@@ -108,13 +108,13 @@
   },
   "blocker": null,
   "previous_completed": {
-    "pr": 443,
+    "pr": 444,
     "merged": true,
-    "main": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
-    "merged_at": "2026-11-01T14:44:25Z",
-    "tested_head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
-    "tested_tree": "c746e3f91f03bfc18f8077e3afb754e3afb1c06e",
-    "main_tree": "c746e3f91f03bfc18f8077e3afb754e3afb1c06e",
+    "main": "0d8f32410f554929e5819e852f0535a13df2adbe",
+    "merged_at": "2026-11-02T07:07:15Z",
+    "tested_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
+    "tested_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
+    "main_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4
@@ -149,11 +149,11 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T12:41:53.670Z",
+  "updated_at": "2026-11-02T12:45:30.469Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
-    "Native monetary execution adapter with fresh repricing/stock and payment-plan authorization, transactional financial/result/replay enforcement; preparation and anchored reading do not substitute."
+    "Native mixed_cash inventory-cart monetary execution remains unfinished; physical-only adapter deliberately rejects it. Production factory remains DenyAll until existing financial/runtime admission criteria are accepted."
   ],
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -242,13 +242,13 @@
     }
   },
   "completion": {
-    "pr": 444,
+    "pr": 445,
     "merged": true,
-    "main": "0d8f32410f554929e5819e852f0535a13df2adbe",
-    "merged_at": "2026-11-02T07:07:15Z",
-    "tested_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-    "tested_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
-    "main_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
+    "main": "78f388171308623ffefb2f956bef191b5c822976",
+    "merged_at": "2026-11-02T12:42:44Z",
+    "tested_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
+    "tested_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
+    "main_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4
@@ -300,6 +300,15 @@
       "tested_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
       "tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
       "ci": "all8success;8040backend+1existing conditionalemptydowngradeskip;all51newpassed;3260frontend;167browser;native replay/19snapshots/identity+columnACL onbothnodes",
+      "closes_control_stage": false
+    },
+    {
+      "pr": 445,
+      "kind": "native-physical-cash-posting",
+      "main": "78f388171308623ffefb2f956bef191b5c822976",
+      "tested_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
+      "tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
+      "ci": "all8success;8091backend+1existingconditionalprescriptionhistoryskip;all51newpassed;3260frontend;167browser;earlyandlate5genuinecases/19legacy/identity+columnACL onbothnodes",
       "closes_control_stage": false
     }
   ],
@@ -371,7 +380,8 @@
     },
     "native_sale_probe": {
       "approval": "User explicitly answered Да, продолжить этот этап to repeated pre-fix mixedprobe failure exception on PR445.",
-      "scope": "Continue this same physicalcash stage to fullCI+main; no tests weakened, remaining twofailure rule preserved."
+      "scope": "Continue this same physicalcash stage to fullCI+main; no tests weakened, remaining twofailure rule preserved.",
+      "status": "completed"
     }
   },
   "previous_failed_ci": {
