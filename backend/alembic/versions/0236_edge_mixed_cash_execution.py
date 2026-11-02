@@ -355,12 +355,12 @@ def _dispatcher(*, reverse: bool = False) -> None:
         "'EXECUTE')"
     ).scalar_one()
     op.execute("GRANT CREATE ON SCHEMA public TO aurum_edge_cash_owner")
+    op.execute("RESET ROLE")
+    op.execute("SET LOCAL ROLE aurum_edge_cash_owner")
     if not execute:
         op.execute(
             f"GRANT EXECUTE ON FUNCTION public.{DISPATCH_SIGNATURE} TO aurum_edge_cash_owner"
         )
-    op.execute("RESET ROLE")
-    op.execute("SET LOCAL ROLE aurum_edge_cash_owner")
     old, new = (DISPATCH_NEW, DISPATCH_OLD) if reverse else (DISPATCH_OLD, DISPATCH_NEW)
     physical._patch(DISPATCH_SIGNATURE, old, new)
     if not execute:
