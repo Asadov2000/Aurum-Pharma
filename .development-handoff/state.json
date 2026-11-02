@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
+  "expected_head": "06b2060c4936964f5bae7cbafd21130a66030802",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -90,12 +90,16 @@
       "resolved": "CIhead071d passed maliciousenvelopechecks afterSQLaliasrename."
     },
     "native_register_lock": {
-      "consecutive": 1,
-      "cause": "INVOKERphysicalcheckoutguard SELECTregisterFORSHAREneedsUPDATEpriv; exactUPDATEid+scopedpermissive/restrictiveRLSWITHCHECKfalse added; bootstrapfailsifpolicy/RLSunsafe;2newregressionscollected."
+      "consecutive": 0,
+      "resolved": "CIba19 genuinepackposting+faultrollbacks+exactfacts passed; scopedFORSHAREworkswithoutmutability."
     },
     "register_force_assumption": {
+      "consecutive": 0,
+      "resolved": "CIba19 migrationroundtrip+bootstrap passed; correctedENABLE+schemaownercheck."
+    },
+    "historical_shift_fixture_login": {
       "consecutive": 1,
-      "cause": "0003registerENABLEonly,0067owner=schemaowner; guard nowchecksENABLE+exactschemaowner+sameprivateownerrestrictivefalsepolicy; QAchecksprivateownerNOSUPER/NOBYPASS/noowner-membership insteadFORCE."
+      "cause": "DirectpostgresUPDATEshift violates0045writerrole guard; replacedwithordinaryPOSService.close_shift through actualaurum_app+actualedge/tenant/user/branch+publishedpos.shift_close permission. No guardsdisabled, profileunchanged."
     }
   },
   "blocker": null,
@@ -141,7 +145,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T10:42:29.692Z",
+  "updated_at": "2026-11-02T10:55:24.139Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -166,8 +170,8 @@
     "register_safety": "RLSenabled+tableowner schemaowner separatefromNOSUPER/NOBYPASS/noowner-member cashowner, exactUPDATEidonly+actualidentityscope+WITHCHECKfalse;2newcases; bootstrapguard; independentlyapproved. NoFORCEchanged."
   },
   "ci": {
-    "head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
-    "attempt": 10,
+    "head": "06b2060c4936964f5bae7cbafd21130a66030802",
+    "attempt": 11,
     "status": "pending",
     "expected_backend_total": 8092,
     "expected_new": 51
@@ -306,13 +310,13 @@
     }
   },
   "previous_failed_ci": {
-    "head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
-    "attempt": 9,
-    "status": "newbootstrapguard incorrectly requiredFORCE onbaselineENABLEonly register; actualnewrestrictivepolicy safe, ordinaryRLSenforcesnontableowner",
+    "head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
+    "attempt": 10,
+    "status": "genuinepackmonetaryposting/3faultrollbacks/lateauth/concurrent/replay/exactfacts/directdenialsPASS; historicalshift fixturepostgresUPDATE42501",
     "expected_backend_total": 8092,
     "expected_new": 51,
-    "workflow": "b831b14d-20a9-47ef-84b6-5d81efefd06d",
-    "backend_job": 4153
+    "workflow": "1efcdc83-14ba-4ab7-acf8-398ed5e0071d",
+    "backend_job": 4160
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
