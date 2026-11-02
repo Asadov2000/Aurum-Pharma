@@ -724,6 +724,7 @@ INSERT_COLUMNS = {
     ),
 }
 READ_COLUMNS = {
+    "pos_unit_cash_intent": "request_hash",
     "unit_stock_lot_v2": "initial_closed_packs,initial_opened_packs",
     "unit_stock_cart_command_v2": "tenant_id,id,branch_id,actor_id,checkout_sale_id",
     "unit_stock_cart_line_v2": (

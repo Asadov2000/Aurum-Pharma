@@ -77,6 +77,16 @@ def database_diagnostic(error: Exception) -> dict[str, str | None]:
     return details
 
 
+def failure_site(error: Exception) -> str | None:
+    trace = error.__traceback__
+    if trace is None:
+        return None
+    while trace.tb_next is not None:
+        trace = trace.tb_next
+    name = re.sub(r"[^A-Za-z0-9_]", "_", trace.tb_frame.f_code.co_name)
+    return f"{name}_{trace.tb_lineno}"
+
+
 @dataclass(frozen=True)
 class Fixture:
     command: EdgeRetailCashCommandV1
@@ -667,7 +677,8 @@ FOR EACH ROW EXECUTE FUNCTION public.{identifier(token)}();
             try:
                 await complete(factory, fixture)
             except DBAPIError as error:
-                assert getattr(error.orig, "sqlstate", None) == "P0001"
+                if getattr(error.orig, "sqlstate", None) != "P0001":
+                    raise  # Preserve the actual driver class, SQLSTATE and safe identifiers.
             else:
                 raise AssertionError("Native execution escaped an injected financial failure")
         finally:
@@ -704,7 +715,10 @@ async def assert_waiting_login_revocation(
                 )
                 != "1"
             ):
-                if task.done() or asyncio.get_running_loop().time() >= deadline:
+                if task.done():
+                    await task  # Preserve the original safe diagnostic instead of masking it.
+                    raise AssertionError("Native request completed before acquiring its stock lock")
+                if asyncio.get_running_loop().time() >= deadline:
                     raise AssertionError("Native request did not wait for the held stock lock")
                 await asyncio.sleep(0.05)
             # Revocation is a real catalog change, while the original native
@@ -720,8 +734,10 @@ async def assert_waiting_login_revocation(
         assert snapshot(admin, fixture) == before
     finally:
         admin.run(f"ALTER ROLE {identifier(fixture.node_role)} LOGIN;")
-        if task is not None and not task.done():
-            task.cancel()
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            # Retrieve even an already failed task: asyncio must not print raw SQL/parameters.
             await asyncio.gather(task, return_exceptions=True)
 
 
@@ -858,6 +874,7 @@ if __name__ == "__main__":
                     "native_physical_execution_proof": "failed",
                     "phase": diagnostic_state.phase,
                     "error": type(error).__name__,
+                    "site": failure_site(error),
                     "sqlstate": getattr(error, "sqlstate", None)
                     or getattr(getattr(error, "orig", None), "sqlstate", None),
                     **database_diagnostic(error),

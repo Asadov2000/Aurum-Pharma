@@ -125,6 +125,7 @@ def invoke_proof(environment: Mapping[str, str]) -> None:
                     "native_physical_execution_proof",
                     "phase",
                     "error",
+                    "site",
                     "sqlstate",
                     "db_table",
                     "db_column",

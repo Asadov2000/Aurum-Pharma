@@ -1673,6 +1673,7 @@ BEGIN
   GRANT INSERT (id,tenant_id,branch_id,catalog_id,command_id,line_id,lot_id,pack_id,kind,entry_order,closed_delta,units_taken,sealed_start,sealed_count,before_state,after_state,created_by) ON public.unit_stock_movement_v2 TO aurum_edge_cash_owner;
   GRANT INSERT (tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,cash_intent_id,stock_command_id,payment_id,payment_journal_version,request_hash,result_payload,receipt_payload,created_by) ON public.pos_physical_checkout TO aurum_edge_cash_owner;
   GRANT INSERT (tenant_id,id,physical_checkout_id,sale_id,method,amount,currency,created_by) ON public.pos_unit_checkout_payment_component TO aurum_edge_cash_owner;
+  GRANT SELECT (request_hash) ON public.pos_unit_cash_intent TO aurum_edge_cash_owner;
   GRANT SELECT (initial_closed_packs,initial_opened_packs) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
   GRANT SELECT (tenant_id,id,branch_id,actor_id,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
   GRANT SELECT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,base_units) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;

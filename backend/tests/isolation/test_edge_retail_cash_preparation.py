@@ -71,6 +71,7 @@ async def test_native_retail_confirmation_has_only_explicit_read_columns(
         "cash_tendered",
         "currency",
         "quote_payload",
+        "request_hash",
     }
     assert table_write is False
     assert all(
