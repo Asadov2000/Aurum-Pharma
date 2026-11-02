@@ -718,7 +718,12 @@ async def assert_envelope_denials(
                     },
                 )
         except DBAPIError as error:
-            if getattr(error.orig, "sqlstate", None) not in {"22023", "23514", "42501"}:
+            # Both routes exist, but the saved intent binds the original kind.
+            expected = {"23505"} if mutation == "mixed" else {"22023", "23514", "42501"}
+            if getattr(error.orig, "sqlstate", None) not in expected or (
+                mutation == "mixed"
+                and database_diagnostic(error)["db_function"] != "prepare_edge_retail_cash_v1"
+            ):
                 raise
         else:
             raise AssertionError("Native SQL accepted a malicious completion envelope")
