@@ -1657,6 +1657,8 @@ BEGIN
    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,aurum_app,aurum_support,aurum_edge_cash_executor,aurum_edge_cash_owner',spec.signature);
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aurum_edge_cash_owner',spec.signature);
   END LOOP;
+  GRANT EXECUTE ON FUNCTION public.is_support_session() TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.tenant_actor_has_scoped_permission(uuid,text,uuid) TO aurum_edge_cash_owner;
   GRANT EXECUTE ON FUNCTION public.unit_pack_v2_remaining(jsonb,jsonb) TO aurum_edge_cash_owner;
   GRANT EXECUTE ON FUNCTION public.unit_pack_v2_initial_state(jsonb) TO aurum_edge_cash_owner;
   GRANT EXECUTE ON FUNCTION public.unit_pack_v2_assert_transition(jsonb,jsonb,jsonb,text,bigint) TO aurum_edge_cash_owner;

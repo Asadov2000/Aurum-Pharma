@@ -689,6 +689,8 @@ FUNCTIONS = (
     "complete_edge_physical_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)",
 )
 CORE = (
+    "is_support_session()",
+    "tenant_actor_has_scoped_permission(uuid,text,uuid)",
     "unit_pack_v2_remaining(jsonb,jsonb)",
     "unit_pack_v2_initial_state(jsonb)",
     "unit_pack_v2_assert_transition(jsonb,jsonb,jsonb,text,bigint)",

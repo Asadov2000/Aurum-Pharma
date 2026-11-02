@@ -132,6 +132,7 @@ def invoke_proof(environment: Mapping[str, str]) -> None:
                     "db_constraint",
                     "db_function",
                     "db_line",
+                    "db_reason",
                 }
                 and all(
                     value is None or re.fullmatch(r"[A-Za-z0-9_]+", str(value))

@@ -57,7 +57,7 @@ class Diagnostic:
 def database_diagnostic(error: Exception) -> dict[str, str | None]:
     """Whitelist object identifiers; never expose SQL, parameters or row values."""
     details: dict[str, str | None] = dict.fromkeys(
-        ("db_table", "db_column", "db_constraint", "db_function", "db_line")
+        ("db_table", "db_column", "db_constraint", "db_function", "db_line", "db_reason")
     )
     driver = getattr(error, "orig", error)
     driver = getattr(driver, "__cause__", None) or driver
@@ -71,9 +71,24 @@ def database_diagnostic(error: Exception) -> dict[str, str | None]:
             details[key] = value
     context = getattr(driver, "context", None)
     if isinstance(context, str):
-        match = re.search(r"PL/pgSQL function ([a-z_][a-z0-9_]*)\([^\n]*?\) line ([0-9]+)", context)
+        match = re.search(
+            r"PL/pgSQL function (?:public\.)?([a-z_][a-z0-9_]*)\([^\n]*?\) line ([0-9]+)",
+            context,
+        )
         if match:
             details["db_function"], details["db_line"] = match.groups()
+    message = getattr(driver, "message", None)
+    if isinstance(message, str):
+        denied = re.fullmatch(
+            r"permission denied for (table|function|column|sequence) ([a-z_][a-z0-9_]*)",
+            message,
+        )
+        if denied:
+            details["db_reason"] = "permission_denied_" + "_".join(denied.groups())
+        elif re.fullmatch(
+            r"(?:unit_cart_v2_|physical_checkout_|native_edge_)[a-z0-9_]{1,100}", message
+        ):
+            details["db_reason"] = message
     return details
 
 

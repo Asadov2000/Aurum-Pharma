@@ -189,6 +189,7 @@ class NativePhysicalExecutionGuards(NativeReplayGuards):
 
     def test_database_diagnostic_excludes_sql_parameters_and_invalid_identifiers(self) -> None:
         class DriverError(Exception):
+            message = "private_parameter"
             table_name = "sale"
             column_name = "private@example.test"
             constraint_name = "native_scope_guard"
@@ -206,6 +207,7 @@ class NativePhysicalExecutionGuards(NativeReplayGuards):
                 "db_constraint": "native_scope_guard",
                 "db_function": "complete_edge_physical_cash_v1",
                 "db_line": "14",
+                "db_reason": None,
             },
         )
 
