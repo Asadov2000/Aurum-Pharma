@@ -103,6 +103,10 @@ jobs:
           command: "bash ../.circleci/scripts/backend-11.sh"
           working_directory: "~/project/backend"
       - run:
+          name: "Verify native retail replay contract"
+          command: "poetry run pytest tests/domains/pos/test_edge_retail_cash_replay.py -q -x --tb=short"
+          working_directory: "~/project/backend"
+      - run:
           name: "Pytest"
           command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"

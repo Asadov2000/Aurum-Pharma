@@ -15,6 +15,59 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 
+def _native_replay_security_snapshot(connection: Connection) -> tuple[tuple[object, ...], ...]:
+    queries = (
+        (
+            "routine",
+            text("""
+            SELECT oid,proowner,proacl,prosecdef,proconfig,pg_get_functiondef(oid)
+            FROM pg_proc WHERE oid IN (
+              'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)'::regprocedure,
+              'public.replay_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'::regprocedure,
+              'public.assert_physical_checkout(uuid,uuid,boolean)'::regprocedure,
+              'public.assert_mixed_checkout(uuid,uuid,boolean)'::regprocedure)
+            ORDER BY oid
+        """),
+        ),
+        (
+            "relation",
+            text("""
+            SELECT oid,relowner,relacl,relrowsecurity,relforcerowsecurity FROM pg_class
+            WHERE oid IN ('public.pos_physical_checkout'::regclass,
+              'public.pos_mixed_checkout'::regclass) ORDER BY oid
+        """),
+        ),
+        (
+            "column",
+            text("""
+            SELECT attrelid,attnum,attname,attacl FROM pg_attribute
+            WHERE attrelid IN ('public.pos_physical_checkout'::regclass,
+              'public.pos_mixed_checkout'::regclass) AND attnum>0 AND NOT attisdropped
+            ORDER BY attrelid,attnum
+        """),
+        ),
+        (
+            "policy",
+            text("""
+            SELECT polrelid,polname,polroles,polcmd::TEXT,polpermissive,
+              pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid)
+            FROM pg_policy WHERE polrelid IN ('public.pos_physical_checkout'::regclass,
+              'public.pos_mixed_checkout'::regclass) ORDER BY polrelid,polname
+        """),
+        ),
+    )
+    return tuple((kind, *row) for kind, query in queries for row in connection.execute(query))
+
+
+def _native_replay_migration_for_rehearsal() -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0234_edge_retail_cash_replay.py"
+    spec = importlib.util.spec_from_file_location("native_replay_historical_0234", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_historical_rehearsal(
     connection: Connection, rehearse: Callable[[Connection], None]
 ) -> None:
@@ -30,6 +83,7 @@ def run_historical_rehearsal(
     )
     before = connection.execute(snapshot).all()
     assert len(before) == 3
+    replay_before = _native_replay_security_snapshot(connection)
     path = Path(__file__).resolve().parents[2] / "alembic/versions/0224_training_checkout.py"
     spec = importlib.util.spec_from_file_location("historical_audit_training_patch", path)
     assert spec is not None and spec.loader is not None
@@ -45,6 +99,10 @@ def run_historical_rehearsal(
     savepoint = connection.begin_nested()
     try:
         with Operations.context(MigrationContext.configure(connection)):
+            # Old callbacks may replace marker tables and validators. Remove
+            # only the later replay surface before their original snapshots;
+            # rollback restores its exact OIDs, ACLs and policies afterwards.
+            _native_replay_migration_for_rehearsal().downgrade()
             for signature, old, new in reversed(patches):
                 training._patch(signature, old, new, upgrade=False)
         # The original callback owns its Operations context and all live roundtrip assertions.
@@ -53,6 +111,7 @@ def run_historical_rehearsal(
         # Also restore asserted partial-history refusals, and inspect only after rollback.
         savepoint.rollback()
         assert connection.execute(snapshot).all() == before
+        assert _native_replay_security_snapshot(connection) == replay_before
 
 
 def migration() -> ModuleType:

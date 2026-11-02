@@ -303,6 +303,7 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "replay_edge_retail_cash_v1",
     "lock_edge_retail_cash_inputs_v1",
     "lock_edge_retail_cash_draft_v1",
     "prepare_edge_retail_cash_v1",
@@ -1790,6 +1791,13 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
+    replay = next(
+        row for row in function_privileges if row["proname"] == "replay_edge_retail_cash_v1"
+    )
+    assert replay["is_security_definer"] is False
+    assert replay["app_can_execute"] is False
+    assert replay["support_can_execute"] is False
+    assert replay["proconfig"] == ["search_path=pg_catalog, pg_temp", "row_security=on"]
     for name in (
         "trg_retail_refund_audit",
         "trg_retail_refund_capture",

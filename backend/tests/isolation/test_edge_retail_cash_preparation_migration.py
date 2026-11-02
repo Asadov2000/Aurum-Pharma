@@ -1,6 +1,8 @@
 """Rehearse the latest native preparation boundary only in a disposable database."""
 
 import importlib.util
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 
 DISPATCHER = "public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)"
 HELPER = "public.prepare_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)"
@@ -41,6 +44,21 @@ def _migration() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def _at_preparation_revision(connection: Connection) -> Iterator[None]:
+    directory = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+    later = tuple(directory.iterate_revisions("head", "0231"))
+    head_dispatcher = connection.execute(DISPATCHER_SNAPSHOT).one()
+    with Operations.context(MigrationContext.configure(connection)):
+        for revision in later:
+            revision.module.downgrade()
+    yield
+    with Operations.context(MigrationContext.configure(connection)):
+        for revision in reversed(later):
+            revision.module.upgrade()
+    assert connection.execute(DISPATCHER_SNAPSHOT).one() == head_dispatcher
 
 
 def _assert_private_helper(connection: Connection) -> None:
@@ -94,31 +112,32 @@ async def test_native_preparation_roundtrip_preserves_dispatcher_and_narrow_acl(
             )
             is owner_execute
         )
-        before = connection.execute(DISPATCHER_SNAPSHOT).one()
-        before_access = connection.execute(INTENT_ACCESS).all()
-        before_policy = connection.execute(INTENT_POLICY).one()
-        assert before_policy[1] == "r"
-        assert "SESSION_USER" in before_policy[2]
-        assert "database_role_oid" in before_policy[2]
-        _assert_private_helper(connection)
-        selected = {row[0] for row in before_access if row[1]}
-        assert selected == set(_migration().INTENT_COLUMNS.split(","))
-        assert not any(row[2] for row in before_access)
-        assert before[3] is True
-        assert "retail_cash.prepare.v1" in before[5]
-        with Operations.context(MigrationContext.configure(connection)):
-            _migration().downgrade()
-            legacy = connection.execute(DISPATCHER_SNAPSHOT).one()
-            assert legacy[:5] == before[:5]
-            assert "retail_cash.prepare.v1" not in legacy[5]
-            assert connection.scalar(text(f"SELECT to_regprocedure('{HELPER}')")) is None
-            assert connection.execute(INTENT_POLICY).first() is None
-            assert not any(row[1] or row[2] for row in connection.execute(INTENT_ACCESS))
-            _migration().upgrade()
-        assert connection.execute(DISPATCHER_SNAPSHOT).one() == before
-        assert connection.execute(INTENT_ACCESS).all() == before_access
-        assert connection.execute(INTENT_POLICY).one() == before_policy
-        _assert_private_helper(connection)
+        with _at_preparation_revision(connection):
+            before = connection.execute(DISPATCHER_SNAPSHOT).one()
+            before_access = connection.execute(INTENT_ACCESS).all()
+            before_policy = connection.execute(INTENT_POLICY).one()
+            assert before_policy[1] == "r"
+            assert "SESSION_USER" in before_policy[2]
+            assert "database_role_oid" in before_policy[2]
+            _assert_private_helper(connection)
+            selected = {row[0] for row in before_access if row[1]}
+            assert selected == set(_migration().INTENT_COLUMNS.split(","))
+            assert not any(row[2] for row in before_access)
+            assert before[3] is True
+            assert "retail_cash.prepare.v1" in before[5]
+            with Operations.context(MigrationContext.configure(connection)):
+                _migration().downgrade()
+                legacy = connection.execute(DISPATCHER_SNAPSHOT).one()
+                assert legacy[:5] == before[:5]
+                assert "retail_cash.prepare.v1" not in legacy[5]
+                assert connection.scalar(text(f"SELECT to_regprocedure('{HELPER}')")) is None
+                assert connection.execute(INTENT_POLICY).first() is None
+                assert not any(row[1] or row[2] for row in connection.execute(INTENT_ACCESS))
+                _migration().upgrade()
+            assert connection.execute(DISPATCHER_SNAPSHOT).one() == before
+            assert connection.execute(INTENT_ACCESS).all() == before_access
+            assert connection.execute(INTENT_POLICY).one() == before_policy
+            _assert_private_helper(connection)
 
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
