@@ -555,8 +555,13 @@ PATCHES: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "trg_guard_sale_immutability()",
-        "current_user = 'aurum_app' AND TG_OP = 'UPDATE'",
-        f"(current_user = 'aurum_app' OR {ACTOR_INVOCER}) AND TG_OP = 'UPDATE'",
+        "  IF current_user = 'aurum_app' AND TG_OP = 'UPDATE' THEN",
+        f"""  IF {ACTOR_INVOCER} AND TG_OP = 'UPDATE' THEN
+    SELECT EXISTS(SELECT 1 FROM public.unit_stock_cart_command_v2
+      WHERE tenant_id=NEW.tenant_id AND checkout_sale_id=NEW.id)
+      INTO v_physical_cash;
+  END IF;
+  IF current_user = 'aurum_app' AND TG_OP = 'UPDATE' THEN""",
     ),
     (
         "trg_unit_cart_payment_boundary()",
