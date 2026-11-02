@@ -86,7 +86,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T14:07:21Z",
+  "updated_at": "2026-11-02T14:19:02Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -119,8 +119,17 @@
   },
   "ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
-    "status": "pending",
-    "required_contexts": 8
+    "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
+    "backend_job": 4204,
+    "status": "running",
+    "phase": "full_pytest",
+    "required_contexts": 8,
+    "early_genuine_proofs": {
+      "physical_per_node": 5,
+      "mixed_per_node": 5,
+      "nodes": 2,
+      "original_ci_databases_unchanged": true
+    }
   },
   "completion": {
     "pr": 445,
