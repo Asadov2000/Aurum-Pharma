@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "a73a7076b7d4a89cb6065848fed47135550f5110",
+  "expected_head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -66,9 +66,13 @@
       "resolved": "E2Emigration+seedpass,167browserflowstarted;3lazyguardsapproved."
     },
     "native_fresh_cash_intent_hash": {
+      "consecutive": 0,
+      "resolved": "Exactrequest_hashgrantconfirmed235+bootstrap+ACLtest; nextdistinctblockerisoldactorhelperEXEC."
+    },
+    "native_existing_actor_helpers": {
       "consecutive": 1,
-      "cause": "235freshSQLreadsrequest_hash omitted from0231narrowgrants; necessary exactSELECTcolumnadded235+rolecontract+liveexactACLtest. No broadrights.",
-      "verification": "NextCI; originalharnessmaskedactualSQLSTATE, nowunexpecteddrivererrorsrethrow+safeproofsite."
+      "cause": "3INVguardsuseis_support_session/scoped_permission; baseline0062 grantsapp/supportnotprivatecashowner; addedexact2EXECinCORE+235bootstrap, reverseREVOKE; grantor/semanticsapproved.",
+      "verification": "Full final-headCIrequired. DiagnosticnowrevealsboundedpermissionobjectorstaticguardcodewithoutSQLparameters."
     }
   },
   "blocker": null,
@@ -114,7 +118,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:33:33.305Z",
+  "updated_at": "2026-11-02T09:47:57.141Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -137,8 +141,8 @@
     "shared_database": "not accessed"
   },
   "ci": {
-    "head": "a73a7076b7d4a89cb6065848fed47135550f5110",
-    "attempt": 5,
+    "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
+    "attempt": 6,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -273,12 +277,12 @@
     }
   },
   "previous_failed_ci": {
-    "head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
-    "attempt": 4,
-    "status": "failed native_write_fault_rollbacks; actualfreshSELECTrequest_hash missing exactcolumnpermission identified statically; e2eseednowpass",
+    "head": "a73a7076b7d4a89cb6065848fed47135550f5110",
+    "attempt": 5,
+    "status": "freshfinancial42501; exacttwoexistingactorhelperEXECmissing confirmed independentlyfrom0062/0067/0113; nativeintenthashgrantsnowpresent",
     "expected_backend_total": 8090,
     "expected_new": 49,
-    "workflow": "2760063d-7e53-4122-9820-45ea5ec0401d",
-    "backend_job": 4110
+    "workflow": "c00a1e11-401f-474e-919a-64ae86b39a06",
+    "backend_job": 4117
   }
 }
