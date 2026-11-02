@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_two_failure_exception",
+  "phase": "diagnosing_ci",
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -82,10 +82,11 @@
       ],
       "cause": "trg_guard_sale_immutability line60: permission_denied_table_unit_stock_cart_command_v2 because native entered app-only mixed_checkout_sale_id probe.",
       "prepared_fix": "c5036bfe: separate nativephysicalonlyprobe; both agents approved,26forward/reverseexact; currentCI started before duplicatecause confirmed.",
-      "approval": "pending"
+      "approval": "granted",
+      "exception": "continue same stage"
     }
   },
-  "blocker": "Two pre-fix native_write_fault_rollbacks runs a73a7076 and67019b53 hit sharedsaleguardmixedcolumn; fixedc5036 already published before second failure observed. Userexception pending; no more productwrites or merge.",
+  "blocker": null,
   "previous_completed": {
     "pr": 443,
     "merged": true,
@@ -128,7 +129,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:59:04.899Z",
+  "updated_at": "2026-11-02T10:00:43.661Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -154,7 +155,7 @@
   "ci": {
     "head": "c5036bfe96e1f189831ae598efcac575840528a0",
     "attempt": 7,
-    "status": "pending",
+    "status": "failed unexpectedSQLstate in maliciousenvelope denial; harnesscurrentlymasksdriverstate, rethrow diagnosticprepared",
     "expected_backend_total": 8090,
     "expected_new": 49,
     "workflow": "c895dad2-b11a-4718-ad40-926d424c4e4e",
@@ -287,6 +288,10 @@
     "black_ci_scripts": {
       "approval": "User explicitly replied: 'Да, исправить форматирование и продолжить этот этап'.",
       "scope": "Only scripts/test-edge-retail-cash-replay.py and scripts/test-disposable-ci-guards.py formatting; existing limits unchanged."
+    },
+    "native_sale_probe": {
+      "approval": "User explicitly answered Да, продолжить этот этап to repeated pre-fix mixedprobe failure exception on PR445.",
+      "scope": "Continue this same physicalcash stage to fullCI+main; no tests weakened, remaining twofailure rule preserved."
     }
   },
   "previous_failed_ci": {
