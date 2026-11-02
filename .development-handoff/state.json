@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "ci_running",
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "06b2060c4936964f5bae7cbafd21130a66030802",
+  "expected_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -31,7 +31,7 @@
     "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
     "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "Finishcurrentnode0pytest, consolidatefailures, publishnarrowACLexpectationfix, fullfinalhead8-contextCI then protectedmerge.",
+  "remaining_step": "FullcurrentheadCI12afterexact5helperACLtestexpectationfix; confirmall8092cases/new51+native5caseproof bothnodes; protectedmergeonlyafter8contexts success.",
   "failure_counters": {
     "lease_observation_count": {
       "consecutive": 0,
@@ -151,7 +151,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T11:30:56.644Z",
+  "updated_at": "2026-11-02T11:47:08.478Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -176,19 +176,11 @@
     "register_safety": "RLSenabled+tableowner schemaowner separatefromNOSUPER/NOBYPASS/noowner-member cashowner, exactUPDATEidonly+actualidentityscope+WITHCHECKfalse;2newcases; bootstrapguard; independentlyapproved. NoFORCEchanged."
   },
   "ci": {
-    "head": "06b2060c4936964f5bae7cbafd21130a66030802",
-    "attempt": 11,
-    "status": "Node1fullpytestfinishedwithoneoldACLexpectationfailure; node0stillrunning. Exact5helperexpectationpatch prepared; no productioncodechanges.",
+    "head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
+    "attempt": 12,
+    "status": "pending",
     "expected_backend_total": 8092,
-    "expected_new": 51,
-    "workflow": "f78d88f4-243b-41d0-9d84-00bcd29d9ce4",
-    "backend_job": 4165,
-    "gate_job": 4170,
-    "native_early_nodes_passed": 2,
-    "native_cases_per_node": 5,
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "production_containers": "success"
+    "expected_new": 51
   },
   "completion": {
     "pr": 444,
@@ -324,13 +316,25 @@
     }
   },
   "previous_failed_ci": {
-    "head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
-    "attempt": 10,
-    "status": "genuinepackmonetaryposting/3faultrollbacks/lateauth/concurrent/replay/exactfacts/directdenialsPASS; historicalshift fixturepostgresUPDATE42501",
+    "head": "06b2060c4936964f5bae7cbafd21130a66030802",
+    "attempt": 11,
+    "status": "failed onlyold0226ACLexpectation; bothshardsfinished; failfastnode1 left244unrun; new51allpassed; frontend3260/browser167/containerssuccess",
     "expected_backend_total": 8092,
     "expected_new": 51,
-    "workflow": "1efcdc83-14ba-4ab7-acf8-398ed5e0071d",
-    "backend_job": 4160
+    "workflow": "f78d88f4-243b-41d0-9d84-00bcd29d9ce4",
+    "backend_job": 4165,
+    "gate_job": 4170,
+    "native_early_nodes_passed": 2,
+    "native_cases_per_node": 5,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "production_containers": "success",
+    "backend_total_executed": 7848,
+    "backend_success": 7846,
+    "backend_failed": 1,
+    "backend_skipped": 1,
+    "new_success": 51,
+    "duplicates": 0
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
