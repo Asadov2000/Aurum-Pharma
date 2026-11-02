@@ -19,6 +19,7 @@ from app.domains.pos.edge_retail_cash import (
     EdgeRetailCashExecutionStateV1,
     EdgeRetailCashKernelV1,
     EdgeRetailCashKind,
+    EdgeRetailCashTransactionStateV1,
     runtime_edge_retail_cash_kernel_v1,
 )
 from app.domains.pos.mixed_documents import MixedCheckoutResultV4
@@ -51,7 +52,7 @@ class AllowVerifier:
 class Execution:
     """Synthetic atomic port: effects become durable only on context exit."""
 
-    state: EdgeRetailCashExecutionStateV1
+    state: EdgeRetailCashTransactionStateV1
     result: RetailResult
     calls: list[EdgeRetailCashCommandV1] = field(default_factory=list)
     principals: list[VerifiedOfflineLeasePrincipalV1] = field(default_factory=list)
@@ -157,7 +158,7 @@ async def test_each_physical_or_mixed_dispatch_reauthorizes_before_atomic_execut
     first = await c.kernel.complete(lease=c.lease, command=c.command)
     replay = await c.kernel.complete(lease=c.lease, command=deepcopy(c.command))
     assert first == replay == c.execution.result
-    assert c.verifier.calls == [(c.lease, "sale.cash.complete")] * 2
+    assert c.verifier.calls == [(c.lease, "sale.cash.complete")] * 6
     assert c.execution.calls == [c.command, c.command]
     assert c.execution.principals == [c.verifier.principal] * 2
     assert c.execution.committed == 2 and c.execution.rolled_back == 0

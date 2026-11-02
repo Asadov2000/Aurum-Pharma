@@ -1,7 +1,8 @@
 """Cash binding rollback preserves old guards and never discards checkout history."""
 
 import importlib.util
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 
 
 def _native_replay_security_snapshot(connection: Connection) -> tuple[tuple[object, ...], ...]:
@@ -21,11 +23,7 @@ def _native_replay_security_snapshot(connection: Connection) -> tuple[tuple[obje
             "routine",
             text("""
             SELECT oid,proowner,proacl,prosecdef,proconfig,pg_get_functiondef(oid)
-            FROM pg_proc WHERE oid IN (
-              'public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)'::regprocedure,
-              'public.replay_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'::regprocedure,
-              'public.assert_physical_checkout(uuid,uuid,boolean)'::regprocedure,
-              'public.assert_mixed_checkout(uuid,uuid,boolean)'::regprocedure)
+            FROM pg_proc WHERE pronamespace='public'::regnamespace AND prokind='f'
             ORDER BY oid
         """),
         ),
@@ -33,16 +31,16 @@ def _native_replay_security_snapshot(connection: Connection) -> tuple[tuple[obje
             "relation",
             text("""
             SELECT oid,relowner,relacl,relrowsecurity,relforcerowsecurity FROM pg_class
-            WHERE oid IN ('public.pos_physical_checkout'::regclass,
-              'public.pos_mixed_checkout'::regclass) ORDER BY oid
+            WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p','v') ORDER BY oid
         """),
         ),
         (
             "column",
             text("""
             SELECT attrelid,attnum,attname,attacl FROM pg_attribute
-            WHERE attrelid IN ('public.pos_physical_checkout'::regclass,
-              'public.pos_mixed_checkout'::regclass) AND attnum>0 AND NOT attisdropped
+            WHERE attrelid IN (SELECT oid FROM pg_class
+              WHERE relnamespace='public'::regnamespace AND relkind IN ('r','p','v'))
+              AND attnum>0 AND NOT attisdropped
             ORDER BY attrelid,attnum
         """),
         ),
@@ -51,21 +49,34 @@ def _native_replay_security_snapshot(connection: Connection) -> tuple[tuple[obje
             text("""
             SELECT polrelid,polname,polroles,polcmd::TEXT,polpermissive,
               pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid)
-            FROM pg_policy WHERE polrelid IN ('public.pos_physical_checkout'::regclass,
-              'public.pos_mixed_checkout'::regclass) ORDER BY polrelid,polname
+            FROM pg_policy WHERE polrelid IN (SELECT oid FROM pg_class
+              WHERE relnamespace='public'::regnamespace) ORDER BY polrelid,polname
         """),
         ),
     )
     return tuple((kind, *row) for kind, query in queries for row in connection.execute(query))
 
 
-def _native_replay_migration_for_rehearsal() -> ModuleType:
-    path = Path(__file__).resolve().parents[2] / "alembic/versions/0234_edge_retail_cash_replay.py"
-    spec = importlib.util.spec_from_file_location("native_replay_historical_0234", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _peel_native_after(connection: Connection, revision: str) -> None:
+    assert str(connection.scalar(text("SELECT current_database()"))).endswith("_test")
+    assert connection.scalar(text("SELECT session_user")) == "aurum_migrator"
+    directory = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+    for later in directory.iterate_revisions("head", revision):
+        later.module.downgrade()
+
+
+@contextmanager
+def at_native_revision(connection: Connection, revision: str) -> Iterator[None]:
+    """Preserve every current public routine/ACL/policy around an old rehearsal."""
+    before = _native_replay_security_snapshot(connection)
+    savepoint = connection.begin_nested()
+    try:
+        with Operations.context(MigrationContext.configure(connection)):
+            _peel_native_after(connection, revision)
+        yield
+    finally:
+        savepoint.rollback()
+        assert _native_replay_security_snapshot(connection) == before
 
 
 def run_historical_rehearsal(
@@ -100,9 +111,9 @@ def run_historical_rehearsal(
     try:
         with Operations.context(MigrationContext.configure(connection)):
             # Old callbacks may replace marker tables and validators. Remove
-            # only the later replay surface before their original snapshots;
+            # later native surfaces before their original snapshots;
             # rollback restores its exact OIDs, ACLs and policies afterwards.
-            _native_replay_migration_for_rehearsal().downgrade()
+            _peel_native_after(connection, "0233")
             for signature, old, new in reversed(patches):
                 training._patch(signature, old, new, upgrade=False)
         # The original callback owns its Operations context and all live roundtrip assertions.

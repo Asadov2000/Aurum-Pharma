@@ -37,9 +37,9 @@ async def test_existing_v1_pipeline_authorizes_both_cash_kinds_without_new_comma
     replay = await kernel.complete(lease=lease_harness.lease, command=c.command)
     assert first == replay == c.execution.result
     assert c.execution.committed == 2 and c.execution.rolled_back == 0
-    assert len(lease_harness.state.observations) == 2
-    assert lease_harness.state.events.count("signature") == 2
-    assert lease_harness.state.events.count("commit") == 2
+    assert len(lease_harness.state.observations) == 6
+    assert lease_harness.state.events.count("signature") == 6
+    assert lease_harness.state.events.count("commit") == 6
     assert all(p.command == "sale.cash.complete" for p in c.execution.principals)
     assert lease_harness.state.session is not None
     assert all(

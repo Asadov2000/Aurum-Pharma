@@ -59,7 +59,7 @@ async def test_native_cash_replay_helper_is_private_invoker(
     assert tuple(row[4:]) == (True, False, False, False, False)
 
 
-async def test_native_cash_replay_marker_columns_are_exactly_read_only(
+async def test_native_cash_replay_reads_and_physical_writer_inserts_exact_columns(
     maintenance_engine: AsyncEngine,
 ) -> None:
     async with maintenance_engine.connect() as connection:
@@ -68,7 +68,9 @@ async def test_native_cash_replay_marker_columns_are_exactly_read_only(
                   has_column_privilege('aurum_edge_cash_owner',relation.oid,
                     attribute.attnum,'SELECT') AS can_select,
                   has_column_privilege('aurum_edge_cash_owner',relation.oid,
-                    attribute.attnum,'INSERT,UPDATE,REFERENCES') AS can_write,
+                    attribute.attnum,'INSERT') AS can_insert,
+                  has_column_privilege('aurum_edge_cash_owner',relation.oid,
+                    attribute.attnum,'UPDATE,REFERENCES') AS can_change,
                   has_column_privilege('aurum_edge_cash_owner',relation.oid,
                     attribute.attnum,'SELECT WITH GRANT OPTION') AS grantable,
                   has_column_privilege('aurum_edge_cash_executor',relation.oid,
@@ -88,9 +90,31 @@ async def test_native_cash_replay_marker_columns_are_exactly_read_only(
     for table in TABLES:
         scoped = [row for row in rows if row["relname"] == table]
         assert {row["attname"] for row in scoped if row["can_select"]} == READ_COLUMNS
+        assert {row["attname"] for row in scoped if row["can_insert"]} == (
+            {
+                "tenant_id",
+                "id",
+                "sale_id",
+                "branch_id",
+                "register_id",
+                "shift_id",
+                "cashier_user_id",
+                "cash_intent_id",
+                "stock_command_id",
+                "payment_id",
+                "payment_journal_version",
+                "request_hash",
+                "result_payload",
+                "receipt_payload",
+                "created_by",
+            }
+            if table == "pos_physical_checkout"
+            else set()
+        )
     assert table_write is False
     assert all(
-        not row["can_write"] and not row["grantable"] and not row["executor_access"] for row in rows
+        not row["can_change"] and not row["grantable"] and not row["executor_access"]
+        for row in rows
     )
 
 

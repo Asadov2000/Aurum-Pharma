@@ -33,3 +33,11 @@ CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
 CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
   PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
   poetry run python ../scripts/test-edge-retail-cash-replay.py
+
+# Unlike the synthetic historical-anchor proof above, these monetary anchors
+# come from real native LOGIN execution with every financial guard enabled.
+# This stage runs after full pytest so committed auth fixtures cannot contaminate
+# migration rollback tests that need to exercise historical schemas.
+CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database \
+  PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
+  poetry run python ../scripts/test-edge-physical-cash-execution.py

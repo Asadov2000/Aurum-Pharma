@@ -38,6 +38,13 @@ UNCHANGED = (
     "public.assert_mixed_checkout(uuid,uuid,boolean)",
     "public.trg_capture_retail_checkout_origin()",
 )
+NATIVE_PHYSICAL_EVENT_HELPERS = {
+    "assert_retail_event_source(uuid,uuid,uuid)",
+    "reserve_retail_checkout_event_position(uuid,uuid,uuid)",
+    "store_retail_checkout_event(uuid,uuid,uuid,bytea,text,text,text)",
+    "retail_event_hash(jsonb)",
+    "retail_event_canonical_json(jsonb)",
+}
 
 
 def migration(filename: str = "0226_retail_checkout_events.py") -> ModuleType:
@@ -177,6 +184,7 @@ async def test_gate_and_event_relations_have_exact_narrow_acl_and_private_helper
     maintenance_engine: AsyncEngine,
 ) -> None:
     module = migration()
+    assert NATIVE_PHYSICAL_EVENT_HELPERS <= set(module.FUNCTIONS)
     roles = (
         "aurum_app",
         "aurum_support",
@@ -223,7 +231,13 @@ async def test_gate_and_event_relations_have_exact_narrow_acl_and_private_helper
                     text("SELECT has_function_privilege(:role,:signature,'EXECUTE')"),
                     {"role": role, "signature": f"public.{signature}"},
                 )
-                assert granted is (role == "aurum_app" and signature in module.PUBLIC_FUNCTIONS)
+                assert granted is (
+                    (role == "aurum_app" and signature in module.PUBLIC_FUNCTIONS)
+                    or (
+                        role == "aurum_edge_cash_owner"
+                        and signature in NATIVE_PHYSICAL_EVENT_HELPERS
+                    )
+                )
         default = await connection.scalar(text("""
                 SELECT pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d
                 JOIN pg_attribute a ON a.attrelid=d.adrelid AND a.attnum=d.adnum
