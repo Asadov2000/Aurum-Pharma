@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "ready_to_merge",
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
   "expected_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
-  "validated_sha": null,
+  "validated_sha": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,7 +31,7 @@
     "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
     "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "FullcurrentheadCI12afterexact5helperACLtestexpectationfix; confirmall8092cases/new51+native5caseproof bothnodes; protectedmergeonlyafter8contexts success.",
+  "remaining_step": "ProtectedmergePR445with testedheadSHA; verifyactualmain merge/tree andsavecompletion. No deployment/sharedDB changes.",
   "failure_counters": {
     "lease_observation_count": {
       "consecutive": 0,
@@ -102,10 +102,8 @@
       "resolved": "All5nativefinancialcases includingactualappclose+historicalreplay passedearlyproof onbothCInodes."
     },
     "retail_event_helper_acl_expectation": {
-      "consecutive": 1,
-      "cause": "Old0226liveHEADtest expectedonlyappEXEC, but235intentionally grants5privateeventhelpers to privatecashowner; literalexact5allowlistprepared, alltable/gate/runtime/private/otherrolechecks preserved.",
-      "file": "backend/tests/isolation/test_retail_checkout_event_producer_migration.py",
-      "verification": "Ruff/Black/diffcheckpass; awaitingotherbackendshardto consolidate fullCIretry."
+      "consecutive": 0,
+      "resolved": "Finalheadliteralexact5privatehelperACLtestpassed; all8092cases accounted for, all51newpassed."
     }
   },
   "blocker": null,
@@ -151,7 +149,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T11:47:08.478Z",
+  "updated_at": "2026-11-02T12:41:53.670Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -178,9 +176,70 @@
   "ci": {
     "head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
     "attempt": 12,
-    "status": "pending",
+    "status": "success",
     "expected_backend_total": 8092,
-    "expected_new": 51
+    "expected_new": 51,
+    "workflow": "891607f1-a2ad-4f68-aef2-f37dfabc9e05",
+    "backend_job": 4175,
+    "gate_job": 4178,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/1629ac60-8008-4edf-899a-7893e98bd77f"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/54354ade-c806-468b-887e-595e2b28f5dd"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/ad1ebde8-556a-4674-9ef7-a2951cb08305"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/f3fb7bfc-46c9-42b2-aa4d-94256cc25784"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/e1ef8253-d736-4065-9183-5eab78480d64"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/4d4b6051-ab85-472e-a7f5-bfbe374a8397"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/d60b6434-2818-457a-9c09-9f8e93ee7563"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/182074a6-0cf2-4040-a5d6-b3a460458009"
+      }
+    ],
+    "backend_passed": 8091,
+    "backend_skipped": 1,
+    "new_pytest_passed": 51,
+    "duplicates": 0,
+    "frontend_passed": 3260,
+    "e2e_passed": 167,
+    "native_early_nodes_passed": 2,
+    "native_post_pytest_nodes_passed": 2,
+    "genuine_cases_per_node": 5,
+    "legacy_snapshot_cases_per_node": 19,
+    "identity_and_acl_nodes_passed": 2,
+    "conditional_skip": {
+      "test": "tests.isolation.test_unit_prescription_migration::test_empty_unit_prescription_downgrade_roundtrip",
+      "reason": "Immutable unit prescription history prevents an empty downgrade rehearsal",
+      "coverage": "Companion nonemptyrefusal and pre-history fullschema0055/headroundtrip succeeded onbothnodes; no new tests skipped or weakened."
+    }
   },
   "completion": {
     "pr": 444,
