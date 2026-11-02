@@ -98,8 +98,8 @@
       "resolved": "CIba19 migrationroundtrip+bootstrap passed; correctedENABLE+schemaownercheck."
     },
     "historical_shift_fixture_login": {
-      "consecutive": 1,
-      "cause": "DirectpostgresUPDATEshift violates0045writerrole guard; replacedwithordinaryPOSService.close_shift through actualaurum_app+actualedge/tenant/user/branch+publishedpos.shift_close permission. No guardsdisabled, profileunchanged."
+      "consecutive": 0,
+      "resolved": "All5nativefinancialcases includingactualappclose+historicalreplay passedearlyproof onbothCInodes."
     }
   },
   "blocker": null,
@@ -145,7 +145,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T10:55:24.139Z",
+  "updated_at": "2026-11-02T11:04:01.175Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -172,9 +172,15 @@
   "ci": {
     "head": "06b2060c4936964f5bae7cbafd21130a66030802",
     "attempt": 11,
-    "status": "pending",
+    "status": "Bothbackendnodes passedisolatedgenuinephysicalsmoke; fullpytest running",
     "expected_backend_total": 8092,
-    "expected_new": 51
+    "expected_new": 51,
+    "workflow": "f78d88f4-243b-41d0-9d84-00bcd29d9ce4",
+    "backend_job": 4165,
+    "gate_job": 4170,
+    "native_early_nodes_passed": 2,
+    "native_cases_per_node": 5,
+    "frontend_passed": 3260
   },
   "completion": {
     "pr": 444,
