@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "awaiting_ci_pc_off",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Verify early8 ACL+DDL cases and both genuine cash proofs, then all8137 full server cases/full8 contexts and late proofs; protected expected-head merge only.",
+  "remaining_step": "On explicit resume, read actual GitHub main/PR446/head and final CircleCI results. No new implementation. Verify all8137 cases+8contexts+early8 contracts+both early/late native proofs; fix only concrete failures preserving counters. Protected merge with expected head only after full success; then verify actualmain/tree. Cloud/schedulers remain paused; no deployment/sharedDB work.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
@@ -93,7 +93,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T14:51:48Z",
+  "updated_at": "2026-11-02T14:59:35Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -127,9 +127,12 @@
   },
   "ci": {
     "head_sha": "c99417eee1913b416266919ac96f1e0dcb6904ab",
-    "status": "pending",
-    "required_contexts": 8,
-    "early_isolation_contract_cases": 8
+    "workflow": "04bf7815-bb7a-45a3-b3ff-091f782adaea",
+    "backend_job": 4213,
+    "status": "running",
+    "phase": "early_native_physical",
+    "early_isolation_contract_cases": 8,
+    "required_contexts": 8
   },
   "completion": {
     "pr": 445,
@@ -301,5 +304,14 @@
     "expected_backend_total": 8090,
     "expected_new": 49,
     "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
+  },
+  "local_stop": {
+    "reason": "User is turning off PC; stop local development",
+    "at": "2026-11-02T14:59:35Z",
+    "all_product_changes_pushed": true,
+    "checkout_clean": true,
+    "main_unchanged": "78f388171308623ffefb2f956bef191b5c822976",
+    "cloud_development_paused": true,
+    "no_automatic_merge_configured": true
   }
 }
