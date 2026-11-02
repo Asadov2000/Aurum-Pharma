@@ -1629,8 +1629,10 @@ $$;
 DO $native_physical$
 DECLARE revision TEXT; spec RECORD; function_oid OID;
 BEGIN
- SELECT version_num INTO revision FROM public.alembic_version;
- IF revision::INTEGER >=235 THEN
+ IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+  SELECT version_num INTO revision FROM public.alembic_version;
+ END IF;
+ IF revision ~ '^[0-9]{4}$' AND revision::INTEGER >=235 THEN
   FOR spec IN SELECT * FROM (VALUES
    ('public.edge_physical_uuid5_v1(uuid,text)','plpgsql',true,'i'),
    ('public.edge_physical_pack_take_v1(jsonb,jsonb,text,bigint)','plpgsql',false,'i'),

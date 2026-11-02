@@ -108,7 +108,7 @@ jobs:
           working_directory: "~/project/backend"
       - run:
           name: "Verify isolated native physical cash execution"
-          command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database poetry run python ../scripts/test-edge-physical-cash-smoke.py"
+          command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database PYTHONPATH=\"$PWD${PYTHONPATH:+:$PYTHONPATH}\" poetry run python ../scripts/test-edge-physical-cash-smoke.py"
           working_directory: "~/project/backend"
       - run:
           name: "Pytest"
