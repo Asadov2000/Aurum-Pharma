@@ -784,6 +784,7 @@ async def main(diagnostic: Diagnostic | None = None) -> None:
     require_ci_context()
 
     from app.core.config import get_settings
+    from sqlalchemy.engine import URL
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
 

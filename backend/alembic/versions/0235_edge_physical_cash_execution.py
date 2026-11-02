@@ -481,8 +481,15 @@ BEGIN
 END $function$;
 """
 
-CONTEXT = "public.native_edge_physical_context_v1()"
-ACTOR_INVOCER = f"(current_user='aurum_edge_cash_owner' AND {CONTEXT})"
+# Shared historical functions also run for app/support/catalog sessions, which
+# intentionally have no EXECUTE on private native helpers. Definer functions can
+# use CASE to avoid the runtime call. Invoker functions additionally require a
+# separate PL/pgSQL statement: expression initialization checks every call's ACL.
+NATIVE_SESSION = "SESSION_USER ~ '^aurum_edge_node_[0-9a-f]{32}$'"
+CONTEXT = (
+    f"(CASE WHEN {NATIVE_SESSION} THEN public.native_edge_physical_context_v1() " "ELSE false END)"
+)
+ACTOR_INVOCER = "v_native_physical"
 CLOUD_WRITER = """epoch.state='active' AND epoch.capability='cloud_full'
   AND epoch.allowed_register_id IS NULL
   AND node.node_kind='cloud' AND node.mode='cloud_writer' AND node.status='active'"""
@@ -498,7 +505,24 @@ def _cloud_or_native(register: str, physical: str) -> str:
   AND node.node_kind='edge' AND node.mode='edge_writer' AND node.status='active'))"""
 
 
+INVOKER_PRELUDE = f"""BEGIN
+ IF current_user='aurum_edge_cash_owner' AND {NATIVE_SESSION} THEN
+  v_native_physical:=public.native_edge_physical_context_v1();
+ END IF;
+"""
 PATCHES: tuple[tuple[str, str, str], ...] = (
+    *(
+        (signature, old, new)
+        for signature in (
+            "trg_unit_cart_v2_actor()",
+            "trg_physical_checkout_guard()",
+            "trg_guard_sale_immutability()",
+        )
+        for old, new in (
+            ("DECLARE", "DECLARE\n v_native_physical BOOLEAN:=false;"),
+            ("BEGIN\n", INVOKER_PRELUDE),
+        )
+    ),
     (
         "allocate_register_receipt(uuid,uuid)",
         """    p_tenant_id,
@@ -506,11 +530,12 @@ PATCHES: tuple[tuple[str, str, str], ...] = (
     p_register_id,
     false
   );""",
-        """    p_tenant_id,
+        f"""    p_tenant_id,
     v_branch_id,
     p_register_id,
-    public.native_edge_physical_actor_v1(
+    CASE WHEN {NATIVE_SESSION} THEN public.native_edge_physical_actor_v1(
       p_tenant_id,v_branch_id,p_register_id,public.current_app_user_id())
+    ELSE false END
   );""",
     ),
     (
