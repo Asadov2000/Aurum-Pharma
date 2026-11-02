@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "ci_running",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
-  "expected_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
+  "expected_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
   "validated_sha": null,
   "pr": 444,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -31,7 +31,7 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Fix only standalone fixture operation pair using approved hash semantics; safe diagnostics; local pure/static checks, review, then samePR final-head complete CI. SharedDB untouched.",
+  "remaining_step": "Third exact-head fullCI, early native cash namespace2cases, full8041pytest and genuine native replay proof onbothnodes, then protectedmerge all8success.",
   "failure_counters": {
     "black_ci_scripts": {
       "consecutive": 0,
@@ -66,7 +66,8 @@
       "nodes": [
         0,
         1
-      ]
+      ],
+      "fix_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba"
     }
   },
   "blocker": null,
@@ -112,7 +113,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T05:24:45.014Z",
+  "updated_at": "2026-11-02T05:38:21.412Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -123,14 +124,14 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "080c209786c267a0c41b8d7f9283656e3422156a",
+  "head_tree": "e3dd3014d2cfba5b5e429bfd5931c9c89a6fc971",
   "local_validation": {
     "targeted_passed": 198,
     "new_pure_passed": 39,
     "new_db_collected": 10,
-    "collected_backend": 8039,
+    "collected_backend": 8041,
     "ruff": "app/tests/scripts pass",
-    "black_app_tests": "1079 files pass",
+    "black_app_tests": "1080 files pass",
     "mypy": "533 app sources pass",
     "safety_guard_tests": 4,
     "backend_runner_tests": 9,
@@ -139,49 +140,17 @@
     "native_CI_fixture": "implemented and independently reviewed; not executed yet",
     "shared_database": "not accessed",
     "black_ci_scripts": "pass",
-    "script_full_project_ruff": "pass; import/diagnostic/orchestration corrections verified"
+    "script_full_project_ruff": "pass; import/diagnostic/orchestration corrections verified",
+    "new_namespace_cases": 2,
+    "ci_runner_tests": 28,
+    "independent_namespace_and_QA_review": "approve"
   },
   "ci": {
-    "head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
-    "attempt": 2,
-    "status": "failed",
-    "expected_backend_total": 8039,
-    "expected_new": 49,
-    "workflow": "1ec70294-0c87-4395-9ef3-2a2e1b9c7bc5",
-    "backend_job": 4052,
-    "gate_job": 4058,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "failure"
-      }
-    ],
-    "updated_at": "2026-11-01T16:32:10.664Z",
-    "pytest": "success on both nodes; native standalone proof failed before checkout"
+    "head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
+    "attempt": 3,
+    "status": "awaiting workflow",
+    "expected_backend_total": 8041,
+    "expected_new": 51
   },
   "completion": {
     "pr": 443,
@@ -296,26 +265,18 @@
     }
   },
   "previous_failed_ci": {
-    "head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
-    "workflow": "ee9cdc6c-f6b2-4546-a426-02133aa2572b",
-    "backend_job": 4044,
-    "gate_job": 4050,
+    "head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
+    "attempt": 2,
     "status": "failed",
-    "attempt": 1,
     "expected_backend_total": 8039,
     "expected_new": 49,
+    "workflow": "1ec70294-0c87-4395-9ef3-2a2e1b9c7bc5",
+    "backend_job": 4052,
+    "gate_job": 4058,
     "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "pending"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "pending"
       },
       {
         "context": "ci/circleci: dependency-audit",
@@ -332,11 +293,17 @@
       {
         "context": "ci/circleci: production-containers",
         "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "failure"
       }
     ],
-    "updated_at": "2026-11-01T15:39:11.071Z",
-    "backend_node0": "runtime function inventory exact-set",
-    "backend_node1": "mixed policy exact-set",
-    "other_contexts": "6 success"
+    "updated_at": "2026-11-01T16:32:10.664Z",
+    "pytest": "success on both nodes; native standalone proof failed before checkout"
   }
 }
