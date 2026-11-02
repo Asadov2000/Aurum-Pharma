@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "implementing",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
@@ -31,7 +31,7 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Third exact-head fullCI, early native cash namespace2cases, full8041pytest and genuine native replay proof onbothnodes, then protectedmerge all8success.",
+  "remaining_step": "Inspect surviving node1 native proof, publish CIordering correction once, complete new final-head CI thenprotectedmerge.",
   "failure_counters": {
     "black_ci_scripts": {
       "consecutive": 0,
@@ -57,7 +57,7 @@
       "resolved": "Corrected fullpytest passed on both nodes in CI4052."
     },
     "native_fixture_operation_pair": {
-      "consecutive": 1,
+      "consecutive": 0,
       "failed_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
       "step": "Verify Edge cash dispatcher boundary",
       "phase": "app_checkout_physical_cash",
@@ -67,7 +67,15 @@
         0,
         1
       ],
-      "fix_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba"
+      "fix_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
+      "resolved": "Physical/mixed real checkout succeeds on bothnodes in early namespace integration tests on b5bce986."
+    },
+    "early_ci_seed_contamination": {
+      "consecutive": 1,
+      "failed_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
+      "step": "Pytest node0 test_identity_migration::test_cluster_safe_upgrade_from_0091_without_reference_privileges",
+      "constraint": "role_permission_permission_code_fkey",
+      "reason": "Early integration tests commit actor role seeds;0093 historical permission downgrade now has references. Replace early step with39pure noDB replay tests; namespace integration2cases remain in correctly ordered fullsuite."
     }
   },
   "blocker": null,
@@ -113,7 +121,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T05:38:21.412Z",
+  "updated_at": "2026-11-02T05:47:35.212Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -148,7 +156,7 @@
   "ci": {
     "head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
     "attempt": 3,
-    "status": "running",
+    "status": "node0 failed due early test seed contamination; node1 running",
     "expected_backend_total": 8041,
     "expected_new": 51,
     "workflow": "cf42e2ec-0196-45d6-8168-420ef15c31ff",
