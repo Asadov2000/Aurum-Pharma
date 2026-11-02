@@ -238,7 +238,7 @@ async def test_native_register_lock_rls_allows_scope_locked_reads_but_never_muta
 ) -> None:
     async with maintenance_engine.connect() as connection:
         rows = (await connection.execute(text("""
-            SELECT relation.relrowsecurity,relation.relforcerowsecurity,
+            SELECT relation.relrowsecurity,pg_get_userbyid(relation.relowner) AS table_owner,
               policy.polname,policy.polcmd::TEXT,policy.polpermissive,
               policy.polroles=ARRAY[(SELECT oid FROM pg_roles
                 WHERE rolname='aurum_edge_cash_owner')] AS owner_only,
@@ -248,12 +248,22 @@ async def test_native_register_lock_rls_allows_scope_locked_reads_but_never_muta
             WHERE relation.oid='public.register'::REGCLASS AND policy.polname IN
               ('edge_physical_execution_lock','edge_physical_execution_no_write')
         """))).mappings().all()
+        owner_authority = (await connection.execute(text("""
+            SELECT rolsuper,rolbypassrls,
+              pg_has_role('aurum_edge_cash_owner','aurum_schema_owner','MEMBER')
+            FROM pg_roles WHERE rolname='aurum_edge_cash_owner'
+        """))).one()
+    assert tuple(owner_authority) == (False, False, False)
     assert {row["polname"]: row["polpermissive"] for row in rows} == {
         "edge_physical_execution_lock": True,
         "edge_physical_execution_no_write": False,
     }
     for row in rows:
-        assert row["relrowsecurity"] and row["relforcerowsecurity"] and row["owner_only"]
+        # The private cash role is neither the relation owner nor a role with
+        # an RLS bypass; register has historically used ENABLE ROW LEVEL SECURITY.
+        assert row["relrowsecurity"] and row["owner_only"]
+        assert row["table_owner"] == "aurum_schema_owner"
+        assert row["table_owner"] != "aurum_edge_cash_owner"
         assert row["polcmd"] == "w" and row["check_expression"] == "false"
         for required in (
             "current_tenant_id()",

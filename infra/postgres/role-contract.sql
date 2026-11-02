@@ -1684,7 +1684,8 @@ BEGIN
    JOIN pg_catalog.pg_namespace schema ON schema.oid=relation.relnamespace
    JOIN pg_catalog.pg_policy policy ON policy.polrelid=relation.oid
    WHERE schema.nspname='public' AND relation.relname='register'
-    AND relation.relrowsecurity AND relation.relforcerowsecurity
+    AND relation.relrowsecurity
+    AND relation.relowner='aurum_schema_owner'::REGROLE
     AND policy.polname='edge_physical_execution_no_write'
     AND policy.polroles=ARRAY['aurum_edge_cash_owner'::REGROLE::OID]
     AND policy.polcmd='w' AND NOT policy.polpermissive
