@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
-  "expected_head": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
+  "expected_head": "c99417eee1913b416266919ac96f1e0dcb6904ab",
   "validated_sha": null,
   "pr": 446,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Collect remaining old node0 result; publish actualNode cost-denial and early8test contract; repeat all8 final-head contexts and late proofs, then protected merge.",
+  "remaining_step": "Verify early8 ACL+DDL cases and both genuine cash proofs, then all8137 full server cases/full8 contexts and late proofs; protected expected-head merge only.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
@@ -45,10 +45,12 @@
     "legacy_cost_test_subject": {
       "consecutive": 1,
       "cause": "New test incorrectly expected trusted NOLOGIN owner to lack longstanding batch SELECT; actual untrusted Node must be denied",
-      "prepared_fix": "Move explicit cost read denial to realNode proof; verify executor/native column ACL; retain owner financial deny checks"
+      "prepared_fix": "Move explicit cost read denial to realNode proof; verify executor/native column ACL; retain owner financial deny checks",
+      "fix_head": "c99417eee1913b416266919ac96f1e0dcb6904ab",
+      "pending_verification": true
     }
   },
-  "blocker": "One incorrect new test assertion; corrected local patch reviewed before publication, waiting remaining old CI shard to consolidate results.",
+  "blocker": null,
   "previous_completed": {
     "pr": 444,
     "merged": true,
@@ -91,7 +93,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T14:47:53Z",
+  "updated_at": "2026-11-02T14:51:48Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -120,21 +122,14 @@
     "db_local": "not run",
     "runtime": "unchanged",
     "dispatcher_grant_order_mock_cases": 4,
-    "dispatcher_grant_order_review": "approved"
+    "dispatcher_grant_order_review": "approved",
+    "latest_test_and_script_static": "Ruff/Black passed; guards19/CIparallel9 passed; independent boundary and rollback review approved"
   },
   "ci": {
-    "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
-    "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
-    "backend_job": 4204,
-    "status": "running",
-    "phase": "full_pytest",
+    "head_sha": "c99417eee1913b416266919ac96f1e0dcb6904ab",
+    "status": "pending",
     "required_contexts": 8,
-    "early_genuine_proofs": {
-      "physical_per_node": 5,
-      "mixed_per_node": 5,
-      "nodes": 2,
-      "original_ci_databases_unchanged": true
-    }
+    "early_isolation_contract_cases": 8
   },
   "completion": {
     "pr": 445,
@@ -288,17 +283,16 @@
     }
   },
   "previous_failed_ci": {
-    "head_sha": "85e9d074bcc5cb522f117527e6e2326556a5703a",
-    "workflow": "1fb990c0-0965-4ef4-87c5-442d841b2dce",
-    "step": "test_cluster_safe_upgrade_from_0091_without_reference_privileges",
-    "cause": "236 conditional dispatcher EXEC grant occurred before switching to actual function owner; order corrected to match235; rights preserved",
-    "same_cause_failures": 1,
-    "early_proofs": {
-      "physical_nodes": 2,
-      "mixed_nodes": 2,
-      "cases_each": 5,
-      "status": "passed"
-    }
+    "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
+    "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
+    "backend_job": 4204,
+    "reported_cases": 7820,
+    "passed": 7819,
+    "new_cases_passed": 44,
+    "failed": 1,
+    "unexecuted_due_failfast": 317,
+    "cause": "Only invalid private-owner cost SELECT denial; use actualNode boundary instead. Historical dispatcher regression+both new migration roundtrips passed.",
+    "same_cause_failures": 1
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
@@ -307,15 +301,5 @@
     "expected_backend_total": 8090,
     "expected_new": 49,
     "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
-  },
-  "pending_local_fix": {
-    "files": [
-      "backend/tests/isolation/test_edge_mixed_cash_execution.py",
-      "scripts/test-edge-mixed-cash-execution.py",
-      ".circleci/config.yml"
-    ],
-    "dependency_changes": false,
-    "privilege_changes": false,
-    "new_early_contract_cases": 8
   }
 }
