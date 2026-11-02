@@ -157,9 +157,12 @@
   "ci": {
     "head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
     "attempt": 4,
-    "status": "awaiting workflow",
+    "status": "running",
     "expected_backend_total": 8041,
-    "expected_new": 51
+    "expected_new": 51,
+    "workflow": "95160889-12dd-4de8-94ce-0591ffe73825",
+    "backend_job": 4070,
+    "gate_job": 4074
   },
   "completion": {
     "pr": 443,
