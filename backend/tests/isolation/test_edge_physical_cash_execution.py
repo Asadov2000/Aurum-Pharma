@@ -201,6 +201,74 @@ async def test_native_physical_policies_require_tenant_and_actual_native_context
             assert "SESSION_USER" in expression and "edge_cash_node_identity" in expression
 
 
+async def test_native_register_lock_grants_only_private_owner_id_update(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        rows = (await connection.execute(text("""
+            SELECT attribute.attname,
+              has_column_privilege('aurum_edge_cash_owner',relation.oid,attribute.attnum,
+                'UPDATE') AS can_update,
+              has_column_privilege('aurum_edge_cash_owner',relation.oid,attribute.attnum,
+                'UPDATE WITH GRANT OPTION') AS grantable,
+              has_column_privilege('aurum_edge_cash_executor',relation.oid,attribute.attnum,
+                'SELECT,INSERT,UPDATE,REFERENCES') AS executor_access,
+              EXISTS(SELECT 1 FROM pg_roles node WHERE node.rolname
+                ~ '^aurum_edge_node_[0-9a-f]{32}$'
+                AND has_column_privilege(node.oid,relation.oid,attribute.attnum,
+                  'SELECT,INSERT,UPDATE,REFERENCES')) AS native_access
+            FROM pg_attribute attribute JOIN pg_class relation ON relation.oid=attribute.attrelid
+            WHERE relation.oid='public.register'::REGCLASS
+              AND attribute.attnum>0 AND NOT attribute.attisdropped
+        """))).mappings().all()
+        broad_access = await connection.scalar(text("""
+            SELECT has_table_privilege('aurum_edge_cash_owner','public.register',
+              'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+        """))
+    assert {row["attname"] for row in rows if row["can_update"]} == {"id"}
+    assert broad_access is False
+    assert all(
+        not row["grantable"] and not row["executor_access"] and not row["native_access"]
+        for row in rows
+    )
+
+
+async def test_native_register_lock_rls_allows_scope_locked_reads_but_never_mutation(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        rows = (await connection.execute(text("""
+            SELECT relation.relrowsecurity,relation.relforcerowsecurity,
+              policy.polname,policy.polcmd::TEXT,policy.polpermissive,
+              policy.polroles=ARRAY[(SELECT oid FROM pg_roles
+                WHERE rolname='aurum_edge_cash_owner')] AS owner_only,
+              pg_get_expr(policy.polqual,policy.polrelid) AS using_expression,
+              pg_get_expr(policy.polwithcheck,policy.polrelid) AS check_expression
+            FROM pg_policy policy JOIN pg_class relation ON relation.oid=policy.polrelid
+            WHERE relation.oid='public.register'::REGCLASS AND policy.polname IN
+              ('edge_physical_execution_lock','edge_physical_execution_no_write')
+        """))).mappings().all()
+    assert {row["polname"]: row["polpermissive"] for row in rows} == {
+        "edge_physical_execution_lock": True,
+        "edge_physical_execution_no_write": False,
+    }
+    for row in rows:
+        assert row["relrowsecurity"] and row["relforcerowsecurity"] and row["owner_only"]
+        assert row["polcmd"] == "w" and row["check_expression"] == "false"
+        for required in (
+            "current_tenant_id()",
+            "native_edge_physical_context_v1()",
+            "SESSION_USER",
+            "edge_cash_node_identity",
+            "tenant_id",
+            "branch_id",
+            "register_id",
+            "register.id",
+        ):
+            assert required in row["using_expression"]
+        assert "support_session" not in row["using_expression"]
+
+
 @pytest.mark.parametrize("role", ["aurum_app", "aurum_support"])
 async def test_application_logins_cannot_call_private_native_physical_writer(role: str) -> None:
     settings = get_settings()
@@ -247,7 +315,13 @@ async def test_owner_cannot_forge_native_identity_or_read_purchase_costs(
                 await connection.scalar(text("SELECT public.native_edge_physical_context_v1()"))
                 is False
             )
+            # UPDATE(id) exists solely for PostgreSQL row-lock syntax. A real
+            # UPDATE cannot use forged caller GUCs to expose or mutate a row.
+            assert not (
+                await connection.execute(text("UPDATE public.register SET id=id RETURNING id"))
+            ).all()
             for sql in (
+                "UPDATE public.register SET name=name",
                 "SELECT purchase_cost_per_pack FROM public.unit_stock_lot_v2 LIMIT 0",
                 "SELECT initial_opened_cost FROM public.unit_stock_lot_v2 LIMIT 0",
                 "SELECT cost_amount FROM public.unit_stock_movement_v2 LIMIT 0",

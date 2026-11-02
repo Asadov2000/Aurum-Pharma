@@ -741,6 +741,11 @@ READ_COLUMNS = {
 
 
 def _scope(table: str) -> str:
+    if table == "register":
+        return f"""tenant_id=public.current_tenant_id() AND {CONTEXT} AND EXISTS(
+          SELECT 1 FROM public.edge_cash_node_identity identity
+          WHERE identity.database_role=SESSION_USER AND identity.tenant_id=register.tenant_id
+           AND identity.branch_id=register.branch_id AND identity.register_id=register.id)"""
     if table == "unit_stock_cart_line_v2":
         return f"""tenant_id=public.current_tenant_id() AND {CONTEXT} AND EXISTS(
           SELECT 1 FROM public.unit_stock_cart_command_v2 command
@@ -759,6 +764,11 @@ def _scope(table: str) -> str:
 
 
 def _grants(*, reverse: bool = False) -> None:
+    op.execute(
+        "REVOKE UPDATE (id) ON public.register FROM aurum_edge_cash_owner"
+        if reverse
+        else "GRANT UPDATE (id) ON public.register TO aurum_edge_cash_owner"
+    )
     for table, columns in INSERT_COLUMNS.items():
         action = f"REVOKE INSERT ({columns}) ON public.{table} FROM aurum_edge_cash_owner"
         if not reverse:
@@ -838,6 +848,11 @@ def upgrade() -> None:
             f"CREATE POLICY edge_physical_execution_read ON public.{table} "
             f"FOR SELECT TO aurum_edge_cash_owner USING({_scope(table)})"
         )
+    for name, modifier in (("lock", ""), ("no_write", "AS RESTRICTIVE ")):
+        op.execute(
+            f"CREATE POLICY edge_physical_execution_{name} ON public.register {modifier}"
+            f"FOR UPDATE TO aurum_edge_cash_owner USING({_scope('register')}) WITH CHECK(false)"
+        )
     _grants()
     _dispatcher()
 
@@ -864,6 +879,8 @@ def downgrade() -> None:
         op.execute(f"DROP POLICY edge_physical_execution_insert ON public.{table}")
     for table in ("unit_stock_cart_command_v2", "unit_stock_cart_line_v2"):
         op.execute(f"DROP POLICY edge_physical_execution_read ON public.{table}")
+    for name in ("no_write", "lock"):
+        op.execute(f"DROP POLICY edge_physical_execution_{name} ON public.register")
     _grants(reverse=True)
     for signature in reversed(FUNCTIONS):
         op.execute(f"DROP FUNCTION public.{signature}")

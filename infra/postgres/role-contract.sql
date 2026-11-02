@@ -1679,5 +1679,17 @@ BEGIN
   GRANT SELECT (initial_closed_packs,initial_opened_packs) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
   GRANT SELECT (tenant_id,id,branch_id,actor_id,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
   GRANT SELECT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,base_units) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;
+  IF NOT EXISTS (
+   SELECT 1 FROM pg_catalog.pg_class relation
+   JOIN pg_catalog.pg_namespace schema ON schema.oid=relation.relnamespace
+   JOIN pg_catalog.pg_policy policy ON policy.polrelid=relation.oid
+   WHERE schema.nspname='public' AND relation.relname='register'
+    AND relation.relrowsecurity AND relation.relforcerowsecurity
+    AND policy.polname='edge_physical_execution_no_write'
+    AND policy.polroles=ARRAY['aurum_edge_cash_owner'::REGROLE::OID]
+    AND policy.polcmd='w' AND NOT policy.polpermissive
+    AND pg_catalog.pg_get_expr(policy.polwithcheck,policy.polrelid)='false'
+  ) THEN RAISE EXCEPTION 'Native register row-lock policy is unsafe'; END IF;
+  GRANT UPDATE (id) ON public.register TO aurum_edge_cash_owner;
  END IF;
 END $native_physical$;
