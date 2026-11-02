@@ -535,20 +535,56 @@ SELECT jsonb_build_object(
         assert packs == [{"id": pack_id, "remaining": 18, "state": after}]
 
 
-def close_shift_fixture(
-    admin: AdminAPI, fixture: Fixture, result: PhysicalCheckoutResultV3
+async def close_shift_fixture(
+    app_factory: async_sessionmaker[AsyncSession],
+    fixture: Fixture,
+    result: PhysicalCheckoutResultV3,
 ) -> None:
-    # This explicit maintenance fixture only establishes historical shift state.
-    # It does not test cashier close-shift authorization or alter a completed sale.
-    admin.run(f"""
-BEGIN;
-SELECT set_config('app.user_id',{literal(fixture.command.scope.user_id)},true) AS actor \\gset
-UPDATE public.shift SET status='closed',closed_at=statement_timestamp(),
- closed_by_user_id={literal(fixture.command.scope.user_id)},
- closing_cash_actual={literal(result.total_amount)},closing_cash_expected={literal(result.total_amount)},
- closing_difference=0 WHERE id={literal(result.shift_id)};
-COMMIT;
-""")
+    from app.domains.pos.repository import POSRepository
+    from app.domains.pos.service import POSService
+    from sqlalchemy import text
+
+    # Only fixture authority/bootstrap is synthetic. A real app login closes its
+    # own shift through the ordinary service and every existing writer/close guard.
+    # This does not add close-shift capability to the native cash command profile.
+    scope = fixture.command.scope
+    async with app_factory() as session, session.begin():
+        assert await session.scalar(text("SELECT session_user")) == "aurum_app"
+        assert await session.scalar(text("SELECT current_user")) == "aurum_app"
+        await session.execute(
+            text(
+                "SELECT set_config('app.tenant_id',:tenant,true),"
+                "set_config('app.user_id',:actor,true),set_config('app.branch_id',:branch,true),"
+                "set_config('app.edge_node_id',:node,true),set_config('app.support_session','false',true)"
+            ),
+            {
+                "tenant": str(scope.tenant_id),
+                "actor": str(scope.user_id),
+                "branch": str(scope.branch_id),
+                "node": str(scope.edge_node_id),
+            },
+        )
+        # seed_receiving_actor publishes all real permission codes and assigns
+        # that role to this branch. Assert the close permission rather than bypass it.
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT public.tenant_actor_has_scoped_permission("
+                    ":tenant,'pos.shift_close',:branch)"
+                ),
+                {"tenant": scope.tenant_id, "branch": scope.branch_id},
+            )
+            is True
+        )
+        shift = await POSService(POSRepository(session)).close_shift(
+            shift_id=result.shift_id,
+            closing_cash_actual=result.total_amount,
+            closed_by_user_id=scope.user_id,
+            allowed_branch_ids={scope.branch_id},
+        )
+        assert shift.status == "closed" and shift.register_id == scope.register_id
+        assert shift.closed_by_user_id == scope.user_id and shift.closing_difference == 0
+        assert shift.closing_cash_expected == result.total_amount
 
 
 async def assert_native_denials(engine: AsyncEngine) -> None:
@@ -763,6 +799,7 @@ async def check_fixture(
     app_url: URL,
     diagnostic: Diagnostic,
     maintenance: AsyncEngine,
+    app_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     from app.domains.sync.offline_auth import OfflineAuthContractError
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -803,7 +840,8 @@ async def check_fixture(
         diagnostic.phase = "native_direct_access_denials"
         await assert_native_denials(engine)
         assert snapshot(admin, fixture) == before
-        close_shift_fixture(admin, fixture, first)
+        diagnostic.phase = "historical_app_shift_close"
+        await close_shift_fixture(app_factory, fixture, first)
         diagnostic.phase = "native_closed_shift_replay"
         before = snapshot(admin, fixture)
         assert await complete(factory, fixture) == first
@@ -858,7 +896,7 @@ async def main(diagnostic: Diagnostic | None = None) -> None:
             diagnostic.phase = "synthetic_activation_" + name
             provision_active_identity(admin, fixture)
             fixtures.append(fixture)
-            await check_fixture(admin, fixture, app_url, diagnostic, maintenance)
+            await check_fixture(admin, fixture, app_url, diagnostic, maintenance, factory)
         diagnostic.phase = "genuine_history_blocks_downgrade"
         from tests.isolation.test_edge_physical_cash_execution_migration import (
             assert_native_history_blocks_downgrade,
