@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "519f5b03ff8882018d11be086865031116b6ced9",
+  "expected_head": "76ed71c704f1342f656f7eafc913b3127661db1d",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -31,7 +31,7 @@
     "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
     "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "Full final-head CI, genuine native monetary proof and migration/ACL tests; resolve actual failures, protected merge only after all8 success. No runtime deployment.",
+  "remaining_step": "Verify fixed exact20historical patches and genuine financial execution on5real cases, full finalhead CI then protectedmerge.",
   "failure_counters": {
     "lease_observation_count": {
       "consecutive": 0,
@@ -44,6 +44,12 @@
     "root_formatting": {
       "consecutive": 0,
       "resolved": "Imports and100-column formatting corrected;changedfileRuff/Black passed."
+    },
+    "sql_historical_patch": {
+      "consecutive": 1,
+      "step": "Verify cluster-safe migration roundtrip",
+      "cause": "0235 expected current_user in checkout-binding guard, but0212 changed actual guard to session_user SECURITY DEFINER.",
+      "head": "519f5b03ff8882018d11be086865031116b6ced9"
     }
   },
   "blocker": null,
@@ -89,7 +95,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T08:40:57.011Z",
+  "updated_at": "2026-11-02T08:53:06.981Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -105,15 +111,15 @@
     "mypy": "536 sources pass",
     "ruff": "app/tests and changed scripts pass",
     "black": "1088 app/tests and4 migration/scripts pass with project config",
-    "stdlib_guards": 14,
+    "stdlib_guards": 15,
     "parallel_contract": 9,
     "cache_contract": 6,
     "build_reuse": 8,
     "shared_database": "not accessed"
   },
   "ci": {
-    "head": "519f5b03ff8882018d11be086865031116b6ced9",
-    "attempt": 1,
+    "head": "76ed71c704f1342f656f7eafc913b3127661db1d",
+    "attempt": 2,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -248,15 +254,12 @@
     }
   },
   "previous_failed_ci": {
-    "head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
-    "attempt": 3,
-    "status": "node0 failed due early test seed contamination; node1 running",
-    "expected_backend_total": 8041,
-    "expected_new": 51,
-    "workflow": "cf42e2ec-0196-45d6-8168-420ef15c31ff",
-    "backend_job": 4062,
-    "gate_job": 4066,
-    "backend_node1": "fullpytest success",
-    "native_proof": "not executed; CircleCI parallel step barrier stops subsequent stages on node0failure"
+    "head": "519f5b03ff8882018d11be086865031116b6ced9",
+    "attempt": 1,
+    "status": "failed",
+    "expected_backend_total": 8090,
+    "expected_new": 49,
+    "workflow": "58a20ee0-6e59-40c4-9724-06c646d11acd",
+    "backend_job": 4087
   }
 }
