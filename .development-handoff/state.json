@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "071d97289cb4513c3c6faa8c3b4465e8c61ad5c9",
+  "expected_head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -70,9 +70,8 @@
       "resolved": "Exactrequest_hashgrantconfirmed235+bootstrap+ACLtest; nextdistinctblockerisoldactorhelperEXEC."
     },
     "native_existing_actor_helpers": {
-      "consecutive": 1,
-      "cause": "3INVguardsuseis_support_session/scoped_permission; baseline0062 grantsapp/supportnotprivatecashowner; addedexact2EXECinCORE+235bootstrap, reverseREVOKE; grantor/semanticsapproved.",
-      "verification": "Full final-headCIrequired. DiagnosticnowrevealsboundedpermissionobjectorstaticguardcodewithoutSQLparameters."
+      "consecutive": 0,
+      "resolved": "CIhead071d reachedgenuine stockwrite/rollback; oldactorhelperchecks passed."
     },
     "native_sale_mixed_probe": {
       "consecutive": 0,
@@ -87,9 +86,12 @@
       "resolved": "physicalonlyprobe published after userexception; nextCI reachedlatermaliciousstockscenario, no moremixedcolumn42501"
     },
     "native_snapshot_alias": {
+      "consecutive": 0,
+      "resolved": "CIhead071d passed maliciousenvelopechecks afterSQLaliasrename."
+    },
+    "native_register_lock": {
       "consecutive": 1,
-      "cause": "original_packs query SQLrangealias pack collided with PLpgSQL packRECORD; renamed snapshot_pack(value) only; unexpectedSQLerrorsnowrethrow.",
-      "verification": "await fullCI"
+      "cause": "INVOKERphysicalcheckoutguard SELECTregisterFORSHAREneedsUPDATEpriv; exactUPDATEid+scopedpermissive/restrictiveRLSWITHCHECKfalse added; bootstrapfailsifpolicy/RLSunsafe;2newregressionscollected."
     }
   },
   "blocker": null,
@@ -135,7 +137,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T10:04:29.195Z",
+  "updated_at": "2026-11-02T10:30:05.630Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -147,7 +149,7 @@
   },
   "local_validation": {
     "pure_cases": 163,
-    "backend_collected": 8090,
+    "backend_collected": 8092,
     "mypy": "536 sources pass",
     "ruff": "app/tests and changed scripts pass",
     "black": "1088 app/tests and4 migration/scripts pass with project config",
@@ -156,14 +158,15 @@
     "cache_contract": 6,
     "build_reuse": 8,
     "shared_database": "not accessed",
-    "native_guard_dependencies": "Threeinvokers: exactneededtwoactorEXEC; separatephysicalonlysaleprobe avoids mixedcolumn;26forward+26reverse anchors exact, independentsecurityapproved."
+    "native_guard_dependencies": "Threeinvokers: exactneededtwoactorEXEC; separatephysicalonlysaleprobe avoids mixedcolumn;26forward+26reverse anchors exact, independentsecurityapproved.",
+    "register_safety": "2newDBcasescollected, Ruff/Black pass; UPDATEidonly, scope/RLS/forced+WITHCHECKfalse+bootstrapguard independentlyreviewed; actualfinancialpasspending."
   },
   "ci": {
-    "head": "071d97289cb4513c3c6faa8c3b4465e8c61ad5c9",
-    "attempt": 8,
+    "head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
+    "attempt": 9,
     "status": "pending",
-    "expected_backend_total": 8090,
-    "expected_new": 49
+    "expected_backend_total": 8092,
+    "expected_new": 51
   },
   "completion": {
     "pr": 444,
@@ -299,13 +302,13 @@
     }
   },
   "previous_failed_ci": {
-    "head": "c5036bfe96e1f189831ae598efcac575840528a0",
-    "attempt": 7,
-    "status": "failed native_malicious_envelopes assertionline634 masked unexpecteddriverstate; staticconfirmedSQLpackRECORD vsJSONrangealiascollisionbeforemovement",
+    "head": "071d97289cb4513c3c6faa8c3b4465e8c61ad5c9",
+    "attempt": 8,
+    "status": "maliciousenvelopespass; stockfaultrollbackpass; laterphysicalmarkerregisterFORSHARE42501",
     "expected_backend_total": 8090,
     "expected_new": 49,
-    "workflow": "c895dad2-b11a-4718-ad40-926d424c4e4e",
-    "backend_job": 4133
+    "workflow": "98225ab7-0421-41aa-8897-91c7f98098fb",
+    "backend_job": 4143
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
