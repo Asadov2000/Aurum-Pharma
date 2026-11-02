@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "awaiting_two_failure_exception",
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -73,9 +73,19 @@
       "consecutive": 1,
       "cause": "3INVguardsuseis_support_session/scoped_permission; baseline0062 grantsapp/supportnotprivatecashowner; addedexact2EXECinCORE+235bootstrap, reverseREVOKE; grantor/semanticsapproved.",
       "verification": "Full final-headCIrequired. DiagnosticnowrevealsboundedpermissionobjectorstaticguardcodewithoutSQLparameters."
+    },
+    "native_sale_mixed_probe": {
+      "consecutive": 2,
+      "heads": [
+        "a73a7076b7d4a89cb6065848fed47135550f5110",
+        "67019b53e7bf7aad5164a6709522fc74d2e72a29"
+      ],
+      "cause": "trg_guard_sale_immutability line60: permission_denied_table_unit_stock_cart_command_v2 because native entered app-only mixed_checkout_sale_id probe.",
+      "prepared_fix": "c5036bfe: separate nativephysicalonlyprobe; both agents approved,26forward/reverseexact; currentCI started before duplicatecause confirmed.",
+      "approval": "pending"
     }
   },
-  "blocker": null,
+  "blocker": "Two pre-fix native_write_fault_rollbacks runs a73a7076 and67019b53 hit sharedsaleguardmixedcolumn; fixedc5036 already published before second failure observed. Userexception pending; no more productwrites or merge.",
   "previous_completed": {
     "pr": 443,
     "merged": true,
@@ -118,7 +128,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:51:20.490Z",
+  "updated_at": "2026-11-02T09:59:04.899Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -146,7 +156,9 @@
     "attempt": 7,
     "status": "pending",
     "expected_backend_total": 8090,
-    "expected_new": 49
+    "expected_new": 49,
+    "workflow": "c895dad2-b11a-4718-ad40-926d424c4e4e",
+    "backend_job": 4133
   },
   "completion": {
     "pr": 444,
