@@ -31,8 +31,21 @@
     "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
     "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "Implement native SQL physical cash vertical slice plus actual transaction adapter and genuine LOGIN evidence, securityreview, local targetedchecks and fullCI.",
-  "failure_counters": {},
+  "remaining_step": "Finish0235 native financial writer, exact scoped guard/origin/event/capture/ACL integration and rolebootstrap; genuine LOGIN proof and historicalmigrationtestcompatibility; independentreview; localchecks and final-head fullCI. Runtime remainsDenyAll.",
+  "failure_counters": {
+    "lease_observation_count": {
+      "consecutive": 0,
+      "resolved": "Existing exact sealed-floor event counts updated2->6 for3authorizationspercommand;132tests passed."
+    },
+    "pure_plan_import_cycle": {
+      "consecutive": 0,
+      "resolved": "Required pure helper extraction preserves oldservice aliases;21plan tests passed."
+    },
+    "root_formatting": {
+      "consecutive": 0,
+      "resolved": "Imports and100-column formatting corrected;changedfileRuff/Black passed."
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "pr": 443,
@@ -76,7 +89,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T07:36:13.799Z",
+  "updated_at": "2026-11-02T08:09:03.959Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -87,24 +100,13 @@
     "clean": true
   },
   "local_validation": {
-    "targeted_passed": 198,
-    "new_pure_passed": 39,
-    "new_db_collected": 10,
-    "collected_backend": 8041,
-    "ruff": "app/tests/scripts pass",
-    "black_app_tests": "1080 files pass",
-    "mypy": "533 app sources pass",
-    "safety_guard_tests": 4,
-    "backend_runner_tests": 9,
-    "shell_syntax": "pass",
-    "independent_SQL_and_security_review": "approve",
-    "native_CI_fixture": "implemented and independently reviewed; not executed yet",
+    "authorization_and_kernel_tests": 132,
+    "physical_plan_tests": 21,
+    "wire_scope_tests": 10,
+    "mypy": "2 execution/kernel sources passed; plan module passed separately",
+    "ruff": "changed Python files pass",
     "shared_database": "not accessed",
-    "black_ci_scripts": "pass",
-    "script_full_project_ruff": "pass; import/diagnostic/orchestration corrections verified",
-    "new_namespace_cases": 2,
-    "ci_runner_tests": 28,
-    "independent_namespace_and_QA_review": "approve"
+    "native_financial_proof": "not run; SQL implementation incomplete"
   },
   "ci": null,
   "completion": {
