@@ -131,9 +131,9 @@ BEGIN
   RAISE EXCEPTION 'Native movement batch invalid' USING ERRCODE='22023'; END IF;
  SELECT coalesce(array_agg((value->>'id')::UUID),'{}'::UUID[]) INTO lot_ids
  FROM jsonb_array_elements(p_snapshot);
- SELECT coalesce(array_agg((pack->>'id')::UUID),'{}'::UUID[]) INTO original_packs
+ SELECT coalesce(array_agg((snapshot_pack.value->>'id')::UUID),'{}'::UUID[]) INTO original_packs
  FROM jsonb_array_elements(p_snapshot) batch
- CROSS JOIN LATERAL jsonb_array_elements(batch->'opened_packs') pack;
+ CROSS JOIN LATERAL jsonb_array_elements(batch->'opened_packs') snapshot_pack(value);
  used_aliases:=original_packs;
  FOR line IN SELECT line_id,catalog_id,packaging,sale_format,base_units,position
   FROM public.unit_stock_cart_line_v2

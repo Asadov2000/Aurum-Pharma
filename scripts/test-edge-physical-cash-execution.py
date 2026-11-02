@@ -631,7 +631,8 @@ async def assert_envelope_denials(
                     },
                 )
         except DBAPIError as error:
-            assert getattr(error.orig, "sqlstate", None) in {"22023", "23514", "42501"}
+            if getattr(error.orig, "sqlstate", None) not in {"22023", "23514", "42501"}:
+                raise
         else:
             raise AssertionError("Native SQL accepted a malicious completion envelope")
         assert snapshot(admin, fixture) == before
