@@ -236,6 +236,7 @@ async def completed_fixture(
     )
     from app.domains.pos.repository import POSRepository
     from app.domains.pos.service import POSService
+    from app.domains.pos.unit_cash_intent_service import cash_intent_request_hash
     from app.domains.sync.schemas import OfflineAuthScopeV0
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -269,9 +270,14 @@ async def completed_fixture(
         # Set this native-ledger FK input while still draft, never after completion.
         await session.execute(
             text(
-                "UPDATE public.sale SET operation_id=:operation WHERE id=:sale AND status='draft'"
+                "UPDATE public.sale SET operation_id=:operation,operation_hash=:hash "
+                "WHERE id=:sale AND status='draft'"
             ),
-            {"operation": request.operation_id, "sale": source.sale.id},
+            {
+                "operation": request.operation_id,
+                "hash": cash_intent_request_hash(request),
+                "sale": source.sale.id,
+            },
         )
         result: Checkout
         if kind == "physical_cash":
@@ -450,11 +456,38 @@ async def denied(engine: AsyncEngine, sql: str) -> None:
         raise AssertionError("Native direct access unexpectedly succeeded")
 
 
-async def check_replay(admin: Admin, fixture: Fixture, app_url: URL) -> None:
+def check_namespace_claim_refused(admin: Admin, fixture: Fixture) -> None:
+    scope = fixture.command.scope
+    admin.run(f"""
+DO $case$
+DECLARE v_constraint TEXT;
+BEGIN
+ BEGIN
+  INSERT INTO public.pos_command(
+    tenant_id,operation_id,actor_user_id,sale_id,command_type,request_hash,result_payload)
+  VALUES ({literal(scope.tenant_id)},{literal(fixture.result.operation_id)},
+    {literal(scope.user_id)},{literal(fixture.result.sale_id)},'sale.create',repeat('0',64),'{{}}');
+  RAISE EXCEPTION 'Native cash operation accepted an unrelated command';
+ EXCEPTION WHEN unique_violation THEN
+  GET STACKED DIAGNOSTICS v_constraint=CONSTRAINT_NAME;
+  IF v_constraint IS DISTINCT FROM 'uq_pos_operation_namespace' THEN
+   RAISE EXCEPTION 'Unexpected namespace refusal';
+  END IF;
+ END;
+END $case$;
+""")
+
+
+async def check_replay(
+    admin: Admin, fixture: Fixture, app_url: URL, maintenance: AsyncEngine
+) -> None:
     from app.domains.pos.edge_retail_cash_replay import replay_payload
     from sqlalchemy.exc import DBAPIError
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
+    from tests.isolation.test_edge_retail_cash_replay_migration import (
+        assert_native_history_blocks_downgrade,
+    )
 
     engine = create_async_engine(
         app_url.set(username=fixture.node_role, password=fixture.password),
@@ -468,6 +501,10 @@ async def check_replay(admin: Admin, fixture: Fixture, app_url: URL) -> None:
         assert admin.snapshot(fixture.command.scope.tenant_id) == before
         provision_anchor(admin, fixture)
         before = admin.snapshot(fixture.command.scope.tenant_id)
+        check_namespace_claim_refused(admin, fixture)
+        async with maintenance.begin() as connection:
+            await connection.run_sync(assert_native_history_blocks_downgrade)
+        assert admin.snapshot(fixture.command.scope.tenant_id) == before
         for _ in range(2):
             assert await native_call(engine, payload) == fixture.wrapper().model_dump(mode="json")
         mutations = (
@@ -606,7 +643,7 @@ async def main(diagnostic: DiagnosticState | None = None) -> None:
             provision_identity(admin, fixture)
             fixtures.append(fixture)
             diagnostic.phase = "native_replay_" + kind
-            await check_replay(admin, fixture, app_url)
+            await check_replay(admin, fixture, app_url, maintenance)
         await check_corrupt_anchor(
             admin, support, maintenance, factory, app_url, fixtures, diagnostic
         )

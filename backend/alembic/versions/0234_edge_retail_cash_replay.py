@@ -33,6 +33,141 @@ REPLAY_START = """BEGIN
   END IF;
   IF p_payload ->> 'profile' = 'retail_cash.prepare.v1' THEN"""
 
+NAMESPACE = "public.trg_enforce_pos_operation_namespace()"
+NAMESPACE_PROBE = """  SELECT
+    EXISTS (
+      SELECT 1
+      FROM public.pos_command AS command"""
+NAMESPACE_RETAIL_PROBE = (
+    """  -- One immutable cash checkout shares sale/payment/native command ownership,
+  -- never a second claimant. Other operation types retain their original guards.
+  IF TG_TABLE_NAME IN ('sale','sale_payment','edge_cash_command') THEN
+    v_retail_new:=pg_catalog.to_jsonb(NEW);
+    v_retail_sale_id:=CASE WHEN TG_TABLE_NAME='sale' THEN NEW.id ELSE v_linked_sale_id END;
+    IF TG_TABLE_NAME='sale' THEN
+      v_retail_sale:=v_retail_new;
+    ELSE
+      SELECT pg_catalog.to_jsonb(s) INTO v_retail_sale FROM public.sale s
+      WHERE s.tenant_id=NEW.tenant_id AND s.id=v_retail_sale_id;
+    END IF;
+    IF TG_TABLE_NAME='sale_payment' THEN
+      v_retail_payment:=v_retail_new;
+    ELSE
+      SELECT pg_catalog.to_jsonb(p) INTO v_retail_payment FROM public.sale_payment p
+      WHERE p.tenant_id=NEW.tenant_id AND p.sale_id=v_retail_sale_id
+        AND p.id=NEW.operation_id AND p.operation_id=NEW.operation_id;
+    END IF;
+    SELECT pg_catalog.count(*)=1 INTO v_retail_cash_link
+    FROM (
+      SELECT tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,
+        cash_intent_id,stock_command_id,payment_id,payment_plan_intent_id,
+        payment_journal_version,request_hash,result_payload FROM public.pos_physical_checkout
+      UNION ALL
+      SELECT tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,
+        cash_intent_id,stock_command_id,payment_id,payment_plan_intent_id,
+        payment_journal_version,request_hash,result_payload FROM public.pos_mixed_checkout
+    ) m
+    JOIN public.pos_unit_cash_intent i ON i.tenant_id=m.tenant_id AND i.id=m.cash_intent_id
+    WHERE m.tenant_id=NEW.tenant_id AND m.id=NEW.operation_id AND m.sale_id=v_retail_sale_id
+      AND m.id=m.cash_intent_id AND m.id=m.stock_command_id AND m.id=m.payment_id
+      AND m.payment_plan_intent_id IS NULL AND m.payment_journal_version=2
+      AND (i.sale_id,i.branch_id,i.register_id,i.shift_id,i.cashier_user_id,i.request_hash)
+        IS NOT DISTINCT FROM
+          (m.sale_id,m.branch_id,m.register_id,m.shift_id,m.cashier_user_id,m.request_hash)
+      AND i.currency='TJS'
+      AND v_retail_sale->>'id'=m.sale_id::TEXT
+      AND v_retail_sale->>'tenant_id'=m.tenant_id::TEXT
+      AND v_retail_sale->>'branch_id'=m.branch_id::TEXT
+      AND v_retail_sale->>'register_id'=m.register_id::TEXT
+      AND v_retail_sale->>'shift_id'=m.shift_id::TEXT
+      AND v_retail_sale->>'cashier_user_id'=m.cashier_user_id::TEXT
+      AND v_retail_sale->>'operation_id'=m.id::TEXT
+      AND v_retail_sale->>'operation_hash'=m.request_hash
+      AND v_retail_sale->>'sale_type'='sale'
+      AND v_retail_sale->'parent_sale_id'='null'::JSONB
+      AND v_retail_sale->'is_test'='false'::JSONB
+      AND v_retail_sale->>'status' IN ('draft','completed')
+      AND v_retail_sale->>'currency'='TJS'
+      AND (v_retail_sale->>'total_amount')::NUMERIC=i.expected_total_amount
+      AND m.result_payload->>'total_amount'=
+        pg_catalog.to_char(i.expected_total_amount,'FM999999999990.00')
+      AND v_retail_payment->>'id'=m.payment_id::TEXT
+      AND v_retail_payment->>'tenant_id'=m.tenant_id::TEXT
+      AND v_retail_payment->>'sale_id'=m.sale_id::TEXT
+      AND v_retail_payment->>'operation_id'=m.id::TEXT
+      AND v_retail_payment->>'operation_hash'=m.request_hash
+      AND v_retail_payment->>'payment_method'='cash'
+      AND v_retail_payment->>'currency'='TJS'
+      AND (v_retail_payment->>'amount')::NUMERIC=i.expected_total_amount
+      AND v_retail_payment->'payment_attempt_id'='null'::JSONB
+      AND v_retail_payment->'metadata'='null'::JSONB
+      AND (TG_TABLE_NAME<>'edge_cash_command' OR (
+        v_retail_new->>'sale_id'=m.sale_id::TEXT
+        AND v_retail_new->>'branch_id'=m.branch_id::TEXT
+        AND v_retail_new->>'register_id'=m.register_id::TEXT
+        AND v_retail_new->>'cashier_user_id'=m.cashier_user_id::TEXT
+        AND v_retail_new->>'command_type'='sale.cash.complete'
+        AND v_retail_new->>'sale_status'='completed'
+        AND v_retail_new->>'receipt_number'=v_retail_sale->>'receipt_number'
+        AND v_retail_new->>'currency'='TJS'
+        AND (v_retail_new->>'total_amount')::NUMERIC=i.expected_total_amount))
+      AND m.result_payload->'payments'=pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object('id',m.payment_id,'method','cash',
+          'amount',pg_catalog.to_char(i.expected_total_amount,'FM999999999990.00'),
+          'currency','TJS'));
+  END IF;
+
+""" + NAMESPACE_PROBE
+)
+NAMESPACE_PATCHES = (
+    (
+        "  v_linked_sale_id UUID;",
+        "  v_linked_sale_id UUID;\n  v_retail_sale_id UUID;\n"
+        "  v_retail_new JSONB;\n  v_retail_sale JSONB;\n  v_retail_payment JSONB;\n"
+        "  v_retail_cash_link BOOLEAN:=false;",
+    ),
+    (NAMESPACE_PROBE, NAMESPACE_RETAIL_PROBE),
+    (
+        """          (TG_TABLE_NAME = 'sale' AND sale_row.id = NEW.id)
+          OR (""",
+        """          (TG_TABLE_NAME = 'sale' AND sale_row.id = NEW.id)
+          OR (TG_TABLE_NAME='sale_payment' AND v_retail_cash_link
+              AND sale_row.id=v_retail_sale_id)
+          OR (""",
+    ),
+    (
+        "        AND NOT (TG_TABLE_NAME = 'sale_payment' AND payment.id = NEW.id)",
+        """        AND NOT (
+          (TG_TABLE_NAME = 'sale_payment' AND payment.id = NEW.id)
+          OR (TG_TABLE_NAME IN ('sale','edge_cash_command') AND v_retail_cash_link
+              AND payment.sale_id=v_retail_sale_id AND payment.id=NEW.operation_id)
+        )""",
+    ),
+    (
+        "          OR (TG_TABLE_NAME = 'sale' AND command.sale_id = NEW.id)",
+        """          OR (TG_TABLE_NAME = 'sale' AND command.sale_id = NEW.id)
+          OR (TG_TABLE_NAME='sale_payment' AND v_retail_cash_link
+              AND command.sale_id=v_retail_sale_id)""",
+    ),
+)
+
+
+def _patch_namespace(*, reverse: bool = False) -> None:
+    connection = op.get_bind()
+    definition = connection.exec_driver_sql(
+        f"SELECT pg_catalog.pg_get_functiondef('{NAMESPACE}'::regprocedure)"
+    ).scalar_one()
+    if not isinstance(definition, str):
+        raise RuntimeError("POS operation namespace definition is unavailable")
+    patches = reversed(NAMESPACE_PATCHES) if reverse else NAMESPACE_PATCHES
+    for original, replacement in patches:
+        source, target = (replacement, original) if reverse else (original, replacement)
+        if definition.count(source) != 1:
+            raise RuntimeError("POS operation namespace historical body changed")
+        definition = definition.replace(source, target, 1)
+    # Replacing its actual definition retains OID, owner, ACL and configuration.
+    connection.exec_driver_sql(definition)
+
 
 def _patch_dispatcher(*, reverse: bool = False) -> None:
     connection = op.get_bind()
@@ -293,9 +428,28 @@ def upgrade() -> None:
             f"FOR SELECT TO aurum_edge_cash_owner USING ({_scope(table)})"
         )
     _patch_dispatcher()
+    _patch_namespace()
 
 
 def downgrade() -> None:
+    # The old namespace cannot represent this composite ownership. Refuse before
+    # changing any function, privilege or policy while such history still exists.
+    op.execute("""
+      DO $guard$ BEGIN
+        IF EXISTS(
+          SELECT 1 FROM public.sale s JOIN public.sale_payment p
+            ON p.tenant_id=s.tenant_id AND p.operation_id=s.operation_id
+          WHERE s.operation_id IS NOT NULL
+        ) OR EXISTS(
+          SELECT 1 FROM public.edge_cash_command c JOIN public.sale_payment p
+            ON p.tenant_id=c.tenant_id AND p.operation_id=c.operation_id
+        ) THEN
+          RAISE EXCEPTION 'Native retail cash operation history prevents downgrade'
+            USING ERRCODE='55000';
+        END IF;
+      END $guard$;
+    """)
+    _patch_namespace(reverse=True)
     _patch_dispatcher(reverse=True)
     for table in ("pos_physical_checkout", "pos_mixed_checkout"):
         op.execute(f"DROP POLICY edge_cash_replay_read ON public.{table}")

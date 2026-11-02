@@ -103,6 +103,10 @@ jobs:
           command: "bash ../.circleci/scripts/backend-11.sh"
           working_directory: "~/project/backend"
       - run:
+          name: "Verify native retail cash operation namespace"
+          command: "poetry run pytest tests/domains/pos/test_native_cash_operation_namespace.py -q -x --tb=short"
+          working_directory: "~/project/backend"
+      - run:
           name: "Pytest"
           command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"
