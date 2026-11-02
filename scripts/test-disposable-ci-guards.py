@@ -187,6 +187,28 @@ class NativePhysicalExecutionGuards(NativeReplayGuards):
             )
         )
 
+    def test_database_diagnostic_excludes_sql_parameters_and_invalid_identifiers(self) -> None:
+        class DriverError(Exception):
+            table_name = "sale"
+            column_name = "private@example.test"
+            constraint_name = "native_scope_guard"
+            context = (
+                'SQL statement "SELECT private_value"\n'
+                "PL/pgSQL function complete_edge_physical_cash_v1(uuid,jsonb) line 14 at PERFORM"
+            )
+
+        diagnostic = self.proof["database_diagnostic"](DriverError("private_parameter"))
+        self.assertEqual(
+            diagnostic,
+            {
+                "db_table": "sale",
+                "db_column": None,
+                "db_constraint": "native_scope_guard",
+                "db_function": "complete_edge_physical_cash_v1",
+                "db_line": "14",
+            },
+        )
+
 
 class NativePhysicalSmokeGuards(NativeReplayGuards):
     @classmethod

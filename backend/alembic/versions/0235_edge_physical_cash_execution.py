@@ -520,8 +520,8 @@ PATCHES: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "trg_physical_stock_checkout_binding()",
-        "current_user<>'aurum_app'",
-        f"(current_user<>'aurum_app' AND NOT {ACTOR_INVOCER})",
+        "session_user<>'aurum_app'",
+        f"(session_user<>'aurum_app' AND NOT {CONTEXT})",
     ),
     (
         "trg_physical_checkout_guard()",

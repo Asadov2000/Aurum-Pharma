@@ -13,6 +13,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import runpy
 import secrets
 from collections.abc import Callable
@@ -53,6 +54,29 @@ class Diagnostic:
     phase: str = "entry_guard"
 
 
+def database_diagnostic(error: Exception) -> dict[str, str | None]:
+    """Whitelist object identifiers; never expose SQL, parameters or row values."""
+    details: dict[str, str | None] = dict.fromkeys(
+        ("db_table", "db_column", "db_constraint", "db_function", "db_line")
+    )
+    driver = getattr(error, "orig", error)
+    driver = getattr(driver, "__cause__", None) or driver
+    for key, attribute in (
+        ("db_table", "table_name"),
+        ("db_column", "column_name"),
+        ("db_constraint", "constraint_name"),
+    ):
+        value = getattr(driver, attribute, None)
+        if isinstance(value, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            details[key] = value
+    context = getattr(driver, "context", None)
+    if isinstance(context, str):
+        match = re.search(r"PL/pgSQL function ([a-z_][a-z0-9_]*)\([^\n]*?\) line ([0-9]+)", context)
+        if match:
+            details["db_function"], details["db_line"] = match.groups()
+    return details
+
+
 @dataclass(frozen=True)
 class Fixture:
     command: EdgeRetailCashCommandV1
@@ -60,6 +84,7 @@ class Fixture:
     initial_units: int
     node_role: str
     password: str = field(repr=False)
+    existing_pack_id: UUID | None = None
 
 
 @dataclass
@@ -131,7 +156,9 @@ async def draft_fixture(
     support: AsyncEngine,
     maintenance: AsyncEngine,
     app_factory: async_sessionmaker[AsyncSession],
-    sale_format: SaleFormatV2,
+    lines: tuple[tuple[SaleFormatV2, int], ...],
+    *,
+    existing_fragment: bool = False,
 ) -> Fixture:
     from app.domains.pos.edge_retail_cash import EdgeRetailCashCommandV1
     from app.domains.sync.schemas import OfflineAuthScopeV0
@@ -143,6 +170,7 @@ async def draft_fixture(
         set_receiving_context,
     )
     from tests.domains.inventory.test_unit_ledger import seed_ledger_context
+    from tests.domains.inventory.test_unit_ledger_v2_dispensing import cart_line, dispense
     from tests.domains.pos.test_retail_checkout_event_producer_integration import enable_gate
     from tests.domains.pos.test_unit_physical_cart import put_physical
     from tests.domains.pos.test_unit_physical_checkout_preparation import (
@@ -161,7 +189,27 @@ async def draft_fixture(
         await enable_gate(session, maintenance)
         await enable_stock_gate(session, maintenance)
         source = await checkout_source(session)
-        await put_physical(session, source.sale.id, sale_format=sale_format, quantity=1)
+        existing_pack_id = None
+        if existing_fragment:
+            # Genuine app dispensing establishes a fragment before handoff;
+            # no completed sale or native monetary anchor is manufactured.
+            await dispense(session, source.stock, (cart_line(source.stock, "unit", 25),))
+            existing_pack_id = await session.scalar(
+                text(
+                    "SELECT id FROM public.unit_stock_opened_pack_v2 "
+                    "WHERE lot_id=:lot AND remaining_units=5"
+                ),
+                {"lot": source.stock.lot_id},
+            )
+            assert isinstance(existing_pack_id, UUID)
+        for position, (sale_format, quantity) in enumerate(lines, 1):
+            await put_physical(
+                session,
+                source.sale.id,
+                position=position,
+                sale_format=sale_format,
+                quantity=quantity,
+            )
         request = await saved_request(session, source.sale)
         initial_units = int(
             await session.scalar(
@@ -192,6 +240,7 @@ async def draft_fixture(
         initial_units,
         "aurum_edge_node_" + scope.edge_node_id.hex,
         secrets.token_hex(32),
+        existing_pack_id,
     )
 
 
@@ -350,6 +399,115 @@ SELECT jsonb_build_object(
         "sequence": 2,
         "remaining_units": fixture.initial_units - sum(line.base_units for line in result.lines),
     }
+    if len(result.lines) == 3 or fixture.existing_pack_id is not None:
+        assert_allocator_state(admin, fixture, result)
+
+
+def assert_allocator_state(
+    admin: AdminAPI,
+    fixture: Fixture,
+    result: PhysicalCheckoutResultV3,
+) -> None:
+    raw = admin.run(f"""
+SELECT jsonb_build_object(
+ 'closed',(SELECT closed_packs FROM public.unit_stock_lot_v2
+   WHERE tenant_id={literal(fixture.command.scope.tenant_id)} AND id={literal(fixture.lot_id)}),
+ 'movements',(SELECT jsonb_agg(jsonb_build_object(
+   'kind',kind,'line_id',line_id,'pack_id',pack_id,'units',units_taken,
+   'closed_delta',closed_delta,'before',before_state,'after',after_state) ORDER BY entry_order)
+   FROM public.unit_stock_movement_v2
+   WHERE tenant_id={literal(fixture.command.scope.tenant_id)}
+    AND command_id={literal(result.operation_id)}),
+ 'packs',(SELECT jsonb_agg(jsonb_build_object('id',id,'state',state,
+   'remaining',remaining_units) ORDER BY id) FROM public.unit_stock_opened_pack_v2
+   WHERE tenant_id={literal(fixture.command.scope.tenant_id)}
+    AND lot_id={literal(fixture.lot_id)}));
+""")
+    facts = json.loads(raw)
+    movements, packs = facts["movements"], facts["packs"]
+    assert len(packs) == 1
+    assert len({line.catalog_id for line in result.lines}) == 1
+    if fixture.existing_pack_id is not None:
+        assert [(line.sale_format, line.quantity, line.base_units) for line in result.lines] == [
+            ("unit", 2, 2)
+        ]
+        before = {
+            "intact_blisters": [],
+            "opened_blisters": [{"number": 3, "remaining_units": 5}],
+            "loose_units": 0,
+        }
+        after = {
+            "intact_blisters": [],
+            "opened_blisters": [{"number": 3, "remaining_units": 3}],
+            "loose_units": 0,
+        }
+        assert facts["closed"] == 1 and fixture.initial_units == 35
+        assert movements == [
+            {
+                "kind": "unit_take",
+                "line_id": str(result.lines[0].id),
+                "pack_id": str(fixture.existing_pack_id),
+                "units": 2,
+                "closed_delta": 0,
+                "before": before,
+                "after": after,
+            }
+        ]
+        assert packs == [{"id": str(fixture.existing_pack_id), "remaining": 3, "state": after}]
+    else:
+        assert [(line.sale_format, line.quantity, line.base_units) for line in result.lines] == [
+            ("pack", 1, 30),
+            ("blister", 1, 10),
+            ("unit", 2, 2),
+        ]
+        full = {"intact_blisters": [1, 2, 3], "opened_blisters": [], "loose_units": 0}
+        blister = {"intact_blisters": [2, 3], "opened_blisters": [], "loose_units": 0}
+        after = {
+            "intact_blisters": [3],
+            "opened_blisters": [{"number": 2, "remaining_units": 8}],
+            "loose_units": 0,
+        }
+        pack_id = packs[0]["id"]
+        assert facts["closed"] == 0 and fixture.initial_units == 60
+        assert movements == [
+            {
+                "kind": "pack_take",
+                "line_id": str(result.lines[0].id),
+                "pack_id": None,
+                "units": 30,
+                "closed_delta": -1,
+                "before": None,
+                "after": None,
+            },
+            {
+                "kind": "pack_open",
+                "line_id": str(result.lines[1].id),
+                "pack_id": pack_id,
+                "units": 0,
+                "closed_delta": -1,
+                "before": None,
+                "after": full,
+            },
+            {
+                "kind": "blister_take",
+                "line_id": str(result.lines[1].id),
+                "pack_id": pack_id,
+                "units": 10,
+                "closed_delta": 0,
+                "before": full,
+                "after": blister,
+            },
+            {
+                "kind": "unit_take",
+                "line_id": str(result.lines[2].id),
+                "pack_id": pack_id,
+                "units": 2,
+                "closed_delta": 0,
+                "before": blister,
+                "after": after,
+            },
+        ]
+        assert packs == [{"id": pack_id, "remaining": 18, "state": after}]
 
 
 def close_shift_fixture(
@@ -648,10 +806,23 @@ async def main(diagnostic: Diagnostic | None = None) -> None:
     factory = async_sessionmaker(app, expire_on_commit=False)
     fixtures: list[Fixture] = []
     try:
-        for sale_format in ("pack", "blister", "unit"):
-            diagnostic.phase = "app_draft_" + sale_format
-            fixture = await draft_fixture(support, maintenance, factory, sale_format)
-            diagnostic.phase = "synthetic_activation_" + sale_format
+        cases: tuple[tuple[str, tuple[tuple[SaleFormatV2, int], ...], bool], ...] = (
+            ("pack", (("pack", 1),), False),
+            ("blister", (("blister", 1),), False),
+            ("unit", (("unit", 1),), False),
+            ("shared_pack", (("pack", 1), ("blister", 1), ("unit", 2)), False),
+            ("existing_fragment", (("unit", 2),), True),
+        )
+        for name, lines, existing_fragment in cases:
+            diagnostic.phase = "app_draft_" + name
+            fixture = await draft_fixture(
+                support,
+                maintenance,
+                factory,
+                lines,
+                existing_fragment=existing_fragment,
+            )
+            diagnostic.phase = "synthetic_activation_" + name
             provision_active_identity(admin, fixture)
             fixtures.append(fixture)
             await check_fixture(admin, fixture, app_url, diagnostic, maintenance)
@@ -670,7 +841,8 @@ async def main(diagnostic: Diagnostic | None = None) -> None:
         await maintenance.dispose()
     print(
         "Native physical cash execution checks passed "
-        "(3 formats, genuine monetary anchors, rollback, replay, gates enabled)."
+        "(3 formats, mixed-formats, existing-fragment, genuine monetary anchors, "
+        "rollback, replay, gates enabled)."
     )
 
 
@@ -687,6 +859,7 @@ if __name__ == "__main__":
                     "error": type(error).__name__,
                     "sqlstate": getattr(error, "sqlstate", None)
                     or getattr(getattr(error, "orig", None), "sqlstate", None),
+                    **database_diagnostic(error),
                 }
             )
         )

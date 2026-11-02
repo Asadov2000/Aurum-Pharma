@@ -121,7 +121,17 @@ def invoke_proof(environment: Mapping[str, str]) -> None:
             if (
                 isinstance(failure, dict)
                 and set(failure)
-                == {"native_physical_execution_proof", "phase", "error", "sqlstate"}
+                == {
+                    "native_physical_execution_proof",
+                    "phase",
+                    "error",
+                    "sqlstate",
+                    "db_table",
+                    "db_column",
+                    "db_constraint",
+                    "db_function",
+                    "db_line",
+                }
                 and all(
                     value is None or re.fullmatch(r"[A-Za-z0-9_]+", str(value))
                     for value in failure.values()
