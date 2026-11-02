@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from tests.isolation.test_physical_cash_checkout_migration import at_native_revision
 
 DISPATCHER = "public.dispatch_edge_cash_sale_v1(uuid,uuid,bigint,uuid,jsonb,text)"
 HELPER = "public.replay_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)"
@@ -171,6 +172,11 @@ async def test_native_replay_roundtrip_preserves_existing_dispatcher_and_helpers
     async with maintenance_engine.connect() as connection:
         transaction = await connection.begin()
         try:
-            await connection.run_sync(lambda sync: _roundtrip(sync, owner_execute))
+
+            def rehearse(sync: Connection) -> None:
+                with at_native_revision(sync, "0234"):
+                    _roundtrip(sync, owner_execute)
+
+            await connection.run_sync(rehearse)
         finally:
             await transaction.rollback()

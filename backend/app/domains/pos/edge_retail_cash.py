@@ -81,9 +81,32 @@ class EdgeRetailCashLeaseVerifierV1(Protocol):
     ) -> VerifiedOfflineLeasePrincipalV1: ...
 
 
+class EdgeRetailCashReplayStateV1(FrozenContract):
+    """Historical recovery makes no claim about today's writer or node status."""
+
+    scope: OfflineAuthScopeV0
+    kind: EdgeRetailCashKind
+    sale_id: UUID
+    shift_id: UUID
+    is_test: Literal[False] = False
+    saved_confirmation: CashConfirmationRequestV2
+
+    @field_validator("is_test", mode="before")
+    @classmethod
+    def production_sale(cls, value: object) -> object:
+        if value is not False:
+            raise ValueError("Edge retail cash replay requires a production sale")
+        return value
+
+
+type EdgeRetailCashTransactionStateV1 = (
+    EdgeRetailCashExecutionStateV1 | EdgeRetailCashReplayStateV1
+)
+
+
 class EdgeRetailCashExecutorV1(Protocol):
     @property
-    def state(self) -> EdgeRetailCashExecutionStateV1: ...
+    def state(self) -> EdgeRetailCashTransactionStateV1: ...
 
     async def complete(
         self, *, command: EdgeRetailCashCommandV1
@@ -125,8 +148,18 @@ def _assert_principal(
 
 
 def _assert_execution_state(
-    state: EdgeRetailCashExecutionStateV1, command: EdgeRetailCashCommandV1
+    state: EdgeRetailCashTransactionStateV1, command: EdgeRetailCashCommandV1
 ) -> None:
+    if isinstance(state, EdgeRetailCashReplayStateV1):
+        if (
+            state.scope != command.scope
+            or state.kind != command.kind
+            or state.sale_id != command.confirmation.sale_id
+            or state.is_test is not False
+            or state.saved_confirmation != command.confirmation
+        ):
+            raise OfflineAuthContractError("Historical execution state differs from the command")
+        return
     if (
         state.scope != command.scope
         or state.writer_mode != "edge"
@@ -142,7 +175,7 @@ def _assert_execution_state(
 def _validated_result(
     raw: PhysicalCheckoutResultV3 | MixedCheckoutResultV4,
     command: EdgeRetailCashCommandV1,
-    state: EdgeRetailCashExecutionStateV1,
+    state: EdgeRetailCashTransactionStateV1,
 ) -> PhysicalCheckoutResultV3 | MixedCheckoutResultV4:
     result: PhysicalCheckoutResultV3 | MixedCheckoutResultV4
     if command.kind == "physical_cash" and type(raw) is PhysicalCheckoutResultV3:
@@ -174,6 +207,17 @@ class EdgeRetailCashKernelV1:
         self.verifier = verifier
         self.execution = execution
 
+    async def _reauthorize(
+        self,
+        lease: SignedOfflineAuthLeaseV1,
+        command: EdgeRetailCashCommandV1,
+        original: VerifiedOfflineLeasePrincipalV1,
+    ) -> None:
+        current = await self.verifier.authorize(lease, "sale.cash.complete")
+        _assert_principal(current, lease, command)
+        if current != original:
+            raise OfflineAuthContractError("Cash authorization changed during the transaction")
+
     async def complete(
         self, *, lease: SignedOfflineAuthLeaseV1, command: EdgeRetailCashCommandV1
     ) -> PhysicalCheckoutResultV3 | MixedCheckoutResultV4:
@@ -184,12 +228,25 @@ class EdgeRetailCashKernelV1:
         _assert_principal(principal, lease, command)
         result: PhysicalCheckoutResultV3 | MixedCheckoutResultV4 | None = None
         async with self.execution.transaction(principal=principal, command=command) as executor:
-            state = EdgeRetailCashExecutionStateV1.model_validate(
-                executor.state.model_dump(mode="python")
-            )
+            raw_state = executor.state
+            state: EdgeRetailCashTransactionStateV1
+            if type(raw_state) is EdgeRetailCashReplayStateV1:
+                state = EdgeRetailCashReplayStateV1.model_validate(
+                    raw_state.model_dump(mode="python")
+                )
+            else:
+                state = EdgeRetailCashExecutionStateV1.model_validate(
+                    raw_state.model_dump(mode="python")
+                )
             _assert_execution_state(state, command)
+            # SQL locks may have waited past the original trusted-time admission.
+            await self._reauthorize(lease, command, principal)
             raw = await executor.complete(command=command)
-            result = _validated_result(raw, command, state)
+            validated = _validated_result(raw, command, state)
+            # Recheck through the trusted verifier, never the ordinary host clock.
+            # Failure exits the native transaction with an exception and rolls it back.
+            await self._reauthorize(lease, command, principal)
+            result = validated
         # An unsuccessful __aexit__/durable commit must never expose a sale result.
         if result is None:
             raise OfflineAuthContractError("Cash execution transaction did not complete")

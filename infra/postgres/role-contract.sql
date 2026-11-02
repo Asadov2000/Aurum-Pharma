@@ -885,7 +885,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 234 THEN
+        IF revision_number < 1 OR revision_number > 235 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -1624,3 +1624,55 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Native physical cash execution: revision0235 exact private helper and write surface.
+DO $native_physical$
+DECLARE revision TEXT; spec RECORD; function_oid OID;
+BEGIN
+ SELECT version_num INTO revision FROM public.alembic_version;
+ IF revision::INTEGER >=235 THEN
+  FOR spec IN SELECT * FROM (VALUES
+   ('public.edge_physical_uuid5_v1(uuid,text)','plpgsql',true,'i'),
+   ('public.edge_physical_pack_take_v1(jsonb,jsonb,text,bigint)','plpgsql',false,'i'),
+   ('public.edge_physical_post_v1(uuid,uuid,uuid,uuid,uuid,uuid,text,integer,bigint,bigint,jsonb,jsonb,jsonb)','plpgsql',false,'v'),
+   ('public.edge_physical_allocate_v1(uuid,uuid,jsonb,date,jsonb)','plpgsql',false,'v'),
+   ('public.native_edge_physical_actor_v1(uuid,uuid,uuid,uuid)','sql',true,'s'),
+   ('public.native_edge_physical_context_v1()','sql',true,'s'),
+   ('public.lock_native_physical_gates_v1(uuid,uuid,uuid,uuid)','plpgsql',true,'v'),
+   ('public.emit_native_physical_retail_event_v1(uuid,uuid,uuid)','plpgsql',false,'v'),
+   ('public.complete_edge_physical_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)','plpgsql',false,'v')
+  ) AS allowed(signature,language,definer,volatility) LOOP
+   function_oid:=pg_catalog.to_regprocedure(spec.signature);
+   IF function_oid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM pg_catalog.pg_proc routine
+    JOIN pg_catalog.pg_roles owner ON owner.oid=routine.proowner
+    JOIN pg_catalog.pg_language language ON language.oid=routine.prolang
+    WHERE routine.oid=function_oid AND owner.rolname='aurum_schema_owner'
+      AND language.lanname=spec.language AND routine.prosecdef=spec.definer
+      AND routine.provolatile::TEXT=spec.volatility
+      AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp','row_security=on']::TEXT[]
+   ) THEN RAISE EXCEPTION 'Native physical execution helper metadata is unsafe'; END IF;
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,aurum_app,aurum_support,aurum_edge_cash_executor,aurum_edge_cash_owner',spec.signature);
+   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aurum_edge_cash_owner',spec.signature);
+  END LOOP;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_remaining(jsonb,jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_initial_state(jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_assert_transition(jsonb,jsonb,jsonb,text,bigint) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_incoming_uuid5(text) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.assert_unit_cart_v2_complete(uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.allocate_register_receipt(uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.assert_retail_event_source(uuid,uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.reserve_retail_checkout_event_position(uuid,uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.store_retail_checkout_event(uuid,uuid,uuid,bytea,text,text,text) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.retail_event_hash(jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.retail_event_canonical_json(jsonb) TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,branch_id,actor_id,request_hash,retail_version,currency,created_by,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,quantity,base_units,created_by,original_retail_unit_price,gross_amount,discount_amount,net_amount) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (id,tenant_id,branch_id,catalog_id,command_id,line_id,lot_id,pack_id,kind,entry_order,closed_delta,units_taken,sealed_start,sealed_count,before_state,after_state,created_by) ON public.unit_stock_movement_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,cash_intent_id,stock_command_id,payment_id,payment_journal_version,request_hash,result_payload,receipt_payload,created_by) ON public.pos_physical_checkout TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,physical_checkout_id,sale_id,method,amount,currency,created_by) ON public.pos_unit_checkout_payment_component TO aurum_edge_cash_owner;
+  GRANT SELECT (initial_closed_packs,initial_opened_packs) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (tenant_id,id,branch_id,actor_id,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,base_units) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;
+ END IF;
+END $native_physical$;

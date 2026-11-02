@@ -178,5 +178,95 @@ class NativeReplayGuards(unittest.TestCase):
             docker.assert_not_called()
 
 
+class NativePhysicalExecutionGuards(NativeReplayGuards):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.proof = runpy.run_path(
+            str(
+                Path(__file__).resolve().parents[1] / "scripts/test-edge-physical-cash-execution.py"
+            )
+        )
+
+
+class NativePhysicalSmokeGuards(NativeReplayGuards):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.proof = runpy.run_path(
+            str(Path(__file__).resolve().parents[1] / "scripts/test-edge-physical-cash-smoke.py")
+        )
+
+    def test_clone_target_changes_only_database(self) -> None:
+        clone = "aurum_native_" + "a" * 32 + "_test"
+        environment = self.environment()
+        result = self.proof["clone_environment"](environment, clone)
+        for name in ("DATABASE_URL_APP", "DATABASE_URL_SUPPORT", "DATABASE_URL_MIGRATION"):
+            self.assertEqual(result[name], environment[name].removesuffix("aurum_test") + clone)
+        self.assertEqual(environment, self.environment())
+        for unsafe in ("aurum_test", "production", "aurum_native_short_test", "../aurum_test"):
+            with self.subTest(target=unsafe), self.assertRaises(RuntimeError):
+                self.proof["clone_environment"](environment, unsafe)
+
+    def test_all_test_and_worker_database_urls_follow_the_clone(self) -> None:
+        clone = "aurum_native_" + "b" * 32 + "_test"
+        environment = self.environment()
+        environment["TEST_DATABASE_URL_APP"] = environment["DATABASE_URL_APP"]
+        environment["DATABASE_URL_WORKER"] = (
+            "postgresql+asyncpg://aurum_worker:unused@localhost:5432/aurum_test"
+        )
+        result = self.proof["clone_environment"](environment, clone)
+        for name in ("TEST_DATABASE_URL_APP", "DATABASE_URL_WORKER"):
+            self.assertTrue(result[name].endswith("/" + clone))
+        self.assertTrue(environment["TEST_DATABASE_URL_APP"].endswith("/aurum_test"))
+
+    def test_external_or_different_test_database_is_refused(self) -> None:
+        clone = "aurum_native_" + "c" * 32 + "_test"
+        for url in (
+            "postgresql+asyncpg://aurum_app:unused@localhost:5432/another_test",
+            "postgresql+asyncpg://aurum_app:unused@external.test:5432/aurum_test",
+        ):
+            with self.subTest(url=url):
+                environment = self.environment()
+                environment["TEST_DATABASE_URL_APP"] = url
+                with self.assertRaisesRegex(RuntimeError, "Every configured database"):
+                    self.proof["clone_environment"](environment, clone)
+
+    def test_failed_proof_drops_only_its_created_clone(self) -> None:
+        statements: list[str] = []
+
+        class Admin:
+            def __init__(self, _container: str, _database: str) -> None:
+                pass
+
+            def run(self, sql: str) -> str:
+                statements.append(sql)
+                if "pg_stat_activity" in sql:
+                    return "0"
+                if "SELECT oid FROM pg_catalog.pg_database" in sql:
+                    return "114455"
+                if "pg_catalog.pg_roles" in sql:
+                    return "[]"
+                return ""
+
+        with (
+            mock.patch.dict(os.environ, self.environment(), clear=True),
+            mock.patch.dict(
+                self.proof["main"].__globals__,
+                {
+                    "_helper": {"Admin": Admin},
+                    "fingerprint": mock.Mock(return_value="unchanged"),
+                    "invoke_proof": mock.Mock(side_effect=RuntimeError("injected proof failure")),
+                },
+            ),
+            self.assertRaisesRegex(RuntimeError, "injected proof failure"),
+        ):
+            asyncio.run(self.proof["main"]())
+        created = [sql for sql in statements if sql.startswith("CREATE DATABASE")]
+        dropped = [sql for sql in statements if sql.startswith("DROP DATABASE")]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(dropped[0].split()[2], created[0].split()[2])
+        self.assertNotEqual(dropped[0], 'DROP DATABASE "aurum_test"')
+
+
 if __name__ == "__main__":
     unittest.main()

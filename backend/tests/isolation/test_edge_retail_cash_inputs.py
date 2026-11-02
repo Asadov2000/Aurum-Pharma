@@ -23,6 +23,8 @@ PHYSICAL_COLUMNS = {
         "created_at",
         "packaging",
         "closed_packs",
+        "initial_closed_packs",
+        "initial_opened_packs",
         "is_blocked",
     },
     "unit_stock_opened_pack_v2": {

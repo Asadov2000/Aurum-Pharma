@@ -107,6 +107,10 @@ jobs:
           command: "poetry run pytest tests/domains/pos/test_edge_retail_cash_replay.py -q -x --tb=short"
           working_directory: "~/project/backend"
       - run:
+          name: "Verify isolated native physical cash execution"
+          command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database poetry run python ../scripts/test-edge-physical-cash-smoke.py"
+          working_directory: "~/project/backend"
+      - run:
           name: "Pytest"
           command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"

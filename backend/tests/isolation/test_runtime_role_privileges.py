@@ -303,6 +303,15 @@ PRIVATE_VIEW_ROLES = {
 }
 
 CUSTOM_FUNCTIONS = {
+    "edge_physical_uuid5_v1",
+    "edge_physical_pack_take_v1",
+    "edge_physical_post_v1",
+    "edge_physical_allocate_v1",
+    "native_edge_physical_actor_v1",
+    "native_edge_physical_context_v1",
+    "lock_native_physical_gates_v1",
+    "emit_native_physical_retail_event_v1",
+    "complete_edge_physical_cash_v1",
     "replay_edge_retail_cash_v1",
     "lock_edge_retail_cash_inputs_v1",
     "lock_edge_retail_cash_draft_v1",
@@ -1791,6 +1800,31 @@ def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
 
 
 def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
+    for row in function_privileges:
+        if row["proname"] not in {
+            "edge_physical_uuid5_v1",
+            "edge_physical_pack_take_v1",
+            "edge_physical_post_v1",
+            "edge_physical_allocate_v1",
+            "native_edge_physical_actor_v1",
+            "native_edge_physical_context_v1",
+            "lock_native_physical_gates_v1",
+            "emit_native_physical_retail_event_v1",
+            "complete_edge_physical_cash_v1",
+        }:
+            continue
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["proconfig"] == ["search_path=pg_catalog, pg_temp", "row_security=on"]
+        assert row["is_security_definer"] is (
+            row["proname"]
+            in {
+                "edge_physical_uuid5_v1",
+                "native_edge_physical_actor_v1",
+                "native_edge_physical_context_v1",
+                "lock_native_physical_gates_v1",
+            }
+        )
     replay = next(
         row for row in function_privileges if row["proname"] == "replay_edge_retail_cash_v1"
     )
