@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
+  "expected_head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -92,6 +92,10 @@
     "native_register_lock": {
       "consecutive": 1,
       "cause": "INVOKERphysicalcheckoutguard SELECTregisterFORSHAREneedsUPDATEpriv; exactUPDATEid+scopedpermissive/restrictiveRLSWITHCHECKfalse added; bootstrapfailsifpolicy/RLSunsafe;2newregressionscollected."
+    },
+    "register_force_assumption": {
+      "consecutive": 1,
+      "cause": "0003registerENABLEonly,0067owner=schemaowner; guard nowchecksENABLE+exactschemaowner+sameprivateownerrestrictivefalsepolicy; QAchecksprivateownerNOSUPER/NOBYPASS/noowner-membership insteadFORCE."
     }
   },
   "blocker": null,
@@ -137,7 +141,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T10:30:05.630Z",
+  "updated_at": "2026-11-02T10:42:29.692Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -159,11 +163,11 @@
     "build_reuse": 8,
     "shared_database": "not accessed",
     "native_guard_dependencies": "Threeinvokers: exactneededtwoactorEXEC; separatephysicalonlysaleprobe avoids mixedcolumn;26forward+26reverse anchors exact, independentsecurityapproved.",
-    "register_safety": "2newDBcasescollected, Ruff/Black pass; UPDATEidonly, scope/RLS/forced+WITHCHECKfalse+bootstrapguard independentlyreviewed; actualfinancialpasspending."
+    "register_safety": "RLSenabled+tableowner schemaowner separatefromNOSUPER/NOBYPASS/noowner-member cashowner, exactUPDATEidonly+actualidentityscope+WITHCHECKfalse;2newcases; bootstrapguard; independentlyapproved. NoFORCEchanged."
   },
   "ci": {
-    "head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
-    "attempt": 9,
+    "head": "ba19c2c66fd26f52ad93a739e2f5637e04fbec7c",
+    "attempt": 10,
     "status": "pending",
     "expected_backend_total": 8092,
     "expected_new": 51
@@ -302,13 +306,13 @@
     }
   },
   "previous_failed_ci": {
-    "head": "071d97289cb4513c3c6faa8c3b4465e8c61ad5c9",
-    "attempt": 8,
-    "status": "maliciousenvelopespass; stockfaultrollbackpass; laterphysicalmarkerregisterFORSHARE42501",
-    "expected_backend_total": 8090,
-    "expected_new": 49,
-    "workflow": "98225ab7-0421-41aa-8897-91c7f98098fb",
-    "backend_job": 4143
+    "head": "9e5825f3c2cad26b38f940d76c30e9f4343d57ad",
+    "attempt": 9,
+    "status": "newbootstrapguard incorrectly requiredFORCE onbaselineENABLEonly register; actualnewrestrictivepolicy safe, ordinaryRLSenforcesnontableowner",
+    "expected_backend_total": 8092,
+    "expected_new": 51,
+    "workflow": "b831b14d-20a9-47ef-84b6-5d81efefd06d",
+    "backend_job": 4153
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
