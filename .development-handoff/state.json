@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
+  "expected_head": "c5036bfe96e1f189831ae598efcac575840528a0",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -118,7 +118,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:47:57.141Z",
+  "updated_at": "2026-11-02T09:51:20.490Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -138,11 +138,12 @@
     "parallel_contract": 9,
     "cache_contract": 6,
     "build_reuse": 8,
-    "shared_database": "not accessed"
+    "shared_database": "not accessed",
+    "native_guard_dependencies": "Threeinvokers: exactneededtwoactorEXEC; separatephysicalonlysaleprobe avoids mixedcolumn;26forward+26reverse anchors exact, independentsecurityapproved."
   },
   "ci": {
-    "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
-    "attempt": 6,
+    "head": "c5036bfe96e1f189831ae598efcac575840528a0",
+    "attempt": 7,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -284,5 +285,13 @@
     "expected_new": 49,
     "workflow": "c00a1e11-401f-474e-919a-64ae86b39a06",
     "backend_job": 4117
+  },
+  "previous_inflight_ci": {
+    "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
+    "attempt": 6,
+    "status": "superseded before financialproof by proactively found unnecessarymixedcolumnread",
+    "expected_backend_total": 8090,
+    "expected_new": 49,
+    "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
   }
 }
