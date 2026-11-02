@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "76ed71c704f1342f656f7eafc913b3127661db1d",
+  "expected_head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -46,10 +46,16 @@
       "resolved": "Imports and100-column formatting corrected;changedfileRuff/Black passed."
     },
     "sql_historical_patch": {
+      "consecutive": 0,
+      "resolved": "Migration full roundtrip passed both CI nodes after exact20patch correction."
+    },
+    "early_proof_import": {
       "consecutive": 1,
-      "step": "Verify cluster-safe migration roundtrip",
-      "cause": "0235 expected current_user in checkout-binding guard, but0212 changed actual guard to session_user SECURITY DEFINER.",
-      "head": "519f5b03ff8882018d11be086865031116b6ced9"
+      "cause": "New early step lacked PYTHONPATH backend; fixed to existing late-proof convention. Standalone imports locally pass with dummy unreachable DB URLs, no database accessed."
+    },
+    "empty_role_bootstrap": {
+      "consecutive": 1,
+      "cause": "235 rolecontract block read absent alembic_version on pristine PostgreSQL; guard now matches previous conditional blocks; all235 metadata+ACL enforcement preserved."
     }
   },
   "blocker": null,
@@ -95,7 +101,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T08:53:06.981Z",
+  "updated_at": "2026-11-02T09:03:39.047Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -118,8 +124,8 @@
     "shared_database": "not accessed"
   },
   "ci": {
-    "head": "76ed71c704f1342f656f7eafc913b3127661db1d",
-    "attempt": 2,
+    "head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
+    "attempt": 3,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -254,12 +260,12 @@
     }
   },
   "previous_failed_ci": {
-    "head": "519f5b03ff8882018d11be086865031116b6ced9",
-    "attempt": 1,
-    "status": "failed",
+    "head": "76ed71c704f1342f656f7eafc913b3127661db1d",
+    "attempt": 2,
+    "status": "failed import configuration; migration roundtrip success bothnodes; e2e emptybootstrap failure",
     "expected_backend_total": 8090,
     "expected_new": 49,
-    "workflow": "58a20ee0-6e59-40c4-9724-06c646d11acd",
-    "backend_job": 4087
+    "workflow": "3f710844-c9c9-4e47-a99e-a06e9dc36515",
+    "backend_job": 4097
   }
 }
