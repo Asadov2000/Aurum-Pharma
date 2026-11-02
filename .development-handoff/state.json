@@ -4,11 +4,11 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "ci_running",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
-  "expected_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
+  "expected_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
   "validated_sha": null,
   "pr": 444,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -31,7 +31,7 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "Inspect surviving node1 native proof, publish CIordering correction once, complete new final-head CI thenprotectedmerge.",
+  "remaining_step": "Exact-head all8CI success; early39pure noDB checks, full8041pytest, both native proofs; protectedmerge then actualmain treeverification.",
   "failure_counters": {
     "black_ci_scripts": {
       "consecutive": 0,
@@ -75,7 +75,8 @@
       "failed_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
       "step": "Pytest node0 test_identity_migration::test_cluster_safe_upgrade_from_0091_without_reference_privileges",
       "constraint": "role_permission_permission_code_fkey",
-      "reason": "Early integration tests commit actor role seeds;0093 historical permission downgrade now has references. Replace early step with39pure noDB replay tests; namespace integration2cases remain in correctly ordered fullsuite."
+      "reason": "Early integration tests commit actor role seeds;0093 historical permission downgrade now has references. Replace early step with39pure noDB replay tests; namespace integration2cases remain in correctly ordered fullsuite.",
+      "fix_head": "3442f66631103b804ea066ee0d5b9c1d5826817e"
     }
   },
   "blocker": null,
@@ -121,7 +122,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T05:47:35.212Z",
+  "updated_at": "2026-11-02T06:14:32.574Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -132,7 +133,7 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "e3dd3014d2cfba5b5e429bfd5931c9c89a6fc971",
+  "head_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
   "local_validation": {
     "targeted_passed": 198,
     "new_pure_passed": 39,
@@ -154,14 +155,11 @@
     "independent_namespace_and_QA_review": "approve"
   },
   "ci": {
-    "head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
-    "attempt": 3,
-    "status": "node0 failed due early test seed contamination; node1 running",
+    "head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
+    "attempt": 4,
+    "status": "awaiting workflow",
     "expected_backend_total": 8041,
-    "expected_new": 51,
-    "workflow": "cf42e2ec-0196-45d6-8168-420ef15c31ff",
-    "backend_job": 4062,
-    "gate_job": 4066
+    "expected_new": 51
   },
   "completion": {
     "pr": 443,
@@ -276,45 +274,15 @@
     }
   },
   "previous_failed_ci": {
-    "head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
-    "attempt": 2,
-    "status": "failed",
-    "expected_backend_total": 8039,
-    "expected_new": 49,
-    "workflow": "1ec70294-0c87-4395-9ef3-2a2e1b9c7bc5",
-    "backend_job": 4052,
-    "gate_job": 4058,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "failure"
-      }
-    ],
-    "updated_at": "2026-11-01T16:32:10.664Z",
-    "pytest": "success on both nodes; native standalone proof failed before checkout"
+    "head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
+    "attempt": 3,
+    "status": "node0 failed due early test seed contamination; node1 running",
+    "expected_backend_total": 8041,
+    "expected_new": 51,
+    "workflow": "cf42e2ec-0196-45d6-8168-420ef15c31ff",
+    "backend_job": 4062,
+    "gate_job": 4066,
+    "backend_node1": "fullpytest success",
+    "native_proof": "not executed; CircleCI parallel step barrier stops subsequent stages on node0failure"
   }
 }
