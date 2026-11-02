@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
-  "expected_head": "85e9d074bcc5cb522f117527e6e2326556a5703a",
+  "expected_head": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
   "validated_sha": null,
   "pr": 446,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -34,9 +34,12 @@
   "remaining_step": "Read exact PR446 head CI; fix concrete failures within two-failure rule; require all8 final contexts and genuine early/late proofs, then protected expected-head merge.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
+      "consecutive": 0,
+      "resolved_on": "85e9d074bcc5cb522f117527e6e2326556a5703a"
+    },
+    "historical_dispatcher_grant_order": {
       "consecutive": 1,
-      "reason": "Outdated negative proof expected code",
-      "fix_head": "85e9d074bcc5cb522f117527e6e2326556a5703a",
+      "fix_head": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
       "pending_verification": true
     }
   },
@@ -83,7 +86,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T13:54:00Z",
+  "updated_at": "2026-11-02T14:07:21Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -110,10 +113,12 @@
       "shared native transaction and plans"
     ],
     "db_local": "not run",
-    "runtime": "unchanged"
+    "runtime": "unchanged",
+    "dispatcher_grant_order_mock_cases": 4,
+    "dispatcher_grant_order_review": "approved"
   },
   "ci": {
-    "head_sha": "85e9d074bcc5cb522f117527e6e2326556a5703a",
+    "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "status": "pending",
     "required_contexts": 8
   },
@@ -269,11 +274,17 @@
     }
   },
   "previous_failed_ci": {
-    "head_sha": "9c166d4db37340e2ab02ad855a7080acbf4e6921",
-    "workflow": "7f1bba4c-188e-445d-903b-7ddcd36ecd04",
-    "step": "early native physical",
-    "cause": "Cross-kind malicious envelope now reaches existing saved-cart kind conflict23505; expected denial narrowed to23505 and prepare helper only for kind mutation; no SQL changes",
-    "same_cause_failures": 1
+    "head_sha": "85e9d074bcc5cb522f117527e6e2326556a5703a",
+    "workflow": "1fb990c0-0965-4ef4-87c5-442d841b2dce",
+    "step": "test_cluster_safe_upgrade_from_0091_without_reference_privileges",
+    "cause": "236 conditional dispatcher EXEC grant occurred before switching to actual function owner; order corrected to match235; rights preserved",
+    "same_cause_failures": 1,
+    "early_proofs": {
+      "physical_nodes": 2,
+      "mixed_nodes": 2,
+      "cases_each": 5,
+      "status": "passed"
+    }
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
