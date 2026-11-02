@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 25,
+  "generation": 26,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "merged_verified",
-  "run_id": "local-2026-11-01-native-cash-replay-01",
-  "branch": "codex/edge-retail-cash-replay",
-  "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
-  "expected_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-  "validated_sha": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-  "pr": 444,
+  "phase": "implementing",
+  "run_id": "local-2026-11-02-native-physical-cash-01",
+  "branch": "codex/edge-native-physical-cash",
+  "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
+  "expected_head": "0d8f32410f554929e5819e852f0535a13df2adbe",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,68 +18,21 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "E6-06: strictly bound completed native physical/mixed cash command replay using existing immutable edge_cash_command; no new monetary execution or backfill, no historical app-checkout substitution; runtime remains DenyAll.",
+  "scope": "E6-06 first genuine native physical_cash monetary execution: one transaction for stock/payment/receipt/origin/event/native command; actual nodeDB identity; no mixed execution/runtimeactivation/deployment.",
   "acceptance": [
-    "Strict native identity/activation/epoch/request/result anchor and historical cash validation",
-    "Read-only replay after closed shift/changed writer; no stock/payment/receipt writes or anchor creation",
-    "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
-    "Complete final-head CI and protected main merge"
+    "Genuine native LOGIN physical pack/blister/unit posting in one transaction, no synthetic completed anchors.",
+    "Current writer/actor/scope/confirmation/stock enforced through commit; historical exact replay first.",
+    "Atomic rollback and duplicate/concurrency/idempotency; current app and other native profiles unchanged.",
+    "Full final-head mandatory CI, protectedmerge; no runtime/sharedDB/dependencies/purchases."
   ],
-  "remaining_step": "E6-06 native monetary execution/atomic command production still open. On nexttask reread live main/PRs/control and acceptance, keep one localwriter, select next unfinished increment. No deployment or sharedDB migration.",
-  "failure_counters": {
-    "black_ci_scripts": {
-      "consecutive": 0,
-      "reason": "Script formatting mismatch; first invocation default88, second explicit project100. No script changes applied after second failure.",
-      "proposal": ".codex/unit-edge-native-cash-replay-2026-11-01/black-format-proposal.patch",
-      "resolved": "Approved formatting-only patch applied; exact project Black and Ruff/safety checks successful."
-    },
-    "legacy_mixed_policy_expectation": {
-      "consecutive": 0,
-      "failed_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
-      "step": "CI Pytest",
-      "test": "tests/isolation/test_mixed_cash_checkout_migration.py::test_app_policy_binds_tenant_cashier_and_branch_permission",
-      "reason": "Historical exact policy set omits new edge_cash_replay_read. Preserve old policy assertions; add explicit assertions of the new private SELECT policy.",
-      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
-      "resolved": "Corrected fullpytest passed on both nodes in CI4052."
-    },
-    "runtime_function_inventory": {
-      "consecutive": 0,
-      "failed_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
-      "step": "CI Pytest",
-      "reason": "Exact custom function inventory omitted private replay helper; fixed exact inventory and added INVOKER/no-app/no-support/search-path/row-security assertions.",
-      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
-      "resolved": "Corrected fullpytest passed on both nodes in CI4052."
-    },
-    "native_fixture_operation_pair": {
-      "consecutive": 0,
-      "failed_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
-      "step": "Verify Edge cash dispatcher boundary",
-      "phase": "app_checkout_physical_cash",
-      "sqlstate": "23514",
-      "reason": "Standalone fixture sets sale.operation_id without operation_hash; ck_sale_operation_pair0025 rejects draft UPDATE before checkout.",
-      "nodes": [
-        0,
-        1
-      ],
-      "fix_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
-      "resolved": "Physical/mixed real checkout succeeds on bothnodes in early namespace integration tests on b5bce986."
-    },
-    "early_ci_seed_contamination": {
-      "consecutive": 0,
-      "failed_head": "b5bce986f36b8f7bf2cdb1cff3a2cc1cb13da1ba",
-      "step": "Pytest node0 test_identity_migration::test_cluster_safe_upgrade_from_0091_without_reference_privileges",
-      "constraint": "role_permission_permission_code_fkey",
-      "reason": "Early integration tests commit actor role seeds;0093 historical permission downgrade now has references. Replace early step with39pure noDB replay tests; namespace integration2cases remain in correctly ordered fullsuite.",
-      "fix_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-      "resolved": "Final-head CI successful; pure early step leaves no actor seed history. All fullsuite tests passed except the unchanged conditional empty-prescription rehearsal."
-    }
-  },
+  "remaining_step": "Implement native SQL physical cash vertical slice plus actual transaction adapter and genuine LOGIN evidence, securityreview, local targetedchecks and fullCI.",
+  "failure_counters": {},
   "blocker": null,
   "previous_completed": {
     "pr": 443,
@@ -123,7 +76,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T07:09:04.652Z",
+  "updated_at": "2026-11-02T07:36:13.799Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -133,7 +86,6 @@
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
-  "head_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
   "local_validation": {
     "targeted_passed": 198,
     "new_pure_passed": 39,
@@ -154,66 +106,7 @@
     "ci_runner_tests": 28,
     "independent_namespace_and_QA_review": "approve"
   },
-  "ci": {
-    "head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-    "attempt": 4,
-    "status": "success",
-    "expected_backend_total": 8041,
-    "expected_new": 51,
-    "workflow": "95160889-12dd-4de8-94ce-0591ffe73825",
-    "backend_job": 4070,
-    "gate_job": 4074,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success"
-      }
-    ],
-    "backend_passed": 8040,
-    "backend_skips": 1,
-    "new_pytest_cases": 51,
-    "backend_duplicates": 0,
-    "backend_failures": 0,
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "native_snapshot_cases_per_node": 19,
-    "native_nodes_passed": 2,
-    "identity_lifecycle_nodes_passed": 2,
-    "conditional_skip": {
-      "test": "tests.isolation.test_unit_prescription_migration::test_empty_unit_prescription_downgrade_roundtrip",
-      "reason": "Immutable unit prescription history prevents an empty downgrade rehearsal",
-      "companion_nonempty_refusal": "success",
-      "coverage": "Successful pre-pytest fullchain downgrade0055/upgradehead on both CI nodes; no test/gate weakened."
-    }
-  },
+  "ci": null,
   "completion": {
     "pr": 444,
     "merged": true,
@@ -276,14 +169,16 @@
       "closes_control_stage": false
     }
   ],
-  "increment_id": "native-completed-cash-replay",
+  "increment_id": "native-physical-cash-posting",
   "previous_ci": {
-    "head": "2fa45546ec5f9e76e4a61cc4afa5f16553062ac1",
-    "workflow": "b70c9c1f-7e91-47ed-b045-f6d429e7647d",
-    "backend_job": 4030,
-    "gate_job": 4034,
+    "head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
+    "attempt": 4,
     "status": "success",
-    "attempt": 1,
+    "expected_backend_total": 8041,
+    "expected_new": 51,
+    "workflow": "95160889-12dd-4de8-94ce-0591ffe73825",
+    "backend_job": 4070,
+    "gate_job": 4074,
     "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
@@ -318,16 +213,22 @@
         "state": "success"
       }
     ],
-    "backend_passed": 7990,
-    "new_pytest_cases": 0,
+    "backend_passed": 8040,
+    "backend_skips": 1,
+    "new_pytest_cases": 51,
     "backend_duplicates": 0,
-    "backend_skips": 0,
+    "backend_failures": 0,
     "frontend_passed": 3260,
     "e2e_passed": 167,
     "native_snapshot_cases_per_node": 19,
     "native_nodes_passed": 2,
     "identity_lifecycle_nodes_passed": 2,
-    "column_acl_regressions": "success on both nodes: bootstrap/enroll/revoke, system/custom/public, exact access baseline and delegated-grantor atomic refusal"
+    "conditional_skip": {
+      "test": "tests.isolation.test_unit_prescription_migration::test_empty_unit_prescription_downgrade_roundtrip",
+      "reason": "Immutable unit prescription history prevents an empty downgrade rehearsal",
+      "companion_nonempty_refusal": "success",
+      "coverage": "Successful pre-pytest fullchain downgrade0055/upgradehead on both CI nodes; no test/gate weakened."
+    }
   },
   "one_time_exceptions": {
     "black_ci_scripts": {
