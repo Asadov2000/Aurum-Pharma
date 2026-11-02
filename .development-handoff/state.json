@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
-  "expected_head": "78f388171308623ffefb2f956bef191b5c822976",
+  "expected_head": "9c166d4db37340e2ab02ad855a7080acbf4e6921",
   "validated_sha": null,
-  "pr": null,
+  "pr": 446,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Implement SQL236 mixed financial coordinator and exact existing-guard/ACL integration, shared native Python execution and pure mixed plan, genuine LOGIN regression; independent review, local checks, fullCI and protectedmerge.",
+  "remaining_step": "Read exact PR446 head CI; fix concrete failures within two-failure rule; require all8 final contexts and genuine early/late proofs, then protected expected-head merge.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -76,7 +76,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T12:58:03.055Z",
+  "updated_at": "2026-11-02T13:42:48Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -87,9 +87,29 @@
     "clean": true
   },
   "local_validation": {
-    "status": "recon: actualmain78f388;445merged; nooverlappingPR; physicalSQL235accepted; mixed_cashrequiresbothlegacy+physical; preparedunsupported"
+    "head_sha": "9c166d4db37340e2ab02ad855a7080acbf4e6921",
+    "pure_tests_passed": 165,
+    "collected_backend_tests": 8137,
+    "new_pytest_cases": 45,
+    "ruff": "passed",
+    "black": "passed",
+    "mypy_modules": 539,
+    "disposable_guards": 19,
+    "parallel_contract_tests": 9,
+    "cache_contract_tests": 6,
+    "historical_exact_patch_roundtrips": 14,
+    "independent_reviews": [
+      "SQL and privileges",
+      "shared native transaction and plans"
+    ],
+    "db_local": "not run",
+    "runtime": "unchanged"
   },
-  "ci": null,
+  "ci": {
+    "head_sha": "9c166d4db37340e2ab02ad855a7080acbf4e6921",
+    "status": "pending",
+    "required_contexts": 8
+  },
   "completion": {
     "pr": 445,
     "merged": true,
