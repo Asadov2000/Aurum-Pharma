@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
+  "expected_head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -50,12 +50,20 @@
       "resolved": "Migration full roundtrip passed both CI nodes after exact20patch correction."
     },
     "early_proof_import": {
-      "consecutive": 1,
-      "cause": "New early step lacked PYTHONPATH backend; fixed to existing late-proof convention. Standalone imports locally pass with dummy unreachable DB URLs, no database accessed."
+      "consecutive": 0,
+      "resolved": "PYTHONPATH fixed; entry now imports actualmodules."
     },
     "empty_role_bootstrap": {
+      "consecutive": 0,
+      "resolved": "Pristine PostgreSQL stack creation and migration passed attempt3."
+    },
+    "proof_runtime_url": {
       "consecutive": 1,
-      "cause": "235 rolecontract block read absent alembic_version on pristine PostgreSQL; guard now matches previous conditional blocks; all235 metadata+ACL enforcement preserved."
+      "cause": "URL used in runtime cast but imported only TYPE_CHECKING; actualruntimeimport added; guarded main reached inert draft with all DBI/O replaced."
+    },
+    "invoker_private_helper_init": {
+      "consecutive": 1,
+      "cause": "PostgreSQL function ACL checked at expression initialization on app;3INVguards now use lazy nativeonlyIF+defaultfalsebool;26forward/reverseanchors verify exactrestoration; privateEXECnotexpanded."
     }
   },
   "blocker": null,
@@ -101,7 +109,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:03:39.047Z",
+  "updated_at": "2026-11-02T09:19:26.956Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -124,8 +132,8 @@
     "shared_database": "not accessed"
   },
   "ci": {
-    "head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
-    "attempt": 3,
+    "head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
+    "attempt": 4,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -260,12 +268,12 @@
     }
   },
   "previous_failed_ci": {
-    "head": "76ed71c704f1342f656f7eafc913b3127661db1d",
-    "attempt": 2,
-    "status": "failed import configuration; migration roundtrip success bothnodes; e2e emptybootstrap failure",
+    "head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
+    "attempt": 3,
+    "status": "failed standaloneURLNameError; e2e privatehelperexpressioninit; allmigrationroundtrips/bootstrappass",
     "expected_backend_total": 8090,
     "expected_new": 49,
-    "workflow": "3f710844-c9c9-4e47-a99e-a06e9dc36515",
-    "backend_job": 4097
+    "workflow": "fa7ea501-d3d2-45af-a1f6-e41167f23c51",
+    "backend_job": 4105
   }
 }
