@@ -492,6 +492,7 @@ async def check_fixture(
             engine,
             extra_statements=(
                 "SELECT * FROM public.batch",
+                "SELECT purchase_price FROM public.batch LIMIT 0",
                 "SELECT * FROM public.pos_mixed_checkout",
                 "UPDATE public.batch SET qty_remaining=qty_remaining",
                 "UPDATE public.register SET id=id",

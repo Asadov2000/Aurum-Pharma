@@ -187,6 +187,18 @@ async def test_mixed_writer_has_exact_insert_and_select_columns_without_broad_gr
                 )
                 is False
             )
+        # The trusted NOLOGIN coordinator retains the historical batch read
+        # grant. Purchase-price confidentiality applies to untrusted logins.
+        cost_access = (await connection.execute(text("""
+            SELECT has_column_privilege('aurum_edge_cash_executor',
+              'public.batch','purchase_price','SELECT'),
+              EXISTS(SELECT 1 FROM pg_roles node JOIN pg_attribute attribute
+                ON attribute.attrelid='public.batch'::REGCLASS
+                  AND attribute.attname='purchase_price' AND NOT attribute.attisdropped
+                WHERE node.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+                  AND has_column_privilege(node.oid,attribute.attrelid,attribute.attnum,'SELECT'))
+        """))).one()
+    assert tuple(cost_access) == (False, False)
 
 
 async def test_mixed_rls_requires_actual_native_context_and_exclusive_mixed_links(
@@ -256,7 +268,7 @@ async def test_real_application_logins_cannot_invoke_private_mixed_coordinator(r
         await engine.dispose()
 
 
-async def test_private_owner_cannot_forge_native_session_or_export_legacy_costs(
+async def test_private_owner_cannot_forge_native_session_or_mutate_mixed_financial_rows(
     maintenance_engine: AsyncEngine,
 ) -> None:
     command, draft = draft_example("mixed_cash")
@@ -300,7 +312,6 @@ async def test_private_owner_cannot_forge_native_session_or_export_legacy_costs(
                     )
             assert getattr(denied.value.orig, "sqlstate", None) == "42501"
             for sql in (
-                "SELECT purchase_price FROM public.batch LIMIT 0",
                 "UPDATE public.pos_mixed_checkout SET request_hash=request_hash",
                 "INSERT INTO public.pos_unit_checkout_payment_component "
                 "(tenant_id,id,mixed_checkout_id,sale_id,method,amount,currency) "
