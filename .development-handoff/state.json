@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci_running",
+  "phase": "implementing",
   "run_id": "local-2026-11-01-native-cash-replay-01",
   "branch": "codex/edge-retail-cash-replay",
   "base_sha": "159b075eb28c72b2b32b88eb7903fdc35d1b347b",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,7 +31,7 @@
     "Genuine native LOGIN tests with clearly synthetic maintenance-provisioned completed anchors; preserved legacy and migration roundtrip",
     "Complete final-head CI and protected main merge"
   ],
-  "remaining_step": "On resume verify live PR444/main/control ownership and all final-head CI. Inspect8039 tests and both native proof nodes; fix actual first failures respecting persisted counters, protected merge only all8success. No new stage or duplicate writer.",
+  "remaining_step": "Fix only standalone fixture operation pair using approved hash semantics; safe diagnostics; local pure/static checks, review, then samePR final-head complete CI. SharedDB untouched.",
   "failure_counters": {
     "black_ci_scripts": {
       "consecutive": 0,
@@ -40,22 +40,36 @@
       "resolved": "Approved formatting-only patch applied; exact project Black and Ruff/safety checks successful."
     },
     "legacy_mixed_policy_expectation": {
-      "consecutive": 1,
+      "consecutive": 0,
       "failed_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
       "step": "CI Pytest",
       "test": "tests/isolation/test_mixed_cash_checkout_migration.py::test_app_policy_binds_tenant_cashier_and_branch_permission",
       "reason": "Historical exact policy set omits new edge_cash_replay_read. Preserve old policy assertions; add explicit assertions of the new private SELECT policy.",
-      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a"
+      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
+      "resolved": "Corrected fullpytest passed on both nodes in CI4052."
     },
     "runtime_function_inventory": {
-      "consecutive": 1,
+      "consecutive": 0,
       "failed_head": "f2f3ed69357464b1ac0308bbf5f584bf019548e3",
       "step": "CI Pytest",
       "reason": "Exact custom function inventory omitted private replay helper; fixed exact inventory and added INVOKER/no-app/no-support/search-path/row-security assertions.",
-      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a"
+      "fix_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
+      "resolved": "Corrected fullpytest passed on both nodes in CI4052."
+    },
+    "native_fixture_operation_pair": {
+      "consecutive": 1,
+      "failed_head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
+      "step": "Verify Edge cash dispatcher boundary",
+      "phase": "app_checkout_physical_cash",
+      "sqlstate": "23514",
+      "reason": "Standalone fixture sets sale.operation_id without operation_hash; ck_sale_operation_pair0025 rejects draft UPDATE before checkout.",
+      "nodes": [
+        0,
+        1
+      ]
     }
   },
-  "blocker": "User shutting down PC; local continuation stopped. Published CI continues remotely. No automatic cloud/product handoff.",
+  "blocker": null,
   "previous_completed": {
     "pr": 442,
     "merged": true,
@@ -98,7 +112,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-01T16:32:10.664Z",
+  "updated_at": "2026-11-02T05:24:45.014Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -130,7 +144,7 @@
   "ci": {
     "head": "7d57384483a33e0edef8722f20f5eb1ca05c7f2a",
     "attempt": 2,
-    "status": "running",
+    "status": "failed",
     "expected_backend_total": 8039,
     "expected_new": 49,
     "workflow": "1ec70294-0c87-4395-9ef3-2a2e1b9c7bc5",
@@ -140,18 +154,6 @@
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "pending"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "pending"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "pending"
       },
       {
         "context": "ci/circleci: dependency-audit",
@@ -164,9 +166,22 @@
       {
         "context": "ci/circleci: frontend",
         "state": "success"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "failure"
       }
     ],
-    "updated_at": "2026-11-01T16:32:10.664Z"
+    "updated_at": "2026-11-01T16:32:10.664Z",
+    "pytest": "success on both nodes; native standalone proof failed before checkout"
   },
   "completion": {
     "pr": 443,
