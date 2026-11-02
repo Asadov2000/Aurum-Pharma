@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-02-native-physical-cash-01",
   "branch": "codex/edge-native-physical-cash",
   "base_sha": "0d8f32410f554929e5819e852f0535a13df2adbe",
-  "expected_head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
+  "expected_head": "a73a7076b7d4a89cb6065848fed47135550f5110",
   "validated_sha": null,
   "pr": 445,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -58,12 +58,17 @@
       "resolved": "Pristine PostgreSQL stack creation and migration passed attempt3."
     },
     "proof_runtime_url": {
-      "consecutive": 1,
-      "cause": "URL used in runtime cast but imported only TYPE_CHECKING; actualruntimeimport added; guarded main reached inert draft with all DBI/O replaced."
+      "consecutive": 0,
+      "resolved": "Guarded realmainentrypassed; CI reachedactualfinancialscenario."
     },
     "invoker_private_helper_init": {
+      "consecutive": 0,
+      "resolved": "E2Emigration+seedpass,167browserflowstarted;3lazyguardsapproved."
+    },
+    "native_fresh_cash_intent_hash": {
       "consecutive": 1,
-      "cause": "PostgreSQL function ACL checked at expression initialization on app;3INVguards now use lazy nativeonlyIF+defaultfalsebool;26forward/reverseanchors verify exactrestoration; privateEXECnotexpanded."
+      "cause": "235freshSQLreadsrequest_hash omitted from0231narrowgrants; necessary exactSELECTcolumnadded235+rolecontract+liveexactACLtest. No broadrights.",
+      "verification": "NextCI; originalharnessmaskedactualSQLSTATE, nowunexpecteddrivererrorsrethrow+safeproofsite."
     }
   },
   "blocker": null,
@@ -109,7 +114,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T09:19:26.956Z",
+  "updated_at": "2026-11-02T09:33:33.305Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -132,8 +137,8 @@
     "shared_database": "not accessed"
   },
   "ci": {
-    "head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
-    "attempt": 4,
+    "head": "a73a7076b7d4a89cb6065848fed47135550f5110",
+    "attempt": 5,
     "status": "pending",
     "expected_backend_total": 8090,
     "expected_new": 49
@@ -268,12 +273,12 @@
     }
   },
   "previous_failed_ci": {
-    "head": "3ec05377b0c96b5938bc49ce71ca85fb515204bb",
-    "attempt": 3,
-    "status": "failed standaloneURLNameError; e2e privatehelperexpressioninit; allmigrationroundtrips/bootstrappass",
+    "head": "8ce701901bf61086cc5d4de419073d98ebe9789e",
+    "attempt": 4,
+    "status": "failed native_write_fault_rollbacks; actualfreshSELECTrequest_hash missing exactcolumnpermission identified statically; e2eseednowpass",
     "expected_backend_total": 8090,
     "expected_new": 49,
-    "workflow": "fa7ea501-d3d2-45af-a1f6-e41167f23c51",
-    "backend_job": 4105
+    "workflow": "2760063d-7e53-4122-9820-45ea5ec0401d",
+    "backend_job": 4110
   }
 }
