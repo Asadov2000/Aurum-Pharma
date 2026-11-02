@@ -4,7 +4,7 @@
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "fixing_ci",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
@@ -31,19 +31,24 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Read exact PR446 head CI; fix concrete failures within two-failure rule; require all8 final contexts and genuine early/late proofs, then protected expected-head merge.",
+  "remaining_step": "Collect remaining old node0 result; publish actualNode cost-denial and early8test contract; repeat all8 final-head contexts and late proofs, then protected merge.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
       "resolved_on": "85e9d074bcc5cb522f117527e6e2326556a5703a"
     },
     "historical_dispatcher_grant_order": {
+      "consecutive": 0,
+      "resolved_on": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
+      "regression_test": "success"
+    },
+    "legacy_cost_test_subject": {
       "consecutive": 1,
-      "fix_head": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
-      "pending_verification": true
+      "cause": "New test incorrectly expected trusted NOLOGIN owner to lack longstanding batch SELECT; actual untrusted Node must be denied",
+      "prepared_fix": "Move explicit cost read denial to realNode proof; verify executor/native column ACL; retain owner financial deny checks"
     }
   },
-  "blocker": null,
+  "blocker": "One incorrect new test assertion; corrected local patch reviewed before publication, waiting remaining old CI shard to consolidate results.",
   "previous_completed": {
     "pr": 444,
     "merged": true,
@@ -86,7 +91,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T14:19:02Z",
+  "updated_at": "2026-11-02T14:47:53Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -302,5 +307,15 @@
     "expected_backend_total": 8090,
     "expected_new": 49,
     "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
+  },
+  "pending_local_fix": {
+    "files": [
+      "backend/tests/isolation/test_edge_mixed_cash_execution.py",
+      "scripts/test-edge-mixed-cash-execution.py",
+      ".circleci/config.yml"
+    ],
+    "dependency_changes": false,
+    "privilege_changes": false,
+    "new_early_contract_cases": 8
   }
 }
