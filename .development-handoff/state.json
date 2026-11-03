@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 37,
+  "generation": 38,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "ci",
+  "phase": "completed",
   "run_id": "local-2026-11-03-trusted-credential-source-01",
   "branch": "codex/edge-trusted-credential-source",
   "base_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,17 +30,17 @@
     "Concrete existing-file Windows source verifies before decrypt and verifies checkpoint again after decrypt, rejects substitution/rollback/faults, closes before publication and clears secret material on failure/disposal.",
     "Targeted verification, independent review, full exact-head eight CI contexts and protected merge; no dependency change, cloud writer, live Aurum or sharedDB access."
   ],
-  "remaining_step": "Await full exact-head CI for PR449; do not start new stage.",
+  "remaining_step": "Next explicit local continuation: fresh actualmain/HEAD/status/open/recentPR recon. PR449 merged; do not repeat credential bundle/source. Source materials are point-in-time only, not password/time/login/provider proof. Continue nearest trusted enrollment/time/shared SQL transaction provider/service/recovery boundary; keep DenyAll until full acceptance. Cloud/schedulers stay paused. Recovery checkout has single-branch fetch refspec: use explicit git fetch origin refs/heads/main:refs/remotes/origin/main or verify fresh FETCH_HEAD, never assume git fetch origin main refreshes origin/main. Counter2/7(4) until fullE6-06; no live Aurum/sharedDB/hardware provisioning.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
-    "pr": 447,
+    "pr": 448,
     "merged": true,
-    "main": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
-    "merged_at": "2026-11-03T09:49:33Z",
-    "tested_head": "9afd145e17abace52f04a244a674b30d50d26ea5",
-    "tested_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
-    "main_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
+    "main": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+    "merged_at": "2026-11-03T11:19:28Z",
+    "tested_head": "ab80d6557320dd1a897abf41528919d17e151920",
+    "tested_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
+    "main_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
@@ -77,11 +77,11 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T11:49:10.145Z",
+  "updated_at": "2026-11-03T12:35:15.801Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
-    "E6-06: real Windows TPM counter/checkpoint (PR447) and exact-checkpoint-verified full cashier admission metadata source (PR448) are implemented. They do not implement credential verifier/pepper integrity, fresh trusted UTC, authenticated enrollment/policy acceptance, single-owner Windows service/IPC/ACL, a shared-SQL-session trusted login/lease state transaction provider or recovery. Hardware fault/restart/database-restore acceptance remains required before a positive runtime factory.",
+    "E6-06: real Windows TPM counter/checkpoint(PR447), checkpoint-verified full cashier admission metadata(PR448) and exact-checkpoint credential bundle/real TPM pepper reader(PR449) implemented. No login principal or positive runtime. Authenticated enrollment/policy acceptance and credential lifecycle, fresh trusted UTC, single-owner Windows service/IPC/ACL, shared-SQL-session login/lease transaction provider with durable guard/session advancement and recovery/hardware acceptance remain mandatory.",
     "E6-07 controlled delivery compatibility, E6-08 recovery and E6-09 volume/long-offline acceptance remain after E6-06; four control stages total. No new product requirements."
   ],
   "runtime_checkout_verified": {
@@ -105,25 +105,92 @@
     "SQL_access": "none",
     "resolved_harness_findings": [
       "New Python oversize testcase moved out of parameter node ID to avoid Windows environment variable limit;66targetedpass.",
-      "Full collection environment first missingJWT_SECRET, then explicitTEST_REDIS_URL; distinct causes resolved,8290collected."
+      "Full collection environment first missingJWT_SECRET, then explicitTEST_REDIS_URL; distinct causes resolved,8290collected.",
+      "Postmerge fetch origin main updated FETCH_HEAD but not origin/main because recovery checkout has a single-branch fetch refspec. Explicit refs/heads/main:refs/remotes/origin/main fetch confirmed actual main8929099e and exact tested tree37f4838f; no product change or CI repeat."
     ]
   },
   "ci": {
     "head_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
-    "status": "pending",
+    "workflow": "680a3c3f-32ba-4b89-a3f4-a70f5bc80584",
+    "status": "success",
+    "required_contexts": 8,
     "expected_backend": 8290,
     "new_python": 66,
     "expected_desktop": 571,
-    "new_desktop": 109
+    "new_desktop": 109,
+    "backend_job": 4268,
+    "desktop_job": 4272,
+    "gate_job": 4274,
+    "backend_passed": 8290,
+    "backend_skipped": 0,
+    "duplicates": 0,
+    "new_python_passed": 66,
+    "snapshot_regression_cases": 87,
+    "native_regression_cases": 45,
+    "desktop_passed": 571,
+    "new_desktop_passed": 109,
+    "desktop_skipped": 0,
+    "frontend_passed": 3260,
+    "frontend_files": 241,
+    "e2e_passed": 167,
+    "native_early_nodes_passed": 2,
+    "native_post_pytest_nodes_passed": 2,
+    "genuine_physical_cases_per_node": 5,
+    "genuine_mixed_cases_per_node": 5,
+    "legacy_snapshot_cases_per_node": 19,
+    "identity_and_acl_nodes_passed": 2,
+    "workflows_run": 1,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d6cf64ee-a4d2-43c0-b1bf-d5640e1e422d"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/0379df48-4ae7-4de5-aa63-9d64c5259c68"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/8642317c-0250-4366-b0a6-f5cb7f2848e4"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d054cd0f-c114-4c87-9537-2cf5549782a4"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/87380860-6a9d-4abc-ac7e-f1e86d4da7ca"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/fb4f9d3e-3585-48cc-be02-892ce1a23b3f"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/78aa765d-65fe-4037-a7cc-dc7e965343ed"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/606071eb-83c7-44a1-bcec-5970e34e0480"
+      }
+    ]
   },
   "completion": {
-    "pr": 448,
+    "pr": 449,
     "merged": true,
-    "main": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
-    "merged_at": "2026-11-03T11:19:28Z",
-    "tested_head": "ab80d6557320dd1a897abf41528919d17e151920",
-    "tested_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
-    "main_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
+    "main": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+    "merged_at": "2026-11-03T12:33:23Z",
+    "tested_head": "134497db34fc0fc67345a79fc04af145da7cde1a",
+    "tested_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
+    "main_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
@@ -215,76 +282,91 @@
       "ci": "all8success/firstworkflow;8224backend incl87new/no skips/no duplicates;462desktop incl132new;3260frontend;167browser;genuine early/late physical+mixed/ACL proofs onbothnodes",
       "closes_control_stage": false,
       "hardware_acceptance": false
+    },
+    {
+      "pr": 449,
+      "kind": "checkpoint-credential-material-source",
+      "main": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+      "tested_head": "134497db34fc0fc67345a79fc04af145da7cde1a",
+      "tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
+      "ci": "all8success/firstworkflow;8290backend incl66new/no skips/no duplicates;571desktop incl109new;3260frontend;167browser;genuine early/late physical+mixed/ACL proofs onbothnodes",
+      "closes_control_stage": false,
+      "hardware_acceptance": false
     }
   ],
   "increment_id": "checkpoint-credential-material-source",
   "previous_ci": {
-    "head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
-    "attempt": 12,
+    "head_sha": "ab80d6557320dd1a897abf41528919d17e151920",
+    "workflow": "67080d95-4c5f-4e4a-b684-b958bb6dd619",
     "status": "success",
-    "expected_backend_total": 8092,
-    "expected_new": 51,
-    "workflow": "891607f1-a2ad-4f68-aef2-f37dfabc9e05",
-    "backend_job": 4175,
-    "gate_job": 4178,
+    "required_contexts": 8,
+    "expected_backend": 8224,
+    "new_python": 87,
+    "expected_desktop": 462,
+    "new_desktop": 132,
+    "backend_job": 4254,
+    "desktop_job": 4251,
+    "gate_job": 4258,
+    "backend_passed": 8224,
+    "backend_skipped": 0,
+    "duplicates": 0,
+    "new_python_passed": 87,
+    "native_regression_cases": 45,
+    "desktop_passed": 462,
+    "new_desktop_passed": 132,
+    "desktop_skipped": 0,
+    "frontend_passed": 3260,
+    "frontend_files": 241,
+    "e2e_passed": 167,
+    "native_early_nodes_passed": 2,
+    "native_post_pytest_nodes_passed": 2,
+    "genuine_physical_cases_per_node": 5,
+    "genuine_mixed_cases_per_node": 5,
+    "legacy_snapshot_cases_per_node": 19,
+    "identity_and_acl_nodes_passed": 2,
+    "workflows_run": 1,
     "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/1629ac60-8008-4edf-899a-7893e98bd77f"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f5395d58-5d29-4154-b384-eb663839ca71"
       },
       {
         "context": "ci/circleci: dependency-audit",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/54354ade-c806-468b-887e-595e2b28f5dd"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/eeccaf05-9a04-4a36-bf1f-629108d16342"
       },
       {
         "context": "ci/circleci: tooling-windows",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/ad1ebde8-556a-4674-9ef7-a2951cb08305"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/dc2b6a3a-fb0b-4f8b-8937-219eda9d5a99"
       },
       {
         "context": "ci/circleci: frontend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/f3fb7bfc-46c9-42b2-aa4d-94256cc25784"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/059af84a-383b-401e-aaaf-ca99016077fe"
       },
       {
         "context": "ci/circleci: production-containers",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/e1ef8253-d736-4065-9183-5eab78480d64"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f7a76655-c393-44c0-b28e-dce9e2119e4d"
       },
       {
         "context": "ci/circleci: e2e",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/4d4b6051-ab85-472e-a7f5-bfbe374a8397"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/ae032eb8-c584-449a-8ce1-9884c85cc425"
       },
       {
         "context": "ci/circleci: backend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/d60b6434-2818-457a-9c09-9f8e93ee7563"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/6482a613-1bba-40a7-b7db-b36deddd2652"
       },
       {
         "context": "ci/circleci: ci-gate",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/891607f1-a2ad-4f68-aef2-f37dfabc9e05/job/182074a6-0cf2-4040-a5d6-b3a460458009"
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/5e2098f5-5d3e-4b30-8a10-c64ac806eabf"
       }
-    ],
-    "backend_passed": 8091,
-    "backend_skipped": 1,
-    "new_pytest_passed": 51,
-    "duplicates": 0,
-    "frontend_passed": 3260,
-    "e2e_passed": 167,
-    "native_early_nodes_passed": 2,
-    "native_post_pytest_nodes_passed": 2,
-    "genuine_cases_per_node": 5,
-    "legacy_snapshot_cases_per_node": 19,
-    "identity_and_acl_nodes_passed": 2,
-    "conditional_skip": {
-      "test": "tests.isolation.test_unit_prescription_migration::test_empty_unit_prescription_downgrade_roundtrip",
-      "reason": "Immutable unit prescription history prevents an empty downgrade rehearsal",
-      "coverage": "Companion nonemptyrefusal and pre-history fullschema0055/headroundtrip succeeded onbothnodes; no new tests skipped or weakened."
-    }
+    ]
   },
   "one_time_exceptions": {
     "black_ci_scripts": {
