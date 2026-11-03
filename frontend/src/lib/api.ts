@@ -3,6 +3,7 @@ import axios, {
   type AxiosError,
   type AxiosInstance,
   type AxiosRequestConfig,
+  type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from "axios";
 
@@ -66,13 +67,14 @@ export const api: AxiosInstance = axios.create({
   },
 });
 
-interface RetryConfig extends InternalAxiosRequestConfig {
+export interface RetryConfig extends InternalAxiosRequestConfig {
   _auth?: { generation: number; epoch: string | null };
   _supportRevision?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
   _skipRefresh?: boolean;
   _stepUpRetry?: boolean;
+  _deferStepUp?: boolean;
 }
 
 type TokenGetter = () => string | null;
@@ -80,12 +82,17 @@ type Refresher = () => Promise<string | null>;
 type StepUpRequester = () => Promise<string | null>;
 type OnAuthFailure = () => void;
 type OnSupportAccessFailure = () => void;
+export type FreshAccessRecovery = (
+  consume: (accessToken: string) => Promise<AxiosResponse<unknown>>,
+  assertRequestCurrent: () => void,
+) => Promise<AxiosResponse<unknown> | null>;
 
 let getAccess: TokenGetter = () => null;
 let refresh: Refresher = async () => null;
 let requestStepUp: StepUpRequester = async () => null;
 let onAuthFailure: OnAuthFailure = () => {};
 let onSupportAccessFailure: OnSupportAccessFailure = () => {};
+let recoverWithFreshAccess: FreshAccessRecovery | null = null;
 
 export function configureAuthHooks(opts: {
   getAccessToken: TokenGetter;
@@ -93,12 +100,14 @@ export function configureAuthHooks(opts: {
   requestMfaStepUp: StepUpRequester;
   onAuthFailure: OnAuthFailure;
   onSupportAccessFailure?: OnSupportAccessFailure;
+  recoverWithFreshAccess?: FreshAccessRecovery;
 }): void {
   getAccess = opts.getAccessToken;
   refresh = opts.refreshTokens;
   requestStepUp = opts.requestMfaStepUp;
   onAuthFailure = opts.onAuthFailure;
   onSupportAccessFailure = opts.onSupportAccessFailure ?? (() => {});
+  recoverWithFreshAccess = opts.recoverWithFreshAccess ?? null;
 }
 
 function supportContextPath(config: InternalAxiosRequestConfig): string | null {
@@ -266,38 +275,34 @@ api.interceptors.response.use(
     if (!original || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
-    const { generation, epoch } = original._auth;
     if (isSupportAccessInactive(error)) {
       if (original._supportRevision !== undefined) onSupportAccessFailure();
       return Promise.reject(error);
     }
-    if (!original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
-      original._stepUpRetry = true;
-      const newAccess = await requestStepUpAccessToken(generation, epoch);
-      if (!newAccess || !hasCurrentAuthority(original)) {
-        return Promise.reject(error);
-      }
-      original.headers.set("Authorization", `Bearer ${newAccess}`);
-      return api.request(original);
-    }
-
+    const needsStepUp =
+      !original._skipAuth &&
+      !original._stepUpRetry &&
+      !original._deferStepUp &&
+      isMfaStepUpRequired(error);
     if (
-      original._skipAuth ||
-      original._skipRefresh ||
-      original._retry ||
-      error.response?.status !== 401
+      !needsStepUp &&
+      (original._skipAuth ||
+        original._skipRefresh ||
+        original._retry ||
+        error.response?.status !== 401)
     ) {
       return Promise.reject(error);
     }
-
-    original._retry = true;
-
-    const newAccess = await refreshAccessToken(generation, epoch);
-    if (!newAccess || !hasCurrentAuthority(original)) {
-      return Promise.reject(error);
-    }
-    original.headers.set("Authorization", `Bearer ${newAccess}`);
-    return api.request(original);
+    const { recoverApiResponse } = await import("./apiResponseRecovery");
+    return recoverApiResponse(original, error, {
+      isCurrent: hasCurrentAuthority,
+      isStepUpRequired: isMfaStepUpRequired,
+      refresh: refreshAccessToken,
+      stepUp: requestStepUpAccessToken,
+      request: api.request,
+      authFailure: onAuthFailure,
+      recover: recoverWithFreshAccess,
+    });
   },
 );
 
