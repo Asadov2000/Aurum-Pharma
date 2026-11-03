@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 40,
+  "generation": 41,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "implementation",
+  "phase": "awaiting_user",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,16 +30,21 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "Implement atomic refresh/retry and targeted guards after modeled prepatch red. Await fullCI before main; cloud paused. Actual CI3686 rootcause remains unproven until real browser reproduction.",
+  "remaining_step": "STOP dependent writes/checks until user approves exact-lock QA restore and this task's repeated startup-budget exception. Current authfix+18newtests prepared on dirty codex/auth-two-tab-recovery (base8929099e), 100targeted passed with oldQA; no commit/push/PR or main changes. Restore isolated QA under workspace (no global installs), replace only verified isolated source node_modules junction, rerun exact-locktargeted/type/lint/build, preserve budgets, then fullCI+main. Actualbrowser proof pending. Keep liveAurum/sharedDB/Docker untouched, cloudpaused/autonomydeferred.",
   "failure_counters": {
-    "prepatch_expected_regression": {
-      "step": "Vitest cross-tab modeled schedule",
-      "cause": "first protected retry revoked by second tab rotation",
-      "count": 1,
-      "expected_red": true
+    "startup-budget": {
+      "step": "check-startup-bundle.mjs",
+      "consecutive": 2,
+      "cause": "Dashboard145.28KiB>145/POS195.16KiB>195 in reused QA graph; precise code-vs-toolchain contribution not established",
+      "requires_user_exception": true
     }
   },
-  "blocker": null,
+  "blocker": {
+    "approval_required": true,
+    "reason": "AGENTS dependency installation consent and two same-step budget failures",
+    "proposal": "C:/Users/Asadov/Desktop/A-Pharma/.codex/auth-two-tab-recovery-2026-11-03/qa-restoration-proposal.json",
+    "requested_scope": "Restore isolated QA from exact current lock using pnpm9.12.0; preserve project dependency versions. Allow this task's startup budget optimization/checks to success without raising any limits, then fullCI and protected merge."
+  },
   "previous_completed": {
     "pr": 448,
     "merged": true,
@@ -84,7 +89,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T13:27:05.091Z",
+  "updated_at": "2026-11-03T13:59:38.512Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -96,25 +101,15 @@
     "clean": true
   },
   "local_validation": {
-    "head_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
-    "desktop_passed": 571,
-    "desktop_new": 109,
-    "python_targeted_passed": 66,
-    "backend_collected": 8290,
-    "ruff": "passed app/tests",
-    "black": "passed1099files",
-    "mypy_modules": 541,
-    "independent_security_review": "approved",
-    "diff_check": "passed",
-    "dependency_changes": 0,
-    "dependency_installs": 0,
-    "native_TPM_calls": 0,
-    "SQL_access": "none",
-    "resolved_harness_findings": [
-      "New Python oversize testcase moved out of parameter node ID to avoid Windows environment variable limit;66targetedpass.",
-      "Full collection environment first missingJWT_SECRET, then explicitTEST_REDIS_URL; distinct causes resolved,8290collected.",
-      "Postmerge fetch origin main updated FETCH_HEAD but not origin/main because recovery checkout has a single-branch fetch refspec. Explicit refs/heads/main:refs/remotes/origin/main fetch confirmed actual main8929099e and exact tested tree37f4838f; no product change or CI repeat."
-    ]
+    "prepatch_modeled_reproduction": "confirmed: first tab's protected retry rejected, second fulfilled",
+    "targeted_tests_passed": 100,
+    "targeted_new_cases": 18,
+    "typecheck": "passed reused QA",
+    "lint": "passed reused QA",
+    "production_build": "compiled; startup budget refused twice",
+    "security_review": "approved final lazy implementation and docs",
+    "real_browser": "prepared; not executed",
+    "toolchain_caveat": "Existing QA top-level tools matched, but installed pnpm lock differs: oldfollow-redirects1.16.1/seroval1.6.3 vs current1.16.2/1.6.8. Recheck with exact frozen lock before claiming final validation."
   },
   "ci": {
     "head_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
