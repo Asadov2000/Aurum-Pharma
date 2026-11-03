@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 33,
+  "generation": 34,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-11-03-protected-local-state-01",
-  "branch": "codex/edge-protected-local-state",
-  "base_sha": "bf8c43cfcdf95e0b636f96382c991be0eecc29ea",
-  "expected_head": "9afd145e17abace52f04a244a674b30d50d26ea5",
-  "validated_sha": "9afd145e17abace52f04a244a674b30d50d26ea5",
-  "pr": 447,
+  "phase": "implementing",
+  "run_id": "local-2026-11-03-trusted-cashier-source-01",
+  "branch": "codex/edge-trusted-cashier-source",
+  "base_sha": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
+  "expected_head": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,19 +18,19 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "Existing-index Windows TPM monotonic counter and authenticated durable checkpoint CAS for future protected local admission; no provisioning, hardware invocation, runtime enabling or sharedDB.",
+  "scope": "Concrete Windows source reads a bounded complete admission snapshot from an existing file and verifies its exact-byte digest against the independent TPM checkpoint; Python strict reference/fixture parity. Admission metadata only, no positive runtime/provider/current-time/credential proof.",
   "acceptance": [
-    "Strict independent enrollment binding pins TPM index Name/profile, auth-secret commitment, device context and minimum counter; fixed authenticated read/increment only, no create/reset/fallback.",
-    "Authenticated checkpoint generation and state digest must match actual counter; exact compare-and-swap, serialized file access, hardware advance before durable file flush; old/tampered/missing state, ambiguous native/IO and commit gaps deny and latch.",
-    "Protocol/fault/concurrency tests without hardware or live DB; exact finalhead CI8contexts protected expected-head merge; E6-06 remains open until real enrollment/provider/time/serviceACL/hardware acceptance."
+    "Strict bounded typed snapshot binds tenant/workplace/device, independently pinned checkpoint context, current policy floor, admitted cashier contexts/guards and full workplace session; stale authorization cannot be selected at a newer policy floor.",
+    "Actual existing-file Windows source uses real checkpoint API, holds file ownership through verification, confirms checkpoint twice and closes before result; wrong scope/device/context/bytes, rollback/change, parse/read/close failure deny and invalidate.",
+    "One shared Python/native golden vector; negative/cross-language/file/checkpoint tests; finalhead8contexts and protectedexpectedhead merge only. No sharedDB/liveAurum/hardware provisioning/dependency changes."
   ],
-  "remaining_step": "Next explicit local continuation: fresh actualmain/HEAD/status/open/recentPR recon. PR447 is merged and must not be reimplemented. Continue the existing trusted admission/provider and enrollment/time/service/recovery boundary using the new checkpoint; do not substitute a fake provider or opaque checkpoint for real policy/session acceptance. Preserve paused cloud/schedulers, no liveAurum/sharedDB changes, and report2/7(4) until full E6-06 acceptance.",
+  "remaining_step": "Implement existing-file checkpoint-verified cashier metadata source, independent review and focused native/Python checks; then fullCI and protectedmerge. Existing credential material, live trustedtime, IPC/service ownership/provider/SQL commit integration and hardware acceptance remain unfinished.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -76,7 +76,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T09:52:13.451Z",
+  "updated_at": "2026-11-03T10:15:14.591Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -105,78 +105,7 @@
     "tpm_nv_hardware_calls": 0,
     "native_transport": "simulated; real-file tests within workspace"
   },
-  "ci": {
-    "head_sha": "9afd145e17abace52f04a244a674b30d50d26ea5",
-    "workflow": "48b3556f-253f-4ffc-8be3-1d4bfbed1d74",
-    "status": "success",
-    "required_contexts": 8,
-    "expected_backend": 8137,
-    "expected_desktop": 330,
-    "new_desktop": 181,
-    "backend_job": 4241,
-    "desktop_job": 4240,
-    "gate_job": 4242,
-    "backend_passed": 8137,
-    "backend_skipped": 0,
-    "duplicates": 0,
-    "native_regression_cases": 45,
-    "new_python_cases": 0,
-    "desktop_passed": 330,
-    "new_desktop_passed": 181,
-    "desktop_skipped": 0,
-    "frontend_passed": 3260,
-    "frontend_files": 241,
-    "e2e_passed": 167,
-    "native_early_nodes_passed": 2,
-    "native_post_pytest_nodes_passed": 2,
-    "genuine_physical_cases_per_node": 5,
-    "genuine_mixed_cases_per_node": 5,
-    "legacy_snapshot_cases_per_node": 19,
-    "identity_and_acl_nodes_passed": 2,
-    "workflows_run": 1,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/0e3660dd-6719-41f7-9975-446c3ccf0229"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/e81a0653-6cfe-4b2a-9d92-d224882feade"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/7abc265d-83f2-4fb3-be6e-8171c584d1e6"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/b847532d-58bc-4ee1-ac50-90e42750d319"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/690283fa-b28c-4363-a7d7-3a1b0ca7e883"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/dc469ce9-eaff-4f7c-81f1-9022a62bbdb1"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/88d2aba2-809f-4e3b-9780-110956472d5b"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/48b3556f-253f-4ffc-8be3-1d4bfbed1d74/job/cd5613cf-d43b-4e9a-8696-230d30e7752f"
-      }
-    ]
-  },
+  "ci": null,
   "completion": {
     "pr": 447,
     "merged": true,
@@ -268,7 +197,7 @@
       "hardware_acceptance": false
     }
   ],
-  "increment_id": "tpm-counter-checkpoint",
+  "increment_id": "checkpoint-cashier-state-source",
   "previous_ci": {
     "head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
     "attempt": 12,
