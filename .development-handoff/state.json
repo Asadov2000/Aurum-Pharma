@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 27,
+  "generation": 28,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_ci_pc_off",
+  "phase": "fixing_ci",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "On explicit resume, read actual GitHub main/PR446/head and final CircleCI results. No new implementation. Verify all8137 cases+8contexts+early8 contracts+both early/late native proofs; fix only concrete failures preserving counters. Protected merge with expected head only after full success; then verify actualmain/tree. Cloud/schedulers remain paused; no deployment/sharedDB work.",
+  "remaining_step": "Fix only confirmed stale policy test; add four read-only metadata tests to early contract, validate static/collection, publish same PR446 then require all8 final-head contexts/full8137 and genuine native proofs before expected-head protected merge.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
@@ -43,10 +43,17 @@
       "regression_test": "success"
     },
     "legacy_cost_test_subject": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "New test incorrectly expected trusted NOLOGIN owner to lack longstanding batch SELECT; actual untrusted Node must be denied",
       "prepared_fix": "Move explicit cost read denial to realNode proof; verify executor/native column ACL; retain owner financial deny checks",
       "fix_head": "c99417eee1913b416266919ac96f1e0dcb6904ab",
+      "pending_verification": false,
+      "resolved_on": "c99417eee1913b416266919ac96f1e0dcb6904ab"
+    },
+    "mixed_policy_snapshot": {
+      "consecutive": 1,
+      "cause": "Existing exact policy set predates migration0236 native mixed INSERT policy",
+      "fix": "Retain exact policy set and add new policy security assertions; move four metadata checks before full Pytest",
       "pending_verification": true
     }
   },
@@ -93,7 +100,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-02T14:59:35Z",
+  "updated_at": "2026-11-03T07:40:05.057Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -129,8 +136,8 @@
     "head_sha": "c99417eee1913b416266919ac96f1e0dcb6904ab",
     "workflow": "04bf7815-bb7a-45a3-b3ff-091f782adaea",
     "backend_job": 4213,
-    "status": "running",
-    "phase": "early_native_physical",
+    "status": "failed",
+    "phase": "full_pytest_existing_policy_snapshot",
     "early_isolation_contract_cases": 8,
     "required_contexts": 8
   },
@@ -313,5 +320,10 @@
     "main_unchanged": "78f388171308623ffefb2f956bef191b5c822976",
     "cloud_development_paused": true,
     "no_automatic_merge_configured": true
+  },
+  "local_resume": {
+    "at": "2026-11-03T07:40:05.057Z",
+    "reason": "User resumed local development and requested safe acceleration",
+    "cloud_product_grant": false
   }
 }
