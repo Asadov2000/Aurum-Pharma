@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 36,
+  "generation": 37,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-11-03-trusted-cashier-source-01",
-  "branch": "codex/edge-trusted-cashier-source",
-  "base_sha": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
-  "expected_head": "ab80d6557320dd1a897abf41528919d17e151920",
-  "validated_sha": "ab80d6557320dd1a897abf41528919d17e151920",
-  "pr": 448,
+  "phase": "implementation",
+  "run_id": "local-2026-11-03-trusted-credential-source-01",
+  "branch": "codex/edge-trusted-credential-source",
+  "base_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+  "expected_head": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,19 +18,19 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "Concrete Windows source reads a bounded complete admission snapshot from an existing file and verifies its exact-byte digest against the independent TPM checkpoint; Python strict reference/fixture parity. Admission metadata only, no positive runtime/provider/current-time/credential proof.",
+  "scope": "Existing-file checkpoint-verified credential bundle binds full admitted cashier metadata, bcrypt verifier and TPM-encrypted pepper; real Windows TPM unprotect with independent sealed context, second checkpoint, close-before-publish and zeroization. No positive runtime or hardware provisioning.",
   "acceptance": [
-    "Strict bounded typed snapshot binds tenant/workplace/device, independently pinned checkpoint context, current policy floor, admitted cashier contexts/guards and full workplace session; stale authorization cannot be selected at a newer policy floor.",
-    "Actual existing-file Windows source uses real checkpoint API, holds file ownership through verification, confirms checkpoint twice and closes before result; wrong scope/device/context/bytes, rollback/change, parse/read/close failure deny and invalidate.",
-    "One shared Python/native golden vector; negative/cross-language/file/checkpoint tests; finalhead8contexts and protectedexpectedhead merge only. No sharedDB/liveAurum/hardware provisioning/dependency changes."
+    "Preserve snapshot v1; new bounded strict Python/native bundle format with exact-byte domain-separated checkpoint digest, one-to-one credential context/envelope binding and shared synthetic fixture.",
+    "Concrete existing-file Windows source verifies before decrypt and verifies checkpoint again after decrypt, rejects substitution/rollback/faults, closes before publication and clears secret material on failure/disposal.",
+    "Targeted verification, independent review, full exact-head eight CI contexts and protected merge; no dependency change, cloud writer, live Aurum or sharedDB access."
   ],
-  "remaining_step": "Next explicit local continuation: fresh actualmain/HEAD/status/open/recentPR recon; PR448 is merged, do not repeat the snapshot reader or format. Continue the nearest existing trusted credential/time/state-provider/service/recovery acceptance boundary. ReadCashierState supplies historical checkpoint-verified metadata, never a login/command principal, fresh clock or full SQL-commit provider. Keep cloud/schedulers paused and avoid liveAurum/sharedDB/hardware provisioning. Counter stays2/7(4) until fullE6-06.",
+  "remaining_step": "Implement and validate credential bundle/source. Cloud/schedulers remain paused.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -77,7 +77,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T11:21:12.089Z",
+  "updated_at": "2026-11-03T11:39:51.074Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -282,7 +282,7 @@
       "hardware_acceptance": false
     }
   ],
-  "increment_id": "checkpoint-cashier-state-source",
+  "increment_id": "checkpoint-credential-material-source",
   "previous_ci": {
     "head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
     "attempt": 12,
