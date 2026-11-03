@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generation": 28,
+  "generation": 29,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "fixing_ci",
+  "phase": "awaiting_ci",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
-  "expected_head": "c99417eee1913b416266919ac96f1e0dcb6904ab",
+  "expected_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
   "validated_sha": null,
   "pr": 446,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Fix only confirmed stale policy test; add four read-only metadata tests to early contract, validate static/collection, publish same PR446 then require all8 final-head contexts/full8137 and genuine native proofs before expected-head protected merge.",
+  "remaining_step": "Await all8 finalhead contexts and full8137 results,45new; early12 ACL/DDL/metadata checks and both genuine early/late native proofs onbothnodes; protectedexpectedhead merge only after fullsuccess. Do not start another stage/cloud/live services.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
@@ -54,7 +54,8 @@
       "consecutive": 1,
       "cause": "Existing exact policy set predates migration0236 native mixed INSERT policy",
       "fix": "Retain exact policy set and add new policy security assertions; move four metadata checks before full Pytest",
-      "pending_verification": true
+      "pending_verification": true,
+      "fix_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294"
     }
   },
   "blocker": null,
@@ -100,7 +101,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T07:40:05.057Z",
+  "updated_at": "2026-11-03T07:43:37.583Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -133,12 +134,10 @@
     "latest_test_and_script_static": "Ruff/Black passed; guards19/CIparallel9 passed; independent boundary and rollback review approved"
   },
   "ci": {
-    "head_sha": "c99417eee1913b416266919ac96f1e0dcb6904ab",
-    "workflow": "04bf7815-bb7a-45a3-b3ff-091f782adaea",
-    "backend_job": 4213,
-    "status": "failed",
-    "phase": "full_pytest_existing_policy_snapshot",
-    "early_isolation_contract_cases": 8,
+    "head_sha": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
+    "workflow": "b901d777-0605-4e13-a3e4-939e21353251",
+    "status": "running",
+    "early_isolation_contract_cases": 12,
     "required_contexts": 8
   },
   "completion": {
