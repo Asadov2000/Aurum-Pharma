@@ -111,6 +111,22 @@ jobs:
           command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database PYTHONPATH=\"$PWD${PYTHONPATH:+:$PYTHONPATH}\" poetry run python ../scripts/test-edge-physical-cash-smoke.py"
           working_directory: "~/project/backend"
       - run:
+          name: "Verify isolated native mixed cash execution"
+          command: "CI=true AURUM_DISPOSABLE_DB_CONFIRM=destroy-this-database PYTHONPATH=\"$PWD${PYTHONPATH:+:$PYTHONPATH}\" poetry run python ../scripts/test-edge-mixed-cash-smoke.py"
+          working_directory: "~/project/backend"
+      - run:
+          name: "Verify native mixed cash isolation contract"
+          command: >-
+            poetry run pytest
+            tests/isolation/test_edge_mixed_cash_execution.py
+            tests/isolation/test_edge_mixed_cash_execution_migration.py
+            tests/isolation/test_mixed_cash_checkout_migration.py::test_mixed_marker_forces_rls_and_grants_only_append_and_read
+            tests/isolation/test_mixed_cash_checkout_migration.py::test_app_policy_binds_tenant_cashier_and_branch_permission
+            tests/isolation/test_mixed_cash_checkout_migration.py::test_mixed_guard_functions_keep_owner_safe_search_path_and_private_acl
+            tests/isolation/test_mixed_cash_checkout_migration.py::test_mixed_completion_constraints_cover_marker_and_both_ledgers
+            -q -x --tb=short
+          working_directory: "~/project/backend"
+      - run:
           name: "Pytest"
           command: "bash ../.circleci/scripts/backend-15.sh"
           working_directory: "~/project/backend"

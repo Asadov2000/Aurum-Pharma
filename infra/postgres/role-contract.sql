@@ -885,7 +885,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 235 THEN
+        IF revision_number < 1 OR revision_number > 236 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -1694,3 +1694,35 @@ BEGIN
   GRANT UPDATE (id) ON public.register TO aurum_edge_cash_owner;
  END IF;
 END $native_physical$;
+
+-- Native mixed cash adds no LOGIN or general table-writing capability.
+DO $native_mixed$
+DECLARE revision TEXT; signature TEXT; function_oid OID;
+BEGIN
+ IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+  SELECT version_num INTO revision FROM public.alembic_version;
+ END IF;
+ IF revision ~ '^[0-9]{4}$' AND revision::INTEGER >=236 THEN
+  FOREACH signature IN ARRAY ARRAY[
+   'public.edge_mixed_legacy_stock_v1(uuid,uuid,uuid,jsonb,date)',
+   'public.emit_native_mixed_retail_event_v1(uuid,uuid,uuid)',
+   'public.complete_edge_mixed_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+  ] LOOP
+   function_oid:=pg_catalog.to_regprocedure(signature);
+   IF function_oid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM pg_catalog.pg_proc routine
+    JOIN pg_catalog.pg_roles owner ON owner.oid=routine.proowner
+    JOIN pg_catalog.pg_language language ON language.oid=routine.prolang
+    WHERE routine.oid=function_oid AND owner.rolname='aurum_schema_owner'
+      AND language.lanname='plpgsql' AND NOT routine.prosecdef AND routine.provolatile='v'
+      AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp','row_security=on']::TEXT[]
+   ) THEN RAISE EXCEPTION 'Native mixed execution helper metadata is unsafe'; END IF;
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,aurum_app,aurum_support,aurum_edge_cash_executor,aurum_edge_cash_owner',signature);
+   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aurum_edge_cash_owner',signature);
+  END LOOP;
+  GRANT INSERT (mixed_checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (mixed_checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,cash_intent_id,stock_command_id,payment_id,payment_journal_version,request_hash,result_payload,receipt_payload,created_by) ON public.pos_mixed_checkout TO aurum_edge_cash_owner;
+  GRANT INSERT (mixed_checkout_id) ON public.pos_unit_checkout_payment_component TO aurum_edge_cash_owner;
+ END IF;
+END $native_mixed$;

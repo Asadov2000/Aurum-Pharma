@@ -104,6 +104,7 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
         "tenant_actor",
         "mixed_return_read",
         "edge_cash_replay_read",
+        "edge_mixed_execution_insert",
     }
     app = next(row for row in policies if row.policyname == "tenant_actor")
     assert app.roles == ["aurum_app"]
@@ -135,6 +136,23 @@ async def test_app_policy_binds_tenant_cashier_and_branch_permission(
     assert "branch_id = pos_mixed_checkout.branch_id" in replay.qual
     assert "register_id = pos_mixed_checkout.register_id" in replay.qual
     assert "cashier_user_id = current_app_user_id()" in replay.qual
+    native = next(row for row in policies if row.policyname == "edge_mixed_execution_insert")
+    assert native.roles == ["aurum_edge_cash_owner"]
+    assert native.cmd == "INSERT" and native.qual is None
+    assert native.with_check is not None
+    for boundary in (
+        "tenant_id = current_tenant_id()",
+        "native_edge_physical_context_v1()",
+        "CASE",
+        "SESSION_USER",
+        "aurum_edge_node_",
+        "cashier_user_id = current_app_user_id()",
+        "database_role = SESSION_USER",
+        "tenant_id = pos_mixed_checkout.tenant_id",
+        "branch_id = pos_mixed_checkout.branch_id",
+        "register_id = pos_mixed_checkout.register_id",
+    ):
+        assert boundary in native.with_check
 
 
 async def test_mixed_guard_functions_keep_owner_safe_search_path_and_private_acl(

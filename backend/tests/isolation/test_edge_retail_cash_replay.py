@@ -108,8 +108,6 @@ async def test_native_cash_replay_reads_and_physical_writer_inserts_exact_column
                 "receipt_payload",
                 "created_by",
             }
-            if table == "pos_physical_checkout"
-            else set()
         )
     assert table_write is False
     assert all(
