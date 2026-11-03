@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generation": 35,
+  "generation": 36,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-11-03-trusted-cashier-source-01",
   "branch": "codex/edge-trusted-cashier-source",
   "base_sha": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
   "expected_head": "ab80d6557320dd1a897abf41528919d17e151920",
-  "validated_sha": null,
+  "validated_sha": "ab80d6557320dd1a897abf41528919d17e151920",
   "pr": 448,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -30,20 +30,21 @@
     "Actual existing-file Windows source uses real checkpoint API, holds file ownership through verification, confirms checkpoint twice and closes before result; wrong scope/device/context/bytes, rollback/change, parse/read/close failure deny and invalidate.",
     "One shared Python/native golden vector; negative/cross-language/file/checkpoint tests; finalhead8contexts and protectedexpectedhead merge only. No sharedDB/liveAurum/hardware provisioning/dependency changes."
   ],
-  "remaining_step": "Await all8 finalhead contexts plus462desktop/8224backend(incl87new)+native regression/3260frontend/167browser. No newimplementation. Fix only concrete failures respecting persisted counters; protectedexpectedheadmerge onlyafterfullsuccess, verifyactualmain/tree. No cloud/runtime/sharedDB/hardware provisioning.",
+  "remaining_step": "Next explicit local continuation: fresh actualmain/HEAD/status/open/recentPR recon; PR448 is merged, do not repeat the snapshot reader or format. Continue the nearest existing trusted credential/time/state-provider/service/recovery acceptance boundary. ReadCashierState supplies historical checkpoint-verified metadata, never a login/command principal, fresh clock or full SQL-commit provider. Keep cloud/schedulers paused and avoid liveAurum/sharedDB/hardware provisioning. Counter stays2/7(4) until fullE6-06.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
-    "pr": 446,
+    "pr": 447,
     "merged": true,
-    "main": "bf8c43cfcdf95e0b636f96382c991be0eecc29ea",
-    "merged_at": "2026-11-03T08:28:43Z",
-    "tested_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
-    "tested_tree": "9248e74d37e5bf78a02005fb8c640b753a31e509",
-    "main_tree": "9248e74d37e5bf78a02005fb8c640b753a31e509",
+    "main": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
+    "merged_at": "2026-11-03T09:49:33Z",
+    "tested_head": "9afd145e17abace52f04a244a674b30d50d26ea5",
+    "tested_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
+    "main_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
     "tree_match": true,
     "closes_control_stage": false,
-    "remaining_control_stages": 4
+    "remaining_control_stages": 4,
+    "hardware_acceptance": false
   },
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -76,12 +77,12 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T10:36:16.964Z",
+  "updated_at": "2026-11-03T11:21:12.089Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
-    "E6-06: Windows existing-index TPM counter and authenticated NV-first checkpoint storage are implemented (PR447), but the real independently authenticated enrollment, TPM key lifecycle, policy/session/guard provider, trusted UTC, single-owner service/IPC/ACL and recovery composition remain unfinished. Hardware fault/restart/database-restore acceptance is required before any positive runtime factory.",
-    "Then E6-07 controlled delivery compatibility, E6-08 recovery, E6-09 volume and long-offline acceptance. Four control stages remain; no new product requirements."
+    "E6-06: real Windows TPM counter/checkpoint (PR447) and exact-checkpoint-verified full cashier admission metadata source (PR448) are implemented. They do not implement credential verifier/pepper integrity, fresh trusted UTC, authenticated enrollment/policy acceptance, single-owner Windows service/IPC/ACL, a shared-SQL-session trusted login/lease state transaction provider or recovery. Hardware fault/restart/database-restore acceptance remains required before a positive runtime factory.",
+    "E6-07 controlled delivery compatibility, E6-08 recovery and E6-09 volume/long-offline acceptance remain after E6-06; four control stages total. No new product requirements."
   ],
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -110,21 +111,84 @@
   "ci": {
     "head_sha": "ab80d6557320dd1a897abf41528919d17e151920",
     "workflow": "67080d95-4c5f-4e4a-b684-b958bb6dd619",
-    "status": "running",
+    "status": "success",
     "required_contexts": 8,
     "expected_backend": 8224,
     "new_python": 87,
     "expected_desktop": 462,
-    "new_desktop": 132
+    "new_desktop": 132,
+    "backend_job": 4254,
+    "desktop_job": 4251,
+    "gate_job": 4258,
+    "backend_passed": 8224,
+    "backend_skipped": 0,
+    "duplicates": 0,
+    "new_python_passed": 87,
+    "native_regression_cases": 45,
+    "desktop_passed": 462,
+    "new_desktop_passed": 132,
+    "desktop_skipped": 0,
+    "frontend_passed": 3260,
+    "frontend_files": 241,
+    "e2e_passed": 167,
+    "native_early_nodes_passed": 2,
+    "native_post_pytest_nodes_passed": 2,
+    "genuine_physical_cases_per_node": 5,
+    "genuine_mixed_cases_per_node": 5,
+    "legacy_snapshot_cases_per_node": 19,
+    "identity_and_acl_nodes_passed": 2,
+    "workflows_run": 1,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f5395d58-5d29-4154-b384-eb663839ca71"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/eeccaf05-9a04-4a36-bf1f-629108d16342"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/dc2b6a3a-fb0b-4f8b-8937-219eda9d5a99"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/059af84a-383b-401e-aaaf-ca99016077fe"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f7a76655-c393-44c0-b28e-dce9e2119e4d"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/ae032eb8-c584-449a-8ce1-9884c85cc425"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/6482a613-1bba-40a7-b7db-b36deddd2652"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/5e2098f5-5d3e-4b30-8a10-c64ac806eabf"
+      }
+    ]
   },
   "completion": {
-    "pr": 447,
+    "pr": 448,
     "merged": true,
-    "main": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
-    "merged_at": "2026-11-03T09:49:33Z",
-    "tested_head": "9afd145e17abace52f04a244a674b30d50d26ea5",
-    "tested_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
-    "main_tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
+    "main": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+    "merged_at": "2026-11-03T11:19:28Z",
+    "tested_head": "ab80d6557320dd1a897abf41528919d17e151920",
+    "tested_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
+    "main_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
@@ -204,6 +268,16 @@
       "tested_head": "9afd145e17abace52f04a244a674b30d50d26ea5",
       "tree": "5e0c562f1484682a216ed904f4a1fdceb4ed64e9",
       "ci": "all8success/firstworkflow;330desktop incl181new;8137backend/no skips/no duplicates;3260frontend;167browser;genuine early/late physical+mixed/ACL proofs onbothnodes",
+      "closes_control_stage": false,
+      "hardware_acceptance": false
+    },
+    {
+      "pr": 448,
+      "kind": "checkpoint-cashier-state-source",
+      "main": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+      "tested_head": "ab80d6557320dd1a897abf41528919d17e151920",
+      "tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
+      "ci": "all8success/firstworkflow;8224backend incl87new/no skips/no duplicates;462desktop incl132new;3260frontend;167browser;genuine early/late physical+mixed/ACL proofs onbothnodes",
       "closes_control_stage": false,
       "hardware_acceptance": false
     }
@@ -309,7 +383,7 @@
     "reason": "User resumed local development and requested safe acceleration",
     "cloud_product_grant": false
   },
-  "latest_main_sha": "9a2069f35a758c6c36074fc715a10f8755c6dbd2",
+  "latest_main_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
   "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
@@ -323,6 +397,18 @@
     "same_cause_failures": 1
   },
   "acceleration": {
+    "scope": "One connected native source/Python contract/shared fixture increment; parallel implementation and independent security review; local tests before publication",
+    "ci_workflows": 1,
+    "ci_reruns": 0,
+    "local_desktop_tests": 462,
+    "local_python_targeted": 87,
+    "concurrency_harness": "Dedicated participants, same five-second deadlines and one-winner assertions",
+    "full_matrix_and_limits": "unchanged",
+    "dependency_changes": 0,
+    "dependency_installs": 0
+  },
+  "resume_run_id": "local-2026-11-03-native-mixed-cash-02",
+  "previous_acceleration": {
     "scope": "Connected counter+authenticated durable checkpoint increment; parallel protocol/fault/file review; targeted tests before publishing",
     "local_desktop_test_execution_seconds": 2,
     "local_desktop_total": 330,
@@ -331,17 +417,5 @@
     "full_matrix_and_limits": "unchanged",
     "dependency_changes": 0,
     "dependency_installs": 0
-  },
-  "resume_run_id": "local-2026-11-03-native-mixed-cash-02",
-  "previous_acceleration": {
-    "scope": "Fail earlier on existing policy/ACL/DDL regressions; full matrix and limits unchanged",
-    "previous_policy_failure_detected_after_full_pytest_seconds": 1322.852,
-    "early_contract_cases_per_node": 12,
-    "early_contract_seconds_per_node": [
-      4.475,
-      4.274
-    ],
-    "additional_readonly_metadata_cases": 4,
-    "end_to_end_speedup_claimed": false
   }
 }
