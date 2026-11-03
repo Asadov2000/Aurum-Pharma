@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 38,
+  "generation": 39,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
@@ -30,7 +30,7 @@
     "Concrete existing-file Windows source verifies before decrypt and verifies checkpoint again after decrypt, rejects substitution/rollback/faults, closes before publication and clears secret material on failure/disposal.",
     "Targeted verification, independent review, full exact-head eight CI contexts and protected merge; no dependency change, cloud writer, live Aurum or sharedDB access."
   ],
-  "remaining_step": "Next explicit local continuation: fresh actualmain/HEAD/status/open/recentPR recon. PR449 merged; do not repeat credential bundle/source. Source materials are point-in-time only, not password/time/login/provider proof. Continue nearest trusted enrollment/time/shared SQL transaction provider/service/recovery boundary; keep DenyAll until full acceptance. Cloud/schedulers stay paused. Recovery checkout has single-branch fetch refspec: use explicit git fetch origin refs/heads/main:refs/remotes/origin/main or verify fresh FETCH_HEAD, never assume git fetch origin main refreshes origin/main. Counter2/7(4) until fullE6-06; no live Aurum/sharedDB/hardware provisioning.",
+  "remaining_step": "Priority changed by user: ONLINE sales/rehearsal FIRST; E6-06 and A1-A6 deferred, no auto-resume. Rehearsal guide prepared with fictional data; no pharmacy/cashier selected, no separate stand started or rehearsal executed. Read next_work_item. Fresh actualmain/HEAD/status/open/recentPR recon required. Investigate known cross-tab auth candidate with deterministic isolated reproduction before any fix, then prepare isolated online cash rehearsal. Do not invent new cash features or repeat existing passed tests without cause; no live Aurum/sharedDB/dependency changes or Docker startup/deployment by assumption. Keep cloud and schedulers paused. Existing four Edge control stages remain open, counter2/7(4).",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -77,7 +77,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T12:35:15.801Z",
+  "updated_at": "2026-11-03T13:11:33.914Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -434,5 +434,38 @@
     "full_matrix_and_limits": "unchanged",
     "dependency_changes": 0,
     "dependency_installs": 0
+  },
+  "development_priority": {
+    "scope": "online piece sales, cash-first, fictional rehearsal before real pharmacy pilot",
+    "approved_by": "user: online first, autonomy deferred; no pharmacy/cashier yet, prepare fictional rehearsal",
+    "autonomy_deferred": true,
+    "no_production_deployment": true,
+    "no_shared_database_access": true
+  },
+  "next_work_item": {
+    "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
+    "phase": "rehearsal_prepared_not_executed",
+    "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+    "owner": "local",
+    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
+    "product_code_changes": false,
+    "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
+    "data": "Entirely fictional; two sealed packs x30, blister10, unitprice1TJS, openingcash100. Three sales43, refund1 intoquarantine, writeoff2: sellable15/quarantine1/writeoff2/net42/closingcash142. Arithmetic checked; app rehearsal NOT executed.",
+    "audit": "Two independent readonly QA reviews found no proved missing online cash/stock/report behavior; current full test tree already passed PR449 CI. Actual pharma/equipment/deployment acceptance not established.",
+    "release_gate": {
+      "validate_exit": 0,
+      "enforce_exit": 3,
+      "decision": "blocked",
+      "verified": 8,
+      "pending": 15,
+      "validation_errors": 0
+    },
+    "local_runtime": {
+      "docker_api": "unavailable; DesktopLinuxEngine pipe missing",
+      "daemon_started": false,
+      "shared_database_access": false,
+      "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
+    },
+    "next_technical_check": "AUTH-PARALLEL-BOOTSTRAP-01: reproduce deterministically in two pages of one browsercontext with shared cookie. Cookie refresh WebLock exists but releases before protected retry; each refresh revokes oldsid. Reviewer identified a possible interleaving, NOT a reproduced current bug or proven CI3686 root cause. Do not patch or relax sid/retry guards before reproduction; don't overlap unrelated PR254."
   }
 }
