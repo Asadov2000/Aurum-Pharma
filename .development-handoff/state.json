@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generation": 29,
+  "generation": 30,
   "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "control_stage_id": "E6-06",
   "owner": "local",
-  "phase": "awaiting_ci",
+  "phase": "completed",
   "run_id": "local-2026-11-02-native-mixed-cash-01",
   "branch": "codex/edge-native-mixed-cash",
   "base_sha": "78f388171308623ffefb2f956bef191b5c822976",
   "expected_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
-  "validated_sha": null,
+  "validated_sha": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
   "pr": 446,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -31,7 +31,7 @@
     "Fault rollback across both stocks/payment/anchor, duplicate/concurrent/closedshift replay, no direct node/private/cost escalation, reversible migration refusing genuine history downgrade.",
     "All8 finalhead CI contexts, full regression and actual proof; protectedmerge only, no purchases/dependencies/liveapplication/sharedDB access."
   ],
-  "remaining_step": "Await all8 finalhead contexts and full8137 results,45new; early12 ACL/DDL/metadata checks and both genuine early/late native proofs onbothnodes; protectedexpectedhead merge only after fullsuccess. Do not start another stage/cloud/live services.",
+  "remaining_step": "On next explicit local continuation, re-read actual main/HEAD/status/open and recently merged PRs. PR446 is merged and must not be reimplemented. Plan the existing trusted-provider admission boundary as one coherent result, with hardware/recovery acceptance and fail-closed production factory; do not claim runtime readiness from synthetic lease fixtures. Cloud/schedulers remain paused; no runtime deployment/sharedDB changes.",
   "failure_counters": {
     "early_native_cross_kind_denial": {
       "consecutive": 0,
@@ -51,22 +51,23 @@
       "resolved_on": "c99417eee1913b416266919ac96f1e0dcb6904ab"
     },
     "mixed_policy_snapshot": {
-      "consecutive": 1,
+      "consecutive": 0,
       "cause": "Existing exact policy set predates migration0236 native mixed INSERT policy",
       "fix": "Retain exact policy set and add new policy security assertions; move four metadata checks before full Pytest",
-      "pending_verification": true,
-      "fix_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294"
+      "pending_verification": false,
+      "fix_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
+      "resolved_on": "79c39ca7ad377771f15b67f2493dd5cb7593a294"
     }
   },
   "blocker": null,
   "previous_completed": {
-    "pr": 444,
+    "pr": 445,
     "merged": true,
-    "main": "0d8f32410f554929e5819e852f0535a13df2adbe",
-    "merged_at": "2026-11-02T07:07:15Z",
-    "tested_head": "3442f66631103b804ea066ee0d5b9c1d5826817e",
-    "tested_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
-    "main_tree": "e9bd3f683c5b0186f07fb11c50319894123f6cd1",
+    "main": "78f388171308623ffefb2f956bef191b5c822976",
+    "merged_at": "2026-11-02T12:42:44Z",
+    "tested_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
+    "tested_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
+    "main_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4
@@ -101,11 +102,12 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T07:43:37.583Z",
+  "updated_at": "2026-11-03T08:30:10.251Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
-    "Native mixed_cash inventory-cart monetary execution remains unfinished; physical-only adapter deliberately rejects it. Production factory remains DenyAll until existing financial/runtime admission criteria are accepted."
+    "E6-06 remains open: real production trusted providers for independently protected policy floor, local session/guard high-water, enrollment, trusted time and recovery are absent. Existing contracts require hardware fault/restart/database-restore proof; composing a FixedVerifier with the native executor does not close admission.",
+    "Then E6-07 controlled delivery compatibility, E6-08 recovery, E6-09 volume and long-offline acceptance; four control stages total remain. No new requirements."
   ],
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -136,18 +138,75 @@
   "ci": {
     "head_sha": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
     "workflow": "b901d777-0605-4e13-a3e4-939e21353251",
-    "status": "running",
+    "status": "success",
     "early_isolation_contract_cases": 12,
-    "required_contexts": 8
+    "required_contexts": 8,
+    "backend_job": 4225,
+    "gate_job": 4226,
+    "backend_passed": 8137,
+    "backend_skipped": 0,
+    "new_pytest_passed": 45,
+    "duplicates": 0,
+    "frontend_passed": 3260,
+    "frontend_files": 241,
+    "e2e_passed": 167,
+    "native_early_nodes_passed": 2,
+    "native_post_pytest_nodes_passed": 2,
+    "genuine_physical_cases_per_node": 5,
+    "genuine_mixed_cases_per_node": 5,
+    "legacy_snapshot_cases_per_node": 19,
+    "identity_and_acl_nodes_passed": 2,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/6c28fd54-625a-44dc-b622-604a1de272d8"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/c0e65218-1a1a-4f98-9d80-954d9179cd1d"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/5568f5a9-2a49-427f-a9de-aaa72397436c"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/1a3f197b-3b46-4cc4-b445-091e3dc594e4"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/0d2807d8-ce8e-4f06-b773-1229f85c3db5"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/d5018bdb-5a84-4a8c-a891-365595de6584"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/664da543-a955-47be-84a9-1137a9aede96"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/b901d777-0605-4e13-a3e4-939e21353251/job/cf49dbc5-9f55-430c-a0ec-b0ad3696d620"
+      }
+    ]
   },
   "completion": {
-    "pr": 445,
+    "pr": 446,
     "merged": true,
-    "main": "78f388171308623ffefb2f956bef191b5c822976",
-    "merged_at": "2026-11-02T12:42:44Z",
-    "tested_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
-    "tested_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
-    "main_tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
+    "main": "bf8c43cfcdf95e0b636f96382c991be0eecc29ea",
+    "merged_at": "2026-11-03T08:28:43Z",
+    "tested_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
+    "tested_tree": "9248e74d37e5bf78a02005fb8c640b753a31e509",
+    "main_tree": "9248e74d37e5bf78a02005fb8c640b753a31e509",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4
@@ -208,6 +267,15 @@
       "tested_head": "8199e643c4c35293e5abd95c92a7f83328e8f8d3",
       "tree": "088dec60209b080c8c98c7ab772996a6ad1b5240",
       "ci": "all8success;8091backend+1existingconditionalprescriptionhistoryskip;all51newpassed;3260frontend;167browser;earlyandlate5genuinecases/19legacy/identity+columnACL onbothnodes",
+      "closes_control_stage": false
+    },
+    {
+      "pr": 446,
+      "kind": "native-mixed-cash-posting",
+      "main": "bf8c43cfcdf95e0b636f96382c991be0eecc29ea",
+      "tested_head": "79c39ca7ad377771f15b67f2493dd5cb7593a294",
+      "tree": "9248e74d37e5bf78a02005fb8c640b753a31e509",
+      "ci": "all8success;8137backend/no skips/no duplicates;all45new;3260frontend;167browser;early12contracts and early/late5physical+5mixedgenuinecases/19legacy/identity+columnACL onbothnodes",
       "closes_control_stage": false
     }
   ],
@@ -292,6 +360,28 @@
     }
   },
   "previous_failed_ci": {
+    "head_sha": "c99417eee1913b416266919ac96f1e0dcb6904ab",
+    "workflow": "04bf7815-bb7a-45a3-b3ff-091f782adaea",
+    "backend_job": 4213,
+    "cause": "Existing exact policy set omitted new edge_mixed_execution_insert; no product RLS defect",
+    "same_cause_failures": 1,
+    "resolved_on": "79c39ca7ad377771f15b67f2493dd5cb7593a294"
+  },
+  "previous_inflight_ci": {
+    "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
+    "attempt": 6,
+    "status": "superseded before financialproof by proactively found unnecessarymixedcolumnread",
+    "expected_backend_total": 8090,
+    "expected_new": 49,
+    "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
+  },
+  "local_resume": {
+    "at": "2026-11-03T07:40:05.057Z",
+    "reason": "User resumed local development and requested safe acceleration",
+    "cloud_product_grant": false
+  },
+  "latest_main_sha": "bf8c43cfcdf95e0b636f96382c991be0eecc29ea",
+  "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
     "backend_job": 4204,
@@ -303,26 +393,16 @@
     "cause": "Only invalid private-owner cost SELECT denial; use actualNode boundary instead. Historical dispatcher regression+both new migration roundtrips passed.",
     "same_cause_failures": 1
   },
-  "previous_inflight_ci": {
-    "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
-    "attempt": 6,
-    "status": "superseded before financialproof by proactively found unnecessarymixedcolumnread",
-    "expected_backend_total": 8090,
-    "expected_new": 49,
-    "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
+  "acceleration": {
+    "scope": "Fail earlier on existing policy/ACL/DDL regressions; full matrix and limits unchanged",
+    "previous_policy_failure_detected_after_full_pytest_seconds": 1322.852,
+    "early_contract_cases_per_node": 12,
+    "early_contract_seconds_per_node": [
+      4.475,
+      4.274
+    ],
+    "additional_readonly_metadata_cases": 4,
+    "end_to_end_speedup_claimed": false
   },
-  "local_stop": {
-    "reason": "User is turning off PC; stop local development",
-    "at": "2026-11-02T14:59:35Z",
-    "all_product_changes_pushed": true,
-    "checkout_clean": true,
-    "main_unchanged": "78f388171308623ffefb2f956bef191b5c822976",
-    "cloud_development_paused": true,
-    "no_automatic_merge_configured": true
-  },
-  "local_resume": {
-    "at": "2026-11-03T07:40:05.057Z",
-    "reason": "User resumed local development and requested safe acceleration",
-    "cloud_product_grant": false
-  }
+  "resume_run_id": "local-2026-11-03-native-mixed-cash-02"
 }
