@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 41,
+  "generation": 42,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "awaiting_user",
+  "phase": "qa_restoration",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "STOP dependent writes/checks until user approves exact-lock QA restore and this task's repeated startup-budget exception. Current authfix+18newtests prepared on dirty codex/auth-two-tab-recovery (base8929099e), 100targeted passed with oldQA; no commit/push/PR or main changes. Restore isolated QA under workspace (no global installs), replace only verified isolated source node_modules junction, rerun exact-locktargeted/type/lint/build, preserve budgets, then fullCI+main. Actualbrowser proof pending. Keep liveAurum/sharedDB/Docker untouched, cloudpaused/autonomydeferred.",
+  "remaining_step": "UserapprovedexactQA restore and startupbudgetchecks for this task. Restorecorrectlocked graph, safelyreplaceONLYisolatedjunction, rerun quality/tests/build. Preserve budget limits; fullCI andmain onlyafter success. No live/sharedDB/Docker changes.",
   "failure_counters": {
     "startup-budget": {
       "step": "check-startup-bundle.mjs",
@@ -39,12 +39,7 @@
       "requires_user_exception": true
     }
   },
-  "blocker": {
-    "approval_required": true,
-    "reason": "AGENTS dependency installation consent and two same-step budget failures",
-    "proposal": "C:/Users/Asadov/Desktop/A-Pharma/.codex/auth-two-tab-recovery-2026-11-03/qa-restoration-proposal.json",
-    "requested_scope": "Restore isolated QA from exact current lock using pnpm9.12.0; preserve project dependency versions. Allow this task's startup budget optimization/checks to success without raising any limits, then fullCI and protected merge."
-  },
+  "blocker": null,
   "previous_completed": {
     "pr": 448,
     "merged": true,
@@ -89,7 +84,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T13:59:38.512Z",
+  "updated_at": "2026-11-03T14:03:21.747Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -379,6 +374,10 @@
       "approval": "User explicitly answered Да, продолжить этот этап to repeated pre-fix mixedprobe failure exception on PR445.",
       "scope": "Continue this same physicalcash stage to fullCI+main; no tests weakened, remaining twofailure rule preserved.",
       "status": "completed"
+    },
+    "auth_two_tab_startup_budget": {
+      "approval": "User explicitly: Да, восстановить QA и продолжить проверку до успеха",
+      "scope": "Only this authfix exact-lock isolatedQA restoration inclpnpm9.12.0 and startup-size optimization/checks untilsuccess without raisinglimits; all other twofailrule/dependencies/liveDB protections retained."
     }
   },
   "previous_failed_ci": {
