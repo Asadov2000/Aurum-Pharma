@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 43,
+  "generation": 44,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "ci",
+  "phase": "ci_wait_pc_shutdown",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "Await full exact-head CI PR450; inspect newauth shared-cookie browser scenario, all3278frontend/8290backend/571desktop/168browser, no flaky cases. If failure establish cause; normal twofailure policy except user-approved budget optimization. Beforemerge re-read actualmain/ownhead/controlowner and all8contexts; expected-head protectedmerge only. Thenverifytestedtreeincurrentmain and recordfixed reproduced authcase (historicalCI3686 exactcause remains unknown), update fictionalrehearsalguide baseline. Keep cloud/autonomydeferred, no liveAurum/sharedDB/Docker.",
+  "remaining_step": "USER IS SHUTTING PC DOWN. Local work stopped, code committed/pushed inPR450 head10c39aac9e38cc7d4df378442aaf4ee219390279. Cloud/schedulers remainpaused; NOauto-merge. CircleCIworkflow6144c130-7016-4f0f-9385-c26f5f414c55 remotecontinues/queues independently. Onnextresume freshactualmain/ownhead/status/openPR/recentmerge/controlowner, continueSAMEPR450 (not newstage). Inspect fullCI, require newactualtwo-tab browsercase andall3278frontend/8290backend/571desktop/168E2E. Budgetexceptionalreadyapprovedforthistask; exactQArestoredandbudgetspassed. Normaltwofailurepolicyotherwise. Protectedmergeonly8successonfinalhead; verifyactualmain tree. No liveAurum/sharedDB/Docker/autonomy changes.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -77,7 +77,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T14:34:50.936Z",
+  "updated_at": "2026-11-03T14:39:33.306Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -135,7 +135,20 @@
     "expected_frontend_files": 243,
     "expected_e2e": 168,
     "new_frontend": 18,
-    "new_browser": 1
+    "new_browser": 1,
+    "workflow": "6144c130-7016-4f0f-9385-c26f5f414c55",
+    "last_contexts": [
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "pending",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/9ee1e3b1-d280-4a2a-9193-86a5eb8c577a"
+      },
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "pending",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/e076d1db-b753-46da-9973-5454b2f923fd"
+      }
+    ]
   },
   "completion": {
     "pr": 449,
@@ -430,5 +443,11 @@
   "previous_completed_work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
-  ]
+  ],
+  "shutdown_by_user": {
+    "reason": "User is turning PC off",
+    "at": "2026-11-03T14:39:33.306Z",
+    "cloud_resumed": false,
+    "automatic_merge_enabled": false
+  }
 }
