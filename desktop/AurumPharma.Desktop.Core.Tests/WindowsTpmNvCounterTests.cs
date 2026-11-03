@@ -404,7 +404,8 @@ public sealed class WindowsTpmNvCounterTests
         using var counter = Open(transport);
         using var ready = new CountdownEvent(2);
         using var release = new ManualResetEventSlim();
-        Task<bool> Attempt() => Task.Run(() =>
+        // Dedicated participants keep the concurrency assertion independent of thread-pool starvation.
+        Task<bool> Attempt() => Task.Factory.StartNew(() =>
         {
             ready.Signal();
             Assert.True(release.Wait(TimeSpan.FromSeconds(5)));
@@ -414,7 +415,7 @@ public sealed class WindowsTpmNvCounterTests
                 Assert.Equal(FailureMessage, error.Message);
                 return false;
             }
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         var first = Attempt();
         var second = Attempt();
         Assert.True(ready.Wait(TimeSpan.FromSeconds(5)));
