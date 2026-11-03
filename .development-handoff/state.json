@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 39,
-  "work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
-  "control_stage_id": "E6-06",
+  "generation": 40,
+  "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
+  "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "completed",
-  "run_id": "local-2026-11-03-trusted-credential-source-01",
-  "branch": "codex/edge-trusted-credential-source",
-  "base_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
-  "expected_head": "134497db34fc0fc67345a79fc04af145da7cde1a",
-  "validated_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
-  "pr": 449,
+  "phase": "implementation",
+  "run_id": "local-2026-11-03-two-tab-auth-01",
+  "branch": "codex/auth-two-tab-recovery",
+  "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+  "expected_head": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,20 +18,27 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "2/7 (4)",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "Existing-file checkpoint-verified credential bundle binds full admitted cashier metadata, bcrypt verifier and TPM-encrypted pepper; real Windows TPM unprotect with independent sealed context, second checkpoint, close-before-publish and zeroization. No positive runtime or hardware provisioning.",
+  "scope": "Reproduce two-tab SID rotation during a single protected retry, then serialize refresh+retry with the existing origin cookie lock; preserve logout/session/support/abort/MFA fences and backend SID revocation. Online priority; autonomy deferred.",
   "acceptance": [
-    "Preserve snapshot v1; new bounded strict Python/native bundle format with exact-byte domain-separated checkpoint digest, one-to-one credential context/envelope binding and shared synthetic fixture.",
-    "Concrete existing-file Windows source verifies before decrypt and verifies checkpoint again after decrypt, rejects substitution/rollback/faults, closes before publication and clears secret material on failure/disposal.",
-    "Targeted verification, independent review, full exact-head eight CI contexts and protected merge; no dependency change, cloud writer, live Aurum or sharedDB access."
+    "Deterministic actual frontend module test reproduces modeled two-tab final401 beforefix; no sleeps or mocked coordinator.",
+    "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
+    "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "Priority changed by user: ONLINE sales/rehearsal FIRST; E6-06 and A1-A6 deferred, no auto-resume. Rehearsal guide prepared with fictional data; no pharmacy/cashier selected, no separate stand started or rehearsal executed. Read next_work_item. Fresh actualmain/HEAD/status/open/recentPR recon required. Investigate known cross-tab auth candidate with deterministic isolated reproduction before any fix, then prepare isolated online cash rehearsal. Do not invent new cash features or repeat existing passed tests without cause; no live Aurum/sharedDB/dependency changes or Docker startup/deployment by assumption. Keep cloud and schedulers paused. Existing four Edge control stages remain open, counter2/7(4).",
-  "failure_counters": {},
+  "remaining_step": "Implement atomic refresh/retry and targeted guards after modeled prepatch red. Await fullCI before main; cloud paused. Actual CI3686 rootcause remains unproven until real browser reproduction.",
+  "failure_counters": {
+    "prepatch_expected_regression": {
+      "step": "Vitest cross-tab modeled schedule",
+      "cause": "first protected retry revoked by second tab rotation",
+      "count": 1,
+      "expected_red": true
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "pr": 448,
@@ -77,7 +84,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T13:11:33.914Z",
+  "updated_at": "2026-11-03T13:27:05.091Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -294,7 +301,7 @@
       "hardware_acceptance": false
     }
   ],
-  "increment_id": "checkpoint-credential-material-source",
+  "increment_id": "atomic-refresh-and-protected-retry",
   "previous_ci": {
     "head_sha": "ab80d6557320dd1a897abf41528919d17e151920",
     "workflow": "67080d95-4c5f-4e4a-b684-b958bb6dd619",
@@ -467,5 +474,9 @@
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
     "next_technical_check": "AUTH-PARALLEL-BOOTSTRAP-01: reproduce deterministically in two pages of one browsercontext with shared cookie. Cookie refresh WebLock exists but releases before protected retry; each refresh revokes oldsid. Reviewer identified a possible interleaving, NOT a reproduced current bug or proven CI3686 root cause. Do not patch or relax sid/retry guards before reproduction; don't overlap unrelated PR254."
-  }
+  },
+  "previous_completed_work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
+  "local_harness_findings": [
+    "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
+  ]
 }
