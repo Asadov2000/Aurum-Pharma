@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 42,
+  "generation": 43,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "qa_restoration",
+  "phase": "ci",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
-  "expected_head": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
-  "validated_sha": null,
-  "pr": null,
+  "expected_head": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+  "validated_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+  "pr": 450,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -30,15 +30,8 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "UserapprovedexactQA restore and startupbudgetchecks for this task. Restorecorrectlocked graph, safelyreplaceONLYisolatedjunction, rerun quality/tests/build. Preserve budget limits; fullCI andmain onlyafter success. No live/sharedDB/Docker changes.",
-  "failure_counters": {
-    "startup-budget": {
-      "step": "check-startup-bundle.mjs",
-      "consecutive": 2,
-      "cause": "Dashboard145.28KiB>145/POS195.16KiB>195 in reused QA graph; precise code-vs-toolchain contribution not established",
-      "requires_user_exception": true
-    }
-  },
+  "remaining_step": "Await full exact-head CI PR450; inspect newauth shared-cookie browser scenario, all3278frontend/8290backend/571desktop/168browser, no flaky cases. If failure establish cause; normal twofailure policy except user-approved budget optimization. Beforemerge re-read actualmain/ownhead/controlowner and all8contexts; expected-head protectedmerge only. Thenverifytestedtreeincurrentmain and recordfixed reproduced authcase (historicalCI3686 exactcause remains unknown), update fictionalrehearsalguide baseline. Keep cloud/autonomydeferred, no liveAurum/sharedDB/Docker.",
+  "failure_counters": {},
   "blocker": null,
   "previous_completed": {
     "pr": 448,
@@ -84,7 +77,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T14:03:21.747Z",
+  "updated_at": "2026-11-03T14:34:50.936Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -96,89 +89,53 @@
     "clean": true
   },
   "local_validation": {
-    "prepatch_modeled_reproduction": "confirmed: first tab's protected retry rejected, second fulfilled",
-    "targeted_tests_passed": 100,
-    "targeted_new_cases": 18,
-    "typecheck": "passed reused QA",
-    "lint": "passed reused QA",
-    "production_build": "compiled; startup budget refused twice",
-    "security_review": "approved final lazy implementation and docs",
-    "real_browser": "prepared; not executed",
-    "toolchain_caveat": "Existing QA top-level tools matched, but installed pnpm lock differs: oldfollow-redirects1.16.1/seroval1.6.3 vs current1.16.2/1.6.8. Recheck with exact frozen lock before claiming final validation."
+    "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+    "exact_qa_lock_sha256": "7905252E2DE8D2CFBE46AD863F98219D915D13D35A4CE84BCD801AC0AEF5E9BC",
+    "targeted_passed": 100,
+    "new_frontend_cases": 18,
+    "new_browser_cases": 1,
+    "real_browser": "listed, CI pending",
+    "typecheck": "passed exact QA",
+    "lint": "passed exact QA+final vite config",
+    "prettier": "passed",
+    "startup_budgets": {
+      "login": {
+        "gzip_kib": 170.24,
+        "requests": 5
+      },
+      "dashboard": {
+        "gzip_kib": 144.93,
+        "requests": 4
+      },
+      "pos": {
+        "gzip_kib": 194.82,
+        "requests": 15
+      },
+      "limits_changed": false
+    },
+    "independent_security_review": "approved final simple cookie/rawPOST variant and lazy coordinator",
+    "diff_check": "passed",
+    "project_dependency_versions_changed": false,
+    "qa_installation": "approved isolated frozen-lock restoration; pnpm9.12.0",
+    "resolved_findings": [
+      "WrongcwdVitestenv fixed before modeled red.",
+      "Actualmodeledprepatch A401 reproduced; corrected coordinator all100green.",
+      "MFA identity/support denial classification preserved; no oldtests changed.",
+      "OldQA lock mismatch corrected by approved fresh installation.",
+      "Startupbudget6failures(2oldQA+4exactQA) before finalsuccess; userexplicitlyapprovedthis task's optimization tosuccess. No limitsraised."
+    ]
   },
   "ci": {
-    "head_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
-    "workflow": "680a3c3f-32ba-4b89-a3f4-a70f5bc80584",
-    "status": "success",
+    "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+    "status": "pending",
     "required_contexts": 8,
     "expected_backend": 8290,
-    "new_python": 66,
     "expected_desktop": 571,
-    "new_desktop": 109,
-    "backend_job": 4268,
-    "desktop_job": 4272,
-    "gate_job": 4274,
-    "backend_passed": 8290,
-    "backend_skipped": 0,
-    "duplicates": 0,
-    "new_python_passed": 66,
-    "snapshot_regression_cases": 87,
-    "native_regression_cases": 45,
-    "desktop_passed": 571,
-    "new_desktop_passed": 109,
-    "desktop_skipped": 0,
-    "frontend_passed": 3260,
-    "frontend_files": 241,
-    "e2e_passed": 167,
-    "native_early_nodes_passed": 2,
-    "native_post_pytest_nodes_passed": 2,
-    "genuine_physical_cases_per_node": 5,
-    "genuine_mixed_cases_per_node": 5,
-    "legacy_snapshot_cases_per_node": 19,
-    "identity_and_acl_nodes_passed": 2,
-    "workflows_run": 1,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d6cf64ee-a4d2-43c0-b1bf-d5640e1e422d"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/0379df48-4ae7-4de5-aa63-9d64c5259c68"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/8642317c-0250-4366-b0a6-f5cb7f2848e4"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d054cd0f-c114-4c87-9537-2cf5549782a4"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/87380860-6a9d-4abc-ac7e-f1e86d4da7ca"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/fb4f9d3e-3585-48cc-be02-892ce1a23b3f"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/78aa765d-65fe-4037-a7cc-dc7e965343ed"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/606071eb-83c7-44a1-bcec-5970e34e0480"
-      }
-    ]
+    "expected_frontend": 3278,
+    "expected_frontend_files": 243,
+    "expected_e2e": 168,
+    "new_frontend": 18,
+    "new_browser": 1
   },
   "completion": {
     "pr": 449,
@@ -293,24 +250,25 @@
   ],
   "increment_id": "atomic-refresh-and-protected-retry",
   "previous_ci": {
-    "head_sha": "ab80d6557320dd1a897abf41528919d17e151920",
-    "workflow": "67080d95-4c5f-4e4a-b684-b958bb6dd619",
+    "head_sha": "134497db34fc0fc67345a79fc04af145da7cde1a",
+    "workflow": "680a3c3f-32ba-4b89-a3f4-a70f5bc80584",
     "status": "success",
     "required_contexts": 8,
-    "expected_backend": 8224,
-    "new_python": 87,
-    "expected_desktop": 462,
-    "new_desktop": 132,
-    "backend_job": 4254,
-    "desktop_job": 4251,
-    "gate_job": 4258,
-    "backend_passed": 8224,
+    "expected_backend": 8290,
+    "new_python": 66,
+    "expected_desktop": 571,
+    "new_desktop": 109,
+    "backend_job": 4268,
+    "desktop_job": 4272,
+    "gate_job": 4274,
+    "backend_passed": 8290,
     "backend_skipped": 0,
     "duplicates": 0,
-    "new_python_passed": 87,
+    "new_python_passed": 66,
+    "snapshot_regression_cases": 87,
     "native_regression_cases": 45,
-    "desktop_passed": 462,
-    "new_desktop_passed": 132,
+    "desktop_passed": 571,
+    "new_desktop_passed": 109,
     "desktop_skipped": 0,
     "frontend_passed": 3260,
     "frontend_files": 241,
@@ -326,42 +284,42 @@
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f5395d58-5d29-4154-b384-eb663839ca71"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d6cf64ee-a4d2-43c0-b1bf-d5640e1e422d"
       },
       {
         "context": "ci/circleci: dependency-audit",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/eeccaf05-9a04-4a36-bf1f-629108d16342"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/0379df48-4ae7-4de5-aa63-9d64c5259c68"
       },
       {
         "context": "ci/circleci: tooling-windows",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/dc2b6a3a-fb0b-4f8b-8937-219eda9d5a99"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/8642317c-0250-4366-b0a6-f5cb7f2848e4"
       },
       {
         "context": "ci/circleci: frontend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/059af84a-383b-401e-aaaf-ca99016077fe"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/d054cd0f-c114-4c87-9537-2cf5549782a4"
       },
       {
         "context": "ci/circleci: production-containers",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/f7a76655-c393-44c0-b28e-dce9e2119e4d"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/87380860-6a9d-4abc-ac7e-f1e86d4da7ca"
       },
       {
         "context": "ci/circleci: e2e",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/ae032eb8-c584-449a-8ce1-9884c85cc425"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/fb4f9d3e-3585-48cc-be02-892ce1a23b3f"
       },
       {
         "context": "ci/circleci: backend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/6482a613-1bba-40a7-b7db-b36deddd2652"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/78aa765d-65fe-4037-a7cc-dc7e965343ed"
       },
       {
         "context": "ci/circleci: ci-gate",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/67080d95-4c5f-4e4a-b684-b958bb6dd619/job/5e2098f5-5d3e-4b30-8a10-c64ac806eabf"
+        "target_url": "https://app.circleci.com/workflow/680a3c3f-32ba-4b89-a3f4-a70f5bc80584/job/606071eb-83c7-44a1-bcec-5970e34e0480"
       }
     ]
   },
