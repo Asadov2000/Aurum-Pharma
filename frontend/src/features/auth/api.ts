@@ -18,7 +18,7 @@ import {
   type TokenPair,
 } from "./types";
 
-const AUTH_REQUEST_TIMEOUT_MS = 30_000;
+export const AUTH_REQUEST_TIMEOUT_MS = 30_000;
 
 export async function requestLoginCode(
   payload: LoginCodeRequest,

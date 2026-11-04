@@ -84,6 +84,11 @@ function splitRuntimeDependencies(id: string): string | undefined {
     /\/src\/components\/(AccessDeniedCard|ui\/(Card|PageHeader|Skeleton|Badge))\.tsx$/.test(normalizedId) ||
     /\/src\/(lib\/bodyScrollLock|features\/auth\/(hooks|permissions)|features\/settings\/(preferenceQueueStorage|workspacePreferences|useSidebarPreferences|queries|api))\.ts$/.test(normalizedId)
   ) return "AuthenticatedShell";
+  // Every sprite consumer already imports the shell. Keep its tiny URL module
+  // there too instead of adding a separate startup request and preload entries.
+  if (/\/src\/assets\/sidebar-icons\.svg(?:\?.*)?$/.test(normalizedId)) {
+    return "AuthenticatedShell";
+  }
   // Mini and shared core have no classic schema convenience methods. Sharing
   // their chunk with RHF avoids fragmenting auth without loading lazy schemas.
   if (/\/node_modules\/zod\/v4\/(core|mini)\//.test(normalizedId) ||
