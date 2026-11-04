@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 49,
+  "generation": 50,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-PILOT-REHEARSAL",
   "owner": "local",
@@ -90,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T12:08:46.047Z",
+  "updated_at": "2026-11-04T12:16:29.636Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -113,7 +113,8 @@
     "local_installations": false,
     "windows_ci_passed": 571,
     "frontend_ci_passed": 3278,
-    "frontend_ci_files": 243
+    "frontend_ci_files": 243,
+    "real_browser": "169passed incl1new actualconnectedcase/0failures/0flaky"
   },
   "ci": {
     "status": "pending",
@@ -125,7 +126,11 @@
     "expected_frontend": 3278,
     "expected_frontend_files": 243,
     "expected_e2e": 169,
-    "new_e2e": 1
+    "new_e2e": 1,
+    "browser_passed": 169,
+    "new_browser_passed": 1,
+    "browser_flaky": 0,
+    "browser_job": 4303
   },
   "completion": {
     "pr": 450,
@@ -247,7 +252,7 @@
       "closes_control_stage": false
     }
   ],
-  "increment_id": "atomic-refresh-and-protected-retry",
+  "increment_id": "connected-fictional-cash-rehearsal",
   "previous_ci": {
     "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
     "status": "success",
@@ -392,7 +397,7 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "automated_rehearsal_implementation",
+    "phase": "awaiting_final_ci",
     "base_sha": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
     "owner": "local",
     "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -428,6 +433,7 @@
   "follow_up_candidate": {
     "id": "ONLINE-CASH-REJECTED-INTENT-01",
     "status": "read_only_candidate_not_runtime_reproduced",
-    "question": "Check whether definitive insufficient-stock completion422 leaves browser pending marker blocking correction. PR451 directAPI negative case does not verify failed UI payment recovery. Reproduce first; do not clear ambiguous financial markers."
+    "question": "Check whether definitive insufficient-stock completion422 leaves browser pending marker blocking correction. PR451 directAPI negative case does not verify failed UI payment recovery. Reproduce first; do not clear ambiguous financial markers.",
+    "code_triage": "Pending stored before channel complete; definite422 retains it, acknowledge only completed; panel blocks edit/new/close, saved_draft remains blocked. No cancel path found. Runtime UI422 not reproduced; existing lost-response invariants must stay."
   }
 }
