@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 51,
-  "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-  "control_stage_id": "ONLINE-PILOT-REHEARSAL",
+  "generation": 52,
+  "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
+  "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "merged_verified",
-  "run_id": "local-2026-11-04-online-cash-rehearsal-01",
-  "branch": "codex/online-cash-rehearsal",
-  "base_sha": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
-  "expected_head": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
-  "validated_sha": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
-  "pr": 451,
+  "phase": "reproducing",
+  "run_id": "local-2026-11-04-cash-stock-rejection-01",
+  "branch": "codex/cash-stock-rejection-recovery",
+  "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+  "expected_head": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+  "validated_sha": null,
+  "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,19 +18,19 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "2/7 (4)",
+  "counter": "Online closure: currentcashrecovery, manualfictionalrehearsal, acceptance signoff; no autonomy countdown",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "One connected fictional online cash lifecycle acceptance E2E on existing disposable CI stand; no product/dependency/UI/CI-config/live changes.",
+  "scope": "Only online physical unit cash insufficient-stock recovery: reproduce actual frontend blocked state; durable server cancellation before releasing browser guard; preserve ambiguous/completed/replay races. No autonomy work.",
   "acceptance": [
-    "Two30unitsealedpacks, unit3/blister10/pack30 inthreeUI cashsales43TJS; partialrefund1 intoquarantine; explicit damagedwriteoff2.",
-    "Same lot final sellable15/quarantine1/writeoff2; opening100 closing142; nooversell16 or duplicates afterreload/closedshift; immutable linked receipts and report42.",
-    "All8exact-headCIcontexts including real browser acceptance; protectedmerge/treeproof; rehearsalautomation not real pharmacy acceptance."
+    "Definitive422 shortage leaves pending and blocked UI reproduced with real cash frontend modules; backend422 already proven inPR451, actual post-fix browser required.",
+    "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
+    "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "PR451 merged_verified actualmain96015ad... treeequals testedhead. Automatedfictionalrehearsal passed, humanmanual/equipment/pilot pending. Next only narrow UI422 failedcash recovery reproduction on disposableCI; candidate codeproven, runtime notyet. Preserve optionalearlyreader failurecounter2, do not repeat it withoutscopedapproval. Cloud remains stopped; no live/sharedDB/deployment/installs/paid changes. Counter2/7(4) unchanged, autonomydeferred.",
+  "remaining_step": "QA writes independent reproduction test only; security architect readonly analyzes durable fence; root owns backend/security critical path. Docker Desktop unavailable, notstarted; no live/sharedDB access. Existing exact QA tools only. Preserve auxiliary early-reader2TLS stop; do not rerun oldblocked reader.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -90,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T12:37:13.637Z",
+  "updated_at": "2026-11-04T12:42:56.317Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -118,73 +118,7 @@
     "backend_report": "Native Node HTTPS (default TLS) verified exact-head8290success,0skips,0duplicates,198watched after one PythonmetadataTLSfailure. Optional earlyreader stopped at2 and not repeated."
   },
   "ci": {
-    "status": "success",
-    "head_sha": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
-    "workflow": "37c3f312-feba-4197-9430-a5d334011903",
-    "required_contexts": 8,
-    "expected_backend": 8290,
-    "expected_desktop": 571,
-    "expected_frontend": 3278,
-    "expected_frontend_files": 243,
-    "expected_e2e": 169,
-    "new_e2e": 1,
-    "browser_passed": 169,
-    "new_browser_passed": 1,
-    "browser_flaky": 0,
-    "browser_job": 4303,
-    "contexts": [
-      {
-        "context": "ci/circleci: tooling-linux",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/ce6e5164-d2a8-452a-9c41-b55ba41d4c32"
-      },
-      {
-        "context": "ci/circleci: dependency-audit",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/feac04a8-3c38-4ee2-b4c6-8e690ba2b531"
-      },
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/4903632f-6273-444d-8e7c-a3cf058ca666"
-      },
-      {
-        "context": "ci/circleci: frontend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/42ed92df-d1b9-425d-b016-8e55ea9bd346"
-      },
-      {
-        "context": "ci/circleci: production-containers",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/ec819427-516c-4d5d-bb37-e6318bac9c21"
-      },
-      {
-        "context": "ci/circleci: e2e",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/801172f9-541a-4830-8d62-aaf780501047"
-      },
-      {
-        "context": "ci/circleci: backend",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/07b55557-5912-4a79-94ed-b22b13017a08"
-      },
-      {
-        "context": "ci/circleci: ci-gate",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/080525fb-3ae5-491f-953a-33ff775918f3"
-      }
-    ],
-    "backend_passed": 8290,
-    "backend_skipped": 0,
-    "duplicates": 0,
-    "watched_regression_passed": 198,
-    "desktop_passed": 571,
-    "frontend_passed": 3278,
-    "frontend_files": 243,
-    "e2e_passed": 169,
-    "flaky": 0,
-    "workflows_run": 1,
-    "reruns": 0
+    "status": "not_started"
   },
   "completion": {
     "pr": 451,
@@ -316,67 +250,72 @@
       "human_rehearsal": false
     }
   ],
-  "increment_id": "connected-fictional-cash-rehearsal",
+  "increment_id": "safe-rejected-cash-recovery",
   "previous_ci": {
-    "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
     "status": "success",
+    "head_sha": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
+    "workflow": "37c3f312-feba-4197-9430-a5d334011903",
     "required_contexts": 8,
     "expected_backend": 8290,
     "expected_desktop": 571,
     "expected_frontend": 3278,
     "expected_frontend_files": 243,
-    "expected_e2e": 168,
-    "new_frontend": 18,
-    "new_browser": 1,
-    "workflow": "6144c130-7016-4f0f-9385-c26f5f414c55",
-    "last_contexts": [
-      {
-        "context": "ci/circleci: tooling-windows",
-        "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/9ee1e3b1-d280-4a2a-9193-86a5eb8c577a"
-      },
+    "expected_e2e": 169,
+    "new_e2e": 1,
+    "browser_passed": 169,
+    "new_browser_passed": 1,
+    "browser_flaky": 0,
+    "browser_job": 4303,
+    "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/e076d1db-b753-46da-9973-5454b2f923fd"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/ce6e5164-d2a8-452a-9c41-b55ba41d4c32"
       },
       {
         "context": "ci/circleci: dependency-audit",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/4a70119b-bc49-48bd-b6b7-6fd6cd2c0b2e"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/feac04a8-3c38-4ee2-b4c6-8e690ba2b531"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/4903632f-6273-444d-8e7c-a3cf058ca666"
       },
       {
         "context": "ci/circleci: frontend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/e5a0f3a9-f975-429c-8c99-bccd0c976be1"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/42ed92df-d1b9-425d-b016-8e55ea9bd346"
       },
       {
         "context": "ci/circleci: production-containers",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/9c0e2841-f4a0-4b83-a4dc-928564b29c7e"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/ec819427-516c-4d5d-bb37-e6318bac9c21"
       },
       {
         "context": "ci/circleci: e2e",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/b3f04812-e049-45a5-96e7-6f2d9135321b"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/801172f9-541a-4830-8d62-aaf780501047"
       },
       {
         "context": "ci/circleci: backend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/bceeaa10-8ce2-45a1-aa9c-ad1539321ede"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/07b55557-5912-4a79-94ed-b22b13017a08"
       },
       {
         "context": "ci/circleci: ci-gate",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/09d0a927-77e4-46c1-a83f-eef4f29c8f78"
+        "target_url": "https://app.circleci.com/workflow/37c3f312-feba-4197-9430-a5d334011903/job/080525fb-3ae5-491f-953a-33ff775918f3"
       }
     ],
     "backend_passed": 8290,
+    "backend_skipped": 0,
+    "duplicates": 0,
+    "watched_regression_passed": 198,
     "desktop_passed": 571,
     "frontend_passed": 3278,
     "frontend_files": 243,
-    "e2e_passed": 168,
-    "new_browser_passed": 1,
+    "e2e_passed": 169,
     "flaky": 0,
     "workflows_run": 1,
     "reruns": 0
@@ -483,9 +422,9 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "ONLINE-CASH-REJECTED-INTENT-01: reproduce actual browser cash payment16vs15 with genuine422 on disposableCI; assert no stock/money, reloadsaved_draft and whether edit/new/close stayblocked. Existing cashRecovery retains pending untilcompleted. No cancel path found. Do not blindly clear financialmarker/relaxambiguity guards, do not expand autonomy or duplicate currentrehearsal."
+    "next_technical_check": "Current explicit user task ONLINE-CASH-REJECTED-INTENT-01; do not duplicate anotherstage."
   },
-  "previous_completed_work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
+  "previous_completed_work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
   ],
