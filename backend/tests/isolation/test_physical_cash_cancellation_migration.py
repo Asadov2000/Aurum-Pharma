@@ -122,6 +122,19 @@ async def test_cash_cancellation_rls_audit_and_definer_fences_are_narrow(
             has_table_privilege('aurum_edge_cash_owner','pos_physical_cash_cancellation','SELECT')
         """))).one()
         assert tuple(grants) == (True, True, False, False, True, False, False)
+        policies = list((await connection.execute(text("""
+          SELECT polname,polcmd::TEXT,
+            pg_get_expr(polqual,polrelid) AS using_expr,
+            pg_get_expr(polwithcheck,polrelid) AS check_expr
+          FROM pg_policy WHERE polrelid='public.pos_physical_cash_cancellation'::regclass
+          ORDER BY polname
+        """))).all())
+        assert len(policies) == 3
+        for policy in policies:
+            expressions = f"{policy.using_expr or ''} {policy.check_expr or ''}"
+            assert "is_support_session" not in expressions
+        support_policy = next(policy for policy in policies if policy.polname == "support_read")
+        assert support_policy.polcmd == "r"
         for function in FUNCTIONS:
             details = (
                 await connection.execute(

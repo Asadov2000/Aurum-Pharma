@@ -134,12 +134,12 @@ def upgrade() -> None:
       CREATE POLICY tenant_actor ON public.pos_physical_cash_cancellation TO aurum_app
         USING(tenant_id=public.current_tenant_id()
           AND cashier_user_id=public.current_app_user_id()
-          AND NOT public.is_support_session()
+          AND session_user='aurum_app'
           AND NOT public.is_tenant_support_session()
           AND public.tenant_actor_has_scoped_permission(tenant_id,'pos.sell',branch_id))
         WITH CHECK(tenant_id=public.current_tenant_id()
           AND cashier_user_id=public.current_app_user_id()
-          AND NOT public.is_support_session()
+          AND session_user='aurum_app'
           AND NOT public.is_tenant_support_session()
           AND public.tenant_actor_has_scoped_permission(tenant_id,'pos.sell',branch_id));
     """)
