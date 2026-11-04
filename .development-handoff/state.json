@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 66,
+  "generation": 67,
   "work_item_id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "implementing-readonly-completed-cart",
+  "phase": "waiting-full-ci",
   "run_id": "local-completed-cart-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-  "expected_head": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+  "expected_head": "180deedabf827b6380e5038c37f4ba422a4d182a",
   "validated_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-  "pr": null,
+  "pr": 453,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -29,7 +29,7 @@
     "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
     "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Readonly display correction, regression tests, full CI gate and expected-SHA merge; no live runtime or shared DB changes.",
+  "remaining_step": "Full CircleCI eight required jobs on exact head, refresh main/head, protected expected-head merge, verify main tree. No deployment.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -74,6 +74,12 @@
       "reason": "Exact runtime table/function inventories omitnew237 journal/triggerfunctions; actualnewtablegrantalreadySELECTINSERT",
       "status": "resolved; exact final-head full CI success and protected merge/tree proof",
       "previous_consecutive_failures": 1
+    },
+    "completed_cart_startup_budget": {
+      "count": 0,
+      "previous_consecutive_failures": 1,
+      "status": "resolved",
+      "reason": "static renderer exceeded POS gzip by0.1KiB; lazy component restores194.96/195KiB without limit changes"
     }
   },
   "blocker": null,
@@ -134,22 +140,12 @@
     "clean": true
   },
   "local_validation": {
-    "baseline_reproduction": "1 realfrontend characterization beforeproductfix; HTTPadapter only; actualbackendstock422 previouslyPR451",
-    "final_frontend_integration_passed": 17,
-    "other_targeted_tests_passed": 156,
-    "backend_collection_new": 29,
-    "ruff": "passed",
-    "black": "547filespassed",
-    "mypy": "544sourcespassed",
-    "frontend_typecheck": "passed",
-    "frontend_lint": "passed",
-    "strict_test_types": "passed",
-    "early_build": "170.23/144.91/194.81KiB capsunchanged",
-    "final_build": "passed Login170.24/Dashboard144.92/POS194.82KiB capsunchanged",
-    "local_full_vitest": "3295passed/244files on currentcode; no failures",
-    "browser_list": 2,
-    "independent_security_review": "approved server+DBfence+clonehelper+finalfrontend",
-    "local_validated_sha": "b46836bdb486cf74de12664ed3c590c6c4a7e162"
+    "targeted_vitest": 62,
+    "typecheck": 0,
+    "eslint": 0,
+    "prettier": 0,
+    "build": 0,
+    "pos_gzip_kib": 194.96
   },
   "ci": {
     "status": "success",
