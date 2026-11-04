@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generation": 67,
+  "generation": 68,
   "work_item_id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "waiting-full-ci",
+  "phase": "waiting-ci-infrastructure-retry",
   "run_id": "local-completed-cart-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-  "expected_head": "180deedabf827b6380e5038c37f4ba422a4d182a",
+  "expected_head": "e878d7eddce26b07c7b940bafb59ef28a04e0913",
   "validated_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "pr": 453,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
@@ -80,6 +80,13 @@
       "previous_consecutive_failures": 1,
       "status": "resolved",
       "reason": "static renderer exceeded POS gzip by0.1KiB; lazy component restores194.96/195KiB without limit changes"
+    },
+    "completed_cart_e2e_startup": {
+      "count": 1,
+      "reason": "CircleCI Start isolated application stack: failed to execute bake: read |0: file already closed; browser tests not reached",
+      "workflow": "59dcd7a8-1642-470c-af28-748f2a1db9a9",
+      "job": 4358,
+      "retry": "Same code tree, empty CI retry commit; stop if same cause recurs twice"
     }
   },
   "blocker": null,
@@ -102,7 +109,8 @@
     "application": "not changed or restarted",
     "shared_database": "not accessed or changed",
     "deployment": false,
-    "tpm_nv_provisioning": false
+    "tpm_nv_provisioning": false,
+    "docker_api": "daemon currently off; no service starts/restarts or DB access performed"
   },
   "baseline_findings": [
     {
