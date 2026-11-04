@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 56,
+  "generation": 57,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "fixing-ci",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "SamePR452 finalhead full8CI. Published exact role-contract237 cap fix; local static head/cap match passed. No live/sharedDB/deployment/cloud/autonomy changes. Online closure after successful merge: manual fictional rehearsal and acceptance signoff.",
+  "remaining_step": "Continue samePR452. Fix only new journal RLS predicate and add focused metadata assertion; no weakening existing test. Current finalhead all6nonbackend contexts green; onebackendshard stillrunning, await its results before next publication to batch genuine errors. No runtime/sharedDB changes, cloud stopped.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -43,7 +43,16 @@
       "reason": "First workflow migration preflight: Alembic237 vs role-contract maximum236; fixed exact maximum237, unknown revisions still rejected",
       "failed_head": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
       "workflow": "7a4db4c8-a79a-4ba5-9af4-3a60e68d8540",
-      "status": "fixed; finalhead full CI pending"
+      "status": "resolved; finalhead migration preflight and roundtrip passed"
+    },
+    "rls_policy_support_helper": {
+      "count": 1,
+      "head": "c56a6334e41881a03e0d1cd2612be1f0c22de906",
+      "workflow": "983d6b33-aa5d-43e9-bcb4-769d927c91e1",
+      "step": "Pytest node0",
+      "test": "tests/isolation/test_foundation_rls.py:184",
+      "reason": "New cancellation RLS policy references is_support_session(); foundation invariant forbids helper in any RLS policy; count1 expected0",
+      "status": "diagnosed; DB engineer minimal policy fix, independent security review; preserve invariant"
     }
   },
   "blocker": null,
@@ -97,7 +106,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T13:55:17.603Z",
+  "updated_at": "2026-11-04T14:28:46.231Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
