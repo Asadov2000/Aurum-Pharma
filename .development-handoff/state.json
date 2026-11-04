@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 74,
+  "generation": 75,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "ci-and-isolated-cashier-rehearsal",
+  "phase": "paused-user-pc-shutdown-ci-pending",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -29,7 +29,7 @@
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "Implement narrow sale-scoped dispensing preflight, real branch CASHIER regression, exact-head full CI, protected merge, isolated connected rehearsal.",
+  "remaining_step": "On resume re-read PR454 exact-head CI/main first; do not duplicate. QA stand paused during isolated migration; inspect its current revision and containers before guarded resume. Then full restricted cashier rehearsal and merge only after green required gate. Live Aurum/shared DB unchanged.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -169,7 +169,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04 21:14:30 UTC",
+  "updated_at": "2026-11-04 21:17:21 UTC",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -567,7 +567,7 @@
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
   ],
-  "shutdown_by_user": false,
+  "shutdown_by_user": true,
   "cloud_read_attempt": {
     "at": "2026-11-04T11:38:23.691Z",
     "status": "No cloud resumed; existing userconfirmation and unchanged ledger retain exclusive localwriter"
@@ -855,5 +855,15 @@
     "head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
     "workflow": "529074af-a0fa-4e12-9773-41793329bd2d",
     "status": "pending"
+  },
+  "local_shutdown": {
+    "requested": true,
+    "source_clean_commit": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
+    "pr": 454,
+    "qa_project": "aurum-e2e-cashier-preflight-c814ba650f27",
+    "qa_state_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/stand/stand-state.json",
+    "stage": "migration before application start/seed",
+    "business_operations_performed": false,
+    "cloud_resumed": false
   }
 }
