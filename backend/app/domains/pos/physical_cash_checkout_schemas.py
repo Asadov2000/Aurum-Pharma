@@ -31,7 +31,23 @@ class PhysicalCashOperationCompleted(FrozenContract):
     result: PhysicalCheckoutResultV3
 
 
+class PhysicalCashOperationCancelled(FrozenContract):
+    state: Literal["cancelled"] = "cancelled"
+    operation_id: UUID4
+    sale_id: UUID
+    saved_intent: SavedCashIntentV2
+
+
+PhysicalCashCancellationRead = Annotated[
+    PhysicalCashOperationCancelled | PhysicalCashOperationCompleted,
+    Field(discriminator="state"),
+]
+
+
 PhysicalCashOperationRead = Annotated[
-    PhysicalCashOperationNotFound | PhysicalCashOperationSaved | PhysicalCashOperationCompleted,
+    PhysicalCashOperationNotFound
+    | PhysicalCashOperationSaved
+    | PhysicalCashOperationCompleted
+    | PhysicalCashOperationCancelled,
     Field(discriminator="state"),
 ]

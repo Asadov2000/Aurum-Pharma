@@ -5,7 +5,9 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from app.core.errors import AurumError, NotFoundError, PermissionDeniedError
+from app.domains.pos.physical_cash_cancellation_models import PhysicalCashCancellation
 from app.domains.pos.physical_cash_checkout_schemas import (
+    PhysicalCashOperationCancelled,
     PhysicalCashOperationCompleted,
     PhysicalCashOperationNotFound,
     PhysicalCashOperationRead,
@@ -22,8 +24,13 @@ from app.domains.pos.physical_documents import (
 from app.domains.pos.unit_cart_quote import PhysicalUnitDraftQuoteLineV2
 from app.domains.pos.unit_cart_repository import UnitCartRepository
 from app.domains.pos.unit_cash_confirmation import CashConfirmationRequestV2
+from app.domains.pos.unit_cash_intent_models import UnitCashIntent
 from app.domains.pos.unit_cash_intent_repository import UnitCashIntentRepository
-from app.domains.pos.unit_cash_intent_service import UnitCashIntentService, cash_intent_request_hash
+from app.domains.pos.unit_cash_intent_service import (
+    SavedCashIntentV2,
+    UnitCashIntentService,
+    cash_intent_request_hash,
+)
 from app.domains.pos.unit_checkout_payment_repository import UnitCheckoutPaymentRepository
 from app.domains.pos.unit_checkout_payment_service import UnitCheckoutPaymentService
 
@@ -31,6 +38,44 @@ from app.domains.pos.unit_checkout_payment_service import UnitCheckoutPaymentSer
 class PhysicalCashCheckoutStatusService:
     def __init__(self, repository: PhysicalCashCheckoutStatusRepository) -> None:
         self.repository = repository
+
+    @staticmethod
+    def _unposted_status(
+        intent: UnitCashIntent,
+        saved: SavedCashIntentV2,
+        cancellation: PhysicalCashCancellation | None,
+        *,
+        checkout_exists: bool,
+    ) -> PhysicalCashOperationCancelled | PhysicalCashOperationSaved:
+        if cancellation is None:
+            return PhysicalCashOperationSaved(
+                operation_id=intent.id, sale_id=intent.sale_id, saved_intent=saved
+            )
+        if checkout_exists or (
+            cancellation.tenant_id,
+            cancellation.id,
+            cancellation.sale_id,
+            cancellation.branch_id,
+            cancellation.register_id,
+            cancellation.shift_id,
+            cancellation.cashier_user_id,
+            cancellation.created_by,
+            cancellation.request_hash,
+        ) != (
+            intent.tenant_id,
+            intent.id,
+            intent.sale_id,
+            intent.branch_id,
+            intent.register_id,
+            intent.shift_id,
+            intent.cashier_user_id,
+            intent.cashier_user_id,
+            intent.request_hash,
+        ):
+            raise AurumError("Stored physical cash cancellation is inconsistent")
+        return PhysicalCashOperationCancelled(
+            operation_id=intent.id, sale_id=intent.sale_id, saved_intent=saved
+        )
 
     async def read(
         self,
@@ -46,14 +91,14 @@ class PhysicalCashCheckoutStatusService:
         snapshot = await self.repository.read(tenant_id, sale_id, operation_id)
         if snapshot is None:
             raise NotFoundError("Physical cash sale not found")
-        sale, intent, checkout = snapshot
+        sale, intent, checkout, cancellation = snapshot
         branch_ids = {sale.branch_id} if allowed_branch_ids is None else allowed_branch_ids
         if sale.branch_id not in branch_ids or sale.cashier_user_id != actor_id:
             raise PermissionDeniedError("Physical cash branch or cashier access denied")
         await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
         missing = PhysicalCashOperationNotFound(operation_id=operation_id, sale_id=sale_id)
         if intent is None:
-            if checkout is not None:
+            if checkout is not None or cancellation is not None:
                 raise AurumError("Stored physical checkout has no cash confirmation")
             return missing
         if intent.cashier_user_id != actor_id or intent.branch_id != sale.branch_id:
@@ -90,12 +135,13 @@ class PhysicalCashCheckoutStatusService:
             isinstance(line, PhysicalUnitDraftQuoteLineV2)
             for line in saved.confirmation.quote.lines
         ):
-            if checkout is not None:
+            if checkout is not None or cancellation is not None:
                 raise AurumError("Stored physical checkout has an incompatible confirmation")
             return missing
-        if checkout is None:
-            return PhysicalCashOperationSaved(
-                operation_id=operation_id, sale_id=sale_id, saved_intent=saved
+        if checkout is None or cancellation is not None:
+            await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
+            return self._unposted_status(
+                intent, saved, cancellation, checkout_exists=checkout is not None
             )
         try:
             result = PhysicalCheckoutResultV3.model_validate(checkout.result_payload)

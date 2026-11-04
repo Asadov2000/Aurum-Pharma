@@ -90,6 +90,9 @@ class MixedPhysicalCheckoutPreparationService:
         sale = await cart_service.lock_editable_sale(
             tenant_id, request.sale_id, actor_id, allowed_branch_ids
         )
+        await UnitCashIntentService(
+            UnitCashIntentRepository(self.repository.session)
+        ).require_active(tenant_id, request.operation_id)
         legacy = await self.cart.list_legacy_items(tenant_id, sale.id)
         units = await self.cart.list_items(tenant_id, sale.id)
         if not legacy or not units or any(item.physical_packaging is None for item in units):

@@ -190,11 +190,12 @@ const resultSchema = z
   );
 export type PhysicalCashCheckoutResult = z.infer<typeof resultSchema>;
 const statusShape = { operation_id: operationId, sale_id: uuid };
-// Three strict literal-state variants preserve the same contract while reusing
+// Strict literal-state variants preserve the same contract while reusing
 // the union runtime already shipped by the form bundle.
 const statusSchema = z.union([
   z.object({ ...statusShape, state: z.literal("not_found") }).strict(),
   z.object({ ...statusShape, state: z.literal("saved_draft"), saved_intent: savedSchema }).strict(),
+  z.object({ ...statusShape, state: z.literal("cancelled"), saved_intent: savedSchema }).strict(),
   z
     .object({
       ...statusShape,

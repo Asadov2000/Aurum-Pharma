@@ -96,6 +96,9 @@ class UnitCheckoutPreparationService:
             sale = await UnitCartService(self.cart).lock_editable_sale(
                 tenant_id, request.sale_id, actor_id, allowed_branch_ids
             )
+            await UnitCashIntentService(
+                UnitCashIntentRepository(self.repository.session)
+            ).require_active(tenant_id, request.operation_id)
             if sale.is_test:
                 raise BusinessRuleError("Physical test sales are not supported yet")
             units = await self.cart.list_items(tenant_id, sale.id)

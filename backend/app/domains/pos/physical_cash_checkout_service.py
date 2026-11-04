@@ -71,6 +71,9 @@ class PhysicalCashCheckoutService:
         await cart.assert_actor(tenant_id, actor_id)
         async with self.repository.session.begin_nested():
             await self._lock_real_sale(tenant_id, request.sale_id, actor_id, allowed_branch_ids)
+            await UnitCashIntentService(
+                UnitCashIntentRepository(self.repository.session)
+            ).require_active(tenant_id, request.operation_id)
             saved = await UnitCashIntentService(
                 UnitCashIntentRepository(self.repository.session)
             ).save(
@@ -135,6 +138,9 @@ class PhysicalCashCheckoutService:
                 ).validate_saved(original.payment_journal_version, result)
                 await cart.assert_actor(tenant_id, actor_id, sale.branch_id)
                 return result
+            await UnitCashIntentService(
+                UnitCashIntentRepository(self.repository.session)
+            ).require_active(tenant_id, request.operation_id)
             prepared = await UnitCheckoutPreparationService(
                 UnitCheckoutRepository(self.repository.session)
             ).prepare_physical(
