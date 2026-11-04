@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generation": 68,
+  "generation": 69,
   "work_item_id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "waiting-ci-infrastructure-retry",
+  "phase": "waiting-full-ci-after-isolated-smoke-fix",
   "run_id": "local-completed-cart-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-  "expected_head": "e878d7eddce26b07c7b940bafb59ef28a04e0913",
+  "expected_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
   "validated_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "pr": 453,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
@@ -87,6 +87,12 @@
       "workflow": "59dcd7a8-1642-470c-af28-748f2a1db9a9",
       "job": 4358,
       "retry": "Same code tree, empty CI retry commit; stop if same cause recurs twice"
+    },
+    "completed_cart_minio_tls": {
+      "count": 1,
+      "reason": "Unused Silo web console dynamic-port bind collision in isolated TLS smoke",
+      "fix": "MINIO_BROWSER=off only in disposable smoke, matches production; TLS checks unchanged",
+      "status": "awaiting CI"
     }
   },
   "blocker": null,
