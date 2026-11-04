@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 48,
+  "generation": 49,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-PILOT-REHEARSAL",
   "owner": "local",
@@ -31,7 +31,14 @@
     "All8exact-headCIcontexts including real browser acceptance; protectedmerge/treeproof; rehearsalautomation not real pharmacy acceptance."
   ],
   "remaining_step": "Continue PR451 exactheadCI; new connected browsercase must pass, all8 success; expectedheadprotectedmerge and actualmain treeverify. No app/sharedDB/cloud/dependency changes. API oversized refusal is real422 but browser failedpayment recovery not covered; humanrehearsal notexecuted. Counter2/7(4).",
-  "failure_counters": {},
+  "failure_counters": {
+    "optional_early_evidence_reader": {
+      "count": 2,
+      "reason": "TLS handshake timeout on auxiliary public metadata/log report",
+      "status": "stopped; do not repeat without explicit scoped authorization; independent mandatory status/evidence can continue",
+      "product_failure": false
+    }
+  },
   "blocker": null,
   "previous_completed": {
     "pr": 449,
@@ -83,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T11:50:46.949Z",
+  "updated_at": "2026-11-04T12:08:46.047Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -103,7 +110,10 @@
     "independent_review": "approved",
     "full_browser": "pending CI",
     "dependency_changes": false,
-    "local_installations": false
+    "local_installations": false,
+    "windows_ci_passed": 571,
+    "frontend_ci_passed": 3278,
+    "frontend_ci_files": 243
   },
   "ci": {
     "status": "pending",
@@ -414,5 +424,10 @@
   "cloud_read_attempt": {
     "at": "2026-11-04T11:38:23.691Z",
     "status": "No cloud resumed; existing userconfirmation and unchanged ledger retain exclusive localwriter"
+  },
+  "follow_up_candidate": {
+    "id": "ONLINE-CASH-REJECTED-INTENT-01",
+    "status": "read_only_candidate_not_runtime_reproduced",
+    "question": "Check whether definitive insufficient-stock completion422 leaves browser pending marker blocking correction. PR451 directAPI negative case does not verify failed UI payment recovery. Reproduce first; do not clear ambiguous financial markers."
   }
 }
