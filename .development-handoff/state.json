@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 58,
+  "generation": 59,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "fixing-ci",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "SamePR452 thirdworkflow full8CI on9e5477a3; expected8319backend/29new,3295frontend/244files,571Windows,171browser/2new. Local3changedfilesRuff/Black/diffpassed; 2independentsafetyreviewsapproved. Actualmainunchanged96015ad; cloudstopped. No newproductscope/live/sharedDB/deployment/installs.",
+  "remaining_step": "SamePR452: finishcurrentnode1 results, fixcomplete runtimeprivilege test inventories together, readonlyQAcheckothernewobjectinventories, exactdiff/Ruff/Black. Publishsamebranchthenfull8CI latesthead. Sixothercontexts alreadygreen9e. No runtime/sharedDB/deploy/installs/cloud/autonomy work.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -62,6 +62,15 @@
       "test": "tests/isolation/test_manual_access_migrations.py::test_manual_access_migrations_roundtrip",
       "reason": "New a00_tenant_access dependency omitted from5explicit historical test inventories",
       "status": "fixed in9e5477a3 by addingnewtable toall5inventories; nooldmigration/CASCADE/assertionweakening; pendingCI"
+    },
+    "runtime_privilege_inventory": {
+      "count": 1,
+      "head": "9e5477a36af4dc3b9a9b244b14d27ede6c52efee",
+      "workflow": "474eebe2-2ad8-4175-a517-55e38543c004",
+      "step": "Pytest node0",
+      "test": "tests/isolation/test_runtime_role_privileges.py::test_runtime_role_has_only_row_level_table_privileges",
+      "reason": "Exact runtime table/function inventories omitnew237 journal/triggerfunctions; actualnewtablegrantalreadySELECTINSERT",
+      "status": "DBengineer testonlyinventoryfix; independentsecurityreviewapproved correctappendonly/privateclassification; QAsearchingotherexhaustiveinventories, no appGRANTchanges"
     }
   },
   "blocker": null,
@@ -115,7 +124,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T14:40:07.978Z",
+  "updated_at": "2026-11-04T15:17:36.595Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
