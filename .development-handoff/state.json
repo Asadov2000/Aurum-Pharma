@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 55,
+  "generation": 56,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
@@ -8,7 +8,7 @@
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
-  "expected_head": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
+  "expected_head": "c56a6334e41881a03e0d1cd2612be1f0c22de906",
   "validated_sha": null,
   "pr": 452,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
@@ -30,13 +30,20 @@
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "Continue SAMEPR452; full8CI expected8319backend/29new,3295front/244files/17new,571Windows,171browser/2new. RealUIstock422 recovery+commit race+nonemptyclonedowngrade required. LocalfullVitest3295passed/244files; no knownproductfailures. Freshactualmain/head beforeexpectedheadmerge; treeproof. Cloudstopped; no live/sharedDB/deployment/installs/autonomy work. Current onlineclosure3steps: fixthisbug(nowCI),manualrehearsal,acceptancesignoff; drop old2/7autonomycount for this task.",
+  "remaining_step": "SamePR452 finalhead full8CI. Published exact role-contract237 cap fix; local static head/cap match passed. No live/sharedDB/deployment/cloud/autonomy changes. Online closure after successful merge: manual fictional rehearsal and acceptance signoff.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
       "reason": "TLS handshake timeout on auxiliary public metadata/log report",
       "status": "stopped; do not repeat without explicit scoped authorization; independent mandatory status/evidence can continue",
       "product_failure": false
+    },
+    "role_contract_supported_head": {
+      "count": 1,
+      "reason": "First workflow migration preflight: Alembic237 vs role-contract maximum236; fixed exact maximum237, unknown revisions still rejected",
+      "failed_head": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
+      "workflow": "7a4db4c8-a79a-4ba5-9af4-3a60e68d8540",
+      "status": "fixed; finalhead full CI pending"
     }
   },
   "blocker": null,
@@ -90,7 +97,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T13:45:13.037Z",
+  "updated_at": "2026-11-04T13:55:17.603Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -130,8 +137,8 @@
     "new_e2e": 2,
     "expected_desktop": 571,
     "required_contexts": 8,
-    "head_sha": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
-    "workflow": "7a4db4c8-a79a-4ba5-9af4-3a60e68d8540"
+    "head_sha": "c56a6334e41881a03e0d1cd2612be1f0c22de906",
+    "workflow": "983d6b33-aa5d-43e9-bcb4-769d927c91e1"
   },
   "completion": {
     "pr": 451,
