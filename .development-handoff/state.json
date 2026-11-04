@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 52,
+  "generation": 53,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "reproducing",
+  "phase": "validating_local",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
@@ -18,19 +18,19 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
   "counter": "Online closure: currentcashrecovery, manualfictionalrehearsal, acceptance signoff; no autonomy countdown",
   "counter_after_full_completion": "2/7 (4)",
-  "scope": "Only online physical unit cash insufficient-stock recovery: reproduce actual frontend blocked state; durable server cancellation before releasing browser guard; preserve ambiguous/completed/replay races. No autonomy work.",
+  "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
   "acceptance": [
     "Definitive422 shortage leaves pending and blocked UI reproduced with real cash frontend modules; backend422 already proven inPR451, actual post-fix browser required.",
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "QA writes independent reproduction test only; security architect readonly analyzes durable fence; root owns backend/security critical path. Docker Desktop unavailable, notstarted; no live/sharedDB access. Existing exact QA tools only. Preserve auxiliary early-reader2TLS stop; do not rerun oldblocked reader.",
+  "remaining_step": "Root finalchecks->exactdiffcommit/push/PR; full8CI exacthead required (new2browseractualAPI,29backend isolation,17realfrontintegration). No pending/product failures; fullVitest stillrunning. All writersfrozen; cloudstopped, no autonomy. No sharedDB/app services/deps/paid changes. Previousoptionalearlyreader2TLS remainsstopped; useindependentrequiredproofs only.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -90,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T12:42:56.317Z",
+  "updated_at": "2026-11-04T13:33:44.807Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -102,23 +102,33 @@
     "clean": true
   },
   "local_validation": {
-    "strict_e2e_types": "passed",
-    "eslint": "passed",
-    "prettier": "passed",
-    "browser_list": 1,
-    "whitespace": "passed",
-    "independent_review": "approved",
-    "full_browser": "169passed includingnewconnectedcase;0flaky",
-    "dependency_changes": false,
-    "local_installations": false,
-    "windows_ci_passed": 571,
-    "frontend_ci_passed": 3278,
-    "frontend_ci_files": 243,
-    "real_browser": "169passed incl1new actualconnectedcase/0failures/0flaky",
-    "backend_report": "Native Node HTTPS (default TLS) verified exact-head8290success,0skips,0duplicates,198watched after one PythonmetadataTLSfailure. Optional earlyreader stopped at2 and not repeated."
+    "baseline_reproduction": "1 realfrontend characterization beforeproductfix; HTTPadapter only; actualbackendstock422 previouslyPR451",
+    "final_frontend_integration_passed": 17,
+    "other_targeted_tests_passed": 156,
+    "backend_collection_new": 29,
+    "ruff": "passed",
+    "black": "547filespassed",
+    "mypy": "544sourcespassed",
+    "frontend_typecheck": "passed",
+    "frontend_lint": "passed",
+    "strict_test_types": "passed",
+    "early_build": "170.23/144.91/194.81KiB capsunchanged",
+    "final_build": "running",
+    "local_full_vitest": "running",
+    "browser_list": 2,
+    "independent_security_review": "approved server+DBfence+clonehelper+finalfrontend"
   },
   "ci": {
-    "status": "not_started"
+    "status": "not_started",
+    "expected_backend": 8319,
+    "new_backend": 29,
+    "expected_frontend": 3295,
+    "expected_frontend_files": 244,
+    "new_frontend": 17,
+    "expected_e2e": 171,
+    "new_e2e": 2,
+    "expected_desktop": 571,
+    "required_contexts": 8
   },
   "completion": {
     "pr": 451,
