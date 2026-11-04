@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 62,
+  "generation": 63,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "merging",
+  "phase": "complete",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
@@ -22,15 +22,14 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "Online closure: currentcashrecovery, manualfictionalrehearsal, acceptance signoff; no autonomy countdown",
-  "counter_after_full_completion": "2/7 (4)",
+  "counter": "Online unit-sales training acceptance: 2 steps remain (manual fictional rehearsal, acceptance signoff). Not a production launch approval.",
   "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
   "acceptance": [
     "Definitive422 shortage leaves pending and blocked UI reproduced with real cash frontend modules; backend422 already proven inPR451, actual post-fix browser required.",
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "All8exactheadCI and strictdetailedproofaccepted. Freshmain96015ad/head41a7c6c5/sourceclean/runtimeb1clean verified. Protectedexpectedheadmerge then checkmerged/currentmain andtested-tree identity; updatefictionalrehearsalguide+checkpointtruthfully. No live/sharedDB/deploy/cloudchanges.",
+  "remaining_step": "This bugfix complete. Continue only online manual fictional rehearsal, then acceptance signoff; human/equipment/real pharmacy checks not performed. Training guide updated. Source-tested tree equals merged main; protected runtime stays b1a88ba7 clean, sharedDB untouched. Do not start autonomouscash/cloud/newcode stage or deployment automatically.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -39,53 +38,57 @@
       "product_failure": false
     },
     "role_contract_supported_head": {
-      "count": 1,
+      "count": 0,
       "reason": "First workflow migration preflight: Alembic237 vs role-contract maximum236; fixed exact maximum237, unknown revisions still rejected",
       "failed_head": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
       "workflow": "7a4db4c8-a79a-4ba5-9af4-3a60e68d8540",
-      "status": "resolved; finalhead migration preflight and roundtrip passed"
+      "status": "resolved; exact final-head full CI success and protected merge/tree proof",
+      "previous_consecutive_failures": 1
     },
     "rls_policy_support_helper": {
-      "count": 1,
+      "count": 0,
       "head": "c56a6334e41881a03e0d1cd2612be1f0c22de906",
       "workflow": "983d6b33-aa5d-43e9-bcb4-769d927c91e1",
       "step": "Pytest node0",
       "test": "tests/isolation/test_foundation_rls.py:184",
       "reason": "New cancellation RLS policy references is_support_session(); foundation invariant forbids helper in any RLS policy; count1 expected0",
-      "status": "resolved; actual foundationtests passed9e"
+      "status": "resolved; exact final-head full CI success and protected merge/tree proof",
+      "previous_consecutive_failures": 1
     },
     "manual_access_later_table_inventory": {
-      "count": 1,
+      "count": 0,
       "head": "c56a6334e41881a03e0d1cd2612be1f0c22de906",
       "workflow": "983d6b33-aa5d-43e9-bcb4-769d927c91e1",
       "step": "Pytest node1",
       "test": "tests/isolation/test_manual_access_migrations.py::test_manual_access_migrations_roundtrip",
       "reason": "New a00_tenant_access dependency omitted from5explicit historical test inventories",
-      "status": "resolved; actual manual_access_roundtrip passed9e"
+      "status": "resolved; exact final-head full CI success and protected merge/tree proof",
+      "previous_consecutive_failures": 1
     },
     "runtime_privilege_inventory": {
-      "count": 1,
+      "count": 0,
       "head": "9e5477a36af4dc3b9a9b244b14d27ede6c52efee",
       "workflow": "474eebe2-2ad8-4175-a517-55e38543c004",
       "step": "Pytest node0",
       "test": "tests/isolation/test_runtime_role_privileges.py::test_runtime_role_has_only_row_level_table_privileges",
       "reason": "Exact runtime table/function inventories omitnew237 journal/triggerfunctions; actualnewtablegrantalreadySELECTINSERT",
-      "status": "fixed41a7c6c5: +9onlytestinventory lines, append-only table/privatefunctions, noappEXECUTEallowlist orGRANTchanges; RuffBlackdiff+independentsecurity/QAinventoryreviewpassed. NextfullCIpending"
+      "status": "resolved; exact final-head full CI success and protected merge/tree proof",
+      "previous_consecutive_failures": 1
     }
   },
   "blocker": null,
   "previous_completed": {
-    "pr": 450,
+    "pr": 451,
     "merged": true,
-    "main": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
-    "merged_at": "2026-11-04T09:21:37Z",
-    "tested_head": "10c39aac9e38cc7d4df378442aaf4ee219390279",
-    "tested_tree": "bc12c5793cd3ab43df55c58cbf18433f8c9bb299",
-    "main_tree": "bc12c5793cd3ab43df55c58cbf18433f8c9bb299",
+    "main": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+    "merged_at": "2026-11-04T12:35:58Z",
+    "tested_head": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
+    "tested_tree": "1114506b049f12ef95597c830ee37b1d480ee62d",
+    "main_tree": "1114506b049f12ef95597c830ee37b1d480ee62d",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
-    "hardware_acceptance": false
+    "human_rehearsal": false
   },
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -124,13 +127,8 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T16:10:51.611Z",
+  "updated_at": "2026-11-04T16:13:19.058Z",
   "closes_control_stage": false,
-  "counter_after_full_E6_06": "2/7 (3)",
-  "remaining_control_stage_work": [
-    "E6-06: real Windows TPM counter/checkpoint(PR447), checkpoint-verified full cashier admission metadata(PR448) and exact-checkpoint credential bundle/real TPM pepper reader(PR449) implemented. No login principal or positive runtime. Authenticated enrollment/policy acceptance and credential lifecycle, fresh trusted UTC, single-owner Windows service/IPC/ACL, shared-SQL-session login/lease transaction provider with durable guard/session advancement and recovery/hardware acceptance remain mandatory.",
-    "E6-07 controlled delivery compatibility, E6-08 recovery and E6-09 volume/long-offline acceptance remain after E6-06; four control stages total. No new product requirements."
-  ],
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
@@ -179,20 +177,64 @@
     "flaky": 0,
     "desktop_passed": 571,
     "workflows_run": 4,
-    "reruns": 0
+    "reruns": 0,
+    "contexts": [
+      {
+        "context": "ci/circleci: tooling-linux",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/09a91f79-c8af-4a1b-b878-6b37b0f9bc02"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/d9b40fae-25c2-432c-8d64-1a8bcc31674f"
+      },
+      {
+        "context": "ci/circleci: tooling-windows",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/ff3472d8-fe80-4eaf-af81-93c6028c0e14"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/a59e0e82-4784-4a60-934e-4e27a64e0457"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/d7503a22-b981-46f0-85b9-10bfddabb9a5"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/b6241d06-29a0-4835-b567-51ebb6a0faef"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/bada9998-c288-42a3-a29f-03bbb8ea78e3"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/51e25734-03c3-42b6-b37e-2a7c956359e3"
+      }
+    ],
+    "proof": "Strict native evidence accepted:8318passed+1existingconditionalprescriptionemptydowngradeskip; companionnonemptyrefusalpassed;29new+227watchedpassed/0duplicates;3295frontend244files;571Windows;171browser2new/0flaky"
   },
   "completion": {
-    "pr": 451,
+    "pr": 452,
     "merged": true,
-    "main": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
-    "merged_at": "2026-11-04T12:35:58Z",
-    "tested_head": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
-    "tested_tree": "1114506b049f12ef95597c830ee37b1d480ee62d",
-    "main_tree": "1114506b049f12ef95597c830ee37b1d480ee62d",
+    "main": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+    "merged_at": "2026-11-04T16:11:13Z",
+    "tested_head": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
+    "tested_tree": "2e145811f405ef432a057f1d176418895adc6d72",
+    "main_tree": "2e145811f405ef432a057f1d176418895adc6d72",
     "tree_match": true,
+    "merge_in_current_main": true,
     "closes_control_stage": false,
-    "remaining_control_stages": 4,
-    "human_rehearsal": false
+    "human_rehearsal": false,
+    "scope": "Online physical cash shortage recovery; no autonomouscash expansion or deployment"
   },
   "accepted_increments": [
     {
@@ -307,6 +349,16 @@
       "tested_head": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
       "tree": "1114506b049f12ef95597c830ee37b1d480ee62d",
       "ci": "all8success/firstworkflow;8290backend/no skips/no duplicates/198regression;571Windows;3278frontend/243files;169browser inclnewconnected60unit43sale1refund2writeoff15sellable142cash;0flaky",
+      "closes_control_stage": false,
+      "human_rehearsal": false
+    },
+    {
+      "pr": 452,
+      "kind": "online-physical-cash-shortage-cancellation-recovery",
+      "main": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+      "tested_head": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
+      "tree": "2e145811f405ef432a057f1d176418895adc6d72",
+      "ci": "All8success;8318backend+1existingconditionalprescriptionhistoryskip;29new/227watched;3295frontend244files;571Windows;171browser2new/0flaky",
       "closes_control_stage": false,
       "human_rehearsal": false
     }
@@ -430,7 +482,7 @@
     "reason": "User resumed same PR450; full exact-head CI green",
     "cloud_product_grant": false
   },
-  "latest_main_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+  "latest_main_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
@@ -474,14 +526,14 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "automated_rehearsal_passed_manual_pending",
-    "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+    "phase": "automated_rehearsal_and_recovery_passed_manual_pending",
+    "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
     "owner": "local",
     "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
     "product_code_changes": false,
     "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
-    "data": "Entirely fictional chain passed in real disposable CI backend/UI. Received60; threeUI sales43; partialUI refund1 pendingquarantine; explicitUI writeoff2; sellable15; close142; summary43/1/42. Oversized16 UI-created draft denied by ordinaryAPI422, exactstock/money invariants; afterclosedshift newAPI sale denied. Humanrehearsal NOT performed.",
-    "audit": "No product change; test-only PR451 merged afterall8green andtreeproof. Real pharmacy/equipment/manualpilot acceptance remains pending. Auth two-tab race resolvedPR450. Additional UIstock422 pending-recovery candidate requires real browser reproduction, not presumedfixed by APInegative.",
+    "data": "Fictional60unit/43sales/1refund/2writeoff/15sellable/1quarantine/142cash chain retained; shortage+confirmedcancel+corrected3singlepayment and concurrentcancel/complete passed onactualdisposablebackendUI.",
+    "audit": "PR451 connectedfictionalchain plusPR452 genuineUIstockrefusalrecovery bothfullCIgreen/mergedtreeproof. Humanrehearsal NOT performed. No pharmacy selected. Do not resume deferredautonomy.",
     "release_gate": {
       "validate_exit": 0,
       "enforce_exit": 3,
@@ -496,7 +548,7 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "Current explicit user task ONLINE-CASH-REJECTED-INTENT-01; do not duplicate anotherstage."
+    "next_technical_check": "Manual rehearsal on a separate isolated test stand only; no runtime/sharedDB/deployment authorization inferred."
   },
   "previous_completed_work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "local_harness_findings": [
@@ -509,13 +561,41 @@
   },
   "follow_up_candidate": {
     "id": "ONLINE-CASH-REJECTED-INTENT-01",
-    "status": "read_only_candidate_not_runtime_reproduced",
-    "question": "Check whether definitive insufficient-stock completion422 leaves browser pending marker blocking correction. PR451 directAPI negative case does not verify failed UI payment recovery. Reproduce first; do not clear ambiguous financial markers.",
-    "code_triage": "Pending stored before channel complete; definite422 retains it, acknowledge only completed; panel blocks edit/new/close, saved_draft remains blocked. No cancel path found. Runtime UI422 not reproduced; existing lost-response invariants must stay."
+    "status": "resolved",
+    "pr": 452,
+    "main": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+    "evidence": "Genuine shortage61vs60, reload, authoritative cancellation, correction3, singlepayment,57remaining/shift103; complete/cancel race; oldcancelledUUIDrefillandlateSQLmarkerfence; all29new+2browserpassed"
   },
   "read_only_preexisting_rehearsal_limit": {
     "file": "backend/tests/isolation/test_unit_cash_intent_migration.py",
     "finding": "Fresh-empty direct0171 path alreadyhas0181/0188FK dependencies beforePR452; not runtimeproductdefect, no scopeadded. New237-onlywrapper wasnotretained. Existing nonempty55000guard unchanged; dynamic historicalhelper alreadypeels237fromhead.",
     "status": "not changed; do not claim fresh0171emptyfixed"
+  },
+  "deferred_autonomy": {
+    "status": "deferred by user; not current online unit-sales acceptance",
+    "legacy_counter": "2/7 (4)",
+    "legacy_after_E6_06": "2/7 (3)",
+    "remaining_work": [
+      "E6-06: real Windows TPM counter/checkpoint(PR447), checkpoint-verified full cashier admission metadata(PR448) and exact-checkpoint credential bundle/real TPM pepper reader(PR449) implemented. No login principal or positive runtime. Authenticated enrollment/policy acceptance and credential lifecycle, fresh trusted UTC, single-owner Windows service/IPC/ACL, shared-SQL-session login/lease transaction provider with durable guard/session advancement and recovery/hardware acceptance remain mandatory.",
+      "E6-07 controlled delivery compatibility, E6-08 recovery and E6-09 volume/long-offline acceptance remain after E6-06; four control stages total. No new product requirements."
+    ]
+  },
+  "online_closure": {
+    "bugfix_complete": true,
+    "pr": 452,
+    "remaining_acceptance_steps": 2,
+    "steps": [
+      {
+        "id": "manual-fictional-rehearsal",
+        "state": "pending"
+      },
+      {
+        "id": "acceptance-signoff",
+        "state": "pending"
+      }
+    ],
+    "real_pharmacy_acceptance": false,
+    "production_deployment": false,
+    "autonomy_deferred": true
   }
 }
