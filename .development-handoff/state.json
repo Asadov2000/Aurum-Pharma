@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generation": 61,
+  "generation": 62,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "awaiting-ci",
+  "phase": "merging",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
   "expected_head": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
-  "validated_sha": null,
+  "validated_sha": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
   "pr": 452,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -30,7 +30,7 @@
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "SamePR452 fourthworkflow full8CI on41a7c6c5. Exacttestinventoryonly9-linefix; otherglobalinventories reviewed noadditionalregistrationsrequired. Expected8319backend incl29new/227watched;3295front/244files;571Windows;171browser2new/no flakies. Freshmain/head then protectedexpectedheadmerge+treeproof. No runtime/sharedDB/cloud/deps/purchases/deploy/autonomy.",
+  "remaining_step": "All8exactheadCI and strictdetailedproofaccepted. Freshmain96015ad/head41a7c6c5/sourceclean/runtimeb1clean verified. Protectedexpectedheadmerge then checkmerged/currentmain andtested-tree identity; updatefictionalrehearsalguide+checkpointtruthfully. No live/sharedDB/deploy/cloudchanges.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -124,7 +124,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T15:33:17.585Z",
+  "updated_at": "2026-11-04T16:10:51.611Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -154,7 +154,7 @@
     "local_validated_sha": "b46836bdb486cf74de12664ed3c590c6c4a7e162"
   },
   "ci": {
-    "status": "pending",
+    "status": "success",
     "expected_backend": 8319,
     "new_backend": 29,
     "expected_frontend": 3295,
@@ -165,7 +165,21 @@
     "expected_desktop": 571,
     "required_contexts": 8,
     "head_sha": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
-    "workflow": "6191a385-3699-4291-8d67-2795e18036c9"
+    "workflow": "6191a385-3699-4291-8d67-2795e18036c9",
+    "backend_passed": 8318,
+    "backend_skipped": 1,
+    "skip_reason": "Existing conditional empty prescription downgrade unavailable withimmutableprescriptionhistory; companion nonemptyrefusal passed",
+    "new_backend_passed": 29,
+    "watched_regression_passed": 227,
+    "duplicates": 0,
+    "frontend_passed": 3295,
+    "frontend_files": 244,
+    "e2e_passed": 171,
+    "new_browser_passed": 2,
+    "flaky": 0,
+    "desktop_passed": 571,
+    "workflows_run": 4,
+    "reruns": 0
   },
   "completion": {
     "pr": 451,
