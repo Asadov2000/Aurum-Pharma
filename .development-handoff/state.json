@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 53,
+  "generation": 54,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "validating_local",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-11-04-cash-stock-rejection-01",
   "branch": "codex/cash-stock-rejection-recovery",
   "base_sha": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
-  "expected_head": "96015ad6b622691e6afa18ebb96fc33bcaa590cd",
+  "expected_head": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
   "validated_sha": null,
-  "pr": null,
+  "pr": 452,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -30,7 +30,7 @@
     "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
     "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
   ],
-  "remaining_step": "Root finalchecks->exactdiffcommit/push/PR; full8CI exacthead required (new2browseractualAPI,29backend isolation,17realfrontintegration). No pending/product failures; fullVitest stillrunning. All writersfrozen; cloudstopped, no autonomy. No sharedDB/app services/deps/paid changes. Previousoptionalearlyreader2TLS remainsstopped; useindependentrequiredproofs only.",
+  "remaining_step": "Continue SAMEPR452; full8CI expected8319backend/29new,3295front/244files/17new,571Windows,171browser/2new. RealUIstock422 recovery+commit race+nonemptyclonedowngrade required. LocalfullViteststillrunning session21769; no knownproductfailures. Freshactualmain/head beforeexpectedheadmerge; treeproof. Cloudstopped; no live/sharedDB/deployment/installs/autonomy work. Current onlineclosure3steps: fixthisbug(nowCI),manualrehearsal,acceptancesignoff; drop old2/7autonomycount for this task.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -90,7 +90,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T13:33:44.807Z",
+  "updated_at": "2026-11-04T13:41:03.351Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -113,13 +113,13 @@
     "frontend_lint": "passed",
     "strict_test_types": "passed",
     "early_build": "170.23/144.91/194.81KiB capsunchanged",
-    "final_build": "running",
+    "final_build": "passed Login170.24/Dashboard144.92/POS194.82KiB capsunchanged",
     "local_full_vitest": "running",
     "browser_list": 2,
     "independent_security_review": "approved server+DBfence+clonehelper+finalfrontend"
   },
   "ci": {
-    "status": "not_started",
+    "status": "pending",
     "expected_backend": 8319,
     "new_backend": 29,
     "expected_frontend": 3295,
@@ -128,7 +128,9 @@
     "expected_e2e": 171,
     "new_e2e": 2,
     "expected_desktop": 571,
-    "required_contexts": 8
+    "required_contexts": 8,
+    "head_sha": "b46836bdb486cf74de12664ed3c590c6c4a7e162",
+    "workflow": "7a4db4c8-a79a-4ba5-9af4-3a60e68d8540"
   },
   "completion": {
     "pr": 451,
