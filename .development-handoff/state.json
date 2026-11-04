@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "generation": 70,
-  "work_item_id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
+  "generation": 71,
+  "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "completed-merged",
-  "run_id": "local-completed-cart-2026-11-04",
+  "phase": "acceptance-package-prepared-human-pending",
+  "run_id": "acceptance-package-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "expected_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
@@ -22,14 +22,14 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "До закрытия учебного этапа поштучных онлайн-продаж остался 1 пункт: итоговая приёмка с фиксацией границ пилота. Агентская репетиция11/11 пройдена; визуальный дефект исправлен PR453; человеческая и аппаратная приёмка не выполнены.",
+  "counter": "Остался 1 этап учебной приёмки: 11 контрольных шагов кассиром и 4 группы оборудования (сканер и принтер условные), ещё не выполнены. Отдельный существующий допуск всего реального пилота: 8/23 verified, 15 blocking; не смешивать с остатком учебного модуля.",
   "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
   "acceptance": [
     "Agent-led11step actual UI fictional cycle completed; cash and physical stock conserved",
     "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
     "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Итоговая приёмка учебного онлайн-сценария и фиксация границ пилота. Проверка настоящим кассиром и оборудования не выполнена. Не разворачивать обновление и не менять общую БД автоматически; автономная касса отложена.",
+  "remaining_step": "Подготовить отдельный тестовый стенд актуальной версии и провести неподписанный пакет с планируемой ограниченной ролью кассира и выбранным оборудованием. Реальных кассира/устройств/аптеки пока нет; не ставить pass или подпись за человека. Никакого deployment или общей БД автоматически.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -150,7 +150,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04 19:32:02 UTC",
+  "updated_at": "2026-11-04 19:40:29 UTC",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -511,7 +511,7 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "agent-rehearsal-and-display-fix-complete-acceptance-pending",
+    "phase": "acceptance-package-prepared-human-pending",
     "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
     "owner": "local",
     "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
@@ -533,9 +533,10 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "Итоговая приёмка учебного онлайн-сценария и фиксация границ пилота. Проверка настоящим кассиром и оборудования не выполнена. Не разворачивать обновление и не менять общую БД автоматически; автономная касса отложена.",
+    "next_technical_check": "Подготовить отдельный тестовый стенд актуальной версии и провести неподписанный пакет с планируемой ограниченной ролью кассира и выбранным оборудованием. Реальных кассира/устройств/аптеки пока нет; не ставить pass или подпись за человека. Никакого deployment или общей БД автоматически.",
     "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt",
-    "display_fix_pr": 453
+    "display_fix_pr": 453,
+    "acceptance_package": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sales-acceptance-2026-11-04"
   },
   "previous_completed_work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "local_harness_findings": [
@@ -597,7 +598,7 @@
     "remaining_training_closure_items": 1,
     "display_fix_pr": 453
   },
-  "product_source_changes": true,
+  "product_source_changes": false,
   "rehearsal": {
     "kind": "Agent-led real-browser UI walkthrough; ordinary API fixture setup and read-only verification; not human/equipment acceptance",
     "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5",
@@ -648,6 +649,44 @@
       "full_ci_passed": true,
       "human_cashier_acceptance": false,
       "equipment_acceptance": false
+    }
+  },
+  "acceptance_package": {
+    "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sales-acceptance-2026-11-04",
+    "pdf": "output/pdf/aurum-unit-sales-acceptance.pdf",
+    "results": "acceptance-results.csv",
+    "existing_pilot_gates": "existing-pilot-gates.csv",
+    "verified_main": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
+    "ci_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
+    "ci_success": 8,
+    "pdf_pages": 5,
+    "pdf_all_pages_visually_reviewed": true,
+    "independent_qa_review": "approved",
+    "independent_safety_review": "approved",
+    "cashier_controls": 11,
+    "equipment_groups": 4,
+    "conditional_equipment": [
+      "scanner",
+      "printer"
+    ],
+    "human_executed": 0,
+    "equipment_executed": 0,
+    "signoff": "not_performed",
+    "new_product_requirements": false,
+    "live_changes": false,
+    "shared_database_access": false,
+    "cloud_resumed": false,
+    "dependencies_installed": false,
+    "new_paid_resources": false,
+    "existing_pilot_gate": {
+      "validate_exit": 0,
+      "enforce_exit": 1,
+      "decision": "blocked",
+      "verified": 8,
+      "blocking": 15,
+      "total": 23,
+      "validation_errors": 0,
+      "manifest_unchanged": true
     }
   }
 }
