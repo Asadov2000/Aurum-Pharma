@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "generation": 47,
+  "generation": 48,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-PILOT-REHEARSAL",
   "owner": "local",
-  "phase": "implementing",
+  "phase": "awaiting-ci",
   "run_id": "local-2026-11-04-online-cash-rehearsal-01",
   "branch": "codex/online-cash-rehearsal",
   "base_sha": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
-  "expected_head": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
+  "expected_head": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
   "validated_sha": null,
-  "pr": null,
+  "pr": 451,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Same lot final sellable15/quarantine1/writeoff2; opening100 closing142; nooversell16 or duplicates afterreload/closedshift; immutable linked receipts and report42.",
     "All8exact-headCIcontexts including real browser acceptance; protectedmerge/treeproof; rehearsalautomation not real pharmacy acceptance."
   ],
-  "remaining_step": "Implement one connected acceptance case without duplicating isolated fault tests. Local Docker stopped and notstarted (unless-stopped livecontainers risk); use existing disposable CI. Root handles check/publication, QA writes dedicated E2E only, infrastructure agent readonly. Exact QA dependencies alreadyapproved and unchanged. All standardtwofailure rules apply.",
+  "remaining_step": "Continue PR451 exactheadCI; new connected browsercase must pass, all8 success; expectedheadprotectedmerge and actualmain treeverify. No app/sharedDB/cloud/dependency changes. API oversized refusal is real422 but browser failedpayment recovery not covered; humanrehearsal notexecuted. Counter2/7(4).",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -83,7 +83,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T11:38:23.691Z",
+  "updated_at": "2026-11-04T11:50:46.949Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -95,44 +95,27 @@
     "clean": true
   },
   "local_validation": {
-    "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
-    "exact_qa_lock_sha256": "7905252E2DE8D2CFBE46AD863F98219D915D13D35A4CE84BCD801AC0AEF5E9BC",
-    "targeted_passed": 100,
-    "new_frontend_cases": 18,
-    "new_browser_cases": 1,
-    "real_browser": "passed actual two-page shared-cookie regression on disposable CI backend",
-    "typecheck": "passed exact QA",
-    "lint": "passed exact QA+final vite config",
+    "strict_e2e_types": "passed",
+    "eslint": "passed",
     "prettier": "passed",
-    "startup_budgets": {
-      "login": {
-        "gzip_kib": 170.24,
-        "requests": 5
-      },
-      "dashboard": {
-        "gzip_kib": 144.93,
-        "requests": 4
-      },
-      "pos": {
-        "gzip_kib": 194.82,
-        "requests": 15
-      },
-      "limits_changed": false
-    },
-    "independent_security_review": "approved final simple cookie/rawPOST variant and lazy coordinator",
-    "diff_check": "passed",
-    "project_dependency_versions_changed": false,
-    "qa_installation": "approved isolated frozen-lock restoration; pnpm9.12.0",
-    "resolved_findings": [
-      "WrongcwdVitestenv fixed before modeled red.",
-      "Actualmodeledprepatch A401 reproduced; corrected coordinator all100green.",
-      "MFA identity/support denial classification preserved; no oldtests changed.",
-      "OldQA lock mismatch corrected by approved fresh installation.",
-      "Startupbudget6failures(2oldQA+4exactQA) before finalsuccess; userexplicitlyapprovedthis task's optimization tosuccess. No limitsraised."
-    ]
+    "browser_list": 1,
+    "whitespace": "passed",
+    "independent_review": "approved",
+    "full_browser": "pending CI",
+    "dependency_changes": false,
+    "local_installations": false
   },
   "ci": {
-    "status": "not_started"
+    "status": "pending",
+    "head_sha": "ebaa6ca24c4319beb7495934375cc832ab0e1b18",
+    "workflow": "37c3f312-feba-4197-9430-a5d334011903",
+    "required_contexts": 8,
+    "expected_backend": 8290,
+    "expected_desktop": 571,
+    "expected_frontend": 3278,
+    "expected_frontend_files": 243,
+    "expected_e2e": 169,
+    "new_e2e": 1
   },
   "completion": {
     "pr": 450,
