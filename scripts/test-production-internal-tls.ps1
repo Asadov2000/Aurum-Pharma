@@ -152,6 +152,7 @@ exec silo server --certs-dir /tmp/certs /data
     [void](Invoke-Docker -Arguments @(
         "run", "--detach", "--name", $minioContainer,
         "--network", $network, "--network-alias", "minio",
+        "--env", "MINIO_BROWSER=off",
         "--env", "MINIO_ROOT_USER=tls-test-minio-user",
         "--env", "MINIO_ROOT_PASSWORD=tls-test-minio-password",
         "--volume", "${tlsVolume}:/run/tls:ro",
