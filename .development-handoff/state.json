@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "generation": 71,
+  "generation": 72,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "software-acceptance-verified-server-rehearsal-pending",
-  "run_id": "software-acceptance-2026-11-04",
+  "phase": "restricted-cashier-rehearsal-blocked",
+  "run_id": "cashier-rehearsal-2026-11-04-b35e9f712c04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "expected_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
@@ -22,14 +22,14 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "Остался 1 этап учебной приёмки: 11 контрольных шагов кассиром и 4 группы оборудования (сканер и принтер условные), ещё не выполнены. Отдельный существующий допуск всего реального пилота: 8/23 verified, 15 blocking; не смешивать с остатком учебного модуля.",
-  "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
+  "counter": "Осталось 3 шага до закрытия учебной приёмки: исправление одного блокера, полный повтор под ограниченным кассиром, приёмка человеком/оборудованием.",
+  "scope": "Acceptance of existing online unit-sales under actual branch-scoped CASHIER. No product changes or autonomous Edge work.",
   "acceptance": [
-    "Agent-led11step actual UI fictional cycle completed; cash and physical stock conserved",
-    "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
-    "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
+    "Historical full agent-led cash cycle passed under OWNER, not proof of restricted cashier flow.",
+    "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
+    "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "Один учебный этап приёмки: проверить свежий main/изоляцию и подготовить отдельный стенд для полного физического цикла под ограниченным кассиром; затем 11 человеческих пунктов и 2 обязательные группы рабочего места/связи плюс условные сканер/принтер. Рабочий Aurum поддерживается отдельной задачей Windows, код/БД не обновлялись; не останавливать его ради QA.",
+  "remaining_step": "Исправить подтверждённый блокер кассира узкой POS-проверкой без расширения прав; обязательный CI и повтор полного ограниченного цикла; затем человеческая и аппаратная приёмка. QA-стенд остановлен, данные сохранены.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -96,9 +96,28 @@
       "fix": "MINIO_BROWSER=off only in disposable smoke, matches production; TLS checks unchanged",
       "status": "resolved; final full CI passed",
       "previous_consecutive_failures": 1
+    },
+    "restricted_cashier_catalog_preflight": {
+      "count": 2,
+      "reason": "Automatic prepared-cart preflight and explicit completion click both receive catalog detail403; no payment request",
+      "status": "stopped; diagnosis only, requires scoped product fix before rerunning",
+      "product_failure": true
+    },
+    "cashier_qa_exact_template": {
+      "count": 1,
+      "earlier_unspecified_stage_failure": 1,
+      "reason": "QA helper incorrectly compared branch-filtered effective rights with raw template; diagnostic confirmed intentional exclusion catalog.view",
+      "status": "strict check stopped; diagnostic-only report does not claim pass",
+      "product_failure": false
+    },
+    "cashier_qa_cold_navigation": {
+      "count": 2,
+      "reason": "Cold isolated Vite/startup navigation timeout under CPU/memory pressure; later page became ready without another navigation",
+      "status": "not retried; not counted as passed test",
+      "product_failure": false
     }
   },
-  "blocker": "Полный учебный цикл поштучной продажи под планируемым ограниченным кассиром, человеческая и аппаратная приёмка пока не выполнены. Docker теперь работает; запрет автоматического изменения общего runtime/БД для разработки сохраняется.",
+  "blocker": "Confirmed UNIT-CASHIER-CATALOG-PREFLIGHT-403: ordinary branch-scoped cashier opens shift and saves physical cart, but preparePhysicalCash reads tenant-wide catalog detail and gets403 before payment intent. Stock60/payments0. Role copied exactly; catalog.view intentionally excluded by branch scope.",
   "previous_completed": {
     "pr": 451,
     "merged": true,
@@ -115,11 +134,11 @@
   "runtime": {
     "primary_checkout_head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "primary_checkout_clean": true,
-    "application": "not changed or restarted",
-    "shared_database": "not accessed or changed",
+    "application": "existing running Aurum unchanged, health200",
+    "shared_database": "not accessed",
     "deployment": false,
     "tpm_nv_provisioning": false,
-    "docker_api": "daemon currently off; no service starts/restarts or DB access performed"
+    "docker_api": "running; existing live containers unchanged during isolated cashier QA"
   },
   "baseline_findings": [
     {
@@ -150,7 +169,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04 19:40:29 UTC",
+  "updated_at": "2026-11-04T20:57:23Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -511,14 +530,14 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "software-acceptance-verified-server-rehearsal-pending",
+    "phase": "restricted-cashier-rehearsal-blocked",
     "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
     "owner": "local",
-    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
+    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-rehearsal-2026-11-04-b35e9f712c04/source",
     "product_code_changes": false,
     "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
     "data": "Fictional60unit/43sales/1refund/2writeoff/15sellable/1quarantine/142cash chain retained; shortage+confirmedcancel+corrected3singlepayment and concurrentcancel/complete passed onactualdisposablebackendUI.",
-    "audit": "Independent agent-reviewed UI rehearsal11/11 passed on currentmain; one P2 display issue recorded. No human/equipment or production acceptance.",
+    "audit": "Latest restricted CASHIER rehearsal blocked; historical OWNER rehearsal is not sufficient.",
     "release_gate": {
       "validate_exit": 0,
       "enforce_exit": 3,
@@ -533,8 +552,8 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "Подготовить отдельный тестовый стенд актуальной версии и провести неподписанный пакет с планируемой ограниченной ролью кассира и выбранным оборудованием. Реальных кассира/устройств/аптеки пока нет; не ставить pass или подпись за человека. Никакого deployment или общей БД автоматически.",
-    "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt",
+    "next_technical_check": "Исправить подтверждённый блокер кассира узкой POS-проверкой без расширения прав; обязательный CI и повтор полного ограниченного цикла; затем человеческая и аппаратная приёмка. QA-стенд остановлен, данные сохранены.",
+    "report": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-rehearsal-2026-11-04-b35e9f712c04/result-ru.txt",
     "display_fix_pr": 453,
     "acceptance_package": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sales-acceptance-2026-11-04"
   },
@@ -569,7 +588,7 @@
     ]
   },
   "online_closure": {
-    "bugfix_complete": true,
+    "bugfix_complete": false,
     "pr": 452,
     "remaining_acceptance_steps": 1,
     "steps": [
@@ -589,14 +608,20 @@
       {
         "id": "acceptance-signoff",
         "state": "pending"
+      },
+      {
+        "id": "UNIT-CASHIER-CATALOG-PREFLIGHT-403",
+        "state": "confirmed_blocking",
+        "source": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4"
       }
     ],
     "real_pharmacy_acceptance": false,
     "production_deployment": false,
     "autonomy_deferred": true,
     "agent_rehearsal_passed": true,
-    "remaining_training_closure_items": 1,
-    "display_fix_pr": 453
+    "remaining_training_closure_items": 3,
+    "display_fix_pr": 453,
+    "agent_rehearsal_role": "historical OWNER; restricted CASHIER blocked"
   },
   "product_source_changes": false,
   "rehearsal": {
@@ -775,5 +800,49 @@
     "code_commit_or_push": false,
     "paid_resources": false
   },
-  "current_environment_note": "Docker now running after authorized runtime startup task. Earlier software acceptance could not start it under its no-runtime-change scope; that was historical. Autostart maintains existing installation, not source freshness or deployment."
+  "current_environment_note": "Docker now running after authorized runtime startup task. Earlier software acceptance could not start it under its no-runtime-change scope; that was historical. Autostart maintains existing installation, not source freshness or deployment.",
+  "restricted_cashier_rehearsal": {
+    "source_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
+    "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-rehearsal-2026-11-04-b35e9f712c04",
+    "report": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-rehearsal-2026-11-04-b35e9f712c04/result-ru.txt",
+    "status": "blocked",
+    "finding": "UNIT-CASHIER-CATALOG-PREFLIGHT-403",
+    "full_cycle_passed": false,
+    "role": "exact cashier template assigned to one branch; not owner/platform",
+    "ui_login": true,
+    "shift_opening_cash": "100.00",
+    "cart_units": 3,
+    "cart_total": "3.00",
+    "payment_intent_sent": false,
+    "catalog_detail_status": 403,
+    "permissions": {
+      "template": 9,
+      "effective": 8,
+      "excluded_by_scope": [
+        "catalog.view"
+      ]
+    },
+    "facts": {
+      "completed_sales": 0,
+      "payments": 0,
+      "remaining_units": 60,
+      "quarantine": 0,
+      "writeoffs": 0,
+      "net": "0"
+    },
+    "protected_containers_unchanged": 30,
+    "live_health": 200,
+    "qa_db_revision": "0237",
+    "qa_containers_stopped": 6,
+    "qa_data_retained": true,
+    "browser_closed": true,
+    "product_changes": false,
+    "dependencies_installed": false,
+    "new_paid_resources": false,
+    "cloud_resumed": false,
+    "human_acceptance": false,
+    "equipment_acceptance": false,
+    "recommended_fix": "Sale-scoped POS dispensing preflight; preserve global catalog restriction, Rx checks, tenant/branch/actor scope. Add real restricted CASHIER UI regression.",
+    "test_gap": "Current connected physical E2E OWNER; CASHIER E2E ordinary sale; component test mocks catalog detail success."
+  }
 }
