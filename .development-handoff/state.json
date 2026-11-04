@@ -4,8 +4,8 @@
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "acceptance-package-prepared-human-pending",
-  "run_id": "acceptance-package-2026-11-04",
+  "phase": "software-acceptance-verified-server-rehearsal-pending",
+  "run_id": "software-acceptance-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "expected_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
@@ -29,7 +29,7 @@
     "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
     "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Подготовить отдельный тестовый стенд актуальной версии и провести неподписанный пакет с планируемой ограниченной ролью кассира и выбранным оборудованием. Реальных кассира/устройств/аптеки пока нет; не ставить pass или подпись за человека. Никакого deployment или общей БД автоматически.",
+  "remaining_step": "Один учебный этап: полный поштучный цикл под планируемым ограниченным кассиром на безопасном отдельном актуальном серверном стенде; затем 11 человеческих пунктов и 2 обязательные группы рабочего места/связи плюс 2 условные (сканер/принтер). Docker сейчас off; не запускать общий engine автоматически. Original human CSV не подписан. Никакого deployment/общей БД.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -98,7 +98,7 @@
       "previous_consecutive_failures": 1
     }
   },
-  "blocker": null,
+  "blocker": "Новый серверный прогон недоступен без безопасного отдельного Docker engine: общий Docker выключен и может возобновить общие сервисы. Все выполненные программные проверки прошли.",
   "previous_completed": {
     "pr": 451,
     "merged": true,
@@ -511,7 +511,7 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "acceptance-package-prepared-human-pending",
+    "phase": "software-acceptance-verified-server-rehearsal-pending",
     "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
     "owner": "local",
     "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
@@ -688,5 +688,60 @@
       "validation_errors": 0,
       "manifest_unchanged": true
     }
+  },
+  "software_acceptance": {
+    "main": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
+    "tested_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
+    "tree": "cfc206038e3b4020ff78d7ca12dde8ab66ff829e",
+    "local_vitest": {
+      "files": 98,
+      "passed": 1335,
+      "failed": 0,
+      "skipped": 0,
+      "tcp_guard": true
+    },
+    "local_pure_backend": {
+      "files": 6,
+      "passed": 427,
+      "failed": 0,
+      "skipped": 0,
+      "network_attempts": 0,
+      "full_lock_environment": false,
+      "loaded_locked_dependency_mismatches": 0,
+      "scope": "pure algorithms only; no app fixtures/server/database"
+    },
+    "existing_ci": {
+      "jobs_success": 8,
+      "e2e_passed": 171,
+      "relevant_parameterized_executions": 26,
+      "new_run": false
+    },
+    "new_server_rehearsal": false,
+    "docker_started": false,
+    "remaining_training_stage": 1,
+    "human_pass": 0,
+    "equipment_pass": 0,
+    "product_code_changed": false,
+    "shared_database_accessed": false,
+    "live_runtime_changed": false,
+    "cloud_resumed": false,
+    "dependencies_installed": false,
+    "new_paid_resources": false,
+    "artifact_root": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sales-auto-acceptance-2026-11-04",
+    "report": "result-ru.txt",
+    "matrix": "software-acceptance-results.csv",
+    "reviews": [
+      "QA engineer: 98 files/1335 tests verified; human scope preserved",
+      "Safety architect: programmatic evidence boundaries approved"
+    ],
+    "limitations": [
+      "Docker daemon stopped; starting shared engine can resume live containers; no proven separate engine",
+      "Full physical flow under planned restricted cashier role not demonstrated by combined OWNER/legacy-cashier tests",
+      "Fresh local UI tests use mocked API, not server; human and physical equipment not accepted"
+    ],
+    "resolved_qa_findings": [
+      "Incomplete API mocking: initial Vitest run aborted; final TCP-fenced runs passed",
+      "Preload Windows path fixed before tests; diagnostic duplicate excluded from totals"
+    ]
   }
 }
