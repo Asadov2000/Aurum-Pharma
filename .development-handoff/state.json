@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generation": 64,
+  "generation": 65,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "preparing-isolated-rehearsal",
+  "phase": "agent-rehearsal-completed-with-visual-finding",
   "run_id": "agent-rehearsal-2026-11-04-58c637ddf2e5",
   "branch": null,
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "expected_head": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-  "validated_sha": null,
+  "validated_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "pr": null,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -22,14 +22,14 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "Online unit-sales training acceptance: 2 steps remain (manual fictional rehearsal, acceptance signoff). Not a production launch approval.",
+  "counter": "До закрытия учебного этапа: 2 пункта — исправить подтверждённый P2 показа оплаченного чека и выполнить итоговую приёмку. Агентская репетиция 11/11 пройдена; человек и оборудование не проверены.",
   "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
   "acceptance": [
-    "Definitive422 shortage leaves pending and blocked UI reproduced with real cash frontend modules; backend422 already proven inPR451, actual post-fix browser required.",
-    "Scoped authoritative terminal cancellation serialized with completion; completed wins returns originalresult; cancelled oldUUID cannot execute after stockrefill/delayedretry. No marker removal on timeout/unknown/unconfirmed cancellation or sessionchange.",
-    "Cashier can return to editing, correct quantity, complete once and close shift; genuine disposable backend browser flow and full8CI finalhead then protectedmerge/treeproof."
+    "Agent-led11step actual UI fictional cycle completed; cash and physical stock conserved",
+    "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
+    "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Finish frontend exact-lockrestore; launchonlyuniqueproject onalreadyrunningdaemon, independentvalidator verifiesimmutableIDs/projectvolumes/networks/loopbackports/memory andunchangedexistingcontainers beforeseed/API. OfficialseedonlynewDB. Then actualUI11stepconnectedfictionalcycle inclsamecart16vs15 refusal/reload/cancel/remove; recordobservedresults. No productchanges/deployment/sharedDB/cloud/newpaidresources. Do notcallagentwalkthrough humanpharmacistacceptance.",
+  "remaining_step": "Сначала отдельным согласованным изменением исправить ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01 (оплаченная physical-only продажа показывает Чек пуст), целево перепроверить и пройти CI gate/main; затем итоговая приёмка и фиксация границ пилота. Не возобновлять автономную кассу/облако, не менять runtime или общую БД автоматически.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -127,7 +127,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T16:38:13.005Z",
+  "updated_at": "2026-11-04 17:43:20 UTC",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -526,14 +526,14 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "automated_rehearsal_and_recovery_passed_manual_pending",
+    "phase": "agent-rehearsal-passed-display-fix-and-signoff-pending",
     "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
     "owner": "local",
-    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
+    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/source",
     "product_code_changes": false,
     "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
     "data": "Fictional60unit/43sales/1refund/2writeoff/15sellable/1quarantine/142cash chain retained; shortage+confirmedcancel+corrected3singlepayment and concurrentcancel/complete passed onactualdisposablebackendUI.",
-    "audit": "PR451 connectedfictionalchain plusPR452 genuineUIstockrefusalrecovery bothfullCIgreen/mergedtreeproof. Humanrehearsal NOT performed. No pharmacy selected. Do not resume deferredautonomy.",
+    "audit": "Independent agent-reviewed UI rehearsal11/11 passed on currentmain; one P2 display issue recorded. No human/equipment or production acceptance.",
     "release_gate": {
       "validate_exit": 0,
       "enforce_exit": 3,
@@ -543,12 +543,13 @@
       "validation_errors": 0
     },
     "local_runtime": {
-      "docker_api": "unavailable; DesktopLinuxEngine pipe missing",
-      "daemon_started": false,
+      "docker_api": "available; existing daemon unchanged",
+      "test_stand": "stopped, data retained",
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "Manual rehearsal on a separate isolated test stand only; no runtime/sharedDB/deployment authorization inferred."
+    "next_technical_check": "Сначала отдельным согласованным изменением исправить ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01 (оплаченная physical-only продажа показывает Чек пуст), целево перепроверить и пройти CI gate/main; затем итоговая приёмка и фиксация границ пилота. Не возобновлять автономную кассу/облако, не менять runtime или общую БД автоматически.",
+    "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt"
   },
   "previous_completed_work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "local_harness_findings": [
@@ -587,7 +588,14 @@
     "steps": [
       {
         "id": "manual-fictional-rehearsal",
-        "state": "pending"
+        "state": "passed_by_AI_agent",
+        "human_cashier_acceptance": false
+      },
+      {
+        "id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
+        "state": "open",
+        "severity": "P2",
+        "scope": "existing completed-sale display inconsistency; no new feature"
       },
       {
         "id": "acceptance-signoff",
@@ -596,23 +604,54 @@
     ],
     "real_pharmacy_acceptance": false,
     "production_deployment": false,
-    "autonomy_deferred": true
+    "autonomy_deferred": true,
+    "agent_rehearsal_passed": true,
+    "remaining_training_closure_items": 2
   },
   "product_source_changes": false,
   "rehearsal": {
-    "kind": "agent-led UI walkthrough onlocaldisposable stand, not human/equipment acceptance",
+    "kind": "Agent-led real-browser UI walkthrough; ordinary API fixture setup and read-only verification; not human/equipment acceptance",
     "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5",
     "project": "aurum-e2e-rehearsal-58c637ddf2e5",
-    "state": "dependency-restoration",
-    "backend_dependencies": "existingmainlock restored inowned768MiB/0.5CPU container, stopped; newtoolsimage only",
-    "frontend_dependencies": "restoring existingmainlock inowned768MiB/0.5CPU container +ownnode_modulesvolume",
+    "state": "completed_with_visual_finding_stand_stopped",
+    "backend_dependencies": "Exact current backend lock restored in isolated QA container; project locks unchanged",
+    "frontend_dependencies": "Exact current frontend lock and pnpm 9.12.0 restored in isolated QA container; project locks unchanged",
     "dependency_approval": "User explicitly approved exactcurrentlock dependencyrestoration and rehearsal",
     "live_application": "existingDockerdaemonalreadyrunning; no start/restart/change toexistingcontainers",
     "shared_database": "not accessed",
     "runtime_limits": "core+system/catalog/mailer workers only; <=2048MiB aggregate; fixedloopback18000/15173",
     "steps_expected": 11,
-    "steps_executed": 0,
+    "steps_executed": 11,
     "human_cashier_acceptance": false,
-    "equipment_acceptance": false
+    "equipment_acceptance": false,
+    "steps_passed": 11,
+    "steps_failed": 0,
+    "visual_findings": 1,
+    "stand_running": false,
+    "containers_stopped": 9,
+    "containers_retained": 10,
+    "test_volumes_retained": true,
+    "protected_containers_unchanged": 20,
+    "owned_browser_process_exited": true,
+    "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt",
+    "results": {
+      "received_units": 60,
+      "gross_sold_units": 43,
+      "refunded_units": 1,
+      "written_off_units": 2,
+      "available_units": 15,
+      "pending_quarantine_units": 1,
+      "sales": "43.00",
+      "refunds": "1.00",
+      "net": "42.00",
+      "opening_cash": "100.00",
+      "closing_cash_expected": "142.00",
+      "closing_cash_actual": "142.00",
+      "closing_difference": "0.00",
+      "sales_count": 3,
+      "returns_count": 1
+    },
+    "shortage_recovery": "Real UI16vs15 =>422; ordinary reload same pending operation; confirmed server cancel; delete unpaid row; late cancelled operation retry409; original 3 completed payload hashes unchanged",
+    "no_paid_resources": true
   }
 }
