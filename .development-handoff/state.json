@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 45,
+  "generation": 46,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "ci_verified_premerge",
+  "phase": "merged_verified",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,17 +30,17 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "Final independent read-only review, fresh main/head/status; protected PR450 merge with expected10c39aac... only if all8 success. Verify currentmain tree equals tested tree; update fictional rehearsal baseline, keep rehearsal NOT executed. No cloud/live/sharedDB changes.",
+  "remaining_step": "PR450 merged and actualmain tree exactlymatches testedhead. Auth reproducedcase resolved; historicalCI3686 rootcause not proven. Fictional cash rehearsal guide updated toPR450, NOT executed. Next only isolated fictional rehearsal with confirmed separate runtime/DB; no live/sharedDB updates, no cloudresume or new autonomous-cashier scope. Counter2/7(4) stays: autonomy deferred and realpilot acceptance incomplete.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
-    "pr": 448,
+    "pr": 449,
     "merged": true,
-    "main": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
-    "merged_at": "2026-11-03T11:19:28Z",
-    "tested_head": "ab80d6557320dd1a897abf41528919d17e151920",
-    "tested_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
-    "main_tree": "a5a34af7fec11691f7ce7ce73a0e9fcfa983a1a7",
+    "main": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+    "merged_at": "2026-11-03T12:33:23Z",
+    "tested_head": "134497db34fc0fc67345a79fc04af145da7cde1a",
+    "tested_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
+    "main_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
@@ -57,11 +57,17 @@
   "baseline_findings": [
     {
       "id": "AUTH-PARALLEL-BOOTSTRAP-01",
-      "status": "open",
+      "status": "resolved_reproduced_case",
       "scope": "Separate baseline auth reliability finding, outside the nine Edge stages",
       "evidence": "CI3686 trace shows overlapping initial refresh200/me200 in two tabs, first tenant query401 then retry401 while second tab rotates refresh and succeeds200",
       "interpretation": "Consistent with cross-tab refresh/session invalidation race; exact 401 reason not captured",
-      "not_fixed": "E2E setup synchronization does not fix product authentication race; no Auth/UI changes"
+      "resolution": {
+        "pr": 450,
+        "main": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
+        "deterministic_model": "prepatch final401 reproduced; postfix both200",
+        "real_browser": "actual shared-cookie two-page case passed CI4284;168total noflaky",
+        "historical_caveat": "Exact CI3686 cause remains unproven; do not claim identical historical interleaving"
+      }
     }
   ],
   "cloud_last_verified": {
@@ -77,7 +83,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T09:21:14.291Z",
+  "updated_at": "2026-11-04T09:22:37.786Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -190,13 +196,13 @@
     "reruns": 0
   },
   "completion": {
-    "pr": 449,
+    "pr": 450,
     "merged": true,
-    "main": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
-    "merged_at": "2026-11-03T12:33:23Z",
-    "tested_head": "134497db34fc0fc67345a79fc04af145da7cde1a",
-    "tested_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
-    "main_tree": "37f4838f84e9bf61eb12ad78618ed8af9fb837f9",
+    "main": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
+    "merged_at": "2026-11-04T09:21:37Z",
+    "tested_head": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+    "tested_tree": "bc12c5793cd3ab43df55c58cbf18433f8c9bb299",
+    "main_tree": "bc12c5793cd3ab43df55c58cbf18433f8c9bb299",
     "tree_match": true,
     "closes_control_stage": false,
     "remaining_control_stages": 4,
@@ -298,6 +304,15 @@
       "ci": "all8success/firstworkflow;8290backend incl66new/no skips/no duplicates;571desktop incl109new;3260frontend;167browser;genuine early/late physical+mixed/ACL proofs onbothnodes",
       "closes_control_stage": false,
       "hardware_acceptance": false
+    },
+    {
+      "pr": 450,
+      "kind": "cross-tab-auth-refresh-and-protected-retry",
+      "main": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
+      "tested_head": "10c39aac9e38cc7d4df378442aaf4ee219390279",
+      "tree": "bc12c5793cd3ab43df55c58cbf18433f8c9bb299",
+      "ci": "all8success/firstworkflow;8290backend/no skips/no duplicates;571Windows;3278frontend/243files;168browser incl1new actualsharedcookie2page case;0flaky;100targeted;unchangedstartupbudgets",
+      "closes_control_stage": false
     }
   ],
   "increment_id": "atomic-refresh-and-protected-retry",
@@ -411,7 +426,7 @@
     "reason": "User resumed same PR450; full exact-head CI green",
     "cloud_product_grant": false
   },
-  "latest_main_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
+  "latest_main_sha": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
   "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
@@ -456,13 +471,13 @@
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
     "phase": "rehearsal_prepared_not_executed",
-    "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
+    "base_sha": "b69af4a0dfe7ee4bfb23f3e72c2fb0c06c352dd6",
     "owner": "local",
     "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/local-client-recovery-2026-10-26/source",
     "product_code_changes": false,
     "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
     "data": "Entirely fictional; two sealed packs x30, blister10, unitprice1TJS, openingcash100. Three sales43, refund1 intoquarantine, writeoff2: sellable15/quarantine1/writeoff2/net42/closingcash142. Arithmetic checked; app rehearsal NOT executed.",
-    "audit": "Two independent readonly QA reviews found no proved missing online cash/stock/report behavior; current full test tree already passed PR449 CI. Actual pharma/equipment/deployment acceptance not established.",
+    "audit": "Two independent online cash audits found no proved missing online cash/stock/report behavior. PR450 fullCI all8success;8290backend/571Windows/3278frontend/168browser. Auth reproduced case fixed. Fictional rehearsal prepared NOT executed; deployment/pharmacy/equipment acceptance not established.",
     "release_gate": {
       "validate_exit": 0,
       "enforce_exit": 3,
@@ -477,11 +492,16 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "AUTH-PARALLEL-BOOTSTRAP-01: reproduce deterministically in two pages of one browsercontext with shared cookie. Cookie refresh WebLock exists but releases before protected retry; each refresh revokes oldsid. Reviewer identified a possible interleaving, NOT a reproduced current bug or proven CI3686 root cause. Do not patch or relax sid/retry guards before reproduction; don't overlap unrelated PR254."
+    "next_technical_check": "Proceed only with separate isolated fictional online-cash rehearsal after proving disposable runtime/database isolation; no sharedDB/runtime changes and no duplicate auth implementation. Docker was unavailable at last check. Autonomy remains deferred."
   },
   "previous_completed_work_item_id": "UNIT-EDGE-RETAIL-ADMISSION-01",
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
   ],
-  "shutdown_by_user": false
+  "shutdown_by_user": false,
+  "cloud_read_attempt": {
+    "at": "2026-11-04T09:22:37.786Z",
+    "status": "durable host unavailable; no cloud turn or scheduler resumed",
+    "basis": "Existing user confirmation stopped+autostart off and unchanged remote ledger; no unexpected branch changes"
+  }
 }
