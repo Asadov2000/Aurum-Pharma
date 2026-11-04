@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 44,
+  "generation": 45,
   "work_item_id": "AUTH-PARALLEL-BOOTSTRAP-01",
   "control_stage_id": "ONLINE-PILOT-AUTH",
   "owner": "local",
-  "phase": "ci_wait_pc_shutdown",
+  "phase": "ci_verified_premerge",
   "run_id": "local-2026-11-03-two-tab-auth-01",
   "branch": "codex/auth-two-tab-recovery",
   "base_sha": "8929099ee65688e76d4991ba9e77cba0bd6f6dca",
@@ -18,7 +18,7 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": true,
+  "local_product_writes_stopped": false,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
@@ -30,7 +30,7 @@
     "Actual refresh+one protectedretry hold the same cookie lock, without nested-lock/pendingbootstrap deadlocks or MFAprompt under lock; no retry of consume failures.",
     "Real two-page shared-cookie browser test on disposable CI backend; complete exact-head eight contexts and protected merge; no live Aurum/sharedDB/dependency versions/install or paid resources."
   ],
-  "remaining_step": "USER IS SHUTTING PC DOWN. Local work stopped, code committed/pushed inPR450 head10c39aac9e38cc7d4df378442aaf4ee219390279. Cloud/schedulers remainpaused; NOauto-merge. CircleCIworkflow6144c130-7016-4f0f-9385-c26f5f414c55 remotecontinues/queues independently. Onnextresume freshactualmain/ownhead/status/openPR/recentmerge/controlowner, continueSAMEPR450 (not newstage). Inspect fullCI, require newactualtwo-tab browsercase andall3278frontend/8290backend/571desktop/168E2E. Budgetexceptionalreadyapprovedforthistask; exactQArestoredandbudgetspassed. Normaltwofailurepolicyotherwise. Protectedmergeonly8successonfinalhead; verifyactualmain tree. No liveAurum/sharedDB/Docker/autonomy changes.",
+  "remaining_step": "Final independent read-only review, fresh main/head/status; protected PR450 merge with expected10c39aac... only if all8 success. Verify currentmain tree equals tested tree; update fictional rehearsal baseline, keep rehearsal NOT executed. No cloud/live/sharedDB changes.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -77,7 +77,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-03T14:39:33.306Z",
+  "updated_at": "2026-11-04T09:21:14.291Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -94,7 +94,7 @@
     "targeted_passed": 100,
     "new_frontend_cases": 18,
     "new_browser_cases": 1,
-    "real_browser": "listed, CI pending",
+    "real_browser": "passed actual two-page shared-cookie regression on disposable CI backend",
     "typecheck": "passed exact QA",
     "lint": "passed exact QA+final vite config",
     "prettier": "passed",
@@ -127,7 +127,7 @@
   },
   "ci": {
     "head_sha": "10c39aac9e38cc7d4df378442aaf4ee219390279",
-    "status": "pending",
+    "status": "success",
     "required_contexts": 8,
     "expected_backend": 8290,
     "expected_desktop": 571,
@@ -140,15 +140,54 @@
     "last_contexts": [
       {
         "context": "ci/circleci: tooling-windows",
-        "state": "pending",
+        "state": "success",
         "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/9ee1e3b1-d280-4a2a-9193-86a5eb8c577a"
       },
       {
         "context": "ci/circleci: tooling-linux",
-        "state": "pending",
+        "state": "success",
         "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/e076d1db-b753-46da-9973-5454b2f923fd"
+      },
+      {
+        "context": "ci/circleci: dependency-audit",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/4a70119b-bc49-48bd-b6b7-6fd6cd2c0b2e"
+      },
+      {
+        "context": "ci/circleci: frontend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/e5a0f3a9-f975-429c-8c99-bccd0c976be1"
+      },
+      {
+        "context": "ci/circleci: production-containers",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/9c0e2841-f4a0-4b83-a4dc-928564b29c7e"
+      },
+      {
+        "context": "ci/circleci: e2e",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/b3f04812-e049-45a5-96e7-6f2d9135321b"
+      },
+      {
+        "context": "ci/circleci: backend",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/bceeaa10-8ce2-45a1-aa9c-ad1539321ede"
+      },
+      {
+        "context": "ci/circleci: ci-gate",
+        "state": "success",
+        "target_url": "https://app.circleci.com/workflow/6144c130-7016-4f0f-9385-c26f5f414c55/job/09d0a927-77e4-46c1-a83f-eef4f29c8f78"
       }
-    ]
+    ],
+    "backend_passed": 8290,
+    "desktop_passed": 571,
+    "frontend_passed": 3278,
+    "frontend_files": 243,
+    "e2e_passed": 168,
+    "new_browser_passed": 1,
+    "flaky": 0,
+    "workflows_run": 1,
+    "reruns": 0
   },
   "completion": {
     "pr": 449,
@@ -368,8 +407,8 @@
     "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
   },
   "local_resume": {
-    "at": "2026-11-03T07:40:05.057Z",
-    "reason": "User resumed local development and requested safe acceleration",
+    "at": "2026-11-04T09:21:14.291Z",
+    "reason": "User resumed same PR450; full exact-head CI green",
     "cloud_product_grant": false
   },
   "latest_main_sha": "023d9e557cd78af68c3c7b90ae9fe0f6b025f3d6",
@@ -444,10 +483,5 @@
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
   ],
-  "shutdown_by_user": {
-    "reason": "User is turning PC off",
-    "at": "2026-11-03T14:39:33.306Z",
-    "cloud_resumed": false,
-    "automatic_merge_enabled": false
-  }
+  "shutdown_by_user": false
 }
