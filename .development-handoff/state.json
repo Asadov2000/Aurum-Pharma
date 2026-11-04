@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "generation": 69,
+  "generation": 70,
   "work_item_id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "waiting-full-ci-after-isolated-smoke-fix",
+  "phase": "completed-merged",
   "run_id": "local-completed-cart-2026-11-04",
   "branch": "codex/completed-physical-cart",
   "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
   "expected_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
-  "validated_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+  "validated_sha": "d7fbfc6c15a3beedab26911629134ea9c348e751",
   "pr": 453,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -22,14 +22,14 @@
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "До закрытия учебного этапа: 2 пункта — исправить подтверждённый P2 показа оплаченного чека и выполнить итоговую приёмку. Агентская репетиция 11/11 пройдена; человек и оборудование не проверены.",
+  "counter": "До закрытия учебного этапа поштучных онлайн-продаж остался 1 пункт: итоговая приёмка с фиксацией границ пилота. Агентская репетиция11/11 пройдена; визуальный дефект исправлен PR453; человеческая и аппаратная приёмка не выполнены.",
   "scope": "Only online physical cash rejection recovery. Newexplicitserver cancellation ofsavedattempt; lateDBmarkerfence foralternativephysical/mixed/nativeconsumers. No autonomouscash features activated.",
   "acceptance": [
     "Agent-led11step actual UI fictional cycle completed; cash and physical stock conserved",
     "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
     "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Full CircleCI eight required jobs on exact head, refresh main/head, protected expected-head merge, verify main tree. No deployment.",
+  "remaining_step": "Итоговая приёмка учебного онлайн-сценария и фиксация границ пилота. Проверка настоящим кассиром и оборудования не выполнена. Не разворачивать обновление и не менять общую БД автоматически; автономная касса отложена.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -82,17 +82,20 @@
       "reason": "static renderer exceeded POS gzip by0.1KiB; lazy component restores194.96/195KiB without limit changes"
     },
     "completed_cart_e2e_startup": {
-      "count": 1,
+      "count": 0,
       "reason": "CircleCI Start isolated application stack: failed to execute bake: read |0: file already closed; browser tests not reached",
       "workflow": "59dcd7a8-1642-470c-af28-748f2a1db9a9",
       "job": 4358,
-      "retry": "Same code tree, empty CI retry commit; stop if same cause recurs twice"
+      "retry": "Same code tree, empty CI retry commit; stop if same cause recurs twice",
+      "previous_consecutive_failures": 1,
+      "status": "resolved; final full CI passed"
     },
     "completed_cart_minio_tls": {
-      "count": 1,
+      "count": 0,
       "reason": "Unused Silo web console dynamic-port bind collision in isolated TLS smoke",
       "fix": "MINIO_BROWSER=off only in disposable smoke, matches production; TLS checks unchanged",
-      "status": "awaiting CI"
+      "status": "resolved; final full CI passed",
+      "previous_consecutive_failures": 1
     }
   },
   "blocker": null,
@@ -147,7 +150,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04 17:43:20 UTC",
+  "updated_at": "2026-11-04 19:32:02 UTC",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -162,89 +165,61 @@
     "pos_gzip_kib": 194.96
   },
   "ci": {
-    "status": "success",
-    "expected_backend": 8319,
-    "new_backend": 29,
-    "expected_frontend": 3295,
-    "expected_frontend_files": 244,
-    "new_frontend": 17,
-    "expected_e2e": 171,
-    "new_e2e": 2,
-    "expected_desktop": 571,
-    "required_contexts": 8,
-    "head_sha": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
-    "workflow": "6191a385-3699-4291-8d67-2795e18036c9",
-    "backend_passed": 8318,
-    "backend_skipped": 1,
-    "skip_reason": "Existing conditional empty prescription downgrade unavailable withimmutableprescriptionhistory; companion nonemptyrefusal passed",
-    "new_backend_passed": 29,
-    "watched_regression_passed": 227,
-    "duplicates": 0,
-    "frontend_passed": 3295,
-    "frontend_files": 244,
-    "e2e_passed": 171,
-    "new_browser_passed": 2,
-    "flaky": 0,
-    "desktop_passed": 571,
-    "workflows_run": 4,
-    "reruns": 0,
+    "head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
+    "all_contexts_success": true,
     "contexts": [
       {
         "context": "ci/circleci: tooling-linux",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/09a91f79-c8af-4a1b-b878-6b37b0f9bc02"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/8d654713-ce73-4b8e-b164-c2cad7c878b3"
       },
       {
         "context": "ci/circleci: dependency-audit",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/d9b40fae-25c2-432c-8d64-1a8bcc31674f"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/865deaf1-1853-4cc9-aec2-92405dfa5ac8"
       },
       {
         "context": "ci/circleci: tooling-windows",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/ff3472d8-fe80-4eaf-af81-93c6028c0e14"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/2ff72f0d-4f18-48db-bfdb-0a6e3225b0fe"
       },
       {
         "context": "ci/circleci: frontend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/a59e0e82-4784-4a60-934e-4e27a64e0457"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/45f16ad6-a696-4a5e-b94c-8d03d4701ee0"
       },
       {
         "context": "ci/circleci: production-containers",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/d7503a22-b981-46f0-85b9-10bfddabb9a5"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/847fbc13-979c-4e4e-8e3a-5fea3b00aa80"
       },
       {
         "context": "ci/circleci: e2e",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/b6241d06-29a0-4835-b567-51ebb6a0faef"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/d4d1d700-415d-487c-a97a-66e0949f22bc"
       },
       {
         "context": "ci/circleci: backend",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/bada9998-c288-42a3-a29f-03bbb8ea78e3"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/9a9bece7-6bff-409b-8b94-a091ff427c82"
       },
       {
         "context": "ci/circleci: ci-gate",
         "state": "success",
-        "target_url": "https://app.circleci.com/workflow/6191a385-3699-4291-8d67-2795e18036c9/job/51e25734-03c3-42b6-b37e-2a7c956359e3"
+        "target_url": "https://app.circleci.com/workflow/455a332f-3555-4532-ae85-e44913ae2e4f/job/267c7d60-7d5c-474e-9bed-ffeebf590e18"
       }
     ],
-    "proof": "Strict native evidence accepted:8318passed+1existingconditionalprescriptionemptydowngradeskip; companionnonemptyrefusalpassed;29new+227watchedpassed/0duplicates;3295frontend244files;571Windows;171browser2new/0flaky"
+    "required_gate": "ci/circleci: ci-gate"
   },
   "completion": {
-    "pr": 452,
+    "pr": 453,
     "merged": true,
-    "main": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
-    "merged_at": "2026-11-04T16:11:13Z",
-    "tested_head": "41a7c6c57ce696ff4dfe70ba8c71f6f2006bc4af",
-    "tested_tree": "2e145811f405ef432a057f1d176418895adc6d72",
-    "main_tree": "2e145811f405ef432a057f1d176418895adc6d72",
-    "tree_match": true,
-    "merge_in_current_main": true,
-    "closes_control_stage": false,
-    "human_rehearsal": false,
-    "scope": "Online physical cash shortage recovery; no autonomouscash expansion or deployment"
+    "merge_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
+    "verified_head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
+    "tree": "cfc206038e3b4020ff78d7ca12dde8ab66ff829e",
+    "merged_tree_matches_tested_head": true,
+    "backend_main_pytest_passed": 8318,
+    "local_targeted_vitest_passed": 62
   },
   "accepted_increments": [
     {
@@ -492,7 +467,7 @@
     "reason": "User resumed same PR450; full exact-head CI green",
     "cloud_product_grant": false
   },
-  "latest_main_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+  "latest_main_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
   "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
@@ -536,10 +511,10 @@
   },
   "next_work_item": {
     "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
-    "phase": "agent-rehearsal-passed-display-fix-and-signoff-pending",
-    "base_sha": "b1f71ae7ea8f296bd11b33bc30db074158d458fb",
+    "phase": "agent-rehearsal-and-display-fix-complete-acceptance-pending",
+    "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
     "owner": "local",
-    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/source",
+    "source": "C:/Users/Asadov/Desktop/A-Pharma/.codex/completed-physical-cart-2026-11-04/source",
     "product_code_changes": false,
     "training_guide": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-03/online-cash-rehearsal-ru.txt",
     "data": "Fictional60unit/43sales/1refund/2writeoff/15sellable/1quarantine/142cash chain retained; shortage+confirmedcancel+corrected3singlepayment and concurrentcancel/complete passed onactualdisposablebackendUI.",
@@ -558,8 +533,9 @@
       "shared_database_access": false,
       "primary_checkout": "b1a88ba78e2048beeca6eed929622da238b8ba2f clean"
     },
-    "next_technical_check": "Сначала отдельным согласованным изменением исправить ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01 (оплаченная physical-only продажа показывает Чек пуст), целево перепроверить и пройти CI gate/main; затем итоговая приёмка и фиксация границ пилота. Не возобновлять автономную кассу/облако, не менять runtime или общую БД автоматически.",
-    "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt"
+    "next_technical_check": "Итоговая приёмка учебного онлайн-сценария и фиксация границ пилота. Проверка настоящим кассиром и оборудования не выполнена. Не разворачивать обновление и не менять общую БД автоматически; автономная касса отложена.",
+    "report": ".codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5/rehearsal-result-ru.txt",
+    "display_fix_pr": 453
   },
   "previous_completed_work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "local_harness_findings": [
@@ -594,7 +570,7 @@
   "online_closure": {
     "bugfix_complete": true,
     "pr": 452,
-    "remaining_acceptance_steps": 2,
+    "remaining_acceptance_steps": 1,
     "steps": [
       {
         "id": "manual-fictional-rehearsal",
@@ -603,9 +579,11 @@
       },
       {
         "id": "ONLINE-PHYSICAL-COMPLETED-CART-PRESENTATION-01",
-        "state": "open",
+        "state": "resolved",
         "severity": "P2",
-        "scope": "existing completed-sale display inconsistency; no new feature"
+        "scope": "existing completed-sale display inconsistency; no new feature",
+        "pr": 453,
+        "full_ci_green": true
       },
       {
         "id": "acceptance-signoff",
@@ -616,9 +594,10 @@
     "production_deployment": false,
     "autonomy_deferred": true,
     "agent_rehearsal_passed": true,
-    "remaining_training_closure_items": 2
+    "remaining_training_closure_items": 1,
+    "display_fix_pr": 453
   },
-  "product_source_changes": false,
+  "product_source_changes": true,
   "rehearsal": {
     "kind": "Agent-led real-browser UI walkthrough; ordinary API fixture setup and read-only verification; not human/equipment acceptance",
     "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/online-unit-rehearsal-2026-11-04-58c637ddf2e5",
@@ -662,6 +641,13 @@
       "returns_count": 1
     },
     "shortage_recovery": "Real UI16vs15 =>422; ordinary reload same pending operation; confirmed server cancel; delete unpaid row; late cancelled operation retry409; original 3 completed payload hashes unchanged",
-    "no_paid_resources": true
+    "no_paid_resources": true,
+    "visual_finding_resolution": {
+      "pr": 453,
+      "main": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
+      "full_ci_passed": true,
+      "human_cashier_acceptance": false,
+      "equipment_acceptance": false
+    }
   }
 }
