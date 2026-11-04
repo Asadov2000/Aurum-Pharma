@@ -14,7 +14,7 @@ import {
 } from "react";
 
 import { Button, ConfirmDialog } from "@/components/ui";
-import { findByBarcode, getCatalogItem } from "@/features/catalog/api";
+import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
 import { requestDesktopCashDrawerOpen } from "@/lib/desktopRuntime";
@@ -856,23 +856,14 @@ function ActiveWorkspace({
   const preparePhysicalCash = async (): Promise<void> => {
     if (!sessionIsActive() || !saleId || saleIdRef.current !== saleId)
       throw new Error("Сессия кассира завершена.");
-    const catalogIds = [...new Set([...items, ...preparedItems].map((item) => item.catalog_id))];
-    const catalogs = await Promise.all(catalogIds.map((id) => getCatalogItem(id)));
+    const { requiresSalePrescription } = await import("./dispensingPreflight");
+    if (!sessionIsActive() || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    const prescriptionRequired = await requiresSalePrescription(saleId);
     if (!sessionIsActive() || saleIdRef.current !== saleId)
       throw new Error("Сессия кассира завершена.");
     if (!writableRef.current) throw new Error("Касса недоступна. Новая оплата не отправлена.");
-    if (
-      catalogs.some(
-        (catalog, index) =>
-          catalog.id !== catalogIds[index] ||
-          catalog.tenant_id !== storageScope.tenantId ||
-          !catalog.is_active ||
-          catalog.deleted_at ||
-          !["otc", "prescription"].includes(catalog.dispensing_type),
-      )
-    )
-      throw new Error("В корзине есть недоступное лекарство. Проверьте позиции перед оплатой.");
-    if (catalogs.some((catalog) => catalog.dispensing_type === "prescription")) {
+    if (prescriptionRequired) {
       if (!prescription) {
         setRequiresRx(true);
         setPrescriptionOpen(true);

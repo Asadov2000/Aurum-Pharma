@@ -15,8 +15,10 @@ from app.core.deps import (
     require_writable_tenant,
 )
 from app.core.errors import BusinessRuleError, NotFoundError
+from app.domains.pos.physical_cart_dispensing_service import PhysicalCartDispensingPreflightService
 from app.domains.pos.physical_cart_options_service import PhysicalCartOptionsService
 from app.domains.pos.physical_cart_schemas import (
+    PhysicalCartDispensingPreflightRead,
     PhysicalCartItemPut,
     PhysicalCartOptionsRead,
     PhysicalCartQuoteRead,
@@ -149,3 +151,18 @@ async def read_physical_cart_options(
         actor_id=user.user_id,
         allowed_branch_ids=branch_ids,
     )
+
+
+@router.get("/dispensing-preflight", response_model=PhysicalCartDispensingPreflightRead)
+async def read_physical_cart_dispensing_preflight(
+    sale_id: UUID, user: CartUser, repository: CartRepository, response: Response
+) -> PhysicalCartDispensingPreflightRead:
+    response.headers["Cache-Control"] = "private, no-store"
+    with repository.session.no_autoflush:
+        tenant_id, branch_ids = await _cart_scope(sale_id, user, repository)
+        return await PhysicalCartDispensingPreflightService(repository).read(
+            tenant_id=tenant_id,
+            sale_id=sale_id,
+            actor_id=user.user_id,
+            allowed_branch_ids=branch_ids,
+        )

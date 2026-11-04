@@ -1,5 +1,6 @@
 import { request, test, type Page } from "@playwright/test";
 
+import { createScopedRehearsalCashier } from "./cashierRehearsalAccess";
 import {
   apiContext,
   apiLogin,
@@ -71,7 +72,20 @@ async function sellFormat(
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === `/api/v1/sales/${draft.sale_id}/physical-cash/complete`,
   );
+  const checked = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/sales/${draft.sale_id}/physical-cart/dispensing-preflight`,
+  );
   await payment.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+  const preflight = await checked;
+  expect(preflight.ok()).toBe(true);
+  const authority = (await preflight.json()) as { sale_id: string; requires_prescription: boolean };
+  expect(authority.sale_id === draft.sale_id && authority.requires_prescription === false).toBe(
+    true,
+  );
+  expect(Object.keys(authority).sort()).toEqual(["requires_prescription", "sale_id"]);
   const response = await finished;
   expect(response.ok()).toBe(true);
   const sale = (await response.json()) as RehearsalSale;
@@ -158,20 +172,81 @@ async function refundOneUnit(page: Page, sale: RehearsalSale, medicineName: stri
   return refund;
 }
 
-test("online cash rehearsal conserves 60 units and closes three sales, one refund and one write-off at 142 TJS", async ({
+async function openSavedReceipts(
+  page: Page,
+  medicineName: string,
+  sales: RehearsalSale[],
+  refund: RehearsalRefund,
+) {
+  const receipts = [
+    ...sales.map((sale) => ({
+      id: sale.sale_id,
+      number: sale.receipt_number,
+      total: sale.total_amount,
+    })),
+    { id: refund.sale_id, number: refund.receipt.receipt_number, total: refund.total_amount },
+  ];
+  await page.goto("/sales");
+  for (const receipt of receipts) {
+    const filtered = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/v1/sales" &&
+        url.searchParams.get("receipt_number") === receipt.number
+      );
+    });
+    await page.getByLabel("№ чека").fill(receipt.number);
+    const response = await filtered;
+    expect(response.ok()).toBe(true);
+    const listed = (await response.json()) as { items: { id: string }[] };
+    const index = listed.items.findIndex((item) => item.id === receipt.id);
+    expect(index).toBeGreaterThanOrEqual(0);
+    await page
+      .getByRole("button", { name: `Открыть чек № ${receipt.number}`, exact: true })
+      .nth(index)
+      .click();
+    const dialog = page.getByRole("dialog", { name: `Чек № ${receipt.number}`, exact: true });
+    await expect(dialog.getByText(medicineName, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(`${receipt.total} TJS`, { exact: true }).first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+  }
+}
+
+test("branch-scoped cashier conserves 60 units and closes three sales, one refund and one write-off at 142 TJS", async ({
   page,
+  browser,
 }) => {
   test.setTimeout(180_000);
   clearLoginRateLimit(OWNER.email);
   const anonymous = await request.newContext();
   const tokens = await apiLogin(anonymous, OWNER);
   const api = await apiContext(tokens.access_token);
+  let cashier: Awaited<ReturnType<typeof createScopedRehearsalCashier>> | undefined;
+  const warehouse = await browser.newPage({
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:15173",
+  });
   try {
     const fixture = await seedRehearsal(api);
+    cashier = await createScopedRehearsalCashier(api, fixture);
+    const financialPosts: string[] = [];
+    const catalogReads: string[] = [];
+    page.on("request", (outgoing) => {
+      const pathname = new URL(outgoing.url()).pathname;
+      if (
+        outgoing.method() === "POST" &&
+        /\/physical-cash(?:-refunds)?\/(complete|cancel)$/.test(pathname)
+      ) {
+        financialPosts.push(pathname);
+      }
+      if (outgoing.method() === "GET" && /^\/api\/v1\/catalog\/[0-9a-f-]+$/i.test(pathname))
+        catalogReads.push(pathname);
+    });
     await page.setViewportSize({ width: 1366, height: 900 });
-    await loginInBrowser(page, OWNER);
+    await loginInBrowser(page, cashier.credentials);
     await page.goto("/pos");
-    await page.getByLabel(/^Касса$/).selectOption({ label: fixture.register.name });
+    await expect(page.getByLabel(/^Касса$/)).toBeDisabled();
+    await expect(page.getByLabel(/^Касса$/)).toHaveValue(fixture.register.name);
+    await expect(page.getByText(cashier.hiddenRegister.name, { exact: true })).toHaveCount(0);
     await page.getByLabel("Наличные в кассе на начало смены").fill("100");
     await page.getByRole("button", { name: "Открыть смену", exact: true }).click();
     await expect(page.getByText("Смена открыта")).toBeVisible();
@@ -225,28 +300,32 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
     const blister = pack?.state.opened_blisters.find((candidate) => candidate.remaining_units >= 2);
     if (!pack || !blister)
       throw new Error("The sale did not preserve its opened blister remainder");
-    await page.goto("/batches");
-    await page.getByRole("button", { name: "Поштучные партии", exact: true }).click();
-    const inventory = page.getByRole("region", { name: "Поштучные партии", exact: true });
+    await loginInBrowser(warehouse, OWNER);
+    await warehouse.goto("/batches");
+    await warehouse.getByRole("button", { name: "Поштучные партии", exact: true }).click();
+    const inventory = warehouse.getByRole("region", { name: "Поштучные партии", exact: true });
     await inventory.getByLabel("Аптека", { exact: true }).selectOption(fixture.branch.id);
     await inventory.getByRole("button", { name: "Показать партии", exact: true }).click();
     await expect(inventory.getByText("17 табл.", { exact: true })).toBeVisible();
     await inventory.getByRole("button", { name: "Списать", exact: true }).click();
-    const writeoff = page.getByRole("dialog", { name: "Списание поштучного остатка", exact: true });
+    const writeoff = warehouse.getByRole("dialog", {
+      name: "Списание поштучного остатка",
+      exact: true,
+    });
     await writeoff.getByLabel("Причина", { exact: true }).selectOption("damaged");
     await writeoff.getByLabel("Закрытые упаковки", { exact: true }).fill("0");
     await writeoff
       .getByLabel(`Блистер ${blister.number} · ${pack.pack_id}`, { exact: true })
       .fill("2");
     await writeoff.getByRole("button", { name: "Проверить списание", exact: true }).click();
-    const written = page.waitForResponse(
+    const written = warehouse.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         new URL(response.url()).pathname === "/api/v1/batches/physical/write-offs",
     );
-    await page.getByRole("button", { name: "Подтвердить списание", exact: true }).click();
+    await warehouse.getByRole("button", { name: "Подтвердить списание", exact: true }).click();
     expect((await written).ok()).toBe(true);
-    await expect(page.getByText("Списание выполнено.", { exact: true })).toBeVisible();
+    await expect(warehouse.getByText("Списание выполнено.", { exact: true })).toBeVisible();
     await expect(inventory.getByText("15 табл.", { exact: true })).toBeVisible();
     const afterWriteoff = rehearsalFacts(fixture);
     expect(afterWriteoff).toMatchObject({
@@ -262,32 +341,17 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
     });
     await verifyPendingQuarantine(api, fixture, refund);
     await page.goto("/pos");
-    await page.getByLabel(/^Касса$/).selectOption({ label: fixture.register.name });
     const oversized = await addFormat(page, fixture.medicine.brand_name, "unit", 16);
-    // This negative check calls the ordinary authenticated API for a UI-created draft.
-    // It proves server stock refusal, not the UI's recovery after a failed cash submission.
-    const quoted = await api.get(`sales/${oversized.sale_id}/physical-cart/quote`);
-    expect(quoted.ok()).toBe(true);
-    const quote = (await quoted.json()) as {
-      revision_hash: string;
-      quote: { total_amount: string };
-    };
-    expect(quote.quote.total_amount).toBe("16.00");
-    const confirmation = {
-      operation_id: crypto.randomUUID(),
-      sale_id: oversized.sale_id,
-      expected_revision_hash: quote.revision_hash,
-      expected_total_amount: "16.00",
-      cash_tendered: "16.00",
-    };
-    expect(
-      (
-        await api.post(`sales/${oversized.sale_id}/physical-cash/intent`, { data: confirmation })
-      ).ok(),
-    ).toBe(true);
-    const refused = await api.post(`sales/${oversized.sale_id}/physical-cash/complete`, {
-      data: confirmation,
-    });
+    const payment = page.getByRole("region", { name: "Оплата наличными", exact: true });
+    await payment.getByLabel("Получено наличными, TJS").fill("16");
+    const refusal = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${oversized.sale_id}/physical-cash/complete`,
+    );
+    await payment.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+    const refused = await refusal;
     expect(refused.status()).toBe(422);
     expect(await refused.json()).toMatchObject({
       error: {
@@ -295,8 +359,34 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
         message: "Insufficient compatible physical stock for cart",
       },
     });
+    const confirmation = refused.request().postDataJSON() as { operation_id: string };
     expect(rehearsalFacts(fixture)).toEqual(afterWriteoff);
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
+    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeDisabled();
+    await page.reload();
+    const cancellation = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${oversized.sale_id}/physical-cash/cancel`,
+    );
+    await payment.getByRole("button", { name: "Вернуться к корзине", exact: true }).click();
+    const cancelled = await cancellation;
+    expect(cancelled.ok()).toBe(true);
+    expect(((await cancelled.json()) as { state: string }).state).toBe("cancelled");
+    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeEnabled();
+    const terminal = await cashier.api.get(
+      `sales/${oversized.sale_id}/physical-cash/operations/${confirmation.operation_id}`,
+    );
+    expect(terminal.ok()).toBe(true);
+    expect(((await terminal.json()) as { state: string }).state).toBe("cancelled");
+    expect(
+      (
+        await cashier.api.post(`sales/${oversized.sale_id}/physical-cash/complete`, {
+          data: confirmation,
+        })
+      ).status(),
+    ).toBe(409);
     const removed = page.waitForResponse(
       (response) =>
         response.request().method() === "DELETE" &&
@@ -310,7 +400,7 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
       await page.getByRole("button", { name: "Вернуться к обычной продаже", exact: true }).click();
     }
     await page.reload();
-    await verifySavedOperations(api, sales, refund);
+    await verifySavedOperations(cashier.api, sales, refund);
     await verifyPendingQuarantine(api, fixture, refund);
     expect(rehearsalFacts(fixture)).toEqual(afterWriteoff);
     await page.getByRole("button", { name: "Закрыть смену", exact: true }).click();
@@ -330,9 +420,13 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
     });
     await expect(page.getByLabel("Наличные в кассе на начало смены")).toBeVisible();
     await verifyRehearsalReports(api, fixture, sales, refund);
-    await verifySavedOperations(api, sales, refund);
+    await verifySavedOperations(cashier.api, sales, refund);
     await verifyPendingQuarantine(api, fixture, refund);
-    const newSale = await api.post("sales", {
+    const postsBeforeHistory = financialPosts.length;
+    await openSavedReceipts(page, fixture.medicine.brand_name, sales, refund);
+    expect(financialPosts).toHaveLength(postsBeforeHistory);
+    expect(catalogReads).toEqual([]);
+    const newSale = await cashier.api.post("sales", {
       data: { operation_id: crypto.randomUUID(), register_id: fixture.register.id },
     });
     expect(newSale.status()).toBe(422);
@@ -344,7 +438,129 @@ test("online cash rehearsal conserves 60 units and closes three sales, one refun
     });
     expect(rehearsalFacts(fixture)).toEqual(afterWriteoff);
   } finally {
+    await warehouse.close();
+    await cashier?.cleanup();
     await api.dispose();
+    await anonymous.dispose();
+  }
+});
+
+test("scoped dispensing preflight preserves Rx, owner and branch checks and fails closed before payment", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const ownerApi = await apiContext(tokens.access_token);
+  let cashier: Awaited<ReturnType<typeof createScopedRehearsalCashier>> | undefined;
+  try {
+    const fixture = await seedRehearsal(ownerApi);
+    expect(
+      (
+        await ownerApi.patch(`catalog/${fixture.medicine.id}`, {
+          data: { dispensing_type: "prescription" },
+        })
+      ).ok(),
+    ).toBe(true);
+    cashier = await createScopedRehearsalCashier(ownerApi, fixture);
+    await loginInBrowser(page, cashier.credentials);
+    await page.goto("/pos");
+    await page.getByLabel("Наличные в кассе на начало смены").fill("100");
+    await page.getByRole("button", { name: "Открыть смену", exact: true }).click();
+    await expect(page.getByText("Смена открыта")).toBeVisible();
+    const draft = await addFormat(page, fixture.medicine.brand_name, "unit", 3);
+    const path = `sales/${draft.sale_id}/physical-cart/dispensing-preflight`;
+    const initial = rehearsalFacts(fixture);
+    const checked = await cashier.api.get(path);
+    expect(checked.ok()).toBe(true);
+    expect(await checked.json()).toEqual({ sale_id: draft.sale_id, requires_prescription: true });
+    // An owner remains a different cashier; global permissions do not authorize
+    // reading another actor's draft through this narrow POS endpoint.
+    expect((await ownerApi.get(path)).status()).toBe(403);
+    expect(
+      (
+        await cashier.api.get(`sales/${crypto.randomUUID()}/physical-cart/dispensing-preflight`)
+      ).status(),
+    ).toBe(404);
+    expect(
+      (
+        await ownerApi.post("shifts/open", {
+          data: { register_id: cashier.hiddenRegister.id, opening_cash: "0.00" },
+        })
+      ).ok(),
+    ).toBe(true);
+    const foreignCreated = await ownerApi.post("sales", {
+      data: { register_id: cashier.hiddenRegister.id, operation_id: crypto.randomUUID() },
+    });
+    expect(foreignCreated.ok()).toBe(true);
+    const foreign = (await foreignCreated.json()) as { id: string };
+    expect(
+      (await cashier.api.get(`sales/${foreign.id}/physical-cart/dispensing-preflight`)).status(),
+    ).toBe(403);
+    expect(rehearsalFacts(fixture)).toEqual(initial);
+
+    const financialPosts: string[] = [];
+    const catalogReads: string[] = [];
+    page.on("request", (outgoing) => {
+      const pathname = new URL(outgoing.url()).pathname;
+      if (outgoing.method() === "POST" && /\/physical-cash\/(intent|complete)$/.test(pathname))
+        financialPosts.push(pathname);
+      if (outgoing.method() === "GET" && /^\/api\/v1\/catalog\/[0-9a-f-]+$/i.test(pathname))
+        catalogReads.push(pathname);
+    });
+    const payment = page.getByRole("region", { name: "Оплата наличными", exact: true });
+    const preflightPattern = `**/api/v1/${path}`;
+    // Deliberate transport failure, never a mocked success or a bypass of Rx.
+    await page.route(preflightPattern, (route) => route.abort("failed"));
+    await payment.getByLabel("Получено наличными, TJS").fill("3");
+    const failedRead = page.waitForEvent("requestfailed", {
+      predicate: (outgoing) => new URL(outgoing.url()).pathname === `/api/v1/${path}`,
+    });
+    await payment.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+    await failedRead;
+    await expect(payment.getByRole("alert")).toBeVisible();
+    await expect(
+      payment.getByRole("button", { name: "Завершить продажу", exact: true }),
+    ).toBeEnabled();
+    expect(financialPosts).toEqual([]);
+    expect(rehearsalFacts(fixture)).toEqual(initial);
+    await page.unroute(preflightPattern);
+    await page.reload();
+    await payment.getByLabel("Получено наличными, TJS").fill("3");
+    await payment.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+    const prescription = page.getByRole("dialog", { name: "Данные рецепта" });
+    await expect(prescription).toBeVisible();
+    expect(financialPosts).toEqual([]);
+    expect(rehearsalFacts(fixture)).toEqual(initial);
+    await prescription.getByLabel("Номер рецепта").fill("E2E-SYNTHETIC-RX");
+    await prescription.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(prescription).toBeHidden();
+    const completed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          `/api/v1/sales/${draft.sale_id}/physical-cash/complete`,
+    );
+    await payment.getByRole("button", { name: "Завершить продажу", exact: true }).click();
+    const result = await completed;
+    expect(result.ok()).toBe(true);
+    const sale = (await result.json()) as RehearsalSale;
+    expect(sale.sale_id === draft.sale_id && sale.total_amount === "3.00").toBe(true);
+    await expect(
+      page.getByText(`Чек № ${sale.receipt_number} оформлен`, { exact: true }),
+    ).toBeVisible();
+    expect(rehearsalFacts(fixture)).toMatchObject({
+      sales: 1,
+      payments: 1,
+      checkouts: 1,
+      remaining: 57,
+      net: "3.00",
+    });
+    expect((await cashier.api.get(path)).status()).toBe(422);
+    expect(catalogReads).toEqual([]);
+  } finally {
+    await cashier?.cleanup();
+    await ownerApi.dispose();
     await anonymous.dispose();
   }
 });

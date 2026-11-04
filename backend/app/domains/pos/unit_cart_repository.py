@@ -69,6 +69,13 @@ class UnitCartRepository:
         )
         return result is True
 
+    async def active_branch(self, tenant_id: UUID, branch_id: UUID) -> bool:
+        result = await self.session.scalar(
+            text("SELECT is_active FROM public.branch WHERE tenant_id=:tenant AND id=:branch"),
+            {"tenant": tenant_id, "branch": branch_id},
+        )
+        return result is True
+
     async def has_payment_activity(self, tenant_id: UUID, sale_id: UUID) -> bool:
         result = await self.session.scalar(
             select(
