@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 60,
+  "generation": 61,
   "work_item_id": "ONLINE-CASH-REJECTED-INTENT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
@@ -52,7 +52,7 @@
       "step": "Pytest node0",
       "test": "tests/isolation/test_foundation_rls.py:184",
       "reason": "New cancellation RLS policy references is_support_session(); foundation invariant forbids helper in any RLS policy; count1 expected0",
-      "status": "resolved current9e genuine foundationtestpassed; wholefinalCIrequired"
+      "status": "resolved; actual foundationtests passed9e"
     },
     "manual_access_later_table_inventory": {
       "count": 1,
@@ -61,7 +61,7 @@
       "step": "Pytest node1",
       "test": "tests/isolation/test_manual_access_migrations.py::test_manual_access_migrations_roundtrip",
       "reason": "New a00_tenant_access dependency omitted from5explicit historical test inventories",
-      "status": "fixed9e; currentnode1Pytestsuccess, detailedreportpendingupload; finalfullCIrequired"
+      "status": "resolved; actual manual_access_roundtrip passed9e"
     },
     "runtime_privilege_inventory": {
       "count": 1,
@@ -124,7 +124,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04T15:25:03.948Z",
+  "updated_at": "2026-11-04T15:33:17.585Z",
   "closes_control_stage": false,
   "counter_after_full_E6_06": "2/7 (3)",
   "remaining_control_stage_work": [
@@ -395,7 +395,13 @@
     "new_isolation_passed": 2,
     "foundation_passed": 2,
     "other_six_contexts": "success",
-    "cleanup_report_upload": "in progress"
+    "cleanup_report_upload": "complete; sole failure runtime privilege inventory",
+    "status": "failed",
+    "reported": 8086,
+    "unexecuted_due_failfast": 233,
+    "new_backend_passed": 29,
+    "new_api_passed": 27,
+    "historical_manual_access_roundtrip": "success"
   },
   "previous_inflight_ci": {
     "head": "67019b53e7bf7aad5164a6709522fc74d2e72a29",
