@@ -101,6 +101,11 @@ import {
 import { type PosMode } from "./usePosMode";
 import { usePosRegisterLock } from "./usePosRegisterLock";
 
+const CompletedReceiptLines = lazy(async () => {
+  const module = await import("./CompletedReceiptLines");
+  return { default: module.CompletedReceiptLines };
+});
+
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
   return { default: module.ReceiptPrintModal };
@@ -610,6 +615,12 @@ function ActiveWorkspace({
   const isDraft = !sale || sale.status === "draft";
   const items = sale?.items ?? [];
   const preparedItems = sale?.prepared_cart_items ?? [];
+  const completedReceiptLines =
+    sale?.status === "completed"
+      ? sale.mixed_items?.length
+        ? sale.mixed_items
+        : (sale.physical_items ?? [])
+      : [];
   const cashKind =
     saleId && hasPhysicalCashRecovery(saleId, storageScope)
       ? "physical"
@@ -619,7 +630,10 @@ function ActiveWorkspace({
         : "physical";
   const physicalCartActive = isDraft && (physicalEditorOpen || preparedItems.length > 0);
   const trainingActive = sale?.is_test === true && (physicalCartActive || trainingBlocked);
-  const receiptItemCount = items.length + preparedItems.length;
+  const receiptItemCount =
+    completedReceiptLines.length > 0
+      ? completedReceiptLines.length
+      : items.length + (isDraft ? preparedItems.length : 0);
   const recordedPayments = sale?.payments ?? [];
   const payments =
     sale?.status === "draft" ? [...recordedPayments, ...stagedPayments] : recordedPayments;
@@ -2414,21 +2428,31 @@ function ActiveWorkspace({
               <span aria-hidden="true" />
             </div>
 
-            {(!physicalCartActive || items.length > 0) && (
-              <CartList
-                items={items}
-                nameById={nameById}
-                currency={currency}
-                editable={isDraft && !saleEditingBlocked && !physicalCartActive}
-                onQtyChange={(id, q) => void onQtyChange(id, q)}
-                onDelete={(id) => void onDelete(id)}
-                onQtyTap={touch ? onQtyTap : undefined}
-                touch={touch}
-                busy={posCommand.blocked}
-                embedded
-                quickActions={quickActions}
-                actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
-              />
+            {completedReceiptLines.length > 0 ? (
+              <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
+                <CompletedReceiptLines
+                  lines={completedReceiptLines}
+                  currency={currency}
+                  touch={touch}
+                />
+              </Suspense>
+            ) : (
+              (!physicalCartActive || items.length > 0) && (
+                <CartList
+                  items={items}
+                  nameById={nameById}
+                  currency={currency}
+                  editable={isDraft && !saleEditingBlocked && !physicalCartActive}
+                  onQtyChange={(id, q) => void onQtyChange(id, q)}
+                  onDelete={(id) => void onDelete(id)}
+                  onQtyTap={touch ? onQtyTap : undefined}
+                  touch={touch}
+                  busy={posCommand.blocked}
+                  embedded
+                  quickActions={quickActions}
+                  actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
+                />
+              )
             )}
 
             {isDraft && physicalCartActive && saleId && branchId && (

@@ -936,6 +936,148 @@ describe("SaleArea physical cart integration", () => {
     expect(calls.create).not.toHaveBeenCalled();
   });
 
+  it.each(["keyboard", "touch"] as const)(
+    "shows saved physical receipt rows without draft controls in %s mode",
+    async (mode) => {
+      const lines = [
+        {
+          position: 1,
+          name: "Исторические таблетки",
+          qty: "2",
+          unit_label: "табл.",
+          quantity_description: "Штуки из упаковки 20",
+          unit_price: "5.00",
+          discount_amount: "0.00",
+          total_price: "10.00",
+        },
+        {
+          position: 2,
+          name: "Исторический блистер",
+          qty: "1",
+          unit_label: "бл.",
+          quantity_description: "Блистер по 10 таблеток",
+          unit_price: "20.00",
+          discount_amount: "0.00",
+          total_price: "20.00",
+        },
+        {
+          position: 3,
+          name: "Историческая упаковка",
+          qty: "1",
+          unit_label: "уп.",
+          unit_price: "20.00",
+          discount_amount: "0.00",
+          total_price: "20.00",
+        },
+      ];
+      calls.sale.mockResolvedValue(
+        completedSale({ physical_items: lines, prepared_cart_items: [] }),
+      );
+      mount(mode);
+      const receipt = await screen.findByRole("list", { name: "Товары завершённого чека" });
+      expect(within(receipt).getAllByRole("listitem")).toHaveLength(3);
+      expect(screen.getAllByText("3 товара").length).toBeGreaterThan(0);
+      for (const line of lines) expect(within(receipt).getByText(line.name)).toBeInTheDocument();
+      expect(within(receipt).getByText("2 табл.")).toBeInTheDocument();
+      expect(within(receipt).getByText("Блистер по 10 таблеток")).toBeInTheDocument();
+      expect(within(receipt).getByText("10.00 TJS")).toBeInTheDocument();
+      expect(within(receipt).queryByRole("button")).not.toBeInTheDocument();
+      expect(screen.queryByText("Чек пуст")).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Физическая корзина" })).not.toBeInTheDocument();
+      expect(calls.editor).not.toHaveBeenCalled();
+      expect(calls.panel).not.toHaveBeenCalled();
+      expect(calls.checkout).not.toHaveBeenCalled();
+      expect(calls.complete).not.toHaveBeenCalled();
+      expect(calls.addPayment).not.toHaveBeenCalled();
+      expect(calls.catalog).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["keyboard", "touch"] as const)(
+    "prefers the complete mixed snapshot without duplicating legacy or stale prepared rows in %s mode",
+    async (mode) => {
+      const mixed = [
+        {
+          position: 1,
+          name: "Сохранённая обычная позиция",
+          qty: "0.125",
+          unit_label: "уп.",
+          unit_price: "80.00",
+          discount_amount: "0.00",
+          total_price: "10.00",
+        },
+        {
+          position: 2,
+          name: "Сохранённая физическая позиция",
+          qty: "2",
+          unit_label: "табл.",
+          unit_price: "20.00",
+          discount_amount: "0.00",
+          total_price: "40.00",
+        },
+      ];
+      calls.sale.mockResolvedValue(
+        completedSale({
+          items: [legacyItem],
+          mixed_items: mixed,
+          physical_items: [{ ...mixed[1]!, name: "Не дублировать физическую строку" }],
+          prepared_cart_items: [physicalItem],
+        }),
+      );
+      mount(mode);
+      const receipt = await screen.findByRole("list", { name: "Товары завершённого чека" });
+      expect(within(receipt).getAllByRole("listitem")).toHaveLength(2);
+      expect(screen.getAllByText(mixed[0]!.name)).toHaveLength(1);
+      expect(screen.getAllByText(mixed[1]!.name)).toHaveLength(1);
+      expect(within(receipt).getByText("0.125 уп.")).toBeInTheDocument();
+      expect(within(receipt).getByText("40.00 TJS")).toBeInTheDocument();
+      expect(screen.queryByText("Не дублировать физическую строку")).not.toBeInTheDocument();
+      expect(screen.queryByText("Чек пуст")).not.toBeInTheDocument();
+      expect(calls.editor).not.toHaveBeenCalled();
+      expect(calls.panel).not.toHaveBeenCalled();
+      expect(calls.checkout).not.toHaveBeenCalled();
+      expect(calls.addPayment).not.toHaveBeenCalled();
+    },
+  );
+
+  it("ignores receipt snapshots on an editable draft", async () => {
+    calls.sale.mockResolvedValue(
+      sale({
+        physical_items: [
+          {
+            position: 1,
+            name: "Не показывать сохранённую строку",
+            qty: "1",
+            unit_price: "50.00",
+            discount_amount: "0.00",
+            total_price: "50.00",
+          },
+        ],
+      }),
+    );
+    mount();
+    await screen.findByRole("region", { name: "Физическая корзина" });
+    expect(
+      screen.queryByRole("list", { name: "Товары завершённого чека" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Не показывать сохранённую строку")).not.toBeInTheDocument();
+  });
+
+  it("keeps the existing legacy-only completed cart when no receipt snapshots exist", async () => {
+    calls.sale.mockResolvedValue(
+      completedSale({ items: [{ ...legacyItem, catalog_id: "c-1" }], prepared_cart_items: [] }),
+    );
+    mount();
+    await screen.findByText("Аспирин");
+    expect(
+      screen.queryByRole("list", { name: "Товары завершённого чека" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Чек пуст")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Увеличить количество" })).not.toBeInTheDocument();
+    expect(calls.editor).not.toHaveBeenCalled();
+    expect(calls.addPayment).not.toHaveBeenCalled();
+  });
+
   it("does not mount the draft editor for a completed receipt", async () => {
     calls.sale.mockResolvedValue(
       sale({

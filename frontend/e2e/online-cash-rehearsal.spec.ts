@@ -88,6 +88,12 @@ async function sellFormat(
   await expect(
     page.getByText(`Чек № ${sale.receipt_number} оформлен`, { exact: true }),
   ).toBeVisible();
+  const savedRows = page.getByRole("list", { name: "Товары завершённого чека", exact: true });
+  await expect(savedRows.getByRole("listitem")).toHaveCount(1);
+  await expect(savedRows.getByText(medicineName, { exact: true })).toBeVisible();
+  await expect(savedRows.getByText(`${total} TJS`, { exact: true })).toBeVisible();
+  await expect(savedRows.getByRole("button")).toHaveCount(0);
+  await expect(page.getByText("Чек пуст", { exact: true })).toHaveCount(0);
   return sale;
 }
 
