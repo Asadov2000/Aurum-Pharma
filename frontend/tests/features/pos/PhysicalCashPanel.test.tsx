@@ -32,7 +32,8 @@ vi.mock("@/features/pos/mixedCashRecovery", () => ({
   acknowledgeMixedCash: mixedApi.ack,
 }));
 vi.mock("@/features/pos/physicalCart", () => ({ getPhysicalCartQuote: api.quote }));
-vi.mock("@/features/pos/physicalCashCheckout", () => ({
+vi.mock("@/features/pos/physicalCashCheckout", async (original) => ({
+  ...(await original<typeof import("@/features/pos/physicalCashCheckout")>()),
   getPhysicalCashOperation: api.status,
   parsePhysicalCashQuote: api.parse,
 }));
@@ -300,7 +301,7 @@ describe("PhysicalCashPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
     expect(await screen.findByText("Связь прервалась")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Проверить и завершить оплату" }),
+      await screen.findByRole("button", { name: "Проверить и завершить оплату" }),
     ).toBeInTheDocument();
     expect(blocked).toHaveBeenLastCalledWith(true);
     expect(api.ack).not.toHaveBeenCalled();

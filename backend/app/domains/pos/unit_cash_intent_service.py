@@ -44,6 +44,11 @@ class UnitCashIntentService:
         self.repository = repository
         self.cart_repository = UnitCartRepository(repository.session)
 
+    async def require_active(self, tenant_id: UUID, operation_id: UUID) -> None:
+        """Execution callers hold the sale lock; immutable evidence remains readable."""
+        if await self.repository.is_cancelled(tenant_id, operation_id):
+            raise ConflictError("Cash confirmation was cancelled")
+
     async def read_saved(
         self,
         *,

@@ -1,5 +1,5 @@
 import { isAxiosError } from "axios";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -7,17 +7,9 @@ import { Button, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { getPhysicalCartQuote, type PhysicalCartItem } from "./physicalCart";
-import {
-  getMixedCashOperation,
-  parseMixedCashQuote,
-  type MixedCashCheckoutResult,
-} from "./mixedCashCheckout";
+import { parseMixedCashQuote, type MixedCashCheckoutResult } from "./mixedCashCheckout";
 import { acknowledgeMixedCash, loadPendingMixedCash, runMixedCash } from "./mixedCashRecovery";
-import {
-  getPhysicalCashOperation,
-  parsePhysicalCashQuote,
-  type PhysicalCashCheckoutResult,
-} from "./physicalCashCheckout";
+import { parsePhysicalCashQuote, type PhysicalCashCheckoutResult } from "./physicalCashCheckout";
 import {
   acknowledgePhysicalCash,
   loadPendingPhysicalCash,
@@ -29,18 +21,17 @@ import { type SaleItem } from "./types";
 import { hasCashRecovery } from "./physicalCashRecoveryPresence";
 
 export type CashCheckoutResult = PhysicalCashCheckoutResult | MixedCashCheckoutResult;
+const CashRecoveryActions = lazy(() => import("./CashRecoveryActions"));
 const strategies = {
   physical: {
     parse: parsePhysicalCashQuote,
     load: loadPendingPhysicalCash,
-    get: getPhysicalCashOperation,
     run: runPhysicalCash,
     acknowledge: acknowledgePhysicalCash,
   },
   mixed: {
     parse: parseMixedCashQuote,
     load: loadPendingMixedCash,
-    get: getMixedCashOperation,
     run: runMixedCash,
     acknowledge: acknowledgeMixedCash,
   },
@@ -171,47 +162,6 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
       mounted.current = false;
     };
   }, [initial]);
-
-  useEffect(() => {
-    if (!initial.pending || !props.online || accepted.current || busyRef.current) return;
-    let cancelled = false;
-    let applying = false;
-    const controller = new AbortController();
-    const generation = ++busyGeneration.current;
-    const ownsBusy = () => busyGeneration.current === generation;
-    busyRef.current = true;
-    setBusy(true);
-    void strategy
-      .get(initial.pending.request, latest.current.scope, controller.signal)
-      .then(async (status) => {
-        if (!cancelled && active() && status.state === "completed") {
-          applying = true;
-          await accept(status.result);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled && active()) setError(message(cause));
-      })
-      .finally(() => {
-        if (ownsBusy()) {
-          busyRef.current = false;
-          if (active()) setBusy(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (!applying && ownsBusy()) busyRef.current = false;
-    };
-  }, [
-    accept,
-    active,
-    initial.pending,
-    props.online,
-    props.scope.tenantId,
-    props.scope.userId,
-    strategy,
-  ]);
 
   const itemsKey = JSON.stringify([props.items, props.legacyItems ?? emptyLegacyItems]);
   useEffect(() => {
@@ -406,20 +356,28 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
       {finished ? (
         <p role="status">Продажа завершена. Чек сохранён.</p>
       ) : pending ? (
-        <div className="space-y-3">
-          <p className="text-sm text-foreground-muted">
-            Оплата уже начата. Не принимайте деньги повторно. Проверьте эту же операцию.
-          </p>
-          <p className="text-sm">Получено: {pending.request.cash_tendered} TJS</p>
-          <Button
-            className="w-full"
-            disabled={!props.online}
-            isLoading={busy}
-            onClick={() => void submit(true)}
-          >
-            Проверить и завершить оплату
-          </Button>
-        </div>
+        <Suspense fallback={<p>Проверяем сохранённую оплату…</p>}>
+          <CashRecoveryActions
+            key={pending.request.operation_id}
+            pending={pending}
+            context={JSON.stringify([props.saleId, props.branchId, props.registerId, props.scope])}
+            kind={props.kind ?? "physical"}
+            initial={initial.pending !== null}
+            online={props.online}
+            busy={busy}
+            active={active}
+            onContinue={() => submit(true)}
+            onCompleted={accept}
+            onError={(cause) => setError(message(cause))}
+            onCancelled={() => {
+              if (!active() || retain() !== null) return;
+              setError(null);
+              setQuote(null);
+              setRefresh((value) => value + 1);
+              latest.current.onBlockedChange(false);
+            }}
+          />
+        </Suspense>
       ) : (
         <form
           className="space-y-3"

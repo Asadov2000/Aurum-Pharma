@@ -9,8 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_db, require_branch_permission, require_writable_tenant
 from app.core.errors import BusinessRuleError, NotFoundError
+from app.domains.pos.physical_cash_cancellation_repository import PhysicalCashCancellationRepository
+from app.domains.pos.physical_cash_cancellation_service import PhysicalCashCancellationService
 from app.domains.pos.physical_cash_checkout_repository import PhysicalCashCheckoutRepository
-from app.domains.pos.physical_cash_checkout_schemas import PhysicalCashOperationRead
+from app.domains.pos.physical_cash_checkout_schemas import (
+    PhysicalCashCancellationRead,
+    PhysicalCashOperationRead,
+)
 from app.domains.pos.physical_cash_checkout_service import PhysicalCashCheckoutService
 from app.domains.pos.physical_cash_checkout_status_repository import (
     PhysicalCashCheckoutStatusRepository,
@@ -81,6 +86,25 @@ async def complete_physical_cash_sale(
     response.headers["Cache-Control"] = "private, no-store"
     tenant_id, branches = await _write_scope(sale_id, payload, user, db)
     return await PhysicalCashCheckoutService(PhysicalCashCheckoutRepository(db)).complete(
+        tenant_id=tenant_id, actor_id=user.user_id, allowed_branch_ids=branches, request=payload
+    )
+
+
+@router.post(
+    "/cancel",
+    response_model=PhysicalCashCancellationRead,
+    dependencies=[Depends(require_writable_tenant)],
+)
+async def cancel_physical_cash_attempt(
+    sale_id: UUID,
+    payload: CashConfirmationRequestV2,
+    user: CashUser,
+    db: CashSession,
+    response: Response,
+) -> PhysicalCashCancellationRead:
+    response.headers["Cache-Control"] = "private, no-store"
+    tenant_id, branches = await _write_scope(sale_id, payload, user, db)
+    return await PhysicalCashCancellationService(PhysicalCashCancellationRepository(db)).cancel(
         tenant_id=tenant_id, actor_id=user.user_id, allowed_branch_ids=branches, request=payload
     )
 

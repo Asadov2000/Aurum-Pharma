@@ -22,7 +22,7 @@ export type PendingCash = z.infer<typeof pendingSchema>;
 export type CashInput = Omit<CashConfirmationRequest, "operation_id">;
 type StorageKey = (saleId: string, scope: PosStorageScope) => string;
 type OperationStatus<Result> =
-  | { state: "not_found" | "saved_draft" }
+  | { state: "not_found" | "saved_draft" | "cancelled" }
   | { state: "completed"; result: Result };
 
 /** Keep channel-specific queues while sharing every durability and session barrier. */
@@ -126,6 +126,7 @@ export function createCashRecovery<Result>(channel: {
       const status = await channel.get(pending.request, scope);
       assertCurrent(pending, scope, active);
       if (status.state === "completed") return status.result;
+      if (status.state === "cancelled") throw new Error("Оплата отменена. Вернитесь к корзине.");
       if (status.state === "not_found") {
         await channel.save(pending.request, scope);
         assertCurrent(pending, scope, active);

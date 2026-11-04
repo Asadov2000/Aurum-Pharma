@@ -2,17 +2,30 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import PermissionDeniedError
+from app.domains.pos.physical_cash_cancellation_models import PhysicalCashCancellation
 from app.domains.pos.unit_cash_intent_models import UnitCashIntent
 
 
 class UnitCashIntentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def is_cancelled(self, tenant_id: UUID, operation_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                select(
+                    exists().where(
+                        PhysicalCashCancellation.tenant_id == tenant_id,
+                        PhysicalCashCancellation.id == operation_id,
+                    )
+                )
+            )
+        )
 
     async def get(self, tenant_id: UUID, operation_id: UUID) -> UnitCashIntent | None:
         intent: UnitCashIntent | None = await self.session.scalar(
