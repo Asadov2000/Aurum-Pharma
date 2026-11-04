@@ -89,6 +89,7 @@ APPEND_ONLY_TABLES = {
     "pos_physical_zero_return",
     "pos_physical_cash_refund",
     "pos_physical_checkout",
+    "pos_physical_cash_cancellation",
     "pos_physical_return_command",
     "pos_physical_return_line",
     "pos_physical_return_slice",
@@ -470,6 +471,8 @@ CUSTOM_FUNCTIONS = {
     "trg_physical_checkout_guard",
     "trg_physical_checkout_complete",
     "trg_physical_checkout_cart_frozen",
+    "trg_physical_cash_cancellation_guard",
+    "trg_cancelled_cash_checkout_fence",
     "trg_unit_prescription_guard",
     "trg_unit_cash_intent_guard",
     "trg_unit_payment_plan_intent_guard",
@@ -1554,6 +1557,8 @@ def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
     ):
         assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
     cash_names = {
+        "trg_physical_cash_cancellation_guard",
+        "trg_cancelled_cash_checkout_fence",
         "assert_physical_checkout",
         "trg_physical_stock_checkout_binding",
         "trg_physical_checkout_guard",
@@ -1723,6 +1728,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'pos_training_checkout',
                       'pos_mixed_cash_refund','pos_mixed_zero_return',
                       'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
+                      'pos_physical_cash_cancellation',
                       'pos_physical_return_command','pos_physical_return_line',
                       'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
                     AND roles.rolname IN ('aurum_app','aurum_support','aurum_worker',
@@ -1730,6 +1736,7 @@ async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection
                       'aurum_edge_cash_executor')
                 """))).mappings())
     journal_tables = {
+        "pos_physical_cash_cancellation",
         "pos_training_checkout",
         "physical_writeoff_command",
         "physical_writeoff_entry",
@@ -1839,6 +1846,8 @@ def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> N
     assert replay["support_can_execute"] is False
     assert replay["proconfig"] == ["search_path=pg_catalog, pg_temp", "row_security=on"]
     for name in (
+        "trg_physical_cash_cancellation_guard",
+        "trg_cancelled_cash_checkout_fence",
         "trg_retail_refund_audit",
         "trg_retail_refund_capture",
         "retail_refund_source_payload",
