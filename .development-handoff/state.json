@@ -29,7 +29,7 @@
     "Shortage failure,reload,confirmed cancellation,late replay fence and completed history immutability verified",
     "One P2 completed physical-only receipt display inconsistency remains; human/equipment acceptance not performed"
   ],
-  "remaining_step": "Один учебный этап: полный поштучный цикл под планируемым ограниченным кассиром на безопасном отдельном актуальном серверном стенде; затем 11 человеческих пунктов и 2 обязательные группы рабочего места/связи плюс 2 условные (сканер/принтер). Docker сейчас off; не запускать общий engine автоматически. Original human CSV не подписан. Никакого deployment/общей БД.",
+  "remaining_step": "Один учебный этап приёмки: проверить свежий main/изоляцию и подготовить отдельный стенд для полного физического цикла под ограниченным кассиром; затем 11 человеческих пунктов и 2 обязательные группы рабочего места/связи плюс условные сканер/принтер. Рабочий Aurum поддерживается отдельной задачей Windows, код/БД не обновлялись; не останавливать его ради QA.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -98,7 +98,7 @@
       "previous_consecutive_failures": 1
     }
   },
-  "blocker": "Новый серверный прогон недоступен без безопасного отдельного Docker engine: общий Docker выключен и может возобновить общие сервисы. Все выполненные программные проверки прошли.",
+  "blocker": "Полный учебный цикл поштучной продажи под планируемым ограниченным кассиром, человеческая и аппаратная приёмка пока не выполнены. Docker теперь работает; запрет автоматического изменения общего runtime/БД для разработки сохраняется.",
   "previous_completed": {
     "pr": 451,
     "merged": true,
@@ -743,5 +743,37 @@
       "Incomplete API mocking: initial Vitest run aborted; final TCP-fenced runs passed",
       "Preload Windows path fixed before tests; diagnostic duplicate excluded from totals"
     ]
-  }
+  },
+  "runtime_autostart": {
+    "configured_at": "2026-11-04T20:15:30Z",
+    "task": "Aurum - Existing Runtime Resume",
+    "enabled": true,
+    "trigger": "current user logon + 45 seconds; every 10 minutes while signed in",
+    "logon_type": "Interactive",
+    "run_level": "Limited",
+    "wake_pc": false,
+    "single_instance": true,
+    "scope": "pinned existing 11 aurum-demo long-running containers; no build/pull/recreate/migrate/seed",
+    "status": "healthy",
+    "services_running": 11,
+    "configured_healthchecks_healthy": 8,
+    "http_probes_passed": 3,
+    "last_task_result": 0,
+    "healthy_containers_restarted": false,
+    "docker_started_via": "Windows Explorer; direct Codex child launch reproduced MSIX/AppData socket error1920",
+    "socket_deleted": false,
+    "pid_files_deleted_by_agent": false,
+    "billing_startup_restarts": 6,
+    "billing_recovered_by_itself": true,
+    "pause_marker": "C:/Users/Asadov/Desktop/A-Pharma/.codex/aurum-runtime-startup/PAUSED",
+    "failure_policy": "two consecutive failures prevent further automatic start attempts; no unhealthy-container restart",
+    "artifact_root": "C:/Users/Asadov/Desktop/A-Pharma/.codex/aurum-runtime-startup",
+    "maintenance_instruction": "pause this task or create PAUSED before intentional runtime shutdown; update pinned manifest separately after authorized deployment",
+    "source_or_images_updated": false,
+    "database_migrations_or_manual_writes": false,
+    "reboot_test_performed": false,
+    "code_commit_or_push": false,
+    "paid_resources": false
+  },
+  "current_environment_note": "Docker now running after authorized runtime startup task. Earlier software acceptance could not start it under its no-runtime-change scope; that was historical. Autostart maintains existing installation, not source freshness or deployment."
 }
