@@ -212,7 +212,10 @@ async function openSavedReceipts(
       maximumFractionDigits: 2,
     });
     await expect(dialog.getByText(`${total} TJS`, { exact: true }).first()).toBeVisible();
-    await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await dialog
+      .getByRole("button", { name: "Закрыть", exact: true })
+      .filter({ hasText: /^Закрыть$/ })
+      .click();
   }
 }
 
