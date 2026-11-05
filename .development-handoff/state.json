@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 79,
+  "generation": 80,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "receipt-locale-fixed-ci-running",
+  "phase": "final-head-ci-running-local-qa-evidence-retained",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
@@ -125,6 +125,18 @@
       "reason": "Test expects 3.00 TJS; existing SaleDetailModal correctly renders ru-RU 3,00 TJS; original and retry fail identically",
       "status": "Approved test-only correction committed and pushed; full CI running",
       "product_failure": false
+    },
+    "local_cashier_refund_response": {
+      "count": 1,
+      "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
+      "reason": "waitForResponse15s refundquote; response not observed; no completed refund in owned QA DB",
+      "status": "not retried"
+    },
+    "local_cashier_rx_complete_response": {
+      "count": 1,
+      "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
+      "reason": "waitForResponse15s complete; owned QA DB shows exactly1completed3TJS; browser recovered pending marker",
+      "status": "not retried; do not replay existing financial operation"
     }
   },
   "blocker": null,
@@ -179,7 +191,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T07:13:33.418Z",
+  "updated_at": "2026-11-05T07:31:57.547Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -896,5 +908,20 @@
       "scope": "Test-only exact amount formatting ru-RU; repeat checks and same PR to green CI/main",
       "at": "2026-11-05T07:09:14.453Z"
     }
+  },
+  "current_local_rehearsal": {
+    "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
+    "status": "two browser response wait timeouts; not passed",
+    "retries": 0,
+    "failed_tests": 2,
+    "first_case": "3 physical cash sales completed,43TJS; refund quote response not observed within15s",
+    "rx_case": "browser showed timeout; readonly owned DB proves exactly1 completed physical sale3TJS, do not replay",
+    "cpu_evidence": "QA PostgreSQL usage39.6s throttled391.4s; specific request delay cause unproven",
+    "stand": "6ownedcontainersstopped,dataretained",
+    "protected_containers": 36,
+    "protected_unchanged": true,
+    "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/stand/e2e-runs/20261105T072146469037Z/sanitized-result.json",
+    "shared_database_access": false,
+    "live_runtime_changed": false
   }
 }
