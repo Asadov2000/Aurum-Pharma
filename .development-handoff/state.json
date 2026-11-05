@@ -4,12 +4,12 @@
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-UX-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "pr455-published-awaiting-full-ci",
+  "phase": "pr455-merged-acceptance-ux-fixes-complete",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/unit-sale-picker-copy",
   "base_sha": "dd306b04039e735d41c11ab714d089d4f3497410",
   "expected_head": "a9abf9e9c91237f8afeea07acd96f446ba4df8a5",
-  "validated_sha": null,
+  "validated_sha": "a9abf9e9c91237f8afeea07acd96f446ba4df8a5",
   "pr": 455,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sale-picker-copy-2026-11-05/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
@@ -18,18 +18,18 @@
   "cloud_active_turn": false,
   "cloud_stopped_verified": true,
   "cloud_cursor": "0b767e76-06c5-4f76-b137-4d4b41e6db57:1",
-  "local_product_writes_stopped": false,
+  "local_product_writes_stopped": true,
   "local_heartbeat": "PAUSED",
   "old_schedulers": "PAUSED",
   "pending_transfer": null,
-  "counter": "Осталось 1/3 — приёмка кассиром и на оборудовании.",
+  "counter": "Acceptance UX findings: 0/2 remaining; human acceptance: 12/13 remaining, scanner/printer conditional",
   "scope": "Frontend-only two acceptance findings; no dependencies, migrations, live application or shared DB changes",
   "acceptance": [
     "Historical full agent-led cash cycle passed under OWNER, not proof of restricted cashier flow.",
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "Wait for full CircleCI, verify exact head and merge without bypass",
+  "remaining_step": "Human acceptance remains separate (12/13 required controls not fully confirmed); current live and teaching runtimes retain prior images/source. Merge does not authorize deployment.",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -83,7 +83,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T11:17:23.477Z",
+  "updated_at": "2026-11-05T12:01:48.810Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -146,16 +146,11 @@
     ]
   },
   "completion": {
-    "pr": 454,
+    "pr": 455,
     "merged": true,
-    "merge_sha": "dd306b04039e735d41c11ab714d089d4f3497410",
-    "merged_at": "2026-11-05T07:59:17Z",
-    "verified_head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
-    "tree": "d0bc6982756227fdbd2c7bc74e31b3669b8149bd",
-    "merged_tree_matches_tested_head": true,
-    "backend_main_pytest_passed": 8353,
-    "frontend_passed": 3306,
-    "e2e_passed": 172
+    "merge_sha": "e7ba61efcf644facae6378f011e13875dcc41dc0",
+    "tested_tree": "1769bfd9b0f73be402b09288c284c184811d2aec",
+    "merge_tree_matches": true
   },
   "accepted_increments": [
     {
@@ -407,7 +402,7 @@
     "reason": "User resumed PR454; exact-head CircleCI reviewed; same E2E assertion failed original and automatic retry",
     "cloud_product_grant": false
   },
-  "latest_main_sha": "dd306b04039e735d41c11ab714d089d4f3497410",
+  "latest_main_sha": "e7ba61efcf644facae6378f011e13875dcc41dc0",
   "earlier_failed_ci": {
     "head_sha": "eaa9274c0eb1b9a27ea327d1ca46ec97642f3d42",
     "workflow": "bcbccfb8-35f5-4838-af85-a94e65a5f9d8",
@@ -751,7 +746,14 @@
     "main": "dd306b04039e735d41c11ab714d089d4f3497410",
     "local_pc_run_passed": false
   },
-  "current_ci": null,
+  "current_ci": {
+    "head": "a9abf9e9c91237f8afeea07acd96f446ba4df8a5",
+    "workflow": "12b3415a-1840-4b49-82d0-34c7054aa776",
+    "allEightSuccess": true,
+    "backendPassed": 8353,
+    "frontendPassed": 3308,
+    "browserPassed": 172
+  },
   "local_shutdown": {
     "requested": true,
     "source_clean_commit": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
