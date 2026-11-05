@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generation": 78,
+  "generation": 79,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
@@ -8,7 +8,7 @@
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
-  "expected_head": "8e7675473f87a327e0efec1b6a834e015e18eee3",
+  "expected_head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
   "validated_sha": "d7fbfc6c15a3beedab26911629134ea9c348e751",
   "pr": 454,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/source",
@@ -29,7 +29,7 @@
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "Await exact final-head full CI; complete guarded isolated restricted cashier rehearsal; merge only green required gate. Human/equipment acceptance pending.",
+  "remaining_step": "Final-head CI and guarded isolated cashier rehearsal; expected-head protected merge only after all8success. Human/equipment acceptance remains.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -179,7 +179,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T07:10:10.929Z",
+  "updated_at": "2026-11-05T07:13:33.418Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -200,6 +200,12 @@
       "diff_check": "passed",
       "independent_qa": "approved",
       "commit": "8e7675473f87a327e0efec1b6a834e015e18eee3"
+    },
+    "receipt_close_locator": {
+      "lint": "passed",
+      "diff_check": "passed",
+      "reason": "Proactive QA review: header cross and footer button share accessible name; select exact visible footer text",
+      "commit": "da0c3bd3a49877da806542f8e1ee5f6338376f22"
     }
   },
   "ci": {
@@ -869,8 +875,8 @@
     "test_gap": "Current connected physical E2E OWNER; CASHIER E2E ordinary sale; component test mocks catalog detail success."
   },
   "current_ci": {
-    "head": "8e7675473f87a327e0efec1b6a834e015e18eee3",
-    "workflow": "f65f09b4-7d91-4c1e-811a-0b65d1b7f955",
+    "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
+    "workflow": "cb92909a-3fba-4225-a2aa-c563f8dda5f9",
     "status": "running"
   },
   "local_shutdown": {
