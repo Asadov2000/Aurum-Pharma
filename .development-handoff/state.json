@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 75,
+  "generation": 76,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "paused-user-pc-shutdown-ci-pending",
+  "phase": "awaiting-test-locale-retry-exception",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
@@ -29,7 +29,7 @@
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "On resume re-read PR454 exact-head CI/main first; do not duplicate. QA stand paused during isolated migration; inspect its current revision and containers before guarded resume. Then full restricted cashier rehearsal and merge only after green required gate. Live Aurum/shared DB unchanged.",
+  "remaining_step": "After explicit exception apply prepared test-only locale patch, validate and publish same PR454; exact-head full CI success required before main. Resume isolated cashier stand only after guarded source/baseline/revision verification. Human/equipment acceptance remains.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -100,7 +100,7 @@
     "restricted_cashier_catalog_preflight": {
       "count": 2,
       "reason": "Automatic prepared-cart preflight and explicit completion click both receive catalog detail403; no payment request",
-      "status": "stopped; diagnosis only, requires scoped product fix before rerunning",
+      "status": "Authorized fix implemented in PR454; CI restricted cashier payments and prescription scenario pass; full connected history completion pending test-only locale correction",
       "product_failure": true
     },
     "cashier_qa_exact_template": {
@@ -115,9 +115,19 @@
       "reason": "Cold isolated Vite/startup navigation timeout under CPU/memory pressure; later page became ready without another navigation",
       "status": "not retried; not counted as passed test",
       "product_failure": false
+    },
+    "restricted_cashier_receipt_locale": {
+      "count": 2,
+      "head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
+      "workflow": "529074af-a0fa-4e12-9773-41793329bd2d",
+      "job": 4388,
+      "step": "online-cash-rehearsal.spec.ts:210 openSavedReceipts",
+      "reason": "Test expects 3.00 TJS; existing SaleDetailModal correctly renders ru-RU 3,00 TJS; original and retry fail identically",
+      "status": "stopped; test-only patch prepared, not applied; awaiting scoped user exception",
+      "product_failure": false
     }
   },
-  "blocker": "Confirmed UNIT-CASHIER-CATALOG-PREFLIGHT-403: ordinary branch-scoped cashier opens shift and saves physical cart, but preparePhysicalCash reads tenant-wide catalog detail and gets403 before payment intent. Stock60/payments0. Role copied exactly; catalog.view intentionally excluded by branch scope.",
+  "blocker": "Test-only receipt amount locale assertion; scoped retry exception requested under AGENTS.md two-failure rule.",
   "previous_completed": {
     "pr": 451,
     "merged": true,
@@ -169,7 +179,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-04 21:17:21 UTC",
+  "updated_at": "2026-11-05T07:06:25.918Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -488,8 +498,8 @@
     "workflow": "e74e4705-1a05-4163-a7f7-13f40ab37f88"
   },
   "local_resume": {
-    "at": "2026-11-04T09:21:14.291Z",
-    "reason": "User resumed same PR450; full exact-head CI green",
+    "at": "2026-11-05T07:06:25.918Z",
+    "reason": "User resumed PR454; exact-head CircleCI reviewed; same E2E assertion failed original and automatic retry",
     "cloud_product_grant": false
   },
   "latest_main_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
@@ -567,7 +577,7 @@
   "local_harness_findings": [
     "First Vitest invocation from repo root missed frontend config/window; corrected working directory."
   ],
-  "shutdown_by_user": true,
+  "shutdown_by_user": false,
   "cloud_read_attempt": {
     "at": "2026-11-04T11:38:23.691Z",
     "status": "No cloud resumed; existing userconfirmation and unchanged ledger retain exclusive localwriter"
@@ -854,7 +864,12 @@
   "current_ci": {
     "head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
     "workflow": "529074af-a0fa-4e12-9773-41793329bd2d",
-    "status": "pending"
+    "status": "failed",
+    "successful_jobs": 6,
+    "e2e_job": 4388,
+    "browser_passed": 171,
+    "browser_failed": 1,
+    "ci_gate": "not_run"
   },
   "local_shutdown": {
     "requested": true,
@@ -865,5 +880,6 @@
     "stage": "migration before application start/seed",
     "business_operations_performed": false,
     "cloud_resumed": false
-  }
+  },
+  "prepared_unapplied_patch": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/receipt-locale-proposal.patch"
 }
