@@ -1,10 +1,12 @@
 import { Outlet, useRouterState } from "@tanstack/react-router";
-import { Suspense } from "react";
+import { lazy, Suspense } from "react";
 
 import { AuthGuard } from "@/features/auth/AuthGuard";
 
-import { AppLayout } from "./AppLayout";
-import { RouteAccessGuard } from "./RouteAccessGuard";
+const AuthenticatedShell = lazy(async () => {
+  const module = await import("./AuthenticatedShell");
+  return { default: module.AuthenticatedShell };
+});
 
 const routePending = (
   <div
@@ -28,13 +30,13 @@ export function RootLayout(): JSX.Element {
 
   return (
     <AuthGuard>
-      <AppLayout>
-        <RouteAccessGuard>
+      <Suspense fallback={routePending}>
+        <AuthenticatedShell>
           <Suspense fallback={routePending}>
             <Outlet />
           </Suspense>
-        </RouteAccessGuard>
-      </AppLayout>
+        </AuthenticatedShell>
+      </Suspense>
     </AuthGuard>
   );
 }

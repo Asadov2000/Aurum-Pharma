@@ -170,9 +170,13 @@ export function ReceiptDocument({
             <p className="break-words">
               {it.position}. {it.name}
             </p>
+            {it.quantity_description && (
+              <p className="break-words text-[11px]">{it.quantity_description}</p>
+            )}
             <div className="flex justify-between tabular-nums">
               <span>
-                {fmtQty(it.qty)} × {money(it.unit_price)}
+                {fmtQty(it.qty)}
+                {it.unit_label ? ` ${it.unit_label}` : ""} × {money(it.unit_price)}
               </span>
               <span>{money(it.total_price)}</span>
             </div>
@@ -200,8 +204,12 @@ export function ReceiptDocument({
         ))}
         {!data.is_refund && (
           <>
-            <Row label="Принято" value={`${money(data.paid_total)} ${data.currency}`} />
-            <Row label="Сдача" value={`${money(data.change)} ${data.currency}`} />
+            {data.paid_total !== null && (
+              <Row label="Принято" value={`${money(data.paid_total)} ${data.currency}`} />
+            )}
+            {data.change !== null && (
+              <Row label="Сдача" value={`${money(data.change)} ${data.currency}`} />
+            )}
           </>
         )}
 

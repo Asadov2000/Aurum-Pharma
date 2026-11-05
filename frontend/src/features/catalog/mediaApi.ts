@@ -9,6 +9,9 @@ export async function getCatalogImage(
 ): Promise<Blob> {
   const { data } = await api.get<Blob>(`/catalog/${itemId}/image/${version}/${variant}`, {
     responseType: "blob",
+    // New cache key bypasses images stored under the former immutable policy.
+    // This is a public policy version, never an account or access token.
+    params: { "media-policy": 2 },
   });
   return data;
 }

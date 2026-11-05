@@ -41,6 +41,8 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.stock_on_date_repository import StockQuerySnapshot, read_stock_snapshot
+from app.domains.pos.unit_cart_models import UnitCartItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,20 @@ class RefundReconciliationRow:
     requested_by_name: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class TopProductTotalsRow:
+    catalog_id: UUID
+    name: str | None
+    form: str | None
+    dosage: str | None
+    pack_size: str | None
+    quantity: Decimal
+    physical_quantities: object
+    revenue: Decimal
+    receipts_count: int
+    currency: str
+
+
 _FULL_REFUND_SQL = """
   s.sale_type = 'sale'
   AND EXISTS (
@@ -106,6 +122,29 @@ _FULL_REFUND_SQL = """
         0
       )
   )
+"""
+
+
+# The server-written immutable receipt owns every v3/v4 line, including
+# legacy lines in mixed receipts. Adding SaleItem discounts would count them twice.
+# Keep this scalar correlated to the outer sale so line counts never multiply money.
+_SALE_DISCOUNT_SQL = """
+  CASE WHEN
+    s.receipt_snapshot @> '{"schema_version": 3,"document_kind": "physical_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 4,"document_kind": "mixed_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 3,
+      "document_kind": "physical_cash_refund_receipt"}'::jsonb
+    OR s.receipt_snapshot @> '{"schema_version": 4,
+      "document_kind": "mixed_cash_refund_receipt"}'::jsonb
+  THEN COALESCE((
+    SELECT SUM(COALESCE(line->>'discount_amount', 'invalid')::numeric)
+    FROM jsonb_array_elements(s.receipt_snapshot->'lines') AS line
+  )::text, 'invalid')::numeric
+  ELSE COALESCE((
+    SELECT SUM(si.discount_amount) FROM sale_item si
+    WHERE si.sale_id = s.id AND si.tenant_id = s.tenant_id
+  ), 0)
+  END
 """
 
 
@@ -295,6 +334,9 @@ class POSRepository:
 
     async def has_active_draft_sales(self, shift_id: UUID) -> bool:
         item_exists = exists().where(SaleItem.sale_id == Sale.id)
+        unit_item_exists = exists().where(
+            UnitCartItem.tenant_id == Sale.tenant_id, UnitCartItem.sale_id == Sale.id
+        )
         payment_exists = exists().where(SalePayment.sale_id == Sale.id)
         prescription_exists = exists().where(PrescriptionLog.sale_id == Sale.id)
         stmt = select(
@@ -302,7 +344,7 @@ class POSRepository:
                 and_(
                     Sale.shift_id == shift_id,
                     Sale.status == "draft",
-                    or_(item_exists, payment_exists, prescription_exists),
+                    or_(item_exists, unit_item_exists, payment_exists, prescription_exists),
                 )
             )
         )
@@ -619,8 +661,37 @@ class POSRepository:
             voided_by_sale_id=row["voided_by_sale_id"],
         )
 
+    async def list_prepared_cart_items(self, tenant_id: UUID, sale_id: UUID) -> list[UnitCartItem]:
+        return list(
+            await self.session.scalars(
+                select(UnitCartItem)
+                .where(UnitCartItem.tenant_id == tenant_id, UnitCartItem.sale_id == sale_id)
+                .order_by(UnitCartItem.position)
+                .execution_options(populate_existing=True)
+            )
+        )
+
     async def list_items(self, sale_id: UUID) -> list[SaleItem]:
         stmt = select(SaleItem).where(SaleItem.sale_id == sale_id).order_by(SaleItem.position.asc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_checkout_draft_items(self, sale_id: UUID) -> list[SaleItem]:
+        """Replay draft slices in FEFO order, preserving boundaries within a batch."""
+        stmt = (
+            select(SaleItem)
+            .outerjoin(
+                Batch,
+                and_(Batch.id == SaleItem.batch_id, Batch.tenant_id == SaleItem.tenant_id),
+            )
+            .where(SaleItem.sale_id == sale_id)
+            .order_by(
+                Batch.expires_at.asc(),
+                Batch.created_at.asc(),
+                Batch.id.asc(),
+                SaleItem.position.asc(),
+            )
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -856,6 +927,43 @@ class POSRepository:
             POSPaymentAttempt.status.in_(("pending", "requires_reconciliation", "confirmed")),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def has_bound_unit_payment_attempt(self, attempt: POSPaymentAttempt) -> bool:
+        """A frozen unit draft keeps its total unchanged until atomic completion."""
+        result = await self.session.scalar(
+            text(
+                "SELECT EXISTS(SELECT 1 FROM public.pos_unit_payment_attempt_binding b "
+                "JOIN public.pos_unit_payment_plan_intent i "
+                "ON i.tenant_id=b.tenant_id AND i.id=b.intent_id "
+                "JOIN public.pos_unit_payment_plan_binding active "
+                "ON active.tenant_id=i.tenant_id AND active.id=i.id "
+                "JOIN public.sale s ON s.tenant_id=b.tenant_id AND s.id=b.sale_id "
+                "WHERE b.tenant_id=:tenant AND b.id=:id AND b.id=:operation "
+                "AND b.sale_id=:sale AND b.cashier_user_id=:cashier "
+                "AND b.method=:method AND b.amount=:amount AND b.currency=:currency "
+                "AND i.sale_id=b.sale_id AND i.branch_id=b.branch_id "
+                "AND i.cashier_user_id=b.cashier_user_id AND active.sale_id=b.sale_id "
+                "AND s.status='draft' AND NOT s.is_test AND s.sale_type='sale' "
+                "AND s.parent_sale_id IS NULL AND s.branch_id=b.branch_id "
+                "AND s.cashier_user_id=b.cashier_user_id AND s.register_id=i.register_id "
+                "AND s.shift_id=i.shift_id AND s.currency=b.currency "
+                "AND NOT EXISTS(SELECT 1 FROM public.pos_unit_payment_plan_binding_cancel c "
+                "WHERE c.tenant_id=b.tenant_id AND c.id=b.intent_id) "
+                "AND EXISTS(SELECT 1 FROM jsonb_array_elements(i.request_payload->'payments') p "
+                "WHERE p->>'method'=b.method AND (p->>'amount')::NUMERIC=b.amount))"
+            ),
+            {
+                "tenant": attempt.tenant_id,
+                "id": attempt.id,
+                "operation": attempt.operation_id,
+                "sale": attempt.sale_id,
+                "cashier": attempt.cashier_user_id,
+                "method": attempt.payment_method,
+                "amount": attempt.amount,
+                "currency": attempt.currency,
+            },
+        )
+        return result is True
 
     async def insert_payment_attempt(self, **fields: Any) -> POSPaymentAttempt:
         attempt = POSPaymentAttempt(**fields)
@@ -1168,6 +1276,47 @@ class POSRepository:
         await self.session.refresh(pl)
         return pl
 
+    async def copy_item_prescriptions(
+        self, *, tenant_id: UUID, sale_id: UUID, source_item_id: UUID, target_item_id: UUID
+    ) -> None:
+        target_catalog = (
+            select(SaleItem.catalog_id)
+            .where(
+                SaleItem.tenant_id == tenant_id,
+                SaleItem.sale_id == sale_id,
+                SaleItem.id == target_item_id,
+            )
+            .correlate(None)
+            .scalar_subquery()
+        )
+        records = await self.session.scalars(
+            select(PrescriptionLog)
+            .join(SaleItem, SaleItem.id == PrescriptionLog.sale_item_id)
+            .where(
+                PrescriptionLog.tenant_id == tenant_id,
+                PrescriptionLog.sale_id == sale_id,
+                PrescriptionLog.sale_item_id == source_item_id,
+                SaleItem.tenant_id == tenant_id,
+                SaleItem.sale_id == sale_id,
+                SaleItem.catalog_id == target_catalog,
+            )
+        )
+        for source in records:
+            self.session.add(
+                PrescriptionLog(
+                    tenant_id=tenant_id,
+                    sale_id=sale_id,
+                    sale_item_id=target_item_id,
+                    prescription_number=source.prescription_number,
+                    doctor_name=source.doctor_name,
+                    doctor_license=source.doctor_license,
+                    patient_name=source.patient_name,
+                    notes=source.notes,
+                    created_by=source.created_by,
+                )
+            )
+        await self.session.flush()
+
     async def list_prescriptions(self, sale_id: UUID) -> list[PrescriptionLog]:
         stmt = select(PrescriptionLog).where(PrescriptionLog.sale_id == sale_id)
         result = await self.session.execute(stmt)
@@ -1356,13 +1505,15 @@ class POSRepository:
         )
         total_refunds, returns_count = (await self.session.execute(refunds_stmt)).one()
 
-        disc_stmt = (
-            select(func.coalesce(func.sum(SaleItem.discount_amount), 0))
-            .select_from(SaleItem)
-            .join(Sale, Sale.id == SaleItem.sale_id)
-            .where(_fwd())
-        )
-        total_discounts = (await self.session.execute(disc_stmt)).scalar_one()
+        disc_stmt = text(f"""
+            SELECT COALESCE(SUM({_SALE_DISCOUNT_SQL}), 0)
+            FROM sale s
+            WHERE s.shift_id = :shift_id AND s.status IN ('completed', 'voided')
+              AND s.sale_type = 'sale' AND s.is_test = false
+        """)
+        total_discounts = (
+            await self.session.execute(disc_stmt, {"shift_id": shift_id})
+        ).scalar_one()
 
         # Per-sale method: count distinct methods on its payment lines; >1 → mixed.
         per_sale = (
@@ -1702,14 +1853,10 @@ class POSRepository:
                     ELSE s.status
                   END AS status,
                   s.sale_type,
-                  s.total_amount + COALESCE(
-                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
-                  ) AS gross, s.currency,
+                  s.total_amount + ({_SALE_DISCOUNT_SQL}) AS gross, s.currency,
                   b.name AS branch_name,
                   u.full_name AS cashier_name,
-                  COALESCE(
-                    (SELECT SUM(si.discount_amount) FROM sale_item si WHERE si.sale_id = s.id), 0
-                  ) AS discount,
+                  ({_SALE_DISCOUNT_SQL}) AS discount,
                   (SELECT CASE
                             WHEN COUNT(DISTINCT p.payment_method) = 0 THEN 'none'
                             WHEN COUNT(DISTINCT p.payment_method) > 1 THEN 'mixed'
@@ -1739,8 +1886,8 @@ class POSRepository:
         t = (await self.session.execute(totals_sql, params)).mappings().one()
 
         disc_sql = text(f"""
-            SELECT COALESCE(SUM(si.discount_amount), 0) AS d
-            FROM sale_item si JOIN sale s ON s.id = si.sale_id
+            SELECT COALESCE(SUM({_SALE_DISCOUNT_SQL}), 0) AS d
+            FROM sale s
             WHERE {fwd_done}
             """)
         total_discounts = (await self.session.execute(disc_sql, params)).scalar_one()
@@ -1779,11 +1926,7 @@ class POSRepository:
                     WHERE s.sale_type = 'return'), 0) AS total_refunds,
                   COALESCE(SUM(
                     CASE WHEN s.sale_type = 'sale' THEN
-                      COALESCE((
-                        SELECT SUM(si.discount_amount)
-                        FROM sale_item si
-                        WHERE si.sale_id = s.id
-                      ), 0)
+                      ({_SALE_DISCOUNT_SQL})
                     ELSE 0 END
                   ), 0) AS total_discounts,
                   COUNT(*) FILTER (WHERE s.sale_type = 'sale') AS sales_count,
@@ -1815,213 +1958,100 @@ class POSRepository:
         self,
         *,
         tenant_id: UUID,
-        on_date: Any,
+        on_date: date,
         branch_id: UUID | None,
         tz: str = "Asia/Dushanbe",
         query: str | None = None,
         expires_before: date | None = None,
-    ) -> list[dict[str, Any]]:
-        """Per-batch stock as of `on_date`, summed from the batch_movement
-        ledger (Σ qty_delta for movements dated ≤ on_date). The ledger is the
-        source of truth (the trigger keeps batch.qty_remaining == Σ qty_delta),
-        so this is a faithful historical reconstruction, not just 'today'. Only
-        batches with a positive balance on the date are returned. The movement
-        date is taken in the tenant timezone `tz`."""
-        # "as of end of on_date" = movements strictly before the start of the
-        # next local day → sargable on batch_movement(created_at).
-        _, on_end = local_day_range(on_date, tz)
-        clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {"tid": str(tenant_id), "on_end": on_end}
-        if branch_id is not None:
-            clauses.append("b.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        if query:
-            clauses.append(
-                "(tc.brand_name ILIKE :search OR tc.inn ILIKE :search "
-                "OR b.batch_number ILIKE :search)"
-            )
-            params["search"] = f"%{query.strip()}%"
-        if expires_before is not None:
-            clauses.append("b.expires_at <= :expires_before")
-            params["expires_before"] = expires_before
-        where = " AND ".join(clauses)
-
-        sql = text(f"""
-            SELECT
-              tc.brand_name AS name,
-              tc.inn AS inn,
-              br.name AS branch_name,
-              b.batch_number, b.expires_at, b.purchase_price, b.currency,
-              SUM(bm.qty_delta) AS qty
-            FROM batch b
-            JOIN batch_movement bm
-              ON bm.batch_id = b.id AND bm.created_at < :on_end
-            LEFT JOIN tenant_catalog tc
-              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
-            LEFT JOIN branch br
-              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
-            WHERE {where}
-            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
-                     b.batch_number, b.expires_at, b.purchase_price, b.currency
-            HAVING SUM(bm.qty_delta) > 0
-            ORDER BY tc.brand_name NULLS LAST, b.expires_at
-            """)
-        return [dict(r) for r in (await self.session.execute(sql, params)).mappings().all()]
+    ) -> StockQuerySnapshot:
+        return await read_stock_snapshot(
+            self.session,
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            tz=tz,
+            query=query,
+            expires_before=expires_before,
+        )
 
     async def stock_on_date_overview(
         self,
         *,
         tenant_id: UUID,
-        on_date: Any,
+        on_date: date,
         branch_id: UUID | None,
         query: str | None,
-        expires_before: Any | None,
+        expires_before: date | None,
         page: int,
         page_size: int,
         tz: str = "Asia/Dushanbe",
-    ) -> tuple[list[dict[str, Any]], int, Decimal, Decimal]:
-        """Filtered page and totals for the screen stock report."""
-        _, on_end = local_day_range(on_date, tz)
-        clauses = ["b.tenant_id = :tid"]
-        params: dict[str, Any] = {
-            "tid": str(tenant_id),
-            "on_end": on_end,
-            "limit": page_size,
-            "offset": (page - 1) * page_size,
-        }
-        if branch_id is not None:
-            clauses.append("b.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        where = " AND ".join(clauses)
-
-        filtered_clauses = ["qty > 0"]
-        if query:
-            filtered_clauses.append(
-                "(name ILIKE :search OR inn ILIKE :search OR batch_number ILIKE :search)"
-            )
-            params["search"] = f"%{query.strip()}%"
-        if expires_before is not None:
-            filtered_clauses.append("expires_at <= :expires_before")
-            params["expires_before"] = expires_before
-        filtered_where = " AND ".join(filtered_clauses)
-
-        balances_sql = f"""
-            SELECT
-              b.id,
-              tc.brand_name AS name,
-              tc.inn AS inn,
-              br.name AS branch_name,
-              b.batch_number,
-              b.expires_at,
-              b.purchase_price,
-              b.currency,
-              SUM(bm.qty_delta) AS qty
-            FROM batch b
-            JOIN batch_movement bm
-              ON bm.batch_id = b.id AND bm.created_at < :on_end
-            LEFT JOIN tenant_catalog tc
-              ON tc.id = b.catalog_id AND tc.tenant_id = b.tenant_id
-            LEFT JOIN branch br
-              ON br.id = b.branch_id AND br.tenant_id = b.tenant_id
-            WHERE {where}
-            GROUP BY b.id, tc.brand_name, tc.inn, br.name,
-                     b.batch_number, b.expires_at, b.purchase_price, b.currency
-        """
-        summary_sql = text(f"""
-            WITH balances AS ({balances_sql})
-            SELECT
-              COUNT(*) AS total,
-              COALESCE(SUM(qty), 0) AS total_qty,
-              COALESCE(SUM(ROUND(qty * purchase_price, 2)), 0) AS total_value
-            FROM balances
-            WHERE {filtered_where}
-        """)
-        summary = (await self.session.execute(summary_sql, params)).mappings().one()
-
-        page_sql = text(f"""
-            WITH balances AS ({balances_sql})
-            SELECT name, inn, branch_name, batch_number, expires_at,
-                   purchase_price, currency, qty
-            FROM balances
-            WHERE {filtered_where}
-            ORDER BY name NULLS LAST, expires_at, id
-            LIMIT :limit OFFSET :offset
-        """)
-        rows = [
-            dict(row) for row in (await self.session.execute(page_sql, params)).mappings().all()
-        ]
-        return (
-            rows,
-            int(summary["total"]),
-            Decimal(str(summary["total_qty"])),
-            Decimal(str(summary["total_value"])),
+    ) -> StockQuerySnapshot:
+        return await read_stock_snapshot(
+            self.session,
+            tenant_id=tenant_id,
+            on_date=on_date,
+            branch_id=branch_id,
+            tz=tz,
+            query=query,
+            expires_before=expires_before,
+            page=page,
+            page_size=page_size,
         )
 
     async def top_products(
         self,
         *,
         tenant_id: UUID,
-        date_from: Any,
-        date_to: Any,
+        date_from: date,
+        date_to: date,
         branch_id: UUID | None,
         sort_by: str,
         limit: int,
+        quantity_basis: str = "legacy_pack",
         tz: str = "Asia/Dushanbe",
-    ) -> list[dict[str, Any]]:
-        """Net product ranking over a tenant-local period.
-
-        Completed return documents subtract their quantity and value from the
-        original product. Test sales are excluded, matching the sales summary.
-        """
+    ) -> list[TopProductTotalsRow]:
+        """Rank scoped retail totals without combining incompatible quantities."""
         start, _ = local_day_range(date_from, tz)
         _, end = local_day_range(date_to, tz)
-        clauses = [
-            "s.tenant_id = :tid",
-            "s.completed_at >= :dfrom_ts",
-            "s.completed_at < :dto_ts",
-            "s.is_test = false",
-        ]
-        params: dict[str, Any] = {
-            "tid": str(tenant_id),
+        params: dict[str, object] = {
+            "tid": tenant_id,
             "dfrom_ts": start,
             "dto_ts": end,
+            "branch": branch_id,
+            "basis": quantity_basis,
             "limit": limit,
         }
-        if branch_id is not None:
-            clauses.append("s.branch_id = :branch")
-            params["branch"] = str(branch_id)
-        where = " AND ".join(clauses)
-        order_expression = "revenue" if sort_by == "revenue" else "quantity"
+        order_expression = "revenue" if sort_by == "revenue" else "rank_quantity"
+        quantity_filter = "rank_quantity <> 0" if sort_by == "quantity" else "true"
         sql = text(f"""
-            SELECT
-              si.catalog_id,
-              tc.brand_name AS name,
-              tc.form,
-              tc.dosage,
-              tc.pack_size,
-              COALESCE(SUM(
-                CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END
-              ), 0) AS quantity,
-              COALESCE(SUM(
-                CASE WHEN s.sale_type = 'return'
-                  THEN -si.total_price
-                  ELSE si.total_price
-                END
-              ), 0) AS revenue,
-              COUNT(DISTINCT s.id) FILTER (WHERE s.sale_type = 'sale') AS receipts_count,
-              COALESCE(MAX(si.currency), 'TJS') AS currency
-            FROM sale_item si
-            JOIN sale s ON s.id = si.sale_id AND s.tenant_id = si.tenant_id
-            JOIN tenant_catalog tc
-              ON tc.id = si.catalog_id AND tc.tenant_id = si.tenant_id
-            WHERE {where}
-            GROUP BY si.catalog_id, tc.brand_name, tc.form, tc.dosage, tc.pack_size
-            HAVING
-              SUM(CASE WHEN s.sale_type = 'return' THEN -si.qty ELSE si.qty END) <> 0
-              OR SUM(CASE WHEN s.sale_type = 'return'
-                    THEN -si.total_price
-                    ELSE si.total_price END) <> 0
-            ORDER BY {order_expression} DESC, tc.brand_name ASC, si.catalog_id ASC
+            WITH ranked AS (
+              SELECT t.*,tc.brand_name AS name,tc.form,tc.dosage,tc.pack_size,
+                CASE WHEN :basis = 'legacy_pack' THEN t.quantity ELSE coalesce((
+                  SELECT (q->>'quantity')::numeric
+                  FROM jsonb_array_elements(t.physical_quantities) q
+                  WHERE q->>'unit' = :basis
+                ),0) END AS rank_quantity
+              FROM public.pos_product_totals_for_report(
+                :tid,:dfrom_ts,:dto_ts,:branch) t
+              JOIN tenant_catalog tc ON tc.id=t.catalog_id AND tc.tenant_id=:tid
+            )
+            SELECT * FROM ranked WHERE {quantity_filter}
+            ORDER BY {order_expression} DESC,name ASC,catalog_id ASC
             LIMIT :limit
         """)
-        return [dict(row) for row in (await self.session.execute(sql, params)).mappings().all()]
+        rows = (await self.session.execute(sql, params)).mappings().all()
+        return [
+            TopProductTotalsRow(
+                catalog_id=row["catalog_id"],
+                name=row["name"],
+                form=row["form"],
+                dosage=row["dosage"],
+                pack_size=row["pack_size"],
+                quantity=Decimal(str(row["quantity"])),
+                physical_quantities=row["physical_quantities"],
+                revenue=Decimal(str(row["revenue"])),
+                receipts_count=int(row["receipts_count"]),
+                currency=str(row["currency"]),
+            )
+            for row in rows
+        ]

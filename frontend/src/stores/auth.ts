@@ -17,8 +17,9 @@ interface AuthState {
 }
 
 const initial = loadTokens();
+let sessionGeneration = 0;
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: initial.access,
   user: null,
   hydrated: false,
@@ -30,37 +31,31 @@ export const useAuthStore = create<AuthState>((set) => ({
       hydrated: true,
     });
   },
-  setUser: (user) => set({ user, hydrated: true }),
+  setUser: (user) => {
+    const previous = get().user;
+    if (
+      user !== previous &&
+      authorizationSnapshotKey(user) !== authorizationSnapshotKey(previous)
+    ) {
+      sessionGeneration += 1;
+      if (previous) {
+        // Retain the identity result that delivered the new permissions.
+        queryClient.removeQueries({
+          predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+            queryKey[0] !== "auth" || queryKey[1] !== "me",
+        });
+        queryClient.getMutationCache().clear();
+        window.dispatchEvent(new Event("aurum:client-session-cleared"));
+      }
+    }
+    set({ user, hydrated: true });
+  },
   clear: () => {
     sessionGeneration += 1;
     clearTokens();
     set({ accessToken: null, user: null, hydrated: true });
   },
 }));
-
-// A new authority invalidates work started under the old one. Token rotation,
-// profile edits and network outages do not revoke the current authority.
-let sessionGeneration = 0;
-useAuthStore.subscribe((state, previous) => {
-  const authorityChanged =
-    state.user !== previous.user &&
-    authorizationSnapshotKey(state.user) !== authorizationSnapshotKey(previous.user);
-  if (authorityChanged || (previous.accessToken !== null && state.accessToken === null)) {
-    sessionGeneration += 1;
-  }
-  if (previous.user && authorityChanged) {
-    // Keep the identity query that delivered the new authority; drop all data
-    // and pending reads from the old scope before protected pages mount again.
-    const filters = {
-      predicate: (query: { queryKey: readonly unknown[] }) =>
-        !(query.queryKey[0] === "auth" && query.queryKey[1] === "me"),
-    };
-    void queryClient.cancelQueries(filters);
-    queryClient.removeQueries(filters);
-    queryClient.getMutationCache().clear();
-    window.dispatchEvent(new Event("aurum:client-session-cleared"));
-  }
-});
 
 export function getAuthSessionGeneration(): number {
   return sessionGeneration;

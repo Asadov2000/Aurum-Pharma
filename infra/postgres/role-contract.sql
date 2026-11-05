@@ -446,6 +446,17 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE aurum_schema_owner IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, aurum_app, aurum_support,
         aurum_billing_worker, aurum_worker, aurum_catalog_worker;
+-- Internal physical retail snapshots are available only through their trigger.
+-- Fresh databases receive this function later, during migration 0178.
+DO $$
+BEGIN
+    IF pg_catalog.to_regprocedure('public.trg_unit_cart_v2_retail_snapshot()') IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION public.trg_unit_cart_v2_retail_snapshot()
+            FROM PUBLIC, aurum_app, aurum_support, aurum_mailer,
+                aurum_billing_worker, aurum_worker, aurum_catalog_worker,
+                aurum_edge_cash_executor, aurum_edge_cash_owner;
+    END IF;
+END $$;
 CREATE TEMP TABLE allowed_edge_node_role (
     role_name TEXT PRIMARY KEY,
     role_oid OID NOT NULL UNIQUE
@@ -653,27 +664,51 @@ BEGIN
 END
 $$;
 
--- Table-level REVOKE does not remove column ACLs. Normalize every explicit
--- column grant before restoring the catalog worker's revision allowlist.
+-- The table cleanup above visits application schemas only. Normalize explicit
+-- column grants before restoring the catalog worker and Edge owner revision
+-- allowlists. Native LOGIN roles and the executor must retain no direct grants,
+-- including reserved node roles without a valid identity binding.
+-- Edge has no system-column allowlist: revoke its explicit grants in every
+-- schema while preserving the catalog worker's application-schema boundary.
 DO $$
 DECLARE
     target RECORD;
 BEGIN
     FOR target IN
-        SELECT schema.nspname, relation.relname, column_info.attname
+        SELECT DISTINCT schema.nspname, relation.relname, column_info.attname,
+            column_info.attrelid, column_info.attnum, grantee.rolname,
+            grantee.oid AS grantee_oid
         FROM pg_catalog.pg_attribute AS column_info
         JOIN pg_catalog.pg_class AS relation ON relation.oid = column_info.attrelid
         JOIN pg_catalog.pg_namespace AS schema ON schema.oid = relation.relnamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
         JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
-        WHERE grantee.rolname = 'aurum_catalog_worker'
-          AND column_info.attnum > 0 AND NOT column_info.attisdropped
-          AND schema.nspname <> 'information_schema' AND schema.nspname !~ '^pg_'
+        WHERE column_info.attnum > 0 AND NOT column_info.attisdropped
+          AND (
+            (
+                grantee.rolname = 'aurum_catalog_worker'
+                AND schema.nspname <> 'information_schema' AND schema.nspname !~ '^pg_'
+            )
+            OR grantee.rolname IN ('aurum_edge_cash_owner', 'aurum_edge_cash_executor')
+            OR grantee.rolname ~ '^aurum_edge_node_[0-9a-f]{32}$'
+          )
     LOOP
         EXECUTE pg_catalog.format(
-            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM aurum_catalog_worker',
-            target.attname, target.nspname, target.relname
+            'REVOKE ALL PRIVILEGES (%I) ON TABLE %I.%I FROM %I',
+            target.attname, target.nspname, target.relname, target.rolname
         );
+        -- REVOKE acts as the object owner, even for a superuser. A grant from
+        -- another grantor must not silently survive or trigger broad CASCADE.
+        IF target.rolname <> 'aurum_catalog_worker' AND EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_attribute AS column_info
+            CROSS JOIN LATERAL pg_catalog.aclexplode(column_info.attacl) AS acl
+            WHERE column_info.attrelid = target.attrelid
+              AND column_info.attnum = target.attnum
+              AND acl.grantee = target.grantee_oid
+        ) THEN
+            RAISE EXCEPTION 'Column ACL normalization left explicit grants';
+        END IF;
     END LOOP;
 END
 $$;
@@ -850,7 +885,7 @@ BEGIN
         END IF;
 
         revision_number := current_revision::INTEGER;
-        IF revision_number < 1 OR revision_number > 160 THEN
+        IF revision_number < 1 OR revision_number > 237 THEN
             RAISE EXCEPTION
                 'Unknown Alembic revision in database role bootstrap: %',
                 current_revision;
@@ -911,6 +946,10 @@ BEGIN
     IF pg_catalog.to_regprocedure('public.gen_random_uuid()') IS NOT NULL THEN
         GRANT EXECUTE ON FUNCTION public.gen_random_uuid()
             TO aurum_app, aurum_support, aurum_schema_owner;
+    END IF;
+    IF pg_catalog.to_regprocedure('public.digest(bytea,text)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.digest(BYTEA, TEXT)
+            TO aurum_schema_owner;
     END IF;
     IF pg_catalog.to_regprocedure('public.pgp_sym_encrypt(text,text)') IS NOT NULL THEN
         GRANT EXECUTE ON FUNCTION public.pgp_sym_encrypt(TEXT, TEXT)
@@ -1287,6 +1326,174 @@ BEGIN
             public.sync_writer_activation,
             public.sync_writer_epoch
             TO aurum_edge_cash_owner;
+
+        IF current_revision::INTEGER >= 231 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.prepare_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail preparation helper definition is unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.prepare_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.prepare_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            -- Repeat bootstrap restores precisely the migration's read surface.
+            -- The node LOGIN inherits no table/column access from this owner.
+            GRANT SELECT (
+                tenant_id, id, branch_id, sale_id, register_id, shift_id,
+                cashier_user_id, revision_hash, expected_total_amount,
+                cash_tendered, currency, quote_payload
+            ) ON public.pos_unit_cash_intent TO aurum_edge_cash_owner;
+        END IF;
+        IF current_revision::INTEGER >= 232 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.lock_edge_retail_cash_inputs_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail inputs helper definition is unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.lock_edge_retail_cash_inputs_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.lock_edge_retail_cash_inputs_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                id, tenant_id, branch_id, catalog_id, expires_at, created_at,
+                packaging, closed_packs, is_blocked
+            ) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                id, tenant_id, branch_id, catalog_id, lot_id, opened_at, state,
+                remaining_units
+            ) ON public.unit_stock_opened_pack_v2 TO aurum_edge_cash_owner;
+            -- Row-lock privilege only. Migration 0232 adds restrictive false
+            -- UPDATE checks; neither these grants nor the helper permit DML.
+            GRANT UPDATE (id) ON public.tenant_catalog, public.unit_stock_lot_v2,
+                public.unit_stock_opened_pack_v2 TO aurum_edge_cash_owner;
+        END IF;
+        IF current_revision::INTEGER >= 233 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.lock_edge_retail_cash_draft_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail current-draft helper definition is unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.lock_edge_retail_cash_draft_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.lock_edge_retail_cash_draft_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                id, tenant_id, branch_id, sale_id, catalog_id, position, sale_format,
+                physical_packaging, quantity, discount_amount
+            ) ON public.pos_unit_cart_item TO aurum_edge_cash_owner;
+            GRANT SELECT (id, tenant_id, branch_id, sale_id)
+                ON public.pos_unit_payment_plan_binding,
+                   public.pos_unit_payment_plan_binding_cancel TO aurum_edge_cash_owner;
+            -- Migration 0233 restricts these locking privileges with false
+            -- UPDATE checks, including the legacy/global prescription path.
+            GRANT UPDATE (id) ON public.pos_unit_cart_item, public.sale_item,
+                public.prescription_log TO aurum_edge_cash_owner;
+        END IF;
+        IF current_revision::INTEGER >= 234 THEN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid = pg_catalog.to_regprocedure(
+                    'public.replay_edge_retail_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND NOT routine.prosecdef
+                  AND routine.provolatile = 'v'
+                  AND routine.proconfig @> ARRAY[
+                    'search_path=pg_catalog, pg_temp',
+                    'row_security=on'
+                  ]::TEXT[]
+            ) THEN
+                RAISE EXCEPTION 'Native retail replay helper definition is unsafe';
+            END IF;
+            IF (
+                SELECT pg_catalog.count(*)
+                FROM pg_catalog.pg_proc AS routine
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = routine.proowner
+                JOIN pg_catalog.pg_language AS language ON language.oid = routine.prolang
+                WHERE routine.oid IN (
+                    pg_catalog.to_regprocedure('public.assert_physical_checkout(uuid,uuid,boolean)'),
+                    pg_catalog.to_regprocedure('public.assert_mixed_checkout(uuid,uuid,boolean)')
+                )
+                  AND owner.rolname = 'aurum_schema_owner'
+                  AND language.lanname = 'plpgsql'
+                  AND routine.prosecdef
+                  AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']::TEXT[]
+            ) <> 2 THEN
+                RAISE EXCEPTION 'Native retail replay validators are unsafe';
+            END IF;
+            REVOKE ALL PRIVILEGES ON FUNCTION public.replay_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) FROM PUBLIC, aurum_app, aurum_support, aurum_edge_cash_executor;
+            GRANT EXECUTE ON FUNCTION public.replay_edge_retail_cash_v1(
+                UUID, UUID, BIGINT, UUID, JSONB, TEXT
+            ) TO aurum_edge_cash_owner;
+            -- Existing schema-owner validators inspect committed immutable
+            -- journals without exposing stock costs or granting table writes.
+            GRANT EXECUTE ON FUNCTION
+                public.assert_physical_checkout(UUID, UUID, BOOLEAN),
+                public.assert_mixed_checkout(UUID, UUID, BOOLEAN)
+                TO aurum_edge_cash_owner;
+            GRANT SELECT (
+                tenant_id, id, sale_id, branch_id, register_id, shift_id,
+                cashier_user_id, cash_intent_id, payment_plan_intent_id,
+                stock_command_id, payment_id, payment_journal_version,
+                request_hash, result_payload, receipt_payload
+            ) ON public.pos_physical_checkout, public.pos_mixed_checkout
+                TO aurum_edge_cash_owner;
+        END IF;
     END IF;
 
     SELECT pg_catalog.quote_ident(schemas.nspname)
@@ -1417,3 +1624,105 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Native physical cash execution: revision0235 exact private helper and write surface.
+DO $native_physical$
+DECLARE revision TEXT; spec RECORD; function_oid OID;
+BEGIN
+ IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+  SELECT version_num INTO revision FROM public.alembic_version;
+ END IF;
+ IF revision ~ '^[0-9]{4}$' AND revision::INTEGER >=235 THEN
+  FOR spec IN SELECT * FROM (VALUES
+   ('public.edge_physical_uuid5_v1(uuid,text)','plpgsql',true,'i'),
+   ('public.edge_physical_pack_take_v1(jsonb,jsonb,text,bigint)','plpgsql',false,'i'),
+   ('public.edge_physical_post_v1(uuid,uuid,uuid,uuid,uuid,uuid,text,integer,bigint,bigint,jsonb,jsonb,jsonb)','plpgsql',false,'v'),
+   ('public.edge_physical_allocate_v1(uuid,uuid,jsonb,date,jsonb)','plpgsql',false,'v'),
+   ('public.native_edge_physical_actor_v1(uuid,uuid,uuid,uuid)','sql',true,'s'),
+   ('public.native_edge_physical_context_v1()','sql',true,'s'),
+   ('public.lock_native_physical_gates_v1(uuid,uuid,uuid,uuid)','plpgsql',true,'v'),
+   ('public.emit_native_physical_retail_event_v1(uuid,uuid,uuid)','plpgsql',false,'v'),
+   ('public.complete_edge_physical_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)','plpgsql',false,'v')
+  ) AS allowed(signature,language,definer,volatility) LOOP
+   function_oid:=pg_catalog.to_regprocedure(spec.signature);
+   IF function_oid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM pg_catalog.pg_proc routine
+    JOIN pg_catalog.pg_roles owner ON owner.oid=routine.proowner
+    JOIN pg_catalog.pg_language language ON language.oid=routine.prolang
+    WHERE routine.oid=function_oid AND owner.rolname='aurum_schema_owner'
+      AND language.lanname=spec.language AND routine.prosecdef=spec.definer
+      AND routine.provolatile::TEXT=spec.volatility
+      AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp','row_security=on']::TEXT[]
+   ) THEN RAISE EXCEPTION 'Native physical execution helper metadata is unsafe'; END IF;
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,aurum_app,aurum_support,aurum_edge_cash_executor,aurum_edge_cash_owner',spec.signature);
+   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aurum_edge_cash_owner',spec.signature);
+  END LOOP;
+  GRANT EXECUTE ON FUNCTION public.is_support_session() TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.tenant_actor_has_scoped_permission(uuid,text,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_remaining(jsonb,jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_initial_state(jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_pack_v2_assert_transition(jsonb,jsonb,jsonb,text,bigint) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.unit_incoming_uuid5(text) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.assert_unit_cart_v2_complete(uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.allocate_register_receipt(uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.assert_retail_event_source(uuid,uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.reserve_retail_checkout_event_position(uuid,uuid,uuid) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.store_retail_checkout_event(uuid,uuid,uuid,bytea,text,text,text) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.retail_event_hash(jsonb) TO aurum_edge_cash_owner;
+  GRANT EXECUTE ON FUNCTION public.retail_event_canonical_json(jsonb) TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,branch_id,actor_id,request_hash,retail_version,currency,created_by,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,quantity,base_units,created_by,original_retail_unit_price,gross_amount,discount_amount,net_amount) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (id,tenant_id,branch_id,catalog_id,command_id,line_id,lot_id,pack_id,kind,entry_order,closed_delta,units_taken,sealed_start,sealed_count,before_state,after_state,created_by) ON public.unit_stock_movement_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,cash_intent_id,stock_command_id,payment_id,payment_journal_version,request_hash,result_payload,receipt_payload,created_by) ON public.pos_physical_checkout TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,physical_checkout_id,sale_id,method,amount,currency,created_by) ON public.pos_unit_checkout_payment_component TO aurum_edge_cash_owner;
+  GRANT SELECT (request_hash) ON public.pos_unit_cash_intent TO aurum_edge_cash_owner;
+  GRANT SELECT (initial_closed_packs,initial_opened_packs) ON public.unit_stock_lot_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (tenant_id,id,branch_id,actor_id,checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (tenant_id,command_id,line_id,position,catalog_id,packaging,sale_format,base_units) ON public.unit_stock_cart_line_v2 TO aurum_edge_cash_owner;
+  IF NOT EXISTS (
+   SELECT 1 FROM pg_catalog.pg_class relation
+   JOIN pg_catalog.pg_namespace schema ON schema.oid=relation.relnamespace
+   JOIN pg_catalog.pg_policy policy ON policy.polrelid=relation.oid
+   WHERE schema.nspname='public' AND relation.relname='register'
+    AND relation.relrowsecurity
+    AND relation.relowner='aurum_schema_owner'::REGROLE
+    AND policy.polname='edge_physical_execution_no_write'
+    AND policy.polroles=ARRAY['aurum_edge_cash_owner'::REGROLE::OID]
+    AND policy.polcmd='w' AND NOT policy.polpermissive
+    AND pg_catalog.pg_get_expr(policy.polwithcheck,policy.polrelid)='false'
+  ) THEN RAISE EXCEPTION 'Native register row-lock policy is unsafe'; END IF;
+  GRANT UPDATE (id) ON public.register TO aurum_edge_cash_owner;
+ END IF;
+END $native_physical$;
+
+-- Native mixed cash adds no LOGIN or general table-writing capability.
+DO $native_mixed$
+DECLARE revision TEXT; signature TEXT; function_oid OID;
+BEGIN
+ IF pg_catalog.to_regclass('public.alembic_version') IS NOT NULL THEN
+  SELECT version_num INTO revision FROM public.alembic_version;
+ END IF;
+ IF revision ~ '^[0-9]{4}$' AND revision::INTEGER >=236 THEN
+  FOREACH signature IN ARRAY ARRAY[
+   'public.edge_mixed_legacy_stock_v1(uuid,uuid,uuid,jsonb,date)',
+   'public.emit_native_mixed_retail_event_v1(uuid,uuid,uuid)',
+   'public.complete_edge_mixed_cash_v1(uuid,uuid,bigint,uuid,jsonb,text)'
+  ] LOOP
+   function_oid:=pg_catalog.to_regprocedure(signature);
+   IF function_oid IS NULL OR NOT EXISTS(
+    SELECT 1 FROM pg_catalog.pg_proc routine
+    JOIN pg_catalog.pg_roles owner ON owner.oid=routine.proowner
+    JOIN pg_catalog.pg_language language ON language.oid=routine.prolang
+    WHERE routine.oid=function_oid AND owner.rolname='aurum_schema_owner'
+      AND language.lanname='plpgsql' AND NOT routine.prosecdef AND routine.provolatile='v'
+      AND routine.proconfig @> ARRAY['search_path=pg_catalog, pg_temp','row_security=on']::TEXT[]
+   ) THEN RAISE EXCEPTION 'Native mixed execution helper metadata is unsafe'; END IF;
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,aurum_app,aurum_support,aurum_edge_cash_executor,aurum_edge_cash_owner',signature);
+   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aurum_edge_cash_owner',signature);
+  END LOOP;
+  GRANT INSERT (mixed_checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT SELECT (mixed_checkout_sale_id) ON public.unit_stock_cart_command_v2 TO aurum_edge_cash_owner;
+  GRANT INSERT (tenant_id,id,sale_id,branch_id,register_id,shift_id,cashier_user_id,cash_intent_id,stock_command_id,payment_id,payment_journal_version,request_hash,result_payload,receipt_payload,created_by) ON public.pos_mixed_checkout TO aurum_edge_cash_owner;
+  GRANT INSERT (mixed_checkout_id) ON public.pos_unit_checkout_payment_component TO aurum_edge_cash_owner;
+ END IF;
+END $native_mixed$;

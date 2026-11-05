@@ -87,10 +87,20 @@ class IncomingItem(Base):
     manufactured_at: Mapped[date | None] = mapped_column(Date)
     expires_at: Mapped[date] = mapped_column(Date, nullable=False)
     qty: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_packaging_preparation: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    unit_packaging_snapshot_v2: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     sale_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'TJS'"))
     created_batch_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Scoped cross-domain FK and uniqueness are enforced by migration 0166.
+    created_unit_lot_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    # Versioned journal ownership is exclusive; scoped FK is in migration 0175.
+    created_unit_lot_v2_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -100,6 +110,14 @@ class IncomingItem(Base):
 
     __table_args__ = (
         CheckConstraint("qty > 0", name="ck_ii_qty"),
+        CheckConstraint(
+            "created_unit_lot_id IS NULL OR created_batch_id IS NULL",
+            name="ck_incoming_item_stock_source",
+        ),
+        CheckConstraint(
+            "num_nonnulls(created_batch_id, created_unit_lot_id, created_unit_lot_v2_id) <= 1",
+            name="ck_ii_stock_source_v2_exclusive",
+        ),
         CheckConstraint("purchase_price >= 0", name="ck_ii_purchase_price"),
         CheckConstraint("sale_price >= 0", name="ck_ii_sale_price"),
         CheckConstraint(

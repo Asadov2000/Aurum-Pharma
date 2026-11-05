@@ -812,14 +812,14 @@ async def test_void_is_terminal_idempotent_and_blocks_confirmation(
         attempt_id=attempt.id,
         actor_id=scaffold["cashier"].id,
         reason="customer_cancelled",
-        operator_note="Передумал оплачивать",
+        operator_note="РџРµСЂРµРґСѓРјР°Р» РѕРїР»Р°С‡РёРІР°С‚СЊ",
     )
     retried = await service.void_payment_attempt(
         tenant_id=scaffold["tenant"].id,
         attempt_id=attempt.id,
         actor_id=scaffold["cashier"].id,
         reason="customer_cancelled",
-        operator_note="Передумал оплачивать",
+        operator_note="РџРµСЂРµРґСѓРјР°Р» РѕРїР»Р°С‡РёРІР°С‚СЊ",
     )
     assert retried.id == first.id
     assert first.status == "voided"
@@ -1175,3 +1175,47 @@ async def test_payment_reconciliation_queue_requires_manage_sales_permission(
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(current_user, None)
+
+
+async def test_unbound_legacy_attempt_cannot_confirm_above_current_sale_total(
+    db_session: AsyncSession,
+    pos_scaffold,
+) -> None:  # type: ignore[no-untyped-def]
+    scaffold = await pos_scaffold()
+    service = POSService(POSRepository(db_session))
+    sale = await _draft_sale(service, scaffold)
+    amount = sale.total_amount + Decimal("0.01")
+    attempt = await service.repo.insert_payment_attempt(
+        tenant_id=scaffold["tenant"].id,
+        sale_id=sale.id,
+        cashier_user_id=scaffold["cashier"].id,
+        operation_id=uuid4(),
+        operation_hash=service._payment_attempt_operation_hash(
+            sale_id=sale.id, payment_method="card", amount=amount, currency="TJS"
+        ),
+        payment_method="card",
+        amount=amount,
+        currency="TJS",
+        status="pending",
+        evidence_required=True,
+        created_by=scaffold["cashier"].id,
+    )
+    await service.begin_payment_attempt_reconciliation(
+        tenant_id=scaffold["tenant"].id,
+        attempt_id=attempt.id,
+        actor_id=scaffold["cashier"].id,
+    )
+    with pytest.raises(BusinessRuleError, match="exceeds the current sale total"):
+        await service.confirm_payment_attempt(
+            tenant_id=scaffold["tenant"].id,
+            attempt_id=attempt.id,
+            actor_id=scaffold["cashier"].id,
+            terminal_id="TEST-TERMINAL",
+            external_reference="test-unbound-overpayment",
+        )
+    await db_session.refresh(attempt)
+    assert attempt.status == "requires_reconciliation"
+    assert attempt.reconciliation_started_at is not None
+    assert attempt.terminal_id is None and attempt.external_reference is None
+    assert attempt.confirmed_at is None and attempt.consumed_at is None
+    assert await service.repo.list_payments(sale.id) == []

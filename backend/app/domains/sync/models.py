@@ -248,6 +248,7 @@ class SyncStream(Base):
     writer_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_reservation_transaction_id: Mapped[int | None] = mapped_column(BigInteger)
     current_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     current_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -392,6 +393,119 @@ class SyncCursor(Base):
     updated_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
 
 
+class SyncRetailEventAnchor(Base):
+    """Independent owner-provisioned evidence, never derived by the receiver."""
+
+    __tablename__ = "sync_retail_event_anchor"
+
+    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncRetailRefundAnchor(Base):
+    """Owner-provisioned trust for one target's immutable refund event."""
+
+    __tablename__ = "sync_retail_refund_anchor"
+
+    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncRetailRefundProjection(Base):
+    """Exact read evidence; receiving it never posts stock or pays money."""
+
+    __tablename__ = "sync_retail_refund_projection"
+
+    source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    parent_sale_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    source_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("statement_timestamp()")
+    )
+    created_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+
+
+class SyncPhysicalStockAnchor(Base):
+    __tablename__ = "sync_physical_stock_anchor"
+
+    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    previous_source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    event_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SyncPhysicalStockProjection(Base):
+    __tablename__ = "sync_physical_stock_projection"
+
+    source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    source_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    source_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_hash: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SyncPhysicalStockBaseline(Base):
+    __tablename__ = "sync_physical_stock_baseline"
+
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    branch_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    target_edge_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    snapshot_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    physical_records_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    configuration_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_node_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    writer_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+    projection_checksum: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class SyncSaleProjection(Base):
     __tablename__ = "sync_sale_projection"
 
@@ -403,6 +517,8 @@ class SyncSaleProjection(Base):
     sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     operation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    stock_command_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     sale_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'sale'"))
     parent_sale_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     parent_fully_refunded: Mapped[bool | None] = mapped_column(Boolean)
@@ -600,7 +716,7 @@ class SyncReadSnapshot(Base):
     __tablename__ = "sync_read_snapshot"
     __table_args__ = (
         CheckConstraint("status IN ('draft', 'ready')", name="ck_sync_read_snapshot_status"),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_schema_version"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_schema_version"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_source_revision"),
         CheckConstraint(
             "manifest_hash ~ '^[0-9a-f]{64}$'", name="ck_sync_read_snapshot_manifest_hash"
@@ -688,7 +804,7 @@ class SyncReadSnapshotComponent(Base):
             "component IN ('foundation', 'catalog', 'inventory')",
             name="ck_sync_read_snapshot_component_name",
         ),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_component_schema"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_component_schema"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_component_revision"),
         CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_component_items"),
         CheckConstraint("chunk_count > 0", name="ck_sync_read_snapshot_component_chunks"),
@@ -746,7 +862,7 @@ class SyncReadSnapshotChunk(Base):
     __tablename__ = "sync_read_snapshot_chunk"
     __table_args__ = (
         CheckConstraint("chunk_index >= 0", name="ck_sync_read_snapshot_chunk_index"),
-        CheckConstraint("schema_version = 1", name="ck_sync_read_snapshot_chunk_schema"),
+        CheckConstraint("schema_version IN (1,2)", name="ck_sync_read_snapshot_chunk_schema"),
         CheckConstraint("source_revision >= 1", name="ck_sync_read_snapshot_chunk_revision"),
         CheckConstraint("item_count >= 0", name="ck_sync_read_snapshot_chunk_items"),
         CheckConstraint(
@@ -853,7 +969,7 @@ class SyncReadProjection(Base):
 
     __tablename__ = "sync_read_projection"
     __table_args__ = (
-        CheckConstraint("projection_version = 1", name="ck_sync_read_projection_version"),
+        CheckConstraint("projection_version IN (1,2)", name="ck_sync_read_projection_version"),
         CheckConstraint("status IN ('building', 'ready')", name="ck_sync_read_projection_status"),
         CheckConstraint(
             "catalog_count >= 0 AND supplier_count >= 0 AND inventory_count >= 0",
@@ -895,6 +1011,12 @@ class SyncReadProjection(Base):
         Integer, nullable=False, server_default=text("1")
     )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'building'"))
+    physical_payload: Mapped[list[dict[str, object]]] = mapped_column(
+        "payload", JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    physical_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     foundation_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     catalog_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     supplier_count: Mapped[int] = mapped_column(BigInteger, nullable=False)

@@ -1,3 +1,5 @@
+import { hasTrainingCheckout } from "./trainingCheckoutPresence";
+import { type TrainingCheckoutResult } from "./trainingCheckout";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import {
@@ -15,7 +17,7 @@ import { Button, ConfirmDialog } from "@/components/ui";
 import { findByBarcode } from "@/features/catalog/api";
 import { type CatalogItem } from "@/features/catalog/types";
 import { useQuickActionPreferences } from "@/features/settings/useQuickActionPreferences";
-import { requestDesktopCashDrawerOpen } from "@/lib/desktopBridge";
+import { requestDesktopCashDrawerOpen } from "@/lib/desktopRuntime";
 import { describeApiError } from "@/lib/errorMessages";
 import { useConnectivity } from "@/lib/connectivityContext";
 import { cn } from "@/lib/utils";
@@ -23,10 +25,14 @@ import { useAuthStore } from "@/stores/auth";
 
 import { BarcodeListener } from "./BarcodeListener";
 import { CartList } from "./CartList";
+import {
+  clearPhysicalCartRecovery,
+  loadPhysicalCartRecovery,
+  savePhysicalCartRecovery,
+} from "./physicalCartRecovery";
 import { PaymentPanel } from "./PaymentPanel";
 import { PosRecoveryGate } from "./PosRecoveryGate";
 import { SearchBar } from "./SearchBar";
-import { ShiftBar } from "./ShiftBar";
 import { getActivePaymentAttempt, getCheckoutResult } from "./api";
 import { beep } from "./beep";
 import {
@@ -41,6 +47,15 @@ import {
   markPendingCompletion,
 } from "./completionOperation";
 import { type DraftInit, loadDraft, scopedDraftStorage } from "./draftStorage";
+import { loadPendingPosCommand } from "./commandOperation";
+import {
+  hasCashRecovery,
+  hasMixedCashRecovery,
+  hasPhysicalCashRecovery,
+} from "./physicalCashRecoveryPresence";
+import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
+import { type CashCheckoutResult } from "./PhysicalCashPanel";
+import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
   mergeCheckoutResult,
@@ -86,13 +101,35 @@ import {
 import { type PosMode } from "./usePosMode";
 import { usePosRegisterLock } from "./usePosRegisterLock";
 
+const CompletedReceiptLines = lazy(async () => {
+  const module = await import("./CompletedReceiptLines");
+  return { default: module.CompletedReceiptLines };
+});
+
 const ReceiptPrintModal = lazy(async () => {
   const module = await import("./ReceiptPrintModal");
   return { default: module.ReceiptPrintModal };
 });
 
+const ShiftBar = lazy(async () => {
+  const module = await import("./ShiftBar");
+  return { default: module.ShiftBar };
+});
+
 // Favorites are useful but not required to scan the first item, so they load
 // after the critical sale controls are ready.
+const PhysicalCartEditor = lazy(async () => {
+  const module = await import("./PhysicalCartEditor");
+  return { default: module.PhysicalCartEditor };
+});
+const TrainingCheckoutPanel = lazy(async () => {
+  const module = await import("./TrainingCheckoutPanel");
+  return { default: module.TrainingCheckoutPanel };
+});
+const PhysicalPaymentPanels = lazy(async () => {
+  const module = await import("./PhysicalPaymentPanels");
+  return { default: module.PhysicalPaymentPanels };
+});
 const QuickProducts = lazy(async () => {
   const module = await import("./QuickProducts");
   return { default: module.QuickProducts };
@@ -191,6 +228,7 @@ function normalizePositiveMoney(value: string): string | null {
  */
 export function SaleArea({
   registerId,
+  registerAvailable = true,
   mode,
   soundOn,
   draftTtlMin,
@@ -209,6 +247,7 @@ export function SaleArea({
   onRegisterSwitchStateChange,
 }: {
   registerId: string;
+  registerAvailable?: boolean;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
@@ -238,21 +277,43 @@ export function SaleArea({
   const isOnline = useConnectivity().canUseServer;
   const shiftQuery = useCurrentShiftQuery(registerId);
   const hasShift = Boolean(shiftQuery.data);
+  const recoveryDraft = storageScope ? loadDraft(registerId, draftTtlMin, storageScope) : null;
+  const savedWorkRequired = Boolean(
+    recoveryDraft?.saleId || loadPendingPosCommand(registerId, storageScope),
+  );
+  const workspaceKey = JSON.stringify([storageScope?.tenantId, storageScope?.userId, registerId]);
+  const [openedWorkspace, setOpenedWorkspace] = useState<string | null>(null);
+  // A command may clear its marker just before the live draft effect saves it.
+  // Preserve the mounted recovery context across that handoff when access changes.
+  const retainWorkspace = openedWorkspace === workspaceKey && (!registerAvailable || !canSell);
+  const workspaceRequired = Boolean(
+    storageScope && ((hasShift && canSell) || savedWorkRequired || retainWorkspace),
+  );
+  useEffect(() => {
+    if (workspaceRequired) setOpenedWorkspace(workspaceKey);
+  }, [workspaceKey, workspaceRequired]);
+  useEffect(() => {
+    if (!workspaceRequired)
+      onRegisterSwitchStateChange?.({ blocked: shiftQuery.isPending, hasDraft: false });
+  }, [onRegisterSwitchStateChange, shiftQuery.isPending, workspaceRequired]);
 
   return (
     <div className="min-w-0 xl:h-full xl:min-h-0">
-      {hasShift && canSell && storageScope ? (
+      {workspaceRequired && storageScope ? (
         <RegisterWorkspaceGate
           key={JSON.stringify([storageScope.tenantId, storageScope.userId, registerId])}
           registerId={registerId}
           workstationControls={workstationControls}
           onRegisterSwitchStateChange={onRegisterSwitchStateChange}
+          hasSavedWork={savedWorkRequired}
         >
           <PosRecoveryGate registerId={registerId} scope={storageScope}>
             <ActiveWorkspace
               storageScope={storageScope}
               registerId={registerId}
               branchId={shiftQuery.data?.branch_id ?? null}
+              hasOpenShift={hasShift && canSell && registerAvailable}
+              preparationWritable={canSell && registerAvailable}
               mode={mode}
               soundOn={soundOn}
               draftTtlMin={draftTtlMin}
@@ -262,8 +323,9 @@ export function SaleArea({
               paymentSettingsUnavailable={paymentSettingsUnavailable}
               cardTerminalId={cardTerminalId}
               qrTerminalId={qrTerminalId}
-              canCloseShift={canCloseShift}
-              canReconcileExternalPayment={canReconcileExternalPayment}
+              canCloseShift={canCloseShift && registerAvailable}
+              canOpenShift={canOpenShift && registerAvailable}
+              canReconcileExternalPayment={canReconcileExternalPayment && registerAvailable}
               canExportReports={canExportReports}
               online={isOnline}
               workstationControls={workstationControls}
@@ -278,14 +340,16 @@ export function SaleArea({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canOpen={canOpenShift}
-            canClose={canCloseShift}
-            canExportReport={canExportReports}
-            online={isOnline}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && registerAvailable}
+              canClose={canCloseShift && registerAvailable}
+              canExportReport={canExportReports}
+              online={isOnline}
+            />
+          </Suspense>
         </div>
       )}
     </div>
@@ -296,19 +360,24 @@ function RegisterWorkspaceGate({
   registerId,
   workstationControls,
   onRegisterSwitchStateChange,
+  hasSavedWork,
   children,
 }: {
   registerId: string;
   workstationControls?: ReactNode;
   onRegisterSwitchStateChange?: (state: RegisterSwitchState) => void;
+  hasSavedWork: boolean;
   children: ReactNode;
 }): JSX.Element {
   const registerLock = usePosRegisterLock(registerId);
 
   useEffect(() => {
     if (registerLock.isOwner) return;
-    onRegisterSwitchStateChange?.({ blocked: false, hasDraft: false });
-  }, [onRegisterSwitchStateChange, registerLock.isOwner]);
+    onRegisterSwitchStateChange?.({
+      blocked: registerLock.status === "checking",
+      hasDraft: hasSavedWork,
+    });
+  }, [hasSavedWork, onRegisterSwitchStateChange, registerLock.isOwner, registerLock.status]);
 
   if (registerLock.isOwner) return <>{children}</>;
 
@@ -345,6 +414,8 @@ function ActiveWorkspace({
   storageScope,
   registerId,
   branchId,
+  hasOpenShift,
+  preparationWritable,
   mode,
   soundOn,
   draftTtlMin,
@@ -355,6 +426,7 @@ function ActiveWorkspace({
   cardTerminalId,
   qrTerminalId,
   canCloseShift,
+  canOpenShift,
   canReconcileExternalPayment,
   canExportReports,
   online,
@@ -364,6 +436,8 @@ function ActiveWorkspace({
   storageScope: PosStorageScope;
   registerId: string;
   branchId: string | null;
+  hasOpenShift: boolean;
+  preparationWritable: boolean;
   mode: PosMode;
   soundOn: boolean;
   draftTtlMin: number;
@@ -374,6 +448,7 @@ function ActiveWorkspace({
   cardTerminalId?: string | null;
   qrTerminalId?: string | null;
   canCloseShift: boolean;
+  canOpenShift: boolean;
   canReconcileExternalPayment: boolean;
   canExportReports: boolean;
   online: boolean;
@@ -389,9 +464,25 @@ function ActiveWorkspace({
     [storageScope],
   );
   const [sessionIsActive] = useState(() => capturePosSessionGuard(storageScope));
+  const writableRef = useRef(hasOpenShift);
+  writableRef.current = hasOpenShift;
 
   const [init] = useState<DraftInit>(() => loadDraft(registerId, draftTtlMin, storageScope));
   const [saleId, setSaleId] = useState<string | null>(init.saleId);
+  const [physicalCashBlocked, setPhysicalCashBlocked] = useState(
+    () => init.saleId !== null && hasCashRecovery(init.saleId, storageScope),
+  );
+  const physicalCashBlockedRef = useRef(physicalCashBlocked);
+  const [physicalPreparationBlocked, setPhysicalPreparationBlocked] = useState(
+    () => init.saleId !== null && hasUnitPaymentPreparation(init.saleId, storageScope),
+  );
+  const physicalPreparationBlockedRef = useRef(physicalPreparationBlocked);
+  const [trainingBlocked, setTrainingBlocked] = useState(
+    () => init.saleId !== null && hasTrainingCheckout(init.saleId, storageScope),
+  );
+  const trainingBlockedRef = useRef(trainingBlocked);
+  const physicalOperationsBlocked =
+    physicalCashBlocked || physicalPreparationBlocked || trainingBlocked;
   const [nameById, setNameById] = useState<Record<string, string>>(init.nameById);
   const [pendingPayment, setPendingPayment] = useState<PendingPaymentOperation | null>(() =>
     init.saleId ? loadPendingPaymentOperation(init.saleId) : null,
@@ -435,6 +526,10 @@ function ActiveWorkspace({
   const [externalPaymentConfirmation, setExternalPaymentConfirmation] =
     useState<ExternalPaymentConfirmation | null>(null);
   const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
+  const [physicalEditorOpen, setPhysicalEditorOpen] = useState(
+    () => init.saleId !== null && loadPhysicalCartRecovery(init.saleId, storageScope) !== null,
+  );
+  const [physicalCartBusy, setPhysicalCartBusy] = useState(physicalEditorOpen);
   const [queuedScans, setQueuedScans] = useState(0);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -476,6 +571,7 @@ function ActiveWorkspace({
   const posCommand = usePosCommandResilience({
     registerId,
     scope: storageScope,
+    writable: hasOpenShift,
     onApplied: onPosCommandApplied,
   });
   const addPayment = useAddPayment(sessionIsActive);
@@ -518,6 +614,26 @@ function ActiveWorkspace({
   const sale: SaleDetails | null = saleQuery.data ?? null;
   const isDraft = !sale || sale.status === "draft";
   const items = sale?.items ?? [];
+  const preparedItems = sale?.prepared_cart_items ?? [];
+  const completedReceiptLines =
+    sale?.status === "completed"
+      ? sale.mixed_items?.length
+        ? sale.mixed_items
+        : (sale.physical_items ?? [])
+      : [];
+  const cashKind =
+    saleId && hasPhysicalCashRecovery(saleId, storageScope)
+      ? "physical"
+      : (saleId && hasMixedCashRecovery(saleId, storageScope)) ||
+          (items.length > 0 && preparedItems.length > 0)
+        ? "mixed"
+        : "physical";
+  const physicalCartActive = isDraft && (physicalEditorOpen || preparedItems.length > 0);
+  const trainingActive = sale?.is_test === true && (physicalCartActive || trainingBlocked);
+  const receiptItemCount =
+    completedReceiptLines.length > 0
+      ? completedReceiptLines.length
+      : items.length + (isDraft ? preparedItems.length : 0);
   const recordedPayments = sale?.payments ?? [];
   const payments =
     sale?.status === "draft" ? [...recordedPayments, ...stagedPayments] : recordedPayments;
@@ -540,9 +656,31 @@ function ActiveWorkspace({
         (stagedPayments.some((payment) => !paymentMethods.includes(payment.payment_method)) ||
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
-  const cartMutationPending = posCommand.blocked || !online;
+  const cartMutationPending =
+    !hasOpenShift || posCommand.blocked || physicalCartBusy || physicalOperationsBlocked || !online;
+  const unitPaymentReady =
+    hasOpenShift &&
+    isDraft &&
+    preparedItems.length > 0 &&
+    recordedPayments.length === 0 &&
+    stagedPayments.length === 0 &&
+    !physicalCartBusy &&
+    !posCommand.blocked &&
+    !pendingCheckout &&
+    !pendingPayment &&
+    !completionUncertain &&
+    !checkoutUncertain &&
+    !checkoutReconciling &&
+    !externalPaymentReviewRequired &&
+    !saleQuery.isError &&
+    !saleQuery.isPlaceholderData &&
+    !paymentSettingsLoading &&
+    !paymentSettingsUnavailable;
+  const physicalPaymentReady = unitPaymentReady && sale?.is_test === false;
   const paymentStarted = stagedPayments.length > 0 || recordedPayments.length > 0;
   const saleEditingBlocked =
+    !hasOpenShift ||
+    physicalOperationsBlocked ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -554,6 +692,9 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null);
   const scannerHardwareBlocked =
+    !hasOpenShift ||
+    physicalOperationsBlocked ||
+    physicalCartActive ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -564,6 +705,8 @@ function ActiveWorkspace({
     pendingPayment !== null;
   const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
+    physicalOperationsBlocked ||
+    physicalCartBusy ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -580,11 +723,13 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null) ||
     (sale?.status === "draft" &&
-      (items.length > 0 ||
+      (receiptItemCount > 0 ||
         recordedPayments.length > 0 ||
         stagedPayments.length > 0 ||
         prescription !== null));
   const registerSwitchBlocked =
+    physicalOperationsBlocked ||
+    physicalCartBusy ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -605,7 +750,7 @@ function ActiveWorkspace({
     (saleId !== null && sale === null);
   const hasDraftToPreserve =
     sale?.status === "draft" &&
-    (items.length > 0 ||
+    (receiptItemCount > 0 ||
       recordedPayments.length > 0 ||
       stagedPayments.length > 0 ||
       prescription !== null);
@@ -706,6 +851,176 @@ function ActiveWorkspace({
       return true;
     },
     [persistCompletedReceipt, queryClient, refetchSale, registerId, saleId, sessionIsActive],
+  );
+
+  const preparePhysicalCash = async (): Promise<void> => {
+    if (!sessionIsActive() || !saleId || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    const { requiresSalePrescription } = await import("./dispensingPreflight");
+    if (!sessionIsActive() || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    const prescriptionRequired = await requiresSalePrescription(saleId);
+    if (!sessionIsActive() || saleIdRef.current !== saleId)
+      throw new Error("Сессия кассира завершена.");
+    if (!writableRef.current) throw new Error("Касса недоступна. Новая оплата не отправлена.");
+    if (prescriptionRequired) {
+      if (!prescription) {
+        setRequiresRx(true);
+        setPrescriptionOpen(true);
+        throw new Error("Сначала заполните рецепт. Оплата ещё не начата.");
+      }
+      // A global sale reference covers both legacy and physical Rx positions.
+      // Sensitive details remain only in memory until this authenticated request.
+      await addPrescription.mutateAsync({ saleId, payload: prescription });
+      if (!sessionIsActive() || saleIdRef.current !== saleId)
+        throw new Error("Сессия кассира завершена.");
+    } else setRequiresRx(false);
+  };
+
+  const electronicAcceptanceOwner = useRef({
+    registerId,
+    branchId: branchId ?? sale?.branch_id,
+    saleId,
+    tenantId: storageScope.tenantId,
+    userId: storageScope.userId,
+  });
+  electronicAcceptanceOwner.current = {
+    registerId,
+    branchId: branchId ?? sale?.branch_id,
+    saleId,
+    tenantId: storageScope.tenantId,
+    userId: storageScope.userId,
+  };
+  const acceptPhysicalElectronic = useCallback(
+    async (result: ElectronicCheckoutResult): Promise<boolean> => {
+      const current = () =>
+        sessionIsActive() &&
+        saleIdRef.current === result.sale_id &&
+        electronicAcceptanceOwner.current.saleId === result.sale_id &&
+        electronicAcceptanceOwner.current.registerId === result.register_id &&
+        electronicAcceptanceOwner.current.branchId === result.branch_id &&
+        electronicAcceptanceOwner.current.tenantId === result.tenant_id &&
+        electronicAcceptanceOwner.current.userId === result.cashier_id;
+      if (!current()) return false;
+      const { matchesElectronicCompletedSale } = await import("./electronicCheckoutReceipt");
+      if (!current()) return false;
+      const refreshed = await refetchSale({ throwOnError: true });
+      if (!current()) return false;
+      const completed = refreshed.data;
+      if (!completed || !matchesElectronicCompletedSale(completed, result))
+        throw new Error("Не удалось подтвердить сохранённый электронный чек. Повторите проверку.");
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
+      setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
+      return true;
+    },
+    [sessionIsActive, refetchSale, persistCompletedReceipt, queryClient],
+  );
+
+  const updateTrainingBlocked = useCallback(
+    (blocked: boolean) => {
+      if (!sessionIsActive()) return;
+      trainingBlockedRef.current = blocked;
+      setTrainingBlocked(blocked);
+    },
+    [sessionIsActive],
+  );
+  const acceptTraining = useCallback(
+    (result: TrainingCheckoutResult): boolean => {
+      if (
+        !sessionIsActive() ||
+        saleIdRef.current !== result.sale_id ||
+        result.tenant_id !== storageScope.tenantId ||
+        result.cashier_id !== storageScope.userId ||
+        result.register_id !== registerId
+      )
+        return false;
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
+      return true;
+    },
+    [
+      sessionIsActive,
+      storageScope.tenantId,
+      storageScope.userId,
+      registerId,
+      persistCompletedReceipt,
+    ],
+  );
+
+  const acceptPhysicalCash = useCallback(
+    async (result: CashCheckoutResult, openCashDrawer: boolean): Promise<boolean> => {
+      if (
+        !sessionIsActive() ||
+        saleIdRef.current !== result.sale_id ||
+        result.register_id !== registerId ||
+        result.tenant_id !== storageScope.tenantId ||
+        result.cashier_id !== storageScope.userId
+      )
+        return false;
+      const refreshed = await refetchSale({ throwOnError: true });
+      if (!sessionIsActive() || saleIdRef.current !== result.sale_id) return false;
+      const completed = refreshed.data;
+      if (
+        !completed ||
+        completed.status !== "completed" ||
+        completed.id !== result.sale_id ||
+        completed.tenant_id !== result.tenant_id ||
+        completed.cashier_user_id !== result.cashier_id ||
+        completed.register_id !== result.register_id ||
+        completed.branch_id !== result.branch_id ||
+        completed.shift_id !== result.shift_id ||
+        completed.receipt_number !== result.receipt_number ||
+        completed.total_amount !== result.total_amount ||
+        completed.currency !== result.currency ||
+        completed.payments.length !== 1 ||
+        completed.payments[0]?.id !== result.operation_id ||
+        completed.payments[0]?.operation_id !== result.operation_id ||
+        completed.payments[0]?.sale_id !== result.sale_id ||
+        completed.payments[0]?.payment_method !== "cash" ||
+        completed.payments[0]?.amount !== result.total_amount ||
+        completed.payments[0]?.currency !== result.currency
+      )
+        throw new Error(
+          "Не удалось подтвердить завершённый чек. Проверьте эту же оплату повторно.",
+        );
+      if (!persistCompletedReceipt(result.sale_id)) return false;
+      if (openCashDrawer && openedDrawerOperationRef.current !== result.operation_id) {
+        requestDesktopCashDrawerOpen({
+          reason: "sale-completed",
+          registerId,
+          saleId: result.sale_id,
+        });
+        openedDrawerOperationRef.current = result.operation_id;
+      }
+      void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
+      setPhysicalEditorOpen(false);
+      setPrescription(null);
+      setRequiresRx(false);
+      return true;
+    },
+    [sessionIsActive, registerId, storageScope, refetchSale, persistCompletedReceipt, queryClient],
+  );
+
+  const updatePhysicalCashBlocked = useCallback(
+    (blocked: boolean) => {
+      if (!sessionIsActive()) return;
+      physicalCashBlockedRef.current = blocked;
+      setPhysicalCashBlocked(blocked);
+    },
+    [sessionIsActive],
+  );
+  const updatePhysicalPreparationBlocked = useCallback(
+    (blocked: boolean) => {
+      if (!sessionIsActive()) return;
+      physicalPreparationBlockedRef.current = blocked;
+      setPhysicalPreparationBlocked(blocked);
+    },
+    [sessionIsActive],
   );
 
   const recoverCheckout = useCallback(
@@ -891,7 +1206,8 @@ function ActiveWorkspace({
     qty: number,
     fromScanner = false,
   ): Promise<boolean> => {
-    if (fromScanner ? scannerHardwareBlocked : saleEditingBlocked) return false;
+    if (physicalCartActive || (fromScanner ? scannerHardwareBlocked : saleEditingBlocked))
+      return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
@@ -952,6 +1268,7 @@ function ActiveWorkspace({
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
+    if (physicalCartActive) return;
     if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
       return;
     setTopError(null);
@@ -970,6 +1287,7 @@ function ActiveWorkspace({
   };
 
   const onDelete = async (itemId: string) => {
+    if (physicalCartActive) return;
     if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
       return;
     try {
@@ -990,7 +1308,7 @@ function ActiveWorkspace({
     amount: string,
     metadata?: PaymentMetadata,
   ) => {
-    if (!saleId || !sessionIsActive()) return;
+    if (physicalCartActive || !saleId || !sessionIsActive() || !writableRef.current) return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
     const normalizedAmount = amt.toFixed(2);
@@ -1102,7 +1420,7 @@ function ActiveWorkspace({
     paymentAttemptId?: string,
     serverConfirmed = false,
   ): boolean => {
-    if (!saleId || recordedPayments.length > 0) return false;
+    if (physicalCartActive || !saleId || recordedPayments.length > 0) return false;
     if (!serverConfirmed && !paymentMethods.includes(method)) {
       setTopError("Этот способ оплаты отключён в настройках аптеки.");
       return false;
@@ -1208,6 +1526,7 @@ function ActiveWorkspace({
   };
 
   const submitPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
+    if (!writableRef.current) return;
     if (method === "card" || method === "qr") {
       if (recordedPayments.length > 0 || pendingPayment !== null) {
         setTopError(
@@ -1222,6 +1541,7 @@ function ActiveWorkspace({
   };
 
   const prepareExternalPayment = async (method: "card" | "qr", amount: string) => {
+    if (physicalCartActive || !writableRef.current) return;
     void loadExternalPaymentEvidenceDialog();
     if (!saleId || !sessionIsActive() || externalPaymentConfirmationRef.current !== null) return;
     const normalizedAmount = normalizePositiveMoney(amount);
@@ -1253,6 +1573,7 @@ function ActiveWorkspace({
         return;
       }
       if (attempt.status === "pending") {
+        if (!writableRef.current) return;
         attempt = await beginPaymentAttemptReconciliation.mutateAsync(attempt.id);
         if (!sessionIsActive()) return;
       }
@@ -1283,15 +1604,20 @@ function ActiveWorkspace({
   prepareExternalPaymentRef.current = prepareExternalPayment;
 
   useEffect(() => {
+    if (!hasOpenShift) {
+      paymentAttemptRecoverySaleRef.current = null;
+      return;
+    }
     if (!saleId || sale?.status !== "draft") return;
     if (paymentAttemptRecoverySaleRef.current === saleId) return;
     paymentAttemptRecoverySaleRef.current = saleId;
+    let disposed = false;
     void (async () => {
       let storedAttempt = loadPaymentAttemptOperation(saleId);
       if (!storedAttempt) {
         try {
           const serverAttempt = await getActivePaymentAttempt(saleId);
-          if (!serverAttempt || !sessionIsActive()) return;
+          if (disposed || !serverAttempt || !sessionIsActive()) return;
           storedAttempt = saveRecoveredPaymentAttemptOperation(serverAttempt);
           if (!storedAttempt) {
             setTopError(
@@ -1300,6 +1626,7 @@ function ActiveWorkspace({
             return;
           }
         } catch (error) {
+          if (disposed) return;
           paymentAttemptRecoverySaleRef.current = null;
           setTopError(
             describeApiError(
@@ -1310,9 +1637,13 @@ function ActiveWorkspace({
           return;
         }
       }
-      await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
+      if (!disposed)
+        await prepareExternalPaymentRef.current(storedAttempt.paymentMethod, storedAttempt.amount);
     })();
-  }, [sale?.status, saleId, sessionIsActive]);
+    return () => {
+      disposed = true;
+    };
+  }, [hasOpenShift, sale?.status, saleId, sessionIsActive]);
 
   const closeExternalPaymentConfirmation = () => {
     externalPaymentConfirmationRef.current = null;
@@ -1320,7 +1651,7 @@ function ActiveWorkspace({
   };
 
   const cancelExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
-    if (!sessionIsActive()) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (
       externalPaymentMutationRef.current ||
       voidPaymentAttempt.isPending ||
@@ -1350,7 +1681,7 @@ function ActiveWorkspace({
   };
 
   const confirmExternalPayment = async (evidence: PaymentAttemptConfirmPayload) => {
-    if (!sessionIsActive()) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (
       externalPaymentMutationRef.current ||
       confirmPaymentAttempt.isPending ||
@@ -1427,6 +1758,7 @@ function ActiveWorkspace({
     metadata?: PaymentMetadata,
   ) => {
     if (
+      physicalCartActive ||
       !saleId ||
       remaining <= 0.001 ||
       cartMutationPending ||
@@ -1472,7 +1804,8 @@ function ActiveWorkspace({
   };
 
   const completeLegacySale = async () => {
-    if (!sessionIsActive()) return;
+    if (physicalCartActive) return;
+    if (!sessionIsActive() || !writableRef.current) return;
     if (!saleId || completingRef.current || completeSale.isPending) return;
     if (pendingPayment || addPayment.isPending) {
       setTopError("Сначала подтвердите результат оплаты.");
@@ -1510,6 +1843,10 @@ function ActiveWorkspace({
         if (!sessionIsActive()) return;
         setPrescription(null);
         setRequiresRx(false);
+      }
+      if (!writableRef.current) {
+        completingRef.current = false;
+        return;
       }
       await completeSale.mutateAsync({
         saleId,
@@ -1560,6 +1897,7 @@ function ActiveWorkspace({
   };
 
   const onComplete = async () => {
+    if (physicalCartActive || !writableRef.current) return;
     if (!saleId || !sale || completingRef.current || !sessionIsActive()) return;
     if (cartMutationPending) {
       setTopError("Дождитесь завершения изменения товаров в чеке.");
@@ -1608,7 +1946,7 @@ function ActiveWorkspace({
       setPendingCheckout(storedOperation);
       setCheckoutUncertain(true);
       const recovery = await recoverCheckout(storedOperation, true);
-      if (!sessionIsActive()) return;
+      if (!sessionIsActive() || !writableRef.current) return;
       if (recovery !== "not-found") return;
     }
 
@@ -1654,6 +1992,7 @@ function ActiveWorkspace({
     setTopError(null);
     completingRef.current = true;
     try {
+      if (!writableRef.current) return;
       const result = await checkoutSale.mutateAsync({
         operation_id: operation.operationId,
         register_id: registerId,
@@ -1709,6 +2048,15 @@ function ActiveWorkspace({
   };
 
   const startNewSale = (): boolean => {
+    if (
+      physicalCashBlockedRef.current ||
+      physicalPreparationBlockedRef.current ||
+      trainingBlockedRef.current ||
+      !hasOpenShift
+    ) {
+      setTopError("Сначала проверьте текущую оплату и откройте смену.");
+      return false;
+    }
     if (posCommand.blocked) {
       setTopError("Сначала завершите сверку последней команды с сервером.");
       return false;
@@ -1758,6 +2106,10 @@ function ActiveWorkspace({
   };
 
   const onNewSale = (): boolean => {
+    if (physicalCartActive) {
+      setTopError("Сначала удалите позиции из поштучной корзины и закройте её редактор.");
+      return false;
+    }
     if (
       completingRef.current ||
       posCommand.blocked ||
@@ -1793,6 +2145,7 @@ function ActiveWorkspace({
   };
 
   const onQtyTap = (itemId: string) => {
+    if (physicalCartActive) return;
     const it = items.find((i) => i.id === itemId);
     if (!it) return;
     setNumpad({ kind: "qty", itemId, initial: String(Number(it.qty)) });
@@ -1929,14 +2282,17 @@ function ActiveWorkspace({
               {workstationControls}
             </div>
           ) : null}
-          <ShiftBar
-            registerId={registerId}
-            mode={mode}
-            canClose={canCloseShift}
-            canExportReport={canExportReports}
-            closeBlocked={shiftCloseBlocked}
-            online={online}
-          />
+          <Suspense fallback={<div role="status">Загрузка смены…</div>}>
+            <ShiftBar
+              registerId={registerId}
+              mode={mode}
+              canOpen={canOpenShift && !physicalOperationsBlocked}
+              canClose={canCloseShift}
+              canExportReport={canExportReports}
+              closeBlocked={shiftCloseBlocked}
+              online={online}
+            />
+          </Suspense>
         </div>
 
         {staleNotice && (
@@ -1976,7 +2332,10 @@ function ActiveWorkspace({
         ) : null}
 
         {isDraft && (
-          <fieldset disabled={saleEditingBlocked} className="min-w-0 shrink-0 border-0 p-0">
+          <fieldset
+            disabled={saleEditingBlocked || physicalCartActive}
+            className="min-w-0 shrink-0 border-0 p-0"
+          >
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
@@ -2010,7 +2369,7 @@ function ActiveWorkspace({
               <QuickProducts
                 branchId={branchId ?? undefined}
                 onAdd={onAdd}
-                busy={!isDraft || saleEditingBlocked || posCommand.blocked}
+                busy={!isDraft || saleEditingBlocked || physicalCartActive || posCommand.blocked}
                 touch={touch}
               />
             </Suspense>
@@ -2037,15 +2396,19 @@ function ActiveWorkspace({
                   ) : null}
                 </h2>
                 <p className="text-xs text-foreground-muted">
-                  {items.length === 0
+                  {receiptItemCount === 0
                     ? "Нет товаров"
-                    : `${items.length} ${productCountLabel(items.length)}`}
+                    : `${receiptItemCount} ${productCountLabel(receiptItemCount)}`}
                 </p>
               </div>
               {requiresRx && !prescription ? (
-                <span className="rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-medium text-warning-foreground ring-1 ring-inset ring-warning/30">
-                  требуется рецепт
-                </span>
+                <Button
+                  variant="secondary"
+                  disabled={saleEditingBlocked}
+                  onClick={() => setPrescriptionOpen(true)}
+                >
+                  Заполнить рецепт
+                </Button>
               ) : null}
             </header>
 
@@ -2056,20 +2419,103 @@ function ActiveWorkspace({
               <span aria-hidden="true" />
             </div>
 
-            <CartList
-              items={items}
-              nameById={nameById}
-              currency={currency}
-              editable={isDraft && !saleEditingBlocked}
-              onQtyChange={(id, q) => void onQtyChange(id, q)}
-              onDelete={(id) => void onDelete(id)}
-              onQtyTap={touch ? onQtyTap : undefined}
-              touch={touch}
-              busy={posCommand.blocked}
-              embedded
-              quickActions={quickActions}
-              actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
-            />
+            {completedReceiptLines.length > 0 ? (
+              <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
+                <CompletedReceiptLines
+                  lines={completedReceiptLines}
+                  currency={currency}
+                  touch={touch}
+                />
+              </Suspense>
+            ) : (
+              (!physicalCartActive || items.length > 0) && (
+                <CartList
+                  items={items}
+                  nameById={nameById}
+                  currency={currency}
+                  editable={isDraft && !saleEditingBlocked && !physicalCartActive}
+                  onQtyChange={(id, q) => void onQtyChange(id, q)}
+                  onDelete={(id) => void onDelete(id)}
+                  onQtyTap={touch ? onQtyTap : undefined}
+                  touch={touch}
+                  busy={posCommand.blocked}
+                  embedded
+                  quickActions={quickActions}
+                  actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
+                />
+              )
+            )}
+
+            {isDraft && physicalCartActive && saleId && branchId && (
+              <div className="min-h-0 overflow-y-auto p-3">
+                {items.length > 0 && (
+                  <p className="mb-3 text-sm text-warning-foreground">
+                    Обычные и поштучные позиции оплачиваются вместе наличными.
+                  </p>
+                )}
+                <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
+                  <PhysicalCartEditor
+                    key={saleId}
+                    saleId={saleId}
+                    branchId={branchId}
+                    items={preparedItems}
+                    initialRecovery={loadPhysicalCartRecovery(saleId, storageScope)}
+                    onRecoveryChange={(operation) => {
+                      if (!sessionIsActive()) throw new Error("Сессия кассира завершена");
+                      if (operation) savePhysicalCartRecovery(saleId, storageScope, operation);
+                      else clearPhysicalCartRecovery(saleId, storageScope);
+                    }}
+                    nameById={nameById}
+                    onNameChange={(catalogId, name) => {
+                      if (sessionIsActive())
+                        setNameById((current) => ({ ...current, [catalogId]: name }));
+                    }}
+                    disabled={
+                      saleEditingBlocked ||
+                      !isDraft ||
+                      saleQuery.isError ||
+                      saleQuery.isPlaceholderData
+                    }
+                    sessionIsActive={sessionIsActive}
+                    onChanged={async () => {
+                      if (sessionIsActive()) await refetchSale({ throwOnError: true });
+                    }}
+                    onBusyChange={(busy) => {
+                      if (sessionIsActive()) setPhysicalCartBusy(busy);
+                    }}
+                  />
+                </Suspense>
+              </div>
+            )}
+            {isDraft && preparedItems.length === 0 && (
+              <div className="p-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saleEditingBlocked || physicalCartBusy}
+                  onClick={() => {
+                    if (physicalCartActive) {
+                      setPhysicalEditorOpen(false);
+                      return;
+                    }
+                    void ensureSaleId()
+                      .then((id) => {
+                        if (id && sessionIsActive()) setPhysicalEditorOpen(true);
+                      })
+                      .catch((error: unknown) => {
+                        if (sessionIsActive())
+                          setTopError(
+                            describeApiError(error, "Не удалось открыть поштучную корзину"),
+                          );
+                      });
+                  }}
+                >
+                  {physicalCartActive
+                    ? "Вернуться к обычной продаже"
+                    : "Выбрать упаковку, блистер или штуки"}
+                </Button>
+              </div>
+            )}
 
             {topError ? (
               <div className="flex flex-wrap items-center gap-2 border-t border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
@@ -2100,7 +2546,9 @@ function ActiveWorkspace({
                 size="sm"
                 variant="ghost"
                 className="text-danger hover:text-danger"
-                disabled={!isDraft || items.length === 0 || saleEditingBlocked}
+                disabled={
+                  !isDraft || items.length === 0 || saleEditingBlocked || physicalCartActive
+                }
                 onClick={onNewSale}
               >
                 <ClearReceiptIcon />
@@ -2108,14 +2556,16 @@ function ActiveWorkspace({
               </Button>
               <div className="ml-auto flex items-baseline gap-4">
                 <span className="text-xs text-foreground-muted">
-                  {items.length} {productCountLabel(items.length)}
+                  {receiptItemCount} {productCountLabel(receiptItemCount)}
                 </span>
-                <strong className="font-mono text-xl tabular-nums text-primary">
-                  {totalDue.toFixed(2)}{" "}
-                  <span className="font-sans text-xs font-semibold text-foreground-secondary">
-                    {currency}
-                  </span>
-                </strong>
+                {!physicalCartActive && (
+                  <strong className="font-mono text-xl tabular-nums text-primary">
+                    {totalDue.toFixed(2)}{" "}
+                    <span className="font-sans text-xs font-semibold text-foreground-secondary">
+                      {currency}
+                    </span>
+                  </strong>
+                )}
               </div>
             </footer>
           </section>
@@ -2125,69 +2575,136 @@ function ActiveWorkspace({
             className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
           >
             <div className="xl:h-full xl:min-h-0">
-              <PaymentPanel
-                totalDue={totalDue}
-                totalPaid={totalPaid}
-                remaining={remaining}
-                currency={currency}
-                payments={payments}
-                isDraft={isDraft}
-                completing={completeSale.isPending || checkoutSale.isPending || checkoutReconciling}
-                completionUncertain={completionUncertain || checkoutUncertain}
-                payingMethod={payingMethod}
-                pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
-                paymentMethods={paymentMethods}
-                mixedPaymentEnabled={mixedPaymentEnabled}
-                paymentSettingsLoading={paymentSettingsLoading}
-                paymentSettingsUnavailable={paymentSettingsUnavailable}
-                interactionBlocked={
-                  cartMutationPending ||
-                  createPaymentAttempt.isPending ||
-                  confirmPaymentAttempt.isPending ||
-                  voidPaymentAttempt.isPending ||
-                  externalPaymentReviewRequired
-                }
-                completionBlocked={
-                  cartMutationPending ||
-                  stagedPaymentConflict ||
-                  externalPaymentReviewRequired ||
-                  (recordedPayments.length === 0 &&
-                    (paymentSettingsLoading ||
-                      paymentSettingsUnavailable ||
-                      stagedPayments.length === 0))
-                }
-                onPayTile={onPayTile}
-                onRetryPendingPayment={
-                  pendingPayment
-                    ? () =>
-                        void payLegacy(
-                          pendingPayment.paymentMethod,
-                          pendingPayment.amount,
-                          pendingPayment.metadata,
-                        )
-                    : undefined
-                }
-                onClearPayments={
-                  stagedPayments.length > 0 &&
-                  recordedPayments.length === 0 &&
-                  !electronicPaymentPendingResolution
-                    ? requestStagedPaymentReset
-                    : undefined
-                }
-                onComplete={() => void onComplete()}
-                completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
-                onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
-                onNewSale={onNewSale}
-                newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
-                touch={touch}
-                completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
-              />
+              {(physicalCartActive || physicalOperationsBlocked || trainingActive) &&
+              saleId &&
+              (branchId || sale?.branch_id) ? (
+                <Suspense fallback={<p role="status">Загрузка оплаты…</p>}>
+                  {trainingActive && sale ? (
+                    <TrainingCheckoutPanel
+                      key={`training:${saleId}`}
+                      sale={sale}
+                      scope={storageScope}
+                      registerId={registerId}
+                      sessionIsActive={sessionIsActive}
+                      canStart={
+                        unitPaymentReady &&
+                        online &&
+                        !physicalCashBlocked &&
+                        !physicalPreparationBlocked
+                      }
+                      paymentMethods={paymentMethods}
+                      mixedPaymentEnabled={mixedPaymentEnabled}
+                      onBlockedChange={updateTrainingBlocked}
+                      refreshSale={async () => (await refetchSale({ throwOnError: true })).data}
+                      onCompleted={acceptTraining}
+                      onPrint={() => setPrintOpen(true)}
+                      onNewSale={() => {
+                        void startNewSale();
+                      }}
+                    />
+                  ) : trainingBlocked ? (
+                    <p role="alert">
+                      Сначала восстановите сохранённую учебную операцию в исходной продаже.
+                    </p>
+                  ) : (
+                    <>
+                      <PhysicalPaymentPanels
+                        key={`${saleId}:${cashKind}`}
+                        paymentMethods={paymentMethods}
+                        mixedPaymentEnabled={mixedPaymentEnabled}
+                        canPrepare={physicalPaymentReady && !physicalCashBlocked}
+                        canCancel={preparationWritable}
+                        canResolveDecline={canReconcileExternalPayment}
+                        onPreparationBlockedChange={updatePhysicalPreparationBlocked}
+                        kind={cashKind}
+                        saleId={saleId}
+                        branchId={branchId ?? sale!.branch_id}
+                        registerId={registerId}
+                        scope={storageScope}
+                        items={preparedItems}
+                        legacyItems={cashKind === "mixed" ? items : undefined}
+                        online={online}
+                        canPay={
+                          physicalPaymentReady &&
+                          !physicalPreparationBlocked &&
+                          paymentMethods.includes("cash")
+                        }
+                        sessionIsActive={sessionIsActive}
+                        beforeStart={preparePhysicalCash}
+                        onBlockedChange={updatePhysicalCashBlocked}
+                        onCompleted={acceptPhysicalCash}
+                        onElectronicCompleted={acceptPhysicalElectronic}
+                      />
+                    </>
+                  )}
+                </Suspense>
+              ) : (
+                <PaymentPanel
+                  totalDue={totalDue}
+                  totalPaid={totalPaid}
+                  remaining={remaining}
+                  currency={currency}
+                  payments={payments}
+                  isDraft={isDraft}
+                  completing={
+                    completeSale.isPending || checkoutSale.isPending || checkoutReconciling
+                  }
+                  completionUncertain={completionUncertain || checkoutUncertain}
+                  payingMethod={payingMethod}
+                  pendingPaymentMethod={pendingPayment?.paymentMethod ?? null}
+                  paymentMethods={paymentMethods}
+                  mixedPaymentEnabled={mixedPaymentEnabled}
+                  paymentSettingsLoading={paymentSettingsLoading}
+                  paymentSettingsUnavailable={paymentSettingsUnavailable}
+                  interactionBlocked={
+                    cartMutationPending ||
+                    createPaymentAttempt.isPending ||
+                    confirmPaymentAttempt.isPending ||
+                    voidPaymentAttempt.isPending ||
+                    externalPaymentReviewRequired
+                  }
+                  completionBlocked={
+                    cartMutationPending ||
+                    stagedPaymentConflict ||
+                    externalPaymentReviewRequired ||
+                    (recordedPayments.length === 0 &&
+                      (paymentSettingsLoading ||
+                        paymentSettingsUnavailable ||
+                        stagedPayments.length === 0))
+                  }
+                  onPayTile={onPayTile}
+                  onRetryPendingPayment={
+                    pendingPayment
+                      ? () =>
+                          void payLegacy(
+                            pendingPayment.paymentMethod,
+                            pendingPayment.amount,
+                            pendingPayment.metadata,
+                          )
+                      : undefined
+                  }
+                  onClearPayments={
+                    stagedPayments.length > 0 &&
+                    recordedPayments.length === 0 &&
+                    !electronicPaymentPendingResolution
+                      ? requestStagedPaymentReset
+                      : undefined
+                  }
+                  onComplete={() => void onComplete()}
+                  completedReceiptNumber={!isDraft ? (sale?.receipt_number ?? null) : null}
+                  onPrint={!isDraft && saleId ? () => setPrintOpen(true) : undefined}
+                  onNewSale={hasOpenShift ? onNewSale : undefined}
+                  newSaleHint={keyboard ? "Новая продажа (F2)" : undefined}
+                  touch={touch}
+                  completeHint={keyboard ? "Завершить продажу (F4)" : undefined}
+                />
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {isDraft && totalDue > 0 && !paymentPanelVisible && (
+      {isDraft && !physicalCartActive && totalDue > 0 && !paymentPanelVisible && (
         <div
           className="fixed inset-x-3 bottom-3 z-sticky mx-auto flex max-w-md items-center justify-between gap-3 rounded-lg border border-border bg-surface-raised p-2 shadow-lg xl:hidden"
           role="region"

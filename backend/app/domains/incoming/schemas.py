@@ -9,6 +9,9 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator
 
+from app.domains.incoming.acceptance import AcceptanceMode, StockMode
+from app.domains.inventory.unit_stock import UnitPackaging
+
 IncomingQuantity = Annotated[
     Decimal,
     Field(gt=0, max_digits=14, decimal_places=3, allow_inf_nan=False),
@@ -59,6 +62,8 @@ class IncomingItemBase(BaseModel):
     qty: IncomingQuantity
     purchase_price: IncomingMoney
     sale_price: IncomingMoney
+    # Preparation metadata only; this does not enable unit stock or unit sales.
+    prepare_unit_sale: bool = Field(default=False, strict=True)
 
 
 class IncomingItemUpdate(BaseModel):
@@ -71,8 +76,11 @@ class IncomingItemUpdate(BaseModel):
     qty: IncomingQuantity | None = None
     purchase_price: IncomingMoney | None = None
     sale_price: IncomingMoney | None = None
+    prepare_unit_sale: bool | None = Field(default=None, strict=True)
 
-    @field_validator("catalog_id", "expires_at", "qty", "purchase_price", "sale_price")
+    @field_validator(
+        "catalog_id", "expires_at", "qty", "purchase_price", "sale_price", "prepare_unit_sale"
+    )
     @classmethod
     def required_fields_cannot_be_cleared(cls, value: object) -> object:
         if value is None:
@@ -94,6 +102,7 @@ class IncomingItemRead(BaseModel):
     sale_price: Decimal
     currency: str
     created_batch_id: UUID | None
+    unit_packaging_preparation: UnitPackaging | None = None
     catalog_name: str | None = None
     catalog_form: str | None = None
     catalog_dosage: str | None = None
@@ -168,6 +177,13 @@ class IncomingDraftRead(BaseModel):
     updated_at: datetime
 
 
+class IncomingAcceptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stock_mode: AcceptanceMode = "legacy_pack"
+    expected_revision: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
+
+
 class IncomingDocumentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -187,6 +203,7 @@ class IncomingDocumentRead(BaseModel):
     accepted_at: datetime | None
     branch_name: str | None = None
     supplier_name: str | None = None
+    stock_mode: StockMode | None = None
 
 
 class IncomingDocumentSummary(BaseModel):
@@ -208,3 +225,5 @@ class IncomingDocumentList(BaseModel):
 
 class IncomingDocumentWithItems(IncomingDocumentRead):
     items: list[IncomingItemRead]
+    physical_receiving_ready: bool = False
+    acceptance_revision: str | None = None

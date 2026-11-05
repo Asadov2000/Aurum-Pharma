@@ -1,5 +1,5 @@
 import { isAxiosError } from "axios";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -33,6 +33,9 @@ import { describeApiError } from "@/lib/errorMessages";
 import { refundReasonLabel } from "@/lib/refundReasons";
 
 import { useCustomerReturnsQuery, useResolveCustomerReturn } from "./queries";
+import { PhysicalCustomerReturnsPanel } from "./PhysicalCustomerReturnsPanel";
+import { PhysicalDispositionWorkspace } from "./PhysicalDispositionWorkspace";
+import { MixedDispositionWorkspace } from "./MixedDispositionWorkspace";
 import {
   type CustomerReturnDispositionType,
   type CustomerReturnItem,
@@ -40,6 +43,10 @@ import {
   type CustomerReturnStatus,
 } from "./types";
 
+const MixedCustomerReturnsPanel = lazy(async () => {
+  const module = await import("./MixedCustomerReturnsPanel");
+  return { default: module.MixedCustomerReturnsPanel };
+});
 const PAGE_SIZE = 25;
 const dispositionLabels: Record<CustomerReturnDispositionType, string> = {
   disposed: "Утилизировано",
@@ -64,6 +71,55 @@ const dateTimeFormatter = new Intl.DateTimeFormat("ru-RU", {
 });
 
 export function CustomerReturnsPanel(): JSX.Element {
+  const { user } = useAuth();
+  const [queue, setQueue] = useState<"packages" | "physical" | "mixed">("packages");
+  if (!hasPermission(user, "customer_returns.view")) {
+    return (
+      <div className="space-y-4">
+        <MixedDispositionWorkspace key={`mixed:${user?.id}:${user?.active_tenant_id}`} />
+        <PhysicalDispositionWorkspace key={`physical:${user?.id}:${user?.active_tenant_id}`} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <div role="group" aria-label="Вид возвратов" className="flex flex-wrap gap-2">
+        <Button
+          variant={queue === "packages" ? "primary" : "secondary"}
+          aria-pressed={queue === "packages"}
+          onClick={() => setQueue("packages")}
+        >
+          Возвраты упаковками
+        </Button>
+        <Button
+          variant={queue === "physical" ? "primary" : "secondary"}
+          aria-pressed={queue === "physical"}
+          onClick={() => setQueue("physical")}
+        >
+          Физические возвраты
+        </Button>
+        <Button
+          variant={queue === "mixed" ? "primary" : "secondary"}
+          aria-pressed={queue === "mixed"}
+          onClick={() => setQueue("mixed")}
+        >
+          Смешанные возвраты
+        </Button>
+      </div>
+      {queue === "packages" ? (
+        <PackageCustomerReturnsPanel />
+      ) : queue === "physical" ? (
+        <PhysicalCustomerReturnsPanel />
+      ) : (
+        <Suspense fallback={<p role="status">Загружаем смешанные возвраты…</p>}>
+          <MixedCustomerReturnsPanel />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+function PackageCustomerReturnsPanel(): JSX.Element {
   const { user } = useAuth();
   const filterPreferenceKey = useFilterPreferenceKey("customer-returns");
   const canResolve = hasPermission(user, "customer_returns.resolve");
@@ -450,14 +506,14 @@ interface ResolveForm {
 }
 const resolveSchema = z.object({
   disposition_type: z.enum(["disposed", "supplier_claim", "regulatory_transfer"], {
-    required_error: "Выберите выполненное действие",
+    error: (issue) => issue.input === undefined ? "Выберите выполненное действие" : undefined,
   }),
   reason_code: z.enum(["damaged", "quality_issue", "wrong_item", "expired", "other"], {
-    required_error: "Выберите причину",
+    error: (issue) => issue.input === undefined ? "Выберите причину" : undefined,
   }),
   comment: z.string().trim().max(2000, "Не более 2000 символов"),
   confirmed: z.literal(true, {
-    errorMap: () => ({ message: "Подтвердите фактическое выполнение" }),
+    error: "Подтвердите фактическое выполнение",
   }),
 });
 

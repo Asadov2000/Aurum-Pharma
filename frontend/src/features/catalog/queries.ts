@@ -18,6 +18,7 @@ import {
 import {
   type BarcodeCreatePayload,
   type CatalogItemCreatePayload,
+  type CatalogItemWithBarcodes,
   type CatalogItemUpdatePayload,
   type CatalogSearchParams,
   type DuplicateStrategy,
@@ -38,11 +39,12 @@ export function useCatalogQuery(params: CatalogSearchParams, enabled = true) {
   });
 }
 
-export function useCatalogItemQuery(id: string | null) {
+export function useCatalogItemQuery(id: string | null, alwaysRefreshOnMount = false) {
   return useQuery({
     queryKey: catalogKeys.item(id ?? ""),
     queryFn: ({ signal }) => getCatalogItem(id as string, signal),
     enabled: id !== null,
+    refetchOnMount: alwaysRefreshOnMount ? "always" : true,
   });
 }
 
@@ -63,7 +65,11 @@ export function useUpdateCatalogItem() {
   return useMutation({
     mutationFn: (args: { id: string; payload: CatalogItemUpdatePayload }) =>
       updateCatalogItem(args.id, args.payload),
-    onSuccess: (_data, vars) => {
+    onMutate: ({ id }) => qc.cancelQueries({ queryKey: catalogKeys.item(id) }),
+    onSuccess: (data, vars) => {
+      qc.setQueryData<CatalogItemWithBarcodes>(catalogKeys.item(vars.id), (current) =>
+        current ? { ...current, ...data } : undefined,
+      );
       void qc.invalidateQueries({ queryKey: ["catalog", "list"] });
       void qc.invalidateQueries({ queryKey: catalogKeys.item(vars.id) });
       void qc.invalidateQueries({ queryKey: ["catalog", "summary"] });

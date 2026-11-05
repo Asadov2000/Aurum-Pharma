@@ -1,4 +1,6 @@
-import { api } from "@/lib/api";
+import { api, withAuthSession } from "@/lib/api";
+
+import { assertSupportAuthority, captureSupportAuthority } from "./authority";
 
 import {
   type SupportAccessSession,
@@ -20,10 +22,16 @@ export async function listSupportSessions(): Promise<SupportAccessSession[]> {
 export async function startSupportSession(
   payload: SupportAccessSessionCreate,
 ): Promise<SupportAccessSession> {
-  const { data } = await api.post<SupportAccessSession>("/admin/support-access/sessions", payload);
+  const authority = captureSupportAuthority();
+  const { data } = await api.post<SupportAccessSession>(
+    "/admin/support-access/sessions",
+    payload,
+    withAuthSession(undefined, true),
+  );
+  assertSupportAuthority(authority);
   return data;
 }
 
 export async function revokeSupportSession(sessionId: string): Promise<void> {
-  await api.delete(`/admin/support-access/sessions/${sessionId}`);
+  await api.delete(`/admin/support-access/sessions/${sessionId}`, withAuthSession());
 }

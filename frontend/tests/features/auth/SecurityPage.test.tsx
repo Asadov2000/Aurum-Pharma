@@ -39,8 +39,7 @@ vi.mock("@/features/roles/OwnershipTransferPanel", () => ({
   ),
 }));
 
-vi.mock("@/features/auth/api", () => ({
-  fetchMe: vi.fn(),
+vi.mock("@/features/auth/sessionApi", () => ({
   listActiveSessions: (...args: unknown[]) => listActiveSessions(...args),
   revokeActiveSession: (...args: unknown[]) => revokeActiveSession(...args),
   revokeOtherSessions: (...args: unknown[]) => revokeOtherSessions(...args),

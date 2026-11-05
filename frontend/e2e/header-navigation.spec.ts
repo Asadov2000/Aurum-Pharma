@@ -101,6 +101,7 @@ test.describe("Header navigation", () => {
 
   test("uses the sidebar favorites for quick links and preserves them after reload", async ({
     page,
+    browser,
   }) => {
     await loginInBrowser(page, OWNER);
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -122,10 +123,26 @@ test.describe("Header navigation", () => {
       .toEqual(["/", "/pos", "/catalog", "/incoming", "/reports"]);
 
     await page.getByRole("button", { name: "Настроить быстрые переходы", exact: true }).click();
+    const savedFavorite = page.waitForResponse((response) => {
+      if (
+        response.request().method() !== "PATCH" ||
+        new URL(response.url()).pathname !== "/api/v1/auth/preferences" ||
+        response.status() !== 200
+      )
+        return false;
+      const payload = response.request().postDataJSON() as {
+        workspace?: { favorite_routes?: string[] };
+      };
+      return JSON.stringify(payload.workspace?.favorite_routes) === JSON.stringify(["/catalog"]);
+    });
     await settings
       .getByRole("button", { name: "Добавить «Каталог» в избранное", exact: true })
       .click();
     await settings.getByRole("button", { name: "Готово", exact: true }).click();
+    const saved = (await (await savedFavorite).json()) as {
+      workspace: { favorite_routes: string[] };
+    };
+    expect(saved.workspace.favorite_routes).toEqual(["/catalog"]);
     await expect(quickLinks.getByRole("link")).toHaveCount(1);
     await expect(quickLinks.getByRole("link", { name: "Каталог", exact: true })).toHaveAttribute(
       "href",
@@ -134,17 +151,69 @@ test.describe("Header navigation", () => {
     await quickLinks.getByRole("link", { name: "Каталог", exact: true }).click();
     await expect(page).toHaveURL(/\/catalog(?:\?|$)/);
 
+    const rehydratedPreferences = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/v1/auth/preferences",
+    );
     await page.reload({ waitUntil: "domcontentloaded" });
+    const hydrated = await rehydratedPreferences;
+    expect(hydrated.status()).toBe(200);
+    const hydratedPreferences = (await hydrated.json()) as {
+      workspace: { favorite_routes: string[] };
+    };
+    expect(hydratedPreferences.workspace.favorite_routes).toEqual(["/catalog"]);
     await expect(quickLinks.getByRole("link")).toHaveCount(1);
     await expect(quickLinks.getByRole("link", { name: "Каталог", exact: true })).toHaveAttribute(
       "aria-current",
       "page",
     );
 
+    // A clean device has no optimistic cache or pending queue to mask a failed save.
+    const freshContext = await browser.newContext({
+      baseURL: new URL(page.url()).origin,
+      viewport: { width: 1440, height: 900 },
+    });
+    try {
+      const freshPage = await freshContext.newPage();
+      await loginInBrowser(freshPage, OWNER);
+      await openWorkspace(freshPage, "/catalog");
+      const freshLinks = freshPage.getByRole("navigation", {
+        name: "Быстрые переходы",
+        exact: true,
+      });
+      await expect(freshLinks.getByRole("link")).toHaveCount(1);
+      await expect(freshLinks.getByRole("link", { name: "Каталог", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    } finally {
+      await freshContext.close();
+    }
+
+    const savedReset = page.waitForResponse((response) => {
+      if (
+        response.request().method() !== "PATCH" ||
+        new URL(response.url()).pathname !== "/api/v1/auth/preferences" ||
+        response.status() !== 200
+      )
+        return false;
+      const payload = response.request().postDataJSON() as {
+        workspace?: { favorite_routes?: string[] };
+      };
+      return (
+        Array.isArray(payload.workspace?.favorite_routes) &&
+        payload.workspace.favorite_routes.length === 0
+      );
+    });
     await page.getByRole("button", { name: "Настроить быстрые переходы", exact: true }).click();
     await settings.getByRole("button", { name: "Сбросить", exact: true }).click();
     await settings.getByRole("button", { name: "Готово", exact: true }).click();
     await expect(settings).toBeHidden();
+    const resetPreferences = (await (await savedReset).json()) as {
+      workspace: { favorite_routes: string[] };
+    };
+    expect(resetPreferences.workspace.favorite_routes).toEqual([]);
     await expect
       .poll(() =>
         quickLinks

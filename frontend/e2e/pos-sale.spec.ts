@@ -463,6 +463,9 @@ test.describe("POS sale (owner)", () => {
           response.ok(),
       );
       await refundDialog.getByLabel("Причина").selectOption("quality_issue");
+      // This scenario must remain valid when tenant policy requires reason text.
+      const refundComment = "Проверка возврата по терминалу";
+      await refundDialog.getByLabel("Комментарий").fill(refundComment);
       await refundDialog.getByRole("button", { name: "Зафиксировать сумму возврата" }).click();
       const refundAttempt = (await (await createRefundAttemptResponse).json()) as {
         id: string;
@@ -478,8 +481,21 @@ test.describe("POS sale (owner)", () => {
       );
 
       await page.evaluate(
-        (saleId) => window.localStorage.removeItem(`sales:pendingRefund:${saleId}`),
-        completedSale.sale_id,
+        ({ saleId, attemptId }) => {
+          // Simulate loss of this synthetic owner's local journal only;
+          // the server's frozen attempt must remain available for recovery.
+          for (const key of Object.keys(window.localStorage)) {
+            if (!key.startsWith("sales:pendingRefund:v2:")) continue;
+            const marker = JSON.parse(window.localStorage.getItem(key) ?? "null") as {
+              parentSaleId?: string;
+              refundAttemptId?: string;
+            } | null;
+            if (marker?.parentSaleId === saleId && marker.refundAttemptId === attemptId) {
+              window.localStorage.removeItem(key);
+            }
+          }
+        },
+        { saleId: completedSale.sale_id, attemptId: refundAttempt.id },
       );
       await page.reload();
       const recoveredSalesResponse = page.waitForResponse((response) => {
@@ -548,10 +564,16 @@ test.describe("POS sale (owner)", () => {
       expect(returnedSale.refund_attempt_id).toBe(refundAttempt.id);
       expect((await refundRequest).postDataJSON()).toMatchObject({
         reason: "quality_issue",
-        comment: null,
+        comment: refundComment,
       });
 
-      const storedRefundAttempt = await api.get(`pos/refund-attempts/${refundAttempt.id}`);
+      // Retry only the final read on a connection reset, never a refund command.
+      const storedRefundAttempt = await api
+        .get(`pos/refund-attempts/${refundAttempt.id}`, { maxRetries: 1 })
+        .catch(() => {
+          // Transport errors can include authorization headers in their call log.
+          throw new Error("Refund attempt status read failed (ECONNRESET retry limit: 1)");
+        });
       expect(storedRefundAttempt.ok()).toBe(true);
       expect(((await storedRefundAttempt.json()) as { status: string }).status).toBe("consumed");
 
@@ -572,7 +594,73 @@ test.describe("POS sale (owner)", () => {
     }
   });
 
-  test("FEFO splits a 7-unit sale across two batches of 5 + 5 and completes", async ({ page }) => {
+  test("fractional scans keep the displayed rounded total through cash checkout", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    try {
+      const branch = await seedBranch(api, uniqueName("ROUND-Branch"));
+      const register = await seedRegister(api, branch.id, uniqueName("ROUND-Cash"));
+      const supplier = await seedSupplier(api, uniqueName("ROUND-Supp"));
+      const item = await seedCatalogItem(api, uniqueName("ROUND-Med"), "0.05");
+      const batch = await seedAcceptedBatch(api, {
+        branchId: branch.id,
+        supplierId: supplier.id,
+        catalogId: item.id,
+        qty: "2",
+        purchasePrice: "0.01",
+        salePrice: "0.05",
+        expiresAt: isoDateInDays(90),
+      });
+      await installDesktopCashDrawerBridge(page);
+      await loginInBrowser(page, OWNER);
+      await page.goto("/pos");
+      await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
+      await page.getByLabel("Наличные в кассе на начало смены").fill("0");
+      await page.getByRole("button", { name: "Открыть смену" }).click();
+      await expect(page.getByText("Смена открыта")).toBeVisible();
+      for (const expectedCartItems of [1, 2]) {
+        await addPosItemToCart(page, {
+          brandName: item.brand_name,
+          qty: "0.333",
+          expectedCartItems,
+        });
+      }
+      await payPosSaleCash(page, "0.04");
+      const checkoutResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/sales/checkout") &&
+          response.request().method() === "POST",
+      );
+      await completePosSale(page);
+      const response = await checkoutResponse;
+      expect(response.ok()).toBe(true);
+      const completed = (await response.json()) as {
+        total_amount: string;
+        items: Array<{ qty: string; total_price: string }>;
+      };
+      expect(Number(completed.total_amount)).toBe(0.04);
+      expect(completed.items.map((line) => [Number(line.qty), Number(line.total_price)])).toEqual([
+        [0.333, 0.02],
+        [0.333, 0.02],
+      ]);
+      const remaining = await api.get(`batches/${batch.id}`);
+      expect(remaining.ok()).toBe(true);
+      expect(Number(((await remaining.json()) as { qty_remaining: string }).qty_remaining)).toBe(
+        1.334,
+      );
+    } finally {
+      await apiAnon.dispose();
+      await api.dispose();
+    }
+  });
+
+  test("Repeated scans retain cumulative FEFO prices through checkout recovery", async ({
+    page,
+  }) => {
     // Heaviest spec: seeds two accepted batches (~16 API calls) then drives
     // the whole sale UI. 60s is tight when the entire suite is hammering the
     // stack sequentially — give it headroom.
@@ -587,17 +675,16 @@ test.describe("POS sale (owner)", () => {
     const supplier = await seedSupplier(api, uniqueName("POS-Supp"));
     const item = await seedCatalogItem(api, uniqueName("POS-Med"), "20.00");
 
-    // Two batches, both qty=5, different expiries — FEFO must pull from
-    // the earlier-expiring batch first.
+    // A single earlier unit costs 10; later stock costs 20.
     const sooner = isoDateInDays(30);
     const later = isoDateInDays(180);
     await seedAcceptedBatch(api, {
       branchId: branch.id,
       supplierId: supplier.id,
       catalogId: item.id,
-      qty: "5",
-      purchasePrice: "15.00",
-      salePrice: "20.00",
+      qty: "1",
+      purchasePrice: "5.00",
+      salePrice: "10.00",
       expiresAt: sooner,
       batchNumber: "FEFO-A",
     });
@@ -627,24 +714,30 @@ test.describe("POS sale (owner)", () => {
 
     // The redesigned register shows the search directly (the draft is created
     // lazily on the first add — no "+ Новая продажа" step up front).
-    // Pick the catalog item and ask for 7 units → FEFO splits 5 + 2.
+    // Two separate scans must consume the earlier unit only once.
     const searchKey = catalogSearchKey(item.brand_name);
     await addPosItemToCart(page, {
       brandName: item.brand_name,
-      qty: "7",
+      qty: "1",
+      expectedCartItems: 1,
+      searchKey,
+    });
+    await addPosItemToCart(page, {
+      brandName: item.brand_name,
+      qty: "1",
       expectedCartItems: 2,
       searchKey,
     });
 
-    // Two items × 20 TJS each line = 140 TJS total to settle.
+    // Draft and checkout must both charge 10 + 20 = 30 TJS.
     await expect(page.getByText(/К оплате/)).toBeVisible();
-    await expect(page.getByText("140.00", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("30.00", { exact: false }).first()).toBeVisible();
 
     // The tender is staged only in memory. Commit the complete sale command,
     // then lose both its HTTP response and the first recovery lookup. The POS
     // must stop in a safe uncertain state until a reload can reconcile the
     // exact operation without another checkout POST.
-    await payPosSaleCash(page, "140.00");
+    await payPosSaleCash(page, "30.00");
     let checkoutRequests = 0;
     let recoveryRequests = 0;
     let blockRecoveryLookup = true;
@@ -702,16 +795,16 @@ test.describe("POS sale (owner)", () => {
     const receipt = page.locator(".receipt-print");
     await expect(receipt).toBeVisible({ timeout: 15_000 });
     await expect(receipt.getByText("КАССОВЫЙ ЧЕК")).toBeVisible();
-    // FEFO split the 7 units into two lines, so the name appears twice.
+    // The two separately scanned units remain distinct receipt lines.
     await expect(receipt.getByText(new RegExp(item.brand_name)).first()).toBeVisible();
-    // ИТОГО line carries the 140.00 total.
+    // ИТОГО line carries the 30.00 total.
     await expect(receipt.getByText("ИТОГО")).toBeVisible();
-    await expect(receipt.getByText(/140\.00/).first()).toBeVisible();
+    await expect(receipt.getByText(/30\.00/).first()).toBeVisible();
     // Width selector persists per device/register.
     await page.getByLabel("Ширина чека").selectOption("58");
     await page.getByRole("button", { name: "Закрыть", exact: true }).click();
 
-    // ---- Check that batches are drained: total qty_remaining = 10 - 7 = 3 ----
+    // ---- Verify exactly one unit was spent from each batch ----
     await page.goto("/batches");
     await expect(page.getByRole("button", { name: /^Ещё условия/ })).toBeVisible();
     const batchCatalogPicker = page.getByPlaceholder("Найти товар…");
@@ -733,6 +826,10 @@ test.describe("POS sale (owner)", () => {
     const tbody = page.locator("table tbody");
     await expect(tbody.locator("text=FEFO-A")).toBeVisible({ timeout: 15_000 });
     await expect(tbody.locator("text=FEFO-B")).toBeVisible();
+    const earlierRow = tbody.getByRole("row").filter({ hasText: "FEFO-A" });
+    const laterRow = tbody.getByRole("row").filter({ hasText: "FEFO-B" });
+    await expect(earlierRow).toContainText(/0 из 1/);
+    await expect(laterRow).toContainText(/4 из 5/);
   });
 });
 

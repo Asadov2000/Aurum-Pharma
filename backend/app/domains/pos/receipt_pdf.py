@@ -21,7 +21,7 @@ from fpdf.enums import Align, XPos, YPos
 from minio.error import S3Error
 
 from app.core.storage import ensure_bucket, get_object, put_object
-from app.domains.pos.schemas import ReceiptData
+from app.domains.pos.schemas import ReceiptData, ReceiptLine
 
 _FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
 _FONT_REGULAR = _FONT_DIR / "DejaVuSans.ttf"
@@ -55,8 +55,10 @@ def _write_receipt_summary(data: ReceiptData, line: _LineWriter) -> None:
     for payment in data.payments:
         line(f"{_method_label(payment.method)}: {_money(payment.amount)} {cur}", align="R")
     if not data.is_refund:
-        line(f"Принято: {_money(data.paid_total)} {cur}", align="R")
-        line(f"Сдача: {_money(data.change)} {cur}", align="R")
+        if data.paid_total is not None:
+            line(f"Принято: {_money(data.paid_total)} {cur}", align="R")
+        if data.change is not None:
+            line(f"Сдача: {_money(data.change)} {cur}", align="R")
 
     line("", h=4)
     line(
@@ -64,6 +66,17 @@ def _write_receipt_summary(data: ReceiptData, line: _LineWriter) -> None:
         size=8,
         align="C",
     )
+
+
+def _write_physical_receipt_line(pdf: FPDF, item: ReceiptLine, currency: str) -> None:
+    """Wrap the saved name and format amounts without a narrow quantity column."""
+    pdf.set_font(_FONT, "", 9)
+    pdf.multi_cell(0, 5, item.name, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    amounts = (
+        f"{item.qty:f} {item.unit_label} × {_money(item.unit_price)} = "
+        f"{_money(item.total_price)} {currency}"
+    )
+    pdf.multi_cell(0, 5, amounts, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def render_receipt_pdf(data: ReceiptData) -> bytes:
@@ -121,7 +134,12 @@ def render_receipt_pdf(data: ReceiptData) -> bytes:
         # Trim long names to keep the row on one line; the browser view shows
         # the full wrapped name — the PDF is the compact archival copy.
         name = it.name if len(it.name) <= 38 else it.name[:37] + "…"
-        row(name, _money(it.qty), _money(it.unit_price), _money(it.total_price))
+        if it.unit_label is not None:
+            _write_physical_receipt_line(pdf, it, data.currency)
+        else:
+            row(name, _money(it.qty), _money(it.unit_price), _money(it.total_price))
+        if it.quantity_description is not None:
+            line(it.quantity_description, h=4, size=8)
     pdf.ln(2)
 
     # ---- totals ----

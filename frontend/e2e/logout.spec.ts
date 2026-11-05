@@ -27,6 +27,18 @@ async function expectSignedIn(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: "Меню профиля", exact: true })).toBeVisible();
 }
 
+async function openBootstrappedSession(page: Page): Promise<void> {
+  const initialRefresh = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === refreshPath && response.request().method() === "POST",
+  );
+  await page.goto("/");
+  const response = await initialRefresh;
+  expect(response.status()).toBe(200);
+  expect(await response.finished()).toBeNull();
+  await expectSignedIn(page);
+}
+
 async function expectSignedOut(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
@@ -76,8 +88,8 @@ test.describe("Durable browser logout", () => {
     page,
   }) => {
     await loginInBrowser(page, OWNER);
-    await page.goto("/");
-    await expectSignedIn(page);
+    // Drain startup cookie rotation before observing logout and counting later refreshes.
+    await openBootstrappedSession(page);
     expect(await hasRefreshCookie(page.context())).toBe(true);
 
     let blockLogout = true;
@@ -124,16 +136,15 @@ test.describe("Durable browser logout", () => {
 
   test("logout immediately closes both tabs sharing the browser session", async ({ page }) => {
     await loginInBrowser(page, OWNER);
-    await page.goto("/");
-    await expectSignedIn(page);
+    // Drain each initial refresh before counting requests made during logout.
+    await openBootstrappedSession(page);
     const otherPage = await page.context().newPage();
-    await otherPage.goto("/");
-    await expectSignedIn(otherPage);
+    await openBootstrappedSession(otherPage);
 
     let refreshRequests = 0;
-    page.context().on("request", (request) => {
-      if (new URL(request.url()).pathname === refreshPath) refreshRequests += 1;
-    });
+    let phase = "before-click";
+    const refreshPhases: Record<string, number> = {};
+    const unauthorizedPhases: Record<string, number> = {};
     let releaseLogout!: () => void;
     const logoutGate = new Promise<void>((resolve) => {
       releaseLogout = resolve;
@@ -143,18 +154,36 @@ test.describe("Durable browser logout", () => {
       await route.continue();
     });
     try {
+      phase = "click-and-signout";
+      // Observe from logout intent, after asynchronous route setup is complete.
+      page.context().on("response", (response) => {
+        if (response.status() === 401) {
+          unauthorizedPhases[phase] = (unauthorizedPhases[phase] ?? 0) + 1;
+        }
+      });
+      page.context().on("request", (request) => {
+        if (new URL(request.url()).pathname === refreshPath) {
+          refreshRequests += 1;
+          refreshPhases[phase] = (refreshPhases[phase] ?? 0) + 1;
+        }
+      });
       await logoutInBrowser(page);
       await expectSignedOut(page);
       await expectSignedOut(otherPage);
       expect(await hasRefreshCookie(page.context())).toBe(true);
     } finally {
+      phase = "release-logout";
       releaseLogout();
     }
     await expect.poll(() => hasRefreshCookie(page.context())).toBe(false);
 
+    phase = "reload-other-tab";
     await otherPage.reload({ waitUntil: "domcontentloaded" });
     await expectSignedOut(otherPage);
-    expect(refreshRequests).toBe(0);
+    expect(
+      refreshRequests,
+      JSON.stringify({ refreshPhases, unauthorizedResponsePhases: unauthorizedPhases }),
+    ).toBe(0);
     await otherPage.close();
   });
 

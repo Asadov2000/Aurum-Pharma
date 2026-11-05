@@ -6,8 +6,8 @@ import { z } from "zod";
 import { Button, FormError, Input, Label, Modal, Select, Textarea } from "@/components/ui";
 import { formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 
-import { createOperationId } from "./operationId";
 import { minimumPricingLocalInput, parsePricingLocalInput } from "./pricingTime";
 import {
   useActivatePlatformPricingPrice,
@@ -821,10 +821,12 @@ function handleCommandError(
   setTopError(describeApiError(error, fallback));
 }
 
-function applyIssues<T extends z.ZodTypeAny>(
-  parsed: z.SafeParseReturnType<unknown, z.infer<T>>,
+function applyIssues<T>(
+  parsed:
+    | { success: true; data: T }
+    | { success: false; error: { issues: readonly { path: readonly PropertyKey[]; message: string }[] } },
   setError: (name: never, error: { message: string }) => void,
-): parsed is z.SafeParseSuccess<z.infer<T>> {
+): parsed is { success: true; data: T } {
   if (parsed.success) return true;
   for (const issue of parsed.error.issues) {
     const field = issue.path[0];

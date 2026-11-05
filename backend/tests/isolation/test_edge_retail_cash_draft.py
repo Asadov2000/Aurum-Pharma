@@ -1,0 +1,153 @@
+"""Current native drafts keep helper access private and row locks read-only."""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.config import get_settings
+
+HELPER = "public.lock_edge_retail_cash_draft_v1(uuid,uuid,bigint,uuid,jsonb,text)"
+READ_COLUMNS = {
+    "pos_unit_cart_item": {
+        "id",
+        "tenant_id",
+        "branch_id",
+        "sale_id",
+        "catalog_id",
+        "position",
+        "sale_format",
+        "physical_packaging",
+        "quantity",
+        "discount_amount",
+    },
+    "pos_unit_payment_plan_binding": {"id", "tenant_id", "branch_id", "sale_id"},
+    "pos_unit_payment_plan_binding_cancel": {"id", "tenant_id", "branch_id", "sale_id"},
+}
+
+
+async def test_native_draft_helper_is_private_invoker_with_fixed_search_path(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT prosecdef,provolatile::TEXT,proconfig,"
+                    "has_function_privilege('aurum_edge_cash_owner',oid,'EXECUTE'),"
+                    "has_function_privilege('aurum_edge_cash_executor',oid,'EXECUTE'),"
+                    "has_function_privilege('aurum_app',oid,'EXECUTE'),"
+                    "has_function_privilege('aurum_support',oid,'EXECUTE'),"
+                    "EXISTS(SELECT 1 FROM "
+                    "aclexplode(COALESCE(proacl,acldefault('f',proowner))) acl "
+                    "WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') "
+                    f"FROM pg_proc WHERE oid='{HELPER}'::REGPROCEDURE"
+                )
+            )
+        ).one()
+    assert tuple(row[:2]) == (False, "v")
+    assert set(row[2]) == {"search_path=pg_catalog, pg_temp", "row_security=on"}
+    assert tuple(row[3:]) == (True, False, False, False, False)
+
+
+async def test_native_current_draft_new_select_columns_are_exact_and_not_inherited(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        rows = (await connection.execute(text("""
+            SELECT relation.relname,attribute.attname,
+              has_column_privilege('aurum_edge_cash_owner',relation.oid,attribute.attnum,
+                'SELECT') AS can_select,
+              has_column_privilege('aurum_edge_cash_owner',relation.oid,attribute.attnum,
+                'UPDATE') AS can_update,
+              has_column_privilege('aurum_edge_cash_owner',relation.oid,attribute.attnum,
+                'INSERT') AS can_insert,
+              has_column_privilege('aurum_edge_cash_executor',relation.oid,attribute.attnum,
+                'SELECT,INSERT,UPDATE,REFERENCES') AS executor_access
+            FROM pg_attribute attribute JOIN pg_class relation ON relation.oid=attribute.attrelid
+            WHERE relation.oid IN ('public.pos_unit_cart_item'::REGCLASS,
+              'public.pos_unit_payment_plan_binding'::REGCLASS,
+              'public.pos_unit_payment_plan_binding_cancel'::REGCLASS)
+              AND attribute.attnum>0 AND NOT attribute.attisdropped
+        """))).mappings().all()
+    for table, expected in READ_COLUMNS.items():
+        scoped = [row for row in rows if row["relname"] == table]
+        assert {row["attname"] for row in scoped if row["can_select"]} == expected
+        expected_updates = {"id"} if table == "pos_unit_cart_item" else set()
+        assert {row["attname"] for row in scoped if row["can_update"]} == expected_updates
+    assert all(not row["can_insert"] and not row["executor_access"] for row in rows)
+
+
+async def test_native_draft_update_policies_are_restrictive_and_scope_bound(
+    maintenance_engine: AsyncEngine,
+) -> None:
+    async with maintenance_engine.connect() as connection:
+        rows = (await connection.execute(text("""
+            SELECT relation.relname,policy.polpermissive,policy.polcmd::TEXT,
+              pg_get_expr(policy.polqual,policy.polrelid) AS using_expression,
+              pg_get_expr(policy.polwithcheck,policy.polrelid) AS check_expression,
+              policy.polroles=ARRAY[(SELECT oid FROM pg_roles
+                WHERE rolname='aurum_edge_cash_owner')] AS owner_only
+            FROM pg_policy policy JOIN pg_class relation ON relation.oid=policy.polrelid
+            WHERE policy.polname='edge_cash_draft_no_write'
+        """))).mappings().all()
+    assert {row["relname"] for row in rows} == {
+        "pos_unit_cart_item",
+        "sale_item",
+        "prescription_log",
+    }
+    for row in rows:
+        assert row["polpermissive"] is False
+        assert row["polcmd"] == "w"
+        assert row["check_expression"] == "false"
+        assert row["owner_only"] is True
+        assert "SESSION_USER" in row["using_expression"]
+        assert "database_role_oid" in row["using_expression"]
+        assert "tenant_id" in row["using_expression"]
+        assert "sale_id" in row["using_expression"]
+
+
+@pytest.mark.parametrize("role", ["aurum_app", "aurum_support"])
+async def test_nonowner_cannot_invoke_native_draft_helper(role: str) -> None:
+    settings = get_settings()
+    url = settings.DATABASE_URL_APP if role == "aurum_app" else settings.DATABASE_URL_SUPPORT
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with engine.begin() as connection:
+            assert await connection.scalar(text("SELECT session_user")) == role
+            with pytest.raises(DBAPIError) as denied:
+                async with connection.begin_nested():
+                    await connection.execute(
+                        text(
+                            "SELECT public.lock_edge_retail_cash_draft_v1("
+                            ":operation,:activation,2,:actor,'{}'::JSONB,:hash)"
+                        ),
+                        {
+                            "operation": uuid4(),
+                            "activation": uuid4(),
+                            "actor": uuid4(),
+                            "hash": "a" * 64,
+                        },
+                    )
+        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+    finally:
+        await engine.dispose()
+
+
+async def test_executor_cannot_execute_native_draft_helper(maintenance_engine: AsyncEngine) -> None:
+    async with maintenance_engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT rolcanlogin,has_function_privilege(rolname,:helper,'EXECUTE') "
+                    "FROM pg_roles WHERE rolname='aurum_edge_cash_executor'"
+                ),
+                {"helper": HELPER},
+            )
+        ).one()
+    assert tuple(row) == (False, False)

@@ -15,6 +15,18 @@ export function hasPermission(user: PermissionUser | null | undefined, code: str
   return isUnscopedDeveloper(user) || user?.permissions?.includes(code) === true;
 }
 
+/** Mirrors the server's branch authorization for UI visibility only. */
+export function hasPermissionForBranch(
+  user: PermissionUser | null | undefined,
+  code: string,
+  branchId: string | null | undefined,
+): boolean {
+  if (!branchId || !hasPermission(user, code)) return false;
+  if (isUnscopedDeveloper(user)) return true;
+  const scope = user?.permission_scopes?.[code];
+  return scope === null || (Array.isArray(scope) && scope.includes(branchId));
+}
+
 export function hasAnyPermission(
   user: PermissionUser | null | undefined,
   codes: readonly string[],

@@ -163,7 +163,7 @@ async def test_add_item_splits_across_batches(db_session: AsyncSession, pos_scaf
     assert created[1].qty == Decimal("2.000")
 
 
-async def test_complete_rejects_stale_fefo_allocation_after_line_delete(
+async def test_delete_reallocates_draft_before_cash_completion(
     db_session: AsyncSession,
     pos_scaffold,
 ) -> None:
@@ -206,13 +206,13 @@ async def test_complete_rejects_stale_fefo_allocation_after_line_delete(
         amount=Decimal("20"),
     )
 
-    with pytest.raises(BusinessRuleError) as exc_info:
-        await service.complete(sale_id=sale.id)
-
-    assert exc_info.value.details["reason"] == "fefo_reallocation_required"
+    remaining = await service.repo.list_items(sale.id)
+    assert [(row.batch_id, row.qty) for row in remaining] == [(s["batch"].id, Decimal("2.000"))]
+    completed = await service.complete(sale_id=sale.id)
+    assert completed.status == "completed" and completed.total_amount == Decimal("20.00")
     await db_session.refresh(s["batch"])
     await db_session.refresh(later_batch)
-    assert s["batch"].qty_remaining == Decimal("3.000")
+    assert s["batch"].qty_remaining == Decimal("1.000")
     assert later_batch.qty_remaining == Decimal("5.000")
 
 

@@ -15,7 +15,6 @@ export function useMeQuery() {
     staleTime: 60_000,
     // Pick up remote permission changes without dropping a session on network errors.
     refetchInterval: 60_000,
-    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }

@@ -108,6 +108,7 @@ test.describe("Owner role builder", () => {
       await dialog.getByRole("textbox", { name: "Название", exact: true }).fill(roleName);
       await dialog.getByLabel("Описание (необязательно)").fill("Безопасная тестовая роль");
       await dialog.getByPlaceholder("Найти функцию").fill(initialPermission.code);
+      await expect(dialog.getByRole("checkbox")).toHaveCount(1);
       await dialog.getByRole("checkbox").check();
 
       const createResponse = page.waitForResponse(
@@ -132,6 +133,7 @@ test.describe("Owner role builder", () => {
       await roleCard.getByRole("button", { name: "Изменить" }).click();
       dialog = page.getByRole("dialog", { name: "Изменить роль" });
       await dialog.getByPlaceholder("Найти функцию").fill(addedPermission.code);
+      await expect(dialog.getByRole("checkbox")).toHaveCount(1);
       await dialog.getByRole("checkbox").check();
       await dialog.getByRole("button", { name: "Проверить и опубликовать" }).click();
 

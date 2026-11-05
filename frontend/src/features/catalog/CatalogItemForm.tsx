@@ -6,6 +6,9 @@ import { z } from "zod";
 
 import { Button, FormError, Input, Label, Select, Switch } from "@/components/ui";
 import { describeApiError } from "@/features/foundation/errors";
+import { useAuth } from "@/features/auth/hooks";
+import { hasPermission } from "@/features/auth/permissions";
+import { permissionBranchScope } from "@/features/auth/branchPermissions";
 
 import {
   barcodeLabel,
@@ -19,6 +22,13 @@ import { useCatalogItemQuery, useUpdateCatalogItem } from "./queries";
 import { listCatalog } from "./api";
 import { otherDosageForms, popularDosageForms, presetDosageForm } from "./dosageForms";
 import { CatalogTemplateField } from "./CatalogTemplateField";
+import { CatalogPackagingFields } from "./CatalogPackagingFields";
+import {
+  packagingDefaults,
+  packagingFields,
+  packagingPatch,
+  validatePackaging,
+} from "./packagingForm";
 import { useCatalogCreate } from "./useCatalogCreate";
 import { type CatalogItem } from "./types";
 
@@ -26,6 +36,7 @@ const optionalText = z.string().trim().max(255, "Не более 255 симво�
 
 const schema = z
   .object({
+    ...packagingFields,
     brand_name: z.string().trim().min(1, "Введите название").max(255, "Не более 255 символов"),
     inn: optionalText,
     manufacturer: optionalText,
@@ -53,6 +64,7 @@ const schema = z
     barcode_type: z.enum(["", "ean13", "ean8", "gs1_128", "code128", "qr", "other"]),
   })
   .superRefine((values, context) => {
+    validatePackaging(values, context);
     if (values.initial_barcode && !values.barcode_type) {
       context.addIssue({
         code: "custom",
@@ -63,7 +75,7 @@ const schema = z
   });
 
 type ParsedValues = z.infer<typeof schema>;
-type FormValues = Omit<ParsedValues, "dispensing_type" | "storage_type"> & {
+export type FormValues = Omit<ParsedValues, "dispensing_type" | "storage_type"> & {
   dispensing_type: ParsedValues["dispensing_type"] | "";
   storage_type: ParsedValues["storage_type"] | "";
 };
@@ -91,6 +103,9 @@ export function CatalogItemForm({
   const create = useCatalogCreate();
   const update = useUpdateCatalogItem();
   const [topError, setTopError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const canPrepareUnits =
+    hasPermission(user, "catalog.update") && permissionBranchScope(user, "catalog.update") === null;
   const [customDosageForm, setCustomDosageForm] = useState(
     () => Boolean(item?.form) && !presetDosageForm(item?.form),
   );
@@ -108,6 +123,7 @@ export function CatalogItemForm({
 
   const form = useForm<FormValues>({
     defaultValues: {
+      ...packagingDefaults(item?.unit_sale_preparation),
       brand_name: item?.brand_name ?? initialName,
       inn: item?.inn ?? "",
       manufacturer: item?.manufacturer ?? "",
@@ -125,12 +141,18 @@ export function CatalogItemForm({
     },
   });
   const brandName = form.watch("brand_name").trim();
+  const packagingEnabled = form.watch("packaging_enabled");
+  const packagingUnit = form.watch("packaging_unit");
+  const packagingCount = form.watch("packaging_units_per_pack");
   const identityFields = form.watch(["brand_name", "manufacturer", "form", "dosage", "pack_size"]);
   const selectedDosageForm = identityFields[2] ?? "";
   const dosageFormPreset = presetDosageForm(selectedDosageForm);
   const showCustomDosageForm =
     customDosageForm || (Boolean(selectedDosageForm) && !dosageFormPreset);
-  const identityKey = identityFields.join("\u0000");
+  const identityKey = [
+    ...identityFields.slice(0, 4),
+    packagingEnabled ? `${packagingCount} ${packagingUnit}` : identityFields[4],
+  ].join("\u0000");
   useEffect(() => {
     if (exactMatchId && identityAtConflict.current !== identityKey) setExactMatchId(null);
   }, [exactMatchId, identityKey]);
@@ -160,6 +182,7 @@ export function CatalogItemForm({
   useEffect(() => {
     setCustomDosageForm(Boolean(item?.form) && !presetDosageForm(item?.form));
     form.reset({
+      ...packagingDefaults(item?.unit_sale_preparation),
       brand_name: item?.brand_name ?? initialName,
       inn: item?.inn ?? "",
       manufacturer: item?.manufacturer ?? "",
@@ -221,6 +244,7 @@ export function CatalogItemForm({
     }
     setExactMatchId(null);
     const d = parsed.data;
+    const packaging = canPrepareUnits ? packagingPatch(d, item?.unit_sale_preparation) : {};
     if (!d.dispensing_type || !d.storage_type) return;
     const nullable = (v: string | undefined) => (v && v.trim() !== "" ? v.trim() : null);
     try {
@@ -233,7 +257,8 @@ export function CatalogItemForm({
             manufacturer: nullable(d.manufacturer),
             form: nullable(d.form),
             dosage: nullable(d.dosage),
-            pack_size: nullable(d.pack_size),
+            ...(!packagingEnabled ? { pack_size: nullable(d.pack_size) } : {}),
+            ...packaging,
             atx_code: nullable(d.atx_code),
             dispensing_type: d.dispensing_type,
             storage_type: d.storage_type,
@@ -250,7 +275,8 @@ export function CatalogItemForm({
           manufacturer: nullable(d.manufacturer),
           form: nullable(d.form),
           dosage: nullable(d.dosage),
-          pack_size: nullable(d.pack_size),
+          ...(!packagingEnabled ? { pack_size: nullable(d.pack_size) } : {}),
+          ...packaging,
           atx_code: nullable(d.atx_code),
           dispensing_type: d.dispensing_type,
           storage_type: d.storage_type,
@@ -304,7 +330,7 @@ export function CatalogItemForm({
     ),
   );
 
-  return (
+  const cardForm = (
     <form
       onSubmit={(event) => {
         event.stopPropagation();
@@ -321,189 +347,190 @@ export function CatalogItemForm({
           Ответ не получен. Повторите запрос с теми же данными, чтобы проверить создание товара.
         </p>
       )}
-      <fieldset disabled={!isEdit && (create.pending || create.uncertain)}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Label htmlFor="brand_name">Название лекарства</Label>
-            <Input
-              id="brand_name"
-              invalid={Boolean(form.formState.errors.brand_name)}
-              autoComplete="off"
-              {...form.register("brand_name")}
-            />
-            <FormError>{form.formState.errors.brand_name?.message}</FormError>
-          </div>
-          <div>
-            <Label htmlFor="inn">МНН (действующее вещество)</Label>
-            <Input id="inn" autoComplete="off" {...form.register("inn")} />
-          </div>
-          <div>
-            <Label htmlFor="manufacturer">Производитель</Label>
-            <Input id="manufacturer" autoComplete="off" {...form.register("manufacturer")} />
-          </div>
-          <div>
-            <Label htmlFor="form_choice">Форма выпуска</Label>
-            <Select
-              id="form_choice"
-              value={showCustomDosageForm ? "other" : (dosageFormPreset ?? "")}
-              invalid={Boolean(form.formState.errors.form)}
-              onChange={(event) => {
-                const value = event.target.value;
-                setCustomDosageForm(value === "other");
-                form.setValue("form", value === "other" ? "" : value, {
-                  shouldDirty: true,
-                  shouldValidate: true,
-                });
-              }}
-            >
-              <option value="">Выберите форму выпуска</option>
-              <optgroup label="Популярные">
-                {popularDosageForms.map((dosageForm) => (
-                  <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
-                    {dosageForm}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Другие формы">
-                {otherDosageForms.map((dosageForm) => (
-                  <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
-                    {dosageForm}
-                  </option>
-                ))}
-              </optgroup>
-              <option value="other">Другая форма — указать вручную</option>
-            </Select>
-            {showCustomDosageForm && (
-              <Input
-                id="form"
-                className="mt-2"
-                placeholder="Укажите форму выпуска"
-                aria-label="Другая форма выпуска"
-                invalid={Boolean(form.formState.errors.form)}
-                {...form.register("form")}
-              />
-            )}
-            <FormError>{form.formState.errors.form?.message}</FormError>
-          </div>
-          <CatalogTemplateField
-            kind="dosage"
-            label="Дозировка"
-            placeholder="500 мг"
-            value={form.watch("dosage") ?? ""}
-            inputProps={form.register("dosage")}
-          />
-          <CatalogTemplateField
-            kind="pack_size"
-            label="Размер упаковки"
-            placeholder="20 таблеток"
-            value={form.watch("pack_size") ?? ""}
-            inputProps={form.register("pack_size")}
-          />
-          <div>
-            <Label htmlFor="atx_code">ATX-код</Label>
-            <Input id="atx_code" {...form.register("atx_code")} />
-          </div>
-          <div>
-            <Label htmlFor="dispensing_type">Условия отпуска</Label>
-            <Select
-              id="dispensing_type"
-              invalid={Boolean(form.formState.errors.dispensing_type)}
-              {...form.register("dispensing_type")}
-            >
-              <option value="">Выберите условия</option>
-              {dispensingOptions.map((d) => (
-                <option key={d} value={d}>
-                  {dispensingLabel[d]}
-                </option>
-              ))}
-            </Select>
-            <FormError>{form.formState.errors.dispensing_type?.message}</FormError>
-          </div>
-          <div>
-            <Label htmlFor="storage_type">Условия хранения</Label>
-            <Select
-              id="storage_type"
-              invalid={Boolean(form.formState.errors.storage_type)}
-              {...form.register("storage_type")}
-            >
-              <option value="">Выберите условия</option>
-              {storageOptions.map((s) => (
-                <option key={s} value={s}>
-                  {storageLabel[s]}
-                </option>
-              ))}
-            </Select>
-            <FormError>{form.formState.errors.storage_type?.message}</FormError>
-          </div>
-          <CatalogTemplateField
-            kind="category"
-            label="Категория"
-            value={form.watch("category") ?? ""}
-            inputProps={form.register("category")}
-          />
-          <div>
-            <Label htmlFor="base_price">Цена по умолчанию (TJS)</Label>
-            <Input
-              id="base_price"
-              type="text"
-              inputMode="decimal"
-              placeholder="0.00"
-              invalid={Boolean(form.formState.errors.base_price)}
-              {...form.register("base_price")}
-            />
-            <FormError>{form.formState.errors.base_price?.message}</FormError>
-          </div>
-          {isEdit && (
+      <fieldset
+        disabled={form.formState.isSubmitting || (!isEdit && (create.pending || create.uncertain))}
+        className="space-y-5"
+      >
+        <section aria-labelledby="catalog-medicine-title" className="space-y-4">
+          <h3 id="catalog-medicine-title" className="font-semibold">
+            Лекарство
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <Switch
-                label="Показывать товар в кассе и рабочих списках"
-                {...form.register("is_active")}
+              <Label htmlFor="brand_name">Название лекарства</Label>
+              <Input
+                id="brand_name"
+                invalid={Boolean(form.formState.errors.brand_name)}
+                autoComplete="off"
+                {...form.register("brand_name")}
               />
-              <p className="mt-1 text-xs text-foreground-muted">
-                Отключите, если товар временно нельзя выбирать для новых операций.
-              </p>
+              <FormError>{form.formState.errors.brand_name?.message}</FormError>
             </div>
-          )}
-          {!isEdit && (
-            <>
-              <div>
-                <Label htmlFor="catalog-initial-barcode">Первый штрихкод (необязательно)</Label>
+            <div>
+              <Label htmlFor="inn">МНН (действующее вещество)</Label>
+              <Input id="inn" autoComplete="off" {...form.register("inn")} />
+            </div>
+            <div>
+              <Label htmlFor="manufacturer">Производитель</Label>
+              <Input id="manufacturer" autoComplete="off" {...form.register("manufacturer")} />
+            </div>
+            <div>
+              <Label htmlFor="form_choice">Форма выпуска</Label>
+              <Select
+                id="form_choice"
+                value={showCustomDosageForm ? "other" : (dosageFormPreset ?? "")}
+                invalid={Boolean(form.formState.errors.form)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCustomDosageForm(value === "other");
+                  form.setValue("form", value === "other" ? "" : value, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  });
+                }}
+              >
+                <option value="">Выберите форму выпуска</option>
+                <optgroup label="Популярные">
+                  {popularDosageForms.map((dosageForm) => (
+                    <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
+                      {dosageForm}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Другие формы">
+                  {otherDosageForms.map((dosageForm) => (
+                    <option key={dosageForm} value={dosageForm.toLocaleLowerCase("ru-RU")}>
+                      {dosageForm}
+                    </option>
+                  ))}
+                </optgroup>
+                <option value="other">Другая форма — указать вручную</option>
+              </Select>
+              {showCustomDosageForm && (
                 <Input
-                  id="catalog-initial-barcode"
-                  maxLength={200}
-                  autoComplete="off"
-                  {...form.register("initial_barcode")}
+                  id="form"
+                  className="mt-2"
+                  placeholder="Укажите форму выпуска"
+                  aria-label="Другая форма выпуска"
+                  invalid={Boolean(form.formState.errors.form)}
+                  {...form.register("form")}
                 />
-                <FormError>{form.formState.errors.initial_barcode?.message}</FormError>
+              )}
+              <FormError>{form.formState.errors.form?.message}</FormError>
+            </div>
+            <CatalogTemplateField
+              kind="dosage"
+              label="Дозировка"
+              placeholder="500 мг"
+              value={form.watch("dosage") ?? ""}
+              inputProps={form.register("dosage")}
+            />
+            <CatalogTemplateField
+              kind="category"
+              label="Категория"
+              value={form.watch("category") ?? ""}
+              inputProps={form.register("category")}
+            />
+            <div>
+              <Label htmlFor="atx_code">ATX-код</Label>
+              <Input id="atx_code" {...form.register("atx_code")} />
+            </div>
+          </div>
+        </section>
+        <CatalogPackagingFields
+          form={form}
+          canPrepare={canPrepareUnits}
+          saved={item?.unit_sale_preparation}
+        />
+        <section aria-labelledby="catalog-conditions-title" className="space-y-4">
+          <h3 id="catalog-conditions-title" className="font-semibold">
+            Отпуск и хранение
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="dispensing_type">Условия отпуска</Label>
+              <Select
+                id="dispensing_type"
+                invalid={Boolean(form.formState.errors.dispensing_type)}
+                {...form.register("dispensing_type")}
+              >
+                <option value="">Выберите условия</option>
+                {dispensingOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {dispensingLabel[d]}
+                  </option>
+                ))}
+              </Select>
+              <FormError>{form.formState.errors.dispensing_type?.message}</FormError>
+            </div>
+            <div>
+              <Label htmlFor="storage_type">Условия хранения</Label>
+              <Select
+                id="storage_type"
+                invalid={Boolean(form.formState.errors.storage_type)}
+                {...form.register("storage_type")}
+              >
+                <option value="">Выберите условия</option>
+                {storageOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {storageLabel[s]}
+                  </option>
+                ))}
+              </Select>
+              <FormError>{form.formState.errors.storage_type?.message}</FormError>
+            </div>
+            {isEdit && (
+              <div className="sm:col-span-2">
+                <Switch
+                  label="Показывать товар в кассе и рабочих списках"
+                  {...form.register("is_active")}
+                />
+                <p className="mt-1 text-xs text-foreground-muted">
+                  Отключите, если товар временно нельзя выбирать для новых операций.
+                </p>
               </div>
-              <div>
-                <Label htmlFor="catalog-initial-barcode-type">Тип штрихкода</Label>
-                <Select
-                  id="catalog-initial-barcode-type"
-                  invalid={Boolean(form.formState.errors.barcode_type)}
-                  {...form.register("barcode_type")}
-                >
-                  <option value="">Выберите тип</option>
-                  <optgroup label="Популярные">
-                    {barcodeOptions.slice(0, 3).map((type) => (
-                      <option key={type} value={type}>
-                        {barcodeLabel[type]}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Другие">
-                    {barcodeOptions.slice(3).map((type) => (
-                      <option key={type} value={type}>
-                        {barcodeLabel[type]}
-                      </option>
-                    ))}
-                  </optgroup>
-                </Select>
-                <FormError>{form.formState.errors.barcode_type?.message}</FormError>
-              </div>
-            </>
-          )}
-        </div>
+            )}
+            {!isEdit && (
+              <>
+                <div>
+                  <Label htmlFor="catalog-initial-barcode">Первый штрихкод (необязательно)</Label>
+                  <Input
+                    id="catalog-initial-barcode"
+                    maxLength={200}
+                    autoComplete="off"
+                    {...form.register("initial_barcode")}
+                  />
+                  <FormError>{form.formState.errors.initial_barcode?.message}</FormError>
+                </div>
+                <div>
+                  <Label htmlFor="catalog-initial-barcode-type">Тип штрихкода</Label>
+                  <Select
+                    id="catalog-initial-barcode-type"
+                    invalid={Boolean(form.formState.errors.barcode_type)}
+                    {...form.register("barcode_type")}
+                  >
+                    <option value="">Выберите тип</option>
+                    <optgroup label="Популярные">
+                      {barcodeOptions.slice(0, 3).map((type) => (
+                        <option key={type} value={type}>
+                          {barcodeLabel[type]}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Другие">
+                      {barcodeOptions.slice(3).map((type) => (
+                        <option key={type} value={type}>
+                          {barcodeLabel[type]}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </Select>
+                  <FormError>{form.formState.errors.barcode_type?.message}</FormError>
+                </div>
+              </>
+            )}
+          </div>
+        </section>
       </fieldset>
       {!isEdit && onSelectedExisting && similarName.length >= 2 && !create.uncertain && (
         <div className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
@@ -642,7 +669,7 @@ export function CatalogItemForm({
           {topError}
         </p>
       )}
-      <div className="flex justify-end gap-2">
+      <div className="sticky -bottom-4 z-10 flex flex-wrap justify-end gap-2 border-t border-border bg-surface-raised py-3">
         <Button type="button" variant="secondary" onClick={onCancel}>
           Отмена
         </Button>
@@ -658,4 +685,6 @@ export function CatalogItemForm({
       </div>
     </form>
   );
+
+  return cardForm;
 }

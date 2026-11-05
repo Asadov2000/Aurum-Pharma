@@ -24,7 +24,7 @@ import {
 import { type CashPayment, type CashPaymentCreate } from "@/features/billing/cashTypes";
 import { formatBillingDateTime, formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
-import { createOperationId } from "./operationId";
+import { createOperationId } from "@/lib/operationId";
 import { type PlatformFinancialInvoice } from "./types";
 
 const cashSchema = z.object({

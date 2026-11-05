@@ -11,6 +11,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from app.domains.sync.physical_read_snapshot import (
+    PHYSICAL_RECORD_ADAPTER,
+    PhysicalRecord,
+    validate_physical_records,
+)
 from app.domains.sync.read_snapshot import ReadSnapshotComponent, ReadSnapshotItem
 
 
@@ -166,6 +171,7 @@ class IndexedReadProjection:
     catalog: tuple[CatalogProductRecord, ...]
     suppliers: tuple[SupplierRecord, ...]
     inventory: tuple[InventoryBatchRecord, ...]
+    physical: tuple[PhysicalRecord, ...] = ()
 
 
 def dump_record(record: BaseModel) -> ReadSnapshotItem:
@@ -193,12 +199,14 @@ def build_component_chunks(
     suppliers: Sequence[SupplierRecord],
     inventory: Sequence[InventoryBatchRecord],
     chunk_size: int,
+    physical: Sequence[PhysicalRecord] = (),
 ) -> dict[ReadSnapshotComponent, tuple[tuple[ReadSnapshotItem, ...], ...]]:
     """Return deterministic, validated component chunks."""
 
     catalog_records: list[CatalogProductRecord | SupplierRecord] = [*catalog, *suppliers]
     catalog_records.sort(key=lambda item: (item.record_type, str(item.id)))
-    inventory_records = sorted(inventory, key=lambda item: str(item.id))
+    inventory_records: list[InventoryBatchRecord | PhysicalRecord] = [*inventory, *physical]
+    inventory_records.sort(key=lambda item: (item.record_type, str(item.id)))
     return {
         "foundation": chunk_component((dump_record(foundation),), chunk_size=chunk_size),
         "catalog": chunk_component(
@@ -263,6 +271,7 @@ def build_indexed_projection(
     tenant_id: UUID,
     branch_id: UUID,
     chunks: Sequence[object],
+    schema_version: int = 1,
 ) -> IndexedReadProjection:
     """Parse a fully hash-verified chunk set before the active pointer moves."""
 
@@ -282,16 +291,42 @@ def build_indexed_projection(
             cast(Sequence[Mapping[str, object]], payload)
         )
 
+    if schema_version not in (1, 2):
+        raise ValueError("Unknown snapshot projection version")
+    physical_payloads = [
+        p
+        for p in items_by_component["inventory"]
+        if p.get("record_type")
+        in ("physical_catalog_config", "physical_lot", "physical_legacy_lot")
+    ]
+    if physical_payloads and schema_version != 2:
+        raise ValueError("Physical records require the explicit version two profile")
+    items_by_component["inventory"] = [
+        p for p in items_by_component["inventory"] if p not in physical_payloads
+    ]
     parsed = {
         component: parse_component_items(component, payloads)
         for component, payloads in items_by_component.items()
     }
+    physical = (
+        validate_physical_records(
+            tuple(PHYSICAL_RECORD_ADAPTER.validate_python(dict(p)) for p in physical_payloads),
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            catalog_ids={
+                row.id for row in parsed["catalog"] if isinstance(row, CatalogProductRecord)
+            },
+        )
+        if schema_version == 2
+        else ()
+    )
     validate_projection_scope(tenant_id=tenant_id, branch_id=branch_id, components=parsed)
     foundation_rows = parsed["foundation"]
     if len(foundation_rows) != 1 or not isinstance(foundation_rows[0], FoundationRecord):
         raise ValueError("Foundation projection must contain exactly one record")
     return IndexedReadProjection(
         foundation=foundation_rows[0],
+        physical=physical,
         catalog=tuple(row for row in parsed["catalog"] if isinstance(row, CatalogProductRecord)),
         suppliers=tuple(row for row in parsed["catalog"] if isinstance(row, SupplierRecord)),
         inventory=tuple(

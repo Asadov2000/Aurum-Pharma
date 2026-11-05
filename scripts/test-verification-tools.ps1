@@ -11,7 +11,11 @@ $whitespaceScript = Join-Path $PSScriptRoot "check-untracked-whitespace.ps1"
 $localLauncherScript = Join-Path $PSScriptRoot "start-local-demo-admin.ps1"
 $currentMainLauncherScript = Join-Path $PSScriptRoot "start-current-main-demo.ps1"
 $cmdLauncher = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) "Start-Aurum-Pharma-Admin.cmd"
-$powershellExecutable = (Get-Process -Id $PID).Path
+# Keep child fixtures on the same engine even when process metadata is hidden.
+$powershellName = if ($PSEdition -eq "Desktop") { "powershell.exe" }
+elseif ($env:OS -eq "Windows_NT") { "pwsh.exe" }
+else { "pwsh" }
+$powershellExecutable = Join-Path $PSHOME $powershellName
 $script:assertions = 0
 
 function Get-Scope {
@@ -23,7 +27,7 @@ function Get-Scope {
 
 function Get-Plan {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet("Auto", "Quick", "Full")][string]$Mode,
+        [Parameter(Mandatory = $true)][ValidateSet("Preflight", "Auto", "Quick", "Full")][string]$Mode,
         [AllowEmptyCollection()][string[]]$Paths,
         [ValidateSet("Docker", "Poetry")][string]$BackendRuntime
     )
@@ -251,24 +255,54 @@ Assert-Count -Actual $autoCatalogE2E -Expected 1 -Because "Auto schedules one is
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-flow.spec.ts" -Because "Auto passes the catalog flow to Playwright"
 Assert-Contains -Actual @($autoCatalogE2E[0].arguments) -Expected "e2e/catalog-import.spec.ts" -Because "Auto passes the catalog import flow to Playwright"
 
+foreach ($metadataFailure in @("missing", "denied")) {
+    $metadataPlan = & {
+        param([string]$Failure)
+
+        function Get-Process {
+            param([int]$Id)
+            if ($Failure -eq "denied") { throw "Process metadata is unavailable." }
+            return [pscustomobject]@{ Path = $null }
+        }
+        function docker { throw "PlanOnly must not invoke Docker." }
+        function poetry { throw "PlanOnly must not invoke Poetry." }
+        Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py")
+    } $metadataFailure
+
+    foreach ($id in @("diff-untracked", "backend-tests", "backend-static", "e2e")) {
+        $metadataStep = @($metadataPlan.steps | Where-Object { $_.id -eq $id })
+        Assert-Count -Actual $metadataStep -Expected 1 -Because "$id is planned when process metadata is $metadataFailure"
+        Assert-Equal -Actual $metadataStep[0].command -Expected $powershellExecutable -Because "$id preserves the current PowerShell when process metadata is $metadataFailure"
+        Assert-Equal -Actual (Test-Path -LiteralPath $metadataStep[0].command -PathType Leaf) -Expected $true -Because "$id uses an existing executable when process metadata is $metadataFailure"
+    }
+}
+
 $poetryCatalog = Get-Plan -Mode "Auto" -Paths @("backend/app/domains/catalog/service.py") -BackendRuntime Poetry
 foreach ($check in @(
-    @{ Id = "backend-tests"; Check = "Tests"; Module = "pytest" },
-    @{ Id = "backend-ruff"; Check = "Ruff"; Module = "ruff" },
-    @{ Id = "backend-black"; Check = "Black"; Module = "black" },
-    @{ Id = "backend-mypy"; Check = "Mypy"; Module = "mypy" }
+    @{ Id = "backend-tests"; Check = "Tests" },
+    @{ Id = "backend-static"; Check = "Static" }
 )) {
     $dockerStep = @($autoCatalog.steps | Where-Object { $_.id -eq $check.Id })
-    $poetryStep = @($poetryCatalog.steps | Where-Object { $_.id -eq $check.Id })
-    Assert-Count -Actual $dockerStep -Expected 1 -Because "$($check.Id) keeps its stable step ID"
-    Assert-Count -Actual $poetryStep -Expected 1 -Because "Poetry keeps $($check.Id)"
+    Assert-Count -Actual $dockerStep -Expected 1 -Because "$($check.Id) runs once"
     Assert-Equal -Actual $dockerStep[0].command -Expected $powershellExecutable -Because "default backend checks use the isolated launcher"
     Assert-Contains -Actual $dockerStep[0].arguments -Expected (Join-Path $PSScriptRoot "backend-isolated.ps1") -Because "backend check runs the guarded entrypoint"
     $checkIndex = [Array]::IndexOf([object[]]$dockerStep[0].arguments, "-Check")
     Assert-Equal -Actual ($checkIndex -ge 0) -Expected $true -Because "the launcher check is explicit"
     Assert-Equal -Actual $dockerStep[0].arguments[$checkIndex + 1] -Expected $check.Check -Because "the correct isolated check is selected"
+}
+foreach ($check in @(
+    @{ Id = "backend-tests"; Module = "pytest" },
+    @{ Id = "backend-ruff"; Module = "ruff" },
+    @{ Id = "backend-black"; Module = "black" },
+    @{ Id = "backend-mypy"; Module = "mypy" }
+)) {
+    $poetryStep = @($poetryCatalog.steps | Where-Object { $_.id -eq $check.Id })
+    Assert-Count -Actual $poetryStep -Expected 1 -Because "Poetry keeps $($check.Id)"
     Assert-Equal -Actual $poetryStep[0].command -Expected "poetry" -Because "explicit Poetry preserves the host runtime"
     Assert-Equal -Actual $poetryStep[0].arguments[1] -Expected $check.Module -Because "Poetry preserves the original tool"
+}
+foreach ($id in @("backend-ruff", "backend-black", "backend-mypy")) {
+    Assert-Equal -Actual (@($autoCatalog.steps.id) -contains $id) -Expected $false -Because "Docker batches quality checks without duplicate preparation"
 }
 $dockerTests = @($autoCatalog.steps | Where-Object { $_.id -eq "backend-tests" })[0]
 $poetryTests = @($poetryCatalog.steps | Where-Object { $_.id -eq "backend-tests" })[0]
@@ -300,6 +334,43 @@ Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "external E2E argument b
 $boundE2E = @((($boundE2EJson -join [Environment]::NewLine) | ConvertFrom-Json))
 Assert-Count -Actual $boundE2E -Expected 2 -Because "external E2E binding preserves both specs"
 Assert-Contains -Actual $boundE2E -Expected "e2e/catalog-import.spec.ts" -Because "external E2E binding preserves the final spec"
+
+$preflight = & {
+    function docker { throw "PlanOnly must not invoke Docker." }
+    function poetry { throw "PlanOnly must not invoke Poetry." }
+    Get-Plan -Mode "Preflight" -Paths @("backend/app/domains/pos/service.py")
+}
+Assert-Equal -Actual $preflight.scope.risk -Expected "critical" -Because "Preflight preserves the real risk classification"
+foreach ($id in @("backend-static", "frontend-typecheck", "frontend-lint")) {
+    Assert-Contains -Actual @($preflight.steps.id) -Expected $id -Because "Preflight retains $id"
+}
+foreach ($paths in @(
+    @("backend/app/domains/pos/service.py"),
+    @("website/scripts/test.mjs"),
+    @("scripts/verify-change.ps1")
+)) {
+    $feedback = Get-Plan -Mode "Preflight" -Paths $paths
+    foreach ($id in @("backend-tests", "frontend-tests", "e2e", "frontend-build", "website-unit", "website-build", "website-browser")) {
+        Assert-Equal -Actual (@($feedback.steps.id) -contains $id) -Expected $false -Because "Preflight omits $id even for full or critical scopes"
+    }
+    Assert-Equal -Actual ($feedback.warning -match "omits application tests.*CI gate remain mandatory") -Expected $true -Because "Preflight explicitly states incomplete verification"
+}
+$preflightDocs = Get-Plan -Mode "Preflight" -Paths @("docs/testing.md")
+Assert-Equal -Actual (@($preflightDocs.steps.id) -contains "backend-static") -Expected $false -Because "docs-only feedback does not schedule application checks"
+foreach ($runtime in @("Docker", "Poetry")) {
+    $orderedPlan = Get-Plan -Mode "Auto" -Paths @("backend/app/domains/pos/service.py") -BackendRuntime $runtime
+    $ids = [object[]]@($orderedPlan.steps.id)
+    $qualityIds = @("frontend-typecheck", "frontend-lint")
+    if ($runtime -eq "Docker") { $qualityIds += "backend-static" }
+    else { $qualityIds += @("backend-ruff", "backend-black", "backend-mypy") }
+    foreach ($qualityId in $qualityIds) {
+        foreach ($testId in @("backend-tests", "frontend-tests", "e2e")) {
+            $qualityIndex = [Array]::IndexOf($ids, $qualityId)
+            $testIndex = [Array]::IndexOf($ids, $testId)
+            Assert-Equal -Actual ($qualityIndex -ge 0 -and $testIndex -gt $qualityIndex) -Expected $true -Because "$runtime $qualityId fails before $testId can start"
+        }
+    }
+}
 
 $quickCritical = Get-Plan -Mode "Quick" -Paths @("backend/app/domains/pos/service.py")
 Assert-Equal -Actual $quickCritical.scope.risk -Expected "critical" -Because "Quick sees critical risk"
@@ -413,6 +484,16 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
         Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher works without a saved website URL"
         Assert-Contains -Actual @($fixtureOutput) -Expected "FIXTURE_WEBSITE=" -Because "missing website configuration remains unset in the child"
 
+        $metadataLauncherCode = @'
+function Get-Process { param([int]$Id); [pscustomobject]@{ Path = $null } }
+& '__LAUNCHER__' -DryRun -NoBrowser
+'@
+        $metadataLauncherCode = $metadataLauncherCode.Replace("__LAUNCHER__", $fixtureLauncher.Replace("'", "''"))
+        $metadataLauncherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($metadataLauncherCode))
+        $metadataLauncherOutput = & $powershellExecutable -NoProfile -EncodedCommand $metadataLauncherEncoded
+        Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the actual launcher starts its child without process metadata"
+        Assert-Contains -Actual @($metadataLauncherOutput) -Expected "FIXTURE_WEBSITE=" -Because "the metadata-independent launcher preserves the child environment"
+
         [IO.File]::WriteAllText($fixtureWebsiteUrl, "https://saved.example.test/`n", $encoding)
         $fixtureOutput = & $powershellExecutable @fixtureLauncherArguments
         Assert-Equal -Actual $LASTEXITCODE -Expected 0 -Because "the launcher accepts a saved HTTPS website URL"
@@ -504,6 +585,12 @@ Write-Output "FIXTURE_WEBSITE=$env:VITE_PUBLIC_WEBSITE_URL"
         }
         Assert-Equal -Actual (Test-Path -LiteralPath $summaryMarkdown -PathType Leaf) -Expected $true -Because "a readable report accompanies the JSON report"
         Assert-Equal -Actual ((Get-Content -LiteralPath $successReport.steps[1].log -Raw).Contains("STDERR_ZERO_42")) -Expected $true -Because "native stderr with exit zero is logged without a false failure"
+        Assert-Equal -Actual $successReport.applicationTestsOmitted -Expected $false -Because "Auto reports do not claim Preflight coverage"
+        Invoke-VerificationSteps -Steps @() -LogDirectory $fixtureRoot -Mode Preflight -Risk critical *> $null
+        $preflightReport = Get-Content -LiteralPath $summaryJson -Raw | ConvertFrom-Json
+        Assert-Equal -Actual $preflightReport.mode -Expected "preflight" -Because "saved reports identify early feedback mode"
+        Assert-Equal -Actual $preflightReport.applicationTestsOmitted -Expected $true -Because "JSON cannot mistake early feedback for application test coverage"
+        Assert-Equal -Actual ((Get-Content -LiteralPath $summaryMarkdown -Raw) -match "omits application tests.*CI gate remain mandatory") -Expected $true -Because "readable reports warn that Preflight is incomplete"
 
         # These are deliberately synthetic values, never credentials from the environment.
         $syntheticSecret = "fixture-sensitive-token-UNIQUE-DO-NOT-REPORT"
@@ -653,6 +740,9 @@ finally {
     }
 }
 
-& (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+& {
+    function Get-Process { param([int]$Id); return [pscustomobject]@{ Path = $null } }
+    & (Join-Path $PSScriptRoot "test-backend-isolated.ps1")
+}
 Write-Host "Verification tooling self-test passed: $script:assertions assertions." -ForegroundColor Green
 exit 0

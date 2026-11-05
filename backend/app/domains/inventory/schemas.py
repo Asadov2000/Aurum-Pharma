@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domains.inventory.expiry import ExpiryStatus
+from app.domains.inventory.unit_stock import UnitPackaging
 
 WriteOffReason = Literal["expired", "damaged", "spoiled", "theft", "other"]
 
@@ -35,6 +36,7 @@ class BatchRead(BaseModel):
     currency: str
     qty_initial: Decimal
     qty_remaining: Decimal
+    unit_packaging_preparation: UnitPackaging | None = None
     is_blocked: bool
     block_reason: str | None
     blocked_at: datetime | None

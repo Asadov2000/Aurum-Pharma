@@ -856,9 +856,7 @@ describe("UsersPage", () => {
       is_tenant_owner: true,
       permissions: ["users.view", "roles.assign"],
     };
-    listBranches.mockResolvedValue([
-      { id: "branch-1", name: "Аптека Рудаки", is_active: true },
-    ]);
+    listBranches.mockResolvedValue([{ id: "branch-1", name: "Аптека Рудаки", is_active: true }]);
     listUsers.mockResolvedValue(usersResponse([{ ...USER_ACTIVE, assignments: [] }]));
     renderPage();
 
@@ -902,7 +900,9 @@ describe("UsersPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Во всей аптеке" }));
     expect(
-      screen.getByText("Роль будет действовать во всех текущих и новых торговых точках этой аптеки."),
+      screen.getByText(
+        "Роль будет действовать во всех текущих и новых торговых точках этой аптеки.",
+      ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Проверить доступ" }));
 

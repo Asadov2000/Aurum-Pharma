@@ -4,7 +4,6 @@ import {
   type ComponentProps,
   type CSSProperties,
   type ReactNode,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,6 +15,7 @@ import { Button } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { activeTenantId } from "@/features/auth/tenantContext";
 import { useUserPreferencesQuery } from "@/features/settings/queries";
+import { useSidebarPreferences } from "@/features/settings/useSidebarPreferences";
 import { acquireBodyScrollLock } from "@/lib/bodyScrollLock";
 import { useConnectivity } from "@/lib/connectivityContext";
 
@@ -24,17 +24,7 @@ import { ConnectivityStatusBanner } from "./ConnectivityStatusBanner";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
 import { Sidebar } from "./Sidebar";
 import { buildNav, findActiveNavItem } from "./nav";
-import {
-  defaultSidebarPreferences,
-  loadSidebarPreferences,
-  orderSidebarItems,
-  parseSidebarPreferences,
-  saveSidebarPreferences,
-  SIDEBAR_PREFERENCES_CHANGED_EVENT,
-  sidebarStorageKey,
-  type SidebarPreferences,
-  visibleSidebarItems,
-} from "./sidebarPreferences";
+import { orderSidebarItems, visibleSidebarItems } from "./sidebarPreferences";
 import { type AppRoutePath } from "./routeAccess";
 
 let loadedSectionSearch: typeof import("./SectionSearchDialog") | undefined;
@@ -159,10 +149,12 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       user?.support_access,
     ],
   );
-  const sidebarScope = `${user?.id ?? "anonymous"}:${tenantId ?? "global"}`;
-  const [sidebarPreferences, setSidebarPreferences] = useState<SidebarPreferences>(() =>
-    loadSidebarPreferences(sidebarScope),
-  );
+  const {
+    preferences: sidebarPreferences,
+    scope: sidebarScope,
+    save: updateSidebarPreferences,
+    persistence: sidebarPersistence,
+  } = useSidebarPreferences();
   const startRouteHandledScopeRef = useRef<string | null>(null);
   const [wideDesktop, setWideDesktop] = useState(
     () => window.matchMedia("(min-width: 80rem)").matches,
@@ -222,28 +214,6 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
     quickFavorites.length > 0
       ? quickFavorites
       : defaultQuickRoutes.flatMap((to) => sidebarItems.filter((item) => item.to === to));
-  const serverSidebarPreferences = useMemo(
-    () =>
-      preferencesQuery.data
-        ? parseSidebarPreferences({
-            desktopMode: preferencesQuery.data.workspace.desktop_mode,
-            hiddenRoutes: preferencesQuery.data.workspace.hidden_routes,
-            favoriteRoutes: preferencesQuery.data.workspace.favorite_routes,
-            routeOrder: preferencesQuery.data.workspace.route_order,
-          })
-        : null,
-    [preferencesQuery.data],
-  );
-
-  const updateSidebarPreferences = useCallback(
-    (next: SidebarPreferences) => {
-      const parsed = parseSidebarPreferences(next);
-      setSidebarPreferences(parsed);
-      saveSidebarPreferences(sidebarScope, parsed);
-    },
-    [sidebarScope],
-  );
-
   const openNavigation = (trigger: HTMLButtonElement) => {
     navigationTriggerRef.current = trigger;
     setNavigationOpen(true);
@@ -264,57 +234,6 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
       window.removeEventListener("aurum:open-sidebar-settings", openFromSettingsHub);
     };
   }, []);
-
-  useEffect(() => {
-    setSidebarPreferences(loadSidebarPreferences(sidebarScope));
-
-    const key = sidebarStorageKey(sidebarScope);
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== key) return;
-      try {
-        setSidebarPreferences(
-          event.newValue === null
-            ? loadSidebarPreferences(sidebarScope)
-            : parseSidebarPreferences(JSON.parse(event.newValue)),
-        );
-      } catch {
-        setSidebarPreferences(loadSidebarPreferences(sidebarScope));
-      }
-    };
-    const onSameTabChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ scope?: string }>).detail;
-      if (detail?.scope === sidebarScope) {
-        setSidebarPreferences(loadSidebarPreferences(sidebarScope));
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(SIDEBAR_PREFERENCES_CHANGED_EVENT, onSameTabChange);
-    };
-  }, [sidebarScope]);
-
-  useEffect(() => {
-    if (!serverSidebarPreferences) return;
-    const local = loadSidebarPreferences(sidebarScope);
-    const serverIsDefault = sameSidebarPreferences(
-      serverSidebarPreferences,
-      defaultSidebarPreferences(),
-    );
-    const localIsDefault = sameSidebarPreferences(local, defaultSidebarPreferences());
-    const alreadySynced = hasServerSidebarMarker(sidebarScope);
-
-    // Preserve one legacy local customization, then treat the account copy as
-    // authoritative on every subsequent device and session.
-    if (!alreadySynced && serverIsDefault && !localIsDefault) return;
-    markServerSidebarSynced(sidebarScope);
-    if (!sameSidebarPreferences(local, serverSidebarPreferences)) {
-      saveSidebarPreferences(sidebarScope, serverSidebarPreferences);
-    } else {
-      setSidebarPreferences(serverSidebarPreferences);
-    }
-  }, [serverSidebarPreferences, sidebarScope]);
 
   useEffect(() => {
     if (!preferencesQuery.data || startRouteHandledScopeRef.current === sidebarScope) return;
@@ -383,6 +302,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
 
   return (
     <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
+      {sidebarPersistence}
       <a href="#main-content" className="app-shell-skip-link">
         Перейти к содержимому
       </a>
@@ -508,32 +428,7 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-const SIDEBAR_SERVER_MARKER_PREFIX = "aurum:sidebar-server:v1";
 const START_ROUTE_SESSION_PREFIX = "aurum:start-route:v1";
-
-function sameSidebarPreferences(left: SidebarPreferences, right: SidebarPreferences): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function sidebarServerMarkerKey(scope: string): string {
-  return `${SIDEBAR_SERVER_MARKER_PREFIX}:${encodeURIComponent(scope)}`;
-}
-
-function hasServerSidebarMarker(scope: string): boolean {
-  try {
-    return window.localStorage.getItem(sidebarServerMarkerKey(scope)) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function markServerSidebarSynced(scope: string): void {
-  try {
-    window.localStorage.setItem(sidebarServerMarkerKey(scope), "1");
-  } catch {
-    // The synchronized in-memory state still works when storage is blocked.
-  }
-}
 
 function startRouteSessionKey(scope: string): string {
   return `${START_ROUTE_SESSION_PREFIX}:${encodeURIComponent(scope)}`;

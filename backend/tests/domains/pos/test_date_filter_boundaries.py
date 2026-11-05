@@ -12,12 +12,14 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.dashboard.repository import DashboardRepository
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from tests.platform_access_helpers import create_test_platform_user
 
 TZ = "Asia/Dushanbe"  # UTC+5, no DST
 DAY = date(2026, 3, 15)
@@ -121,13 +123,21 @@ async def test_stock_on_date_excludes_next_local_day(
         assert mv.created_at == ts
     await db_session.flush()
 
-    rows = await POSRepository(db_session).stock_on_date(
+    reader = await create_test_platform_user(db_session, access_kind="developer")
+    await db_session.execute(
+        text(
+            "SELECT set_config('app.user_id',:actor,true),"
+            "set_config('app.tenant_id',:tenant,true)"
+        ),
+        {"actor": str(reader.id), "tenant": str(s["tenant"].id)},
+    )
+    snapshot = await POSRepository(db_session).stock_on_date(
         tenant_id=s["tenant"].id, on_date=DAY, branch_id=None, tz=TZ
     )
     # Scaffold's incoming (qty 100) is dated "now" (far after DAY) → also excluded;
     # only the +10 movement on DAY counts.
-    assert len(rows) == 1
-    assert Decimal(str(rows[0]["qty"])) == Decimal("10")
+    assert len(snapshot.rows) == 1
+    assert snapshot.rows[0].qty == Decimal("10")
 
 
 async def test_today_sales_counts_only_local_today(db_session: AsyncSession, pos_scaffold) -> None:

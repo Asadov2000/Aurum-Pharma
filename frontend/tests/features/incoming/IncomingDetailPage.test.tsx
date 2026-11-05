@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/features/catalog/fieldTemplates", () => ({
@@ -45,7 +45,13 @@ vi.mock("@/features/incoming/api", () => ({
 
 vi.mock("@/features/auth/hooks", () => ({
   useAuth: () => ({
-    user: { is_developer: false, permissions, permission_scopes: permissionScopes },
+    user: {
+      id: "user-1",
+      active_tenant_id: "tenant-1",
+      is_developer: false,
+      permissions,
+      permission_scopes: permissionScopes,
+    },
   }),
 }));
 
@@ -68,6 +74,9 @@ vi.mock("@/features/catalog/CatalogPicker", () => ({
     <input id={id} readOnly value={initialLabel ?? ""} />
   ),
 }));
+
+import { useAuthStore } from "@/stores/auth";
+import { type MeResponse } from "@/features/auth/types";
 
 import { IncomingDetailPage } from "@/features/incoming/IncomingDetailPage";
 
@@ -123,6 +132,8 @@ function renderPage(): QueryClient {
 
 describe("IncomingDetailPage", () => {
   beforeEach(() => {
+    localStorage.clear();
+    useAuthStore.getState().setUser({ id: "user-1", active_tenant_id: "tenant-1" } as MeResponse);
     permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
     permissionScopes = {
       "incoming.view": ["branch-1"],
@@ -173,7 +184,11 @@ describe("IncomingDetailPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
 
     await waitFor(() => expect(acceptIncoming).toHaveBeenCalledWith("doc-1"));
-    expect(await within(dialog).findByText("Не удалось принять приход")).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(
+        "Не удалось подтвердить приёмку. Проверьте статус перед повтором.",
+      ),
+    ).toBeInTheDocument();
     expect(dialog).toBeInTheDocument();
   });
 
@@ -439,5 +454,208 @@ describe("IncomingDetailPage", () => {
     expect(within(catalog).getByLabelText("Название лекарства")).toHaveValue(
       "Несохранённый препарат",
     );
+  });
+  it("receives physical stock only after an explicit choice with the reviewed revision", async () => {
+    const revision = "a".repeat(64);
+    getIncoming.mockResolvedValue({
+      ...DOC,
+      physical_receiving_ready: true,
+      acceptance_revision: revision,
+    });
+    acceptIncoming.mockResolvedValue({
+      ...DOC,
+      status: "accepted",
+      stock_mode: "physical_unit_v2",
+    });
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    const dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
+    expect(within(dialog).getByLabelText("Обычная приёмка упаковок")).toBeChecked();
+    fireEvent.click(within(dialog).getByLabelText("Упаковки, блистеры и поштучно"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
+    await waitFor(() =>
+      expect(acceptIncoming).toHaveBeenCalledWith("doc-1", {
+        stock_mode: "physical_unit_v2",
+        expected_revision: revision,
+      }),
+    );
+    await waitFor(() => expect(localStorage.length).toBe(0));
+  });
+
+  it("keeps the original physical revision after an unknown result and reload", async () => {
+    const original = "b".repeat(64);
+    getIncoming.mockResolvedValue({
+      ...DOC,
+      physical_receiving_ready: true,
+      acceptance_revision: original,
+    });
+    acceptIncoming.mockRejectedValue(new Error("network interrupted"));
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    let dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
+    fireEvent.click(within(dialog).getByLabelText("Упаковки, блистеры и поштучно"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
+    await within(dialog).findByText(
+      "Не удалось подтвердить приёмку. Проверьте статус перед повтором.",
+    );
+    expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+    cleanup();
+    getIncoming.mockResolvedValue({
+      ...DOC,
+      physical_receiving_ready: true,
+      acceptance_revision: "c".repeat(64),
+    });
+    renderPage();
+    await screen.findByRole("button", { name: "Проверить результат приёмки" });
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
+    expect(within(dialog).getByLabelText("Обычная приёмка упаковок")).toBeDisabled();
+    expect(within(dialog).getByLabelText("Упаковки, блистеры и поштучно")).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Повторить тем же способом" }));
+    await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(2));
+    expect(acceptIncoming.mock.calls[1]).toEqual([
+      "doc-1",
+      { stock_mode: "physical_unit_v2", expected_revision: original },
+    ]);
+  });
+
+  it("reconciles a confirmed physical receipt after reload without another write", async () => {
+    const key = `aurum:incoming-accept:v1:${encodeURIComponent(JSON.stringify(["tenant-1", "user-1", "doc-1"]))}`;
+    localStorage.setItem(
+      key,
+      JSON.stringify({ stock_mode: "physical_unit_v2", expected_revision: "d".repeat(64) }),
+    );
+    getIncoming.mockResolvedValue({ ...DOC, status: "accepted", stock_mode: "physical_unit_v2" });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить результат приёмки" }));
+    await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("does not write after the account changes during the pending-row check", async () => {
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    let resolveRows: (rows: []) => void = () => undefined;
+    listIncomingDraftRows.mockImplementationOnce(
+      () =>
+        new Promise<[]>((resolve) => {
+          resolveRows = resolve;
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Принять товары на склад" })).getByRole("button", {
+        name: "Принять на склад",
+      }),
+    );
+    await waitFor(() => expect(listIncomingDraftRows).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      useAuthStore.getState().clear();
+      resolveRows([]);
+    });
+    expect(acceptIncoming).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("disables physical receiving without a complete physical preparation", async () => {
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    expect(screen.getByLabelText("Упаковки, блистеры и поштучно")).toBeDisabled();
+  });
+  it("does not clear the pending receipt after logout while a write response is late", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    acceptIncoming.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Принять товары на склад" })).getByRole("button", {
+        name: "Принять на склад",
+      }),
+    );
+    await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(1));
+    expect(localStorage.length).toBe(1);
+    await act(async () => {
+      useAuthStore.getState().clear();
+      finish({ ...DOC, status: "accepted", stock_mode: "legacy_pack" });
+    });
+    expect(localStorage.length).toBe(1);
+    expect(
+      screen.queryByText("Товары приняты на склад. Документ теперь доступен только для просмотра."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a mismatched accepted mode blocked without another write", async () => {
+    const key = `aurum:incoming-accept:v1:${encodeURIComponent(JSON.stringify(["tenant-1", "user-1", "doc-1"]))}`;
+    localStorage.setItem(key, JSON.stringify({ stock_mode: "legacy_pack" }));
+    getIncoming.mockResolvedValue({ ...DOC, status: "accepted", stock_mode: "prepared_unit_v1" });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить результат приёмки" }));
+    await screen.findByText("Документ принят другим способом. Обратитесь к администратору.");
+    expect(localStorage.getItem(key)).not.toBeNull();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for a corrupt saved acceptance and checks the server without writing", async () => {
+    const key = `aurum:incoming-accept:v1:${encodeURIComponent(JSON.stringify(["tenant-1", "user-1", "doc-1"]))}`;
+    localStorage.setItem(key, "invalid saved value");
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить документ" }));
+    await screen.findByText(
+      "Документ ещё не принят. Для проверки сохранённого способа обратитесь к администратору.",
+    );
+    expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+  it("refreshes the reviewed revision after a definite rejection and a confirmed draft", async () => {
+    const original = "e".repeat(64);
+    const fresh = "f".repeat(64);
+    getIncoming.mockResolvedValue({
+      ...DOC,
+      physical_receiving_ready: true,
+      acceptance_revision: original,
+    });
+    acceptIncoming
+      .mockImplementationOnce(async () => {
+        getIncoming.mockResolvedValue({
+          ...DOC,
+          physical_receiving_ready: true,
+          acceptance_revision: fresh,
+        });
+        throw Object.assign(new Error("Document changed"), {
+          isAxiosError: true,
+          response: { status: 409, data: {} },
+        });
+      })
+      .mockResolvedValue({ ...DOC, status: "accepted", stock_mode: "physical_unit_v2" });
+    renderPage();
+    await screen.findByText("Приёмка № ПР-1042");
+    fireEvent.click(screen.getByRole("button", { name: "Принять на склад" }));
+    const dialog = screen.getByRole("dialog", { name: "Принять товары на склад" });
+    fireEvent.click(within(dialog).getByLabelText("Упаковки, блистеры и поштучно"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
+    await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText("Упаковки, блистеры и поштучно")).toBeEnabled(),
+    );
+    expect(localStorage.length).toBe(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
+    await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(2));
+    expect(acceptIncoming.mock.calls[0]).toEqual([
+      "doc-1",
+      { stock_mode: "physical_unit_v2", expected_revision: original },
+    ]);
+    expect(acceptIncoming.mock.calls[1]).toEqual([
+      "doc-1",
+      { stock_mode: "physical_unit_v2", expected_revision: fresh },
+    ]);
   });
 });

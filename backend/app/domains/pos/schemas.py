@@ -7,10 +7,23 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from app.domains.catalog.schemas import CatalogItemRead
+from app.domains.catalog.unit_sales import DispenseUnit
 from app.domains.customer_returns.reasons import RefundReasonCode
+from app.domains.inventory.unit_stock_v2 import UnitPackagingV2
+from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
 
 PAYMENT_METHODS = frozenset({"cash", "card", "qr"})
 # Legacy clients can retry an operation created before QR became a distinct
@@ -661,9 +674,35 @@ class POSCommandRead(BaseModel):
     result: POSCommandResult
 
 
+class ReceiptLine(BaseModel):
+    """One printed line of a receipt — resolved name, no raw UUIDs."""
+
+    position: int
+    name: str
+    qty: Decimal
+    unit_price: Decimal
+    discount_amount: Decimal
+    total_price: Decimal
+    unit_label: str | None = None
+    quantity_description: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_receipt_line(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        # Keep immutable legacy receipt JSON and operation hashes exactly as stored.
+        result: dict[str, object] = handler(self)
+        if self.unit_label is None:
+            result.pop("unit_label", None)
+        if self.quantity_description is None:
+            result.pop("quantity_description", None)
+        return result
+
+
 class SaleDetails(SaleRead):
     items: list[SaleItemRead]
     payments: list[PaymentRead]
+    physical_items: list[ReceiptLine] = Field(default_factory=list)
+    mixed_items: list[ReceiptLine] = Field(default_factory=list)
+    prepared_cart_items: list[UnitCartItemSnapshot] = Field(default_factory=list)
 
 
 class PrescriptionLogCreate(_PrescriptionFields):
@@ -909,17 +948,6 @@ class SaleList(BaseModel):
 # ---- receipt (print / PDF) ----
 
 
-class ReceiptLine(BaseModel):
-    """One printed line of a receipt — resolved name, no raw UUIDs."""
-
-    position: int
-    name: str
-    qty: Decimal
-    unit_price: Decimal
-    discount_amount: Decimal
-    total_price: Decimal
-
-
 class ReceiptPayment(BaseModel):
     method: str
     amount: Decimal
@@ -947,8 +975,8 @@ class ReceiptData(BaseModel):
     total: Decimal
     currency: str
     payments: list[ReceiptPayment]
-    paid_total: Decimal
-    change: Decimal
+    paid_total: Decimal | None
+    change: Decimal | None
 
 
 # ---- Z-report (shift close XLSX) ----
@@ -1066,8 +1094,20 @@ class SalesSummaryOverview(BaseModel):
     daily: list[SalesSummaryDay]
 
 
+ProductQuantityBasis = Literal["legacy_pack"] | DispenseUnit
+
+
+class TopProductPhysicalQuantity(BaseModel):
+    unit: DispenseUnit
+    quantity: Annotated[Decimal, Field(decimal_places=0, allow_inf_nan=False)]
+
+    @field_serializer("quantity")
+    def serialize_quantity(self, value: Decimal) -> str:
+        return str(int(value))
+
+
 class TopProductRow(BaseModel):
-    """Net product performance for a period; completed returns reduce totals."""
+    """Retail totals; confirmed cash and zero-payout returns reduce quantities."""
 
     catalog_id: UUID
     name: str
@@ -1075,6 +1115,7 @@ class TopProductRow(BaseModel):
     dosage: str | None
     pack_size: str | None
     quantity: Decimal
+    physical_quantities: list[TopProductPhysicalQuantity] = Field(default_factory=list)
     revenue: Decimal
     receipts_count: int
 
@@ -1085,37 +1126,86 @@ class TopProductsOverview(BaseModel):
     branch_name: str | None
     currency: str
     sort_by: Literal["revenue", "quantity"]
+    quantity_basis: ProductQuantityBasis = "legacy_pack"
     rows: list[TopProductRow]
 
 
 # ---- stock on date (accountant XLSX) ----
 
 
+class PhysicalStockQuantities(BaseModel):
+    packaging: UnitPackagingV2
+    closed_packs: int = Field(ge=0)
+    opened_units: int = Field(ge=0)
+    base_units: int = Field(ge=0)
+
+    @field_serializer("closed_packs", "opened_units", "base_units")
+    def serialize_count(self, value: int) -> str:
+        return str(value)
+
+    @model_validator(mode="after")
+    def physical_balance(self) -> Self:
+        if self.base_units != self.closed_packs * self.packaging.units_per_pack + self.opened_units:
+            raise ValueError("historical physical stock quantities do not balance")
+        return self
+
+
 class StockRow(BaseModel):
+    stock_id: UUID | None = None
+    inventory_kind: Literal["legacy", "physical"] = "legacy"
     name: str
     inn: str | None
     branch_name: str | None
     batch_number: str | None
     expires_at: date | None
     qty: Decimal
-    purchase_price: Decimal
-    value: Decimal  # qty × purchase_price
+    physical_stock: PhysicalStockQuantities | None = None
+    purchase_price: Decimal | None
+    value: Decimal | None
+    cost_status: Literal["known", "unknown", "hidden"] = "known"
+
+    @model_validator(mode="after")
+    def stock_visibility(self) -> Self:
+        if (self.inventory_kind == "physical") != (self.physical_stock is not None):
+            raise ValueError("stock kind and physical quantities must agree")
+        if self.physical_stock is not None and self.qty != 0:
+            raise ValueError("physical units must not be added to ordinary packs")
+        if self.cost_status == "hidden" and (
+            self.purchase_price is not None or self.value is not None
+        ):
+            raise ValueError("hidden stock costs must not expose monetary values")
+        if (self.cost_status == "known") != (self.value is not None):
+            raise ValueError("stock valuation and cost knowledge must agree")
+        return self
 
 
-class StockOnDateData(BaseModel):
-    """Per-batch stock as of `on_date`, reconstructed from the batch_movement
-    ledger (Σ qty_delta where movement date ≤ on_date)."""
+class StockValueSummary(BaseModel):
+    total_qty: Decimal
+    total_value: Decimal | None
+    physical_quantities: list[TopProductPhysicalQuantity] = Field(default_factory=list)
+    cost_status: Literal["known", "partial", "hidden"] = "known"
+    known_total_value: Decimal | None = None
+
+    @model_validator(mode="after")
+    def valuation_coverage(self) -> Self:
+        if (self.cost_status == "known") != (self.total_value is not None):
+            raise ValueError("a complete valuation requires all costs to be known")
+        if self.cost_status == "hidden" and self.known_total_value is not None:
+            raise ValueError("hidden stock summaries must not expose monetary values")
+        return self
+
+
+class StockOnDateData(StockValueSummary):
+    """Historical ordinary and received physical balances, with scoped valuation."""
 
     on_date: date
     branch_name: str | None
     show_branch_column: bool
     currency: str
     rows: list[StockRow]
-    total_qty: Decimal
-    total_value: Decimal
 
 
-class StockOnDateOverview(BaseModel):
+class StockOnDateOverview(StockValueSummary):
     """Paginated, screen-friendly view of stock reconstructed for a date."""
 
     on_date: date
@@ -1125,5 +1215,3 @@ class StockOnDateOverview(BaseModel):
     total: int
     page: int
     page_size: int
-    total_qty: Decimal
-    total_value: Decimal

@@ -55,12 +55,20 @@ from app.domains.catalog.models import (
 )
 from app.domains.catalog.repository import CatalogRepository
 from app.domains.catalog.schemas import BarcodeCreate, CatalogItemCreate
+from app.domains.catalog.unit_sales import UnitSalePreparation
 from app.domains.foundation.repository import FoundationRepository
 
 logger = structlog.get_logger("catalog.service")
 
 PREVIEW_ROW_LIMIT = 100
 ROLLBACK_WINDOW = timedelta(hours=24)
+
+
+def _unit_sale_preparation(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    preparation = UnitSalePreparation.model_validate(value)
+    return preparation.model_dump(mode="json")
 
 
 def _creation_identity(request: CatalogItemCreate) -> tuple[str, str, str, str, str] | None:
@@ -178,11 +186,16 @@ class CatalogService:
                 "confirm_distinct_item": confirm_distinct_item,
             }
         )
+        preparation = _unit_sale_preparation(request.unit_sale_preparation)
         fingerprint: str | None = None
         if operation_id is not None:
             canonical = request.model_dump(
                 mode="json", exclude={"operation_id", "confirm_distinct_item"}
             )
+            # A null preparation must not change hashes issued by the preceding release.
+            canonical.pop("unit_sale_preparation")
+            if preparation is not None:
+                canonical["unit_sale_preparation"] = preparation
             if confirm_distinct_item:
                 canonical["confirm_distinct_item"] = True
             if request.base_price is not None:
@@ -212,6 +225,7 @@ class CatalogService:
                 exclude={"operation_id", "initial_barcode", "confirm_distinct_item"},
                 exclude_none=True,
             )
+        fields = {**fields, "unit_sale_preparation": preparation}
         await self._guard_manual_creation(
             tenant_id=tenant_id,
             request=request,
@@ -259,6 +273,11 @@ class CatalogService:
         updated_by: UUID | None = None,
     ) -> TenantCatalog:
         item = await self.get_item(item_id)
+        if "unit_sale_preparation" in fields:
+            fields = {
+                **fields,
+                "unit_sale_preparation": _unit_sale_preparation(fields["unit_sale_preparation"]),
+            }
         if updated_by is not None:
             fields = {**fields, "updated_by": updated_by}
         return await self.repo.update_item(item, **fields)

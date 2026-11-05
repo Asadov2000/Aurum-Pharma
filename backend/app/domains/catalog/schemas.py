@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domains.catalog.unit_sales import UnitSalePreparation
+
 DISPENSING_TYPES = {"prescription", "otc", "special"}
 STORAGE_TYPES = {"normal", "cold", "frozen"}
 BARCODE_TYPES = {"ean13", "ean8", "gs1_128", "code128", "qr", "other"}
@@ -73,6 +75,7 @@ class CatalogItemCreate(BaseModel):
     operation_id: UUID4 | None = None
     initial_barcode: BarcodeCreate | None = None
     confirm_distinct_item: bool = False
+    unit_sale_preparation: UnitSalePreparation | None = None
     brand_name: str = Field(min_length=1, max_length=500)
     inn: str | None = Field(default=None, max_length=500)
     manufacturer: str | None = Field(default=None, max_length=500)
@@ -132,6 +135,7 @@ class CatalogItemCreate(BaseModel):
 
 
 class CatalogItemUpdate(BaseModel):
+    unit_sale_preparation: UnitSalePreparation | None = None
     brand_name: str | None = Field(default=None, min_length=1, max_length=500)
     inn: str | None = Field(default=None, max_length=500)
     manufacturer: str | None = Field(default=None, max_length=500)
@@ -211,6 +215,7 @@ class CatalogItemRead(BaseModel):
     storage_type: str
     category: str | None
     base_price: Decimal | None
+    unit_sale_preparation: UnitSalePreparation | None = None
     currency: str
     image_version: UUID | None = None
     is_active: bool

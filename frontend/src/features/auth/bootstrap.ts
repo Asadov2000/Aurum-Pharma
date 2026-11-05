@@ -93,6 +93,10 @@ export function bootstrapAuth(): void {
       return useAuthStore.getState().accessToken;
     },
     refreshTokens: refreshSessionFromCookie,
+    recoverWithFreshAccess: async (consume, assertRequestCurrent) => {
+      const { recoverSessionWithFreshAccess } = await import("./recovery");
+      return recoverSessionWithFreshAccess(consume, assertRequestCurrent);
+    },
     requestMfaStepUp,
     onAuthFailure: clearClientSession,
     onSupportAccessFailure: clearClientSupportContext,

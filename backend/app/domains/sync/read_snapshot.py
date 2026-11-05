@@ -46,14 +46,14 @@ class ReadSnapshotScope(_StrictContract):
 
 
 class ChunkDescriptor(_StrictContract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     chunk_index: int = Field(ge=0)
     item_count: int = Field(ge=0)
     payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class ComponentDescriptor(_StrictContract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     component: ReadSnapshotComponent
     item_count: int = Field(ge=0)
     chunk_count: int = Field(ge=1)
@@ -82,8 +82,8 @@ class ComponentDescriptor(_StrictContract):
 
 
 class Manifest(_StrictContract):
-    schema_version: Literal[1] = 1
-    profile: Literal["read_only_v1"] = "read_only_v1"
+    schema_version: Literal[1, 2] = 1
+    profile: Literal["read_only_v1", "physical_read_only_v2"] = "read_only_v1"
     snapshot_id: UUID
     edge_node_id: UUID
     tenant_id: UUID
@@ -105,6 +105,16 @@ class Manifest(_StrictContract):
     def validate_component_set(self) -> Self:
         if tuple(component.component for component in self.components) != REQUIRED_COMPONENTS:
             raise ValueError("snapshot must contain the exact canonical component set")
+        if self.profile != (
+            "physical_read_only_v2" if self.schema_version == 2 else "read_only_v1"
+        ):
+            raise ValueError("Snapshot profile and schema version differ")
+        if any(
+            c.schema_version != self.schema_version
+            or any(ch.schema_version != self.schema_version for ch in c.chunks)
+            for c in self.components
+        ):
+            raise ValueError("Snapshot component versions differ")
         return self
 
 
@@ -116,7 +126,7 @@ class ManifestRead(_StrictContract):
 
 
 class ChunkRead(_StrictContract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     snapshot_id: UUID
     edge_node_id: UUID
     tenant_id: UUID
@@ -136,13 +146,18 @@ def chunk_payload_hash(
     component: ReadSnapshotComponent,
     chunk_index: int,
     payload: Sequence[ReadSnapshotItem],
+    schema_version: Literal[1, 2] = 1,
 ) -> str:
     """Hash the canonical payload together with all routing metadata."""
 
     return canonical_json_hash(
         {
-            "domain": _PAYLOAD_DOMAIN,
-            "schema_version": 1,
+            "domain": (
+                _PAYLOAD_DOMAIN
+                if schema_version == 1
+                else "aurum:edge-physical-read-snapshot-payload:v2"
+            ),
+            "schema_version": schema_version,
             "snapshot_id": str(snapshot_id),
             "edge_node_id": str(scope.edge_node_id),
             "tenant_id": str(scope.tenant_id),
@@ -159,11 +174,16 @@ def chunk_payload_hash(
 def _component_hash(
     component: ReadSnapshotComponent,
     descriptors: Sequence[ChunkDescriptor],
+    schema_version: Literal[1, 2] = 1,
 ) -> str:
     return canonical_json_hash(
         {
-            "domain": _COMPONENT_DOMAIN,
-            "schema_version": 1,
+            "domain": (
+                _COMPONENT_DOMAIN
+                if schema_version == 1
+                else "aurum:edge-physical-read-snapshot-component:v2"
+            ),
+            "schema_version": schema_version,
             "component": component,
             "item_count": sum(descriptor.item_count for descriptor in descriptors),
             "chunks": [descriptor.model_dump(mode="json") for descriptor in descriptors],
@@ -177,12 +197,15 @@ def _snapshot_hash(
     scope: ReadSnapshotScope,
     credential_kid: UUID,
     components: Sequence[ComponentDescriptor],
+    schema_version: Literal[1, 2] = 1,
 ) -> str:
     return canonical_json_hash(
         {
-            "domain": _SNAPSHOT_DOMAIN,
-            "schema_version": 1,
-            "profile": "read_only_v1",
+            "domain": (
+                _SNAPSHOT_DOMAIN if schema_version == 1 else "aurum:edge-physical-read-snapshot:v2"
+            ),
+            "schema_version": schema_version,
+            "profile": "read_only_v1" if schema_version == 1 else "physical_read_only_v2",
             "snapshot_id": str(snapshot_id),
             "edge_node_id": str(scope.edge_node_id),
             "tenant_id": str(scope.tenant_id),
@@ -238,7 +261,9 @@ def _validate_component_descriptors(
             raise ReadSnapshotValidationError("An empty component must be represented by chunk 0")
         if item_count > 0 and any(chunk.item_count == 0 for chunk in component.chunks):
             raise ReadSnapshotValidationError("Non-empty components cannot contain empty chunks")
-        expected_hash = _component_hash(component.component, component.chunks)
+        expected_hash = _component_hash(
+            component.component, component.chunks, component.schema_version
+        )
         if not hmac.compare_digest(expected_hash, component.component_hash):
             raise ReadSnapshotValidationError("Component hash does not match")
 
@@ -254,6 +279,7 @@ def build_manifest(
     credential_digest: str,
     source_generated_at: datetime,
     snapshot_id: UUID | None = None,
+    schema_version: Literal[1, 2] = 1,
 ) -> tuple[ManifestRead, list[ChunkRead]]:
     """Build a signed manifest and canonical chunks for one source revision."""
 
@@ -276,8 +302,10 @@ def build_manifest(
                 component=component,
                 chunk_index=chunk_index,
                 payload=payload,
+                schema_version=schema_version,
             )
             descriptor = ChunkDescriptor(
+                schema_version=schema_version,
                 chunk_index=chunk_index,
                 item_count=len(payload),
                 payload_hash=payload_hash,
@@ -285,6 +313,7 @@ def build_manifest(
             descriptors.append(descriptor)
             chunks.append(
                 ChunkRead(
+                    schema_version=schema_version,
                     snapshot_id=snapshot_id,
                     edge_node_id=scope.edge_node_id,
                     tenant_id=scope.tenant_id,
@@ -299,14 +328,17 @@ def build_manifest(
             )
         components.append(
             ComponentDescriptor(
+                schema_version=schema_version,
                 component=component,
                 item_count=sum(chunk.item_count for chunk in descriptors),
                 chunk_count=len(descriptors),
                 chunks=tuple(descriptors),
-                component_hash=_component_hash(component, descriptors),
+                component_hash=_component_hash(component, descriptors, schema_version),
             )
         )
     manifest = Manifest(
+        schema_version=schema_version,
+        profile="physical_read_only_v2" if schema_version == 2 else "read_only_v1",
         snapshot_id=snapshot_id,
         edge_node_id=scope.edge_node_id,
         tenant_id=scope.tenant_id,
@@ -320,6 +352,7 @@ def build_manifest(
             scope=scope,
             credential_kid=credential_kid,
             components=components,
+            schema_version=schema_version,
         ),
     )
     return (
@@ -333,7 +366,9 @@ def build_manifest(
     )
 
 
-def verify_manifest(envelope: ManifestRead, *, credential: str) -> Manifest:
+def verify_manifest(
+    envelope: ManifestRead, *, credential: str, allow_physical: bool = False
+) -> Manifest:
     """Verify signature, hashes, scope binding, and complete component coverage."""
 
     try:
@@ -341,6 +376,8 @@ def verify_manifest(envelope: ManifestRead, *, credential: str) -> Manifest:
     except ValueError as exc:
         raise ReadSnapshotValidationError("Edge credential is invalid") from exc
     manifest = envelope.manifest
+    if manifest.schema_version == 2 and not allow_physical:
+        raise ReadSnapshotValidationError("Physical snapshot requires an explicit supported reader")
     if envelope.signature_algorithm != SIGNATURE_ALGORITHM:
         raise ReadSnapshotValidationError("Snapshot signature algorithm is unsupported")
     if parsed.kid != manifest.credential_kid:
@@ -365,6 +402,7 @@ def verify_manifest(envelope: ManifestRead, *, credential: str) -> Manifest:
         scope=scope,
         credential_kid=manifest.credential_kid,
         components=manifest.components,
+        schema_version=manifest.schema_version,
     )
     if not hmac.compare_digest(expected_snapshot_hash, manifest.snapshot_hash):
         raise ReadSnapshotValidationError("Snapshot hash does not match")
@@ -375,7 +413,8 @@ def verify_chunk(manifest: Manifest, chunk: ChunkRead) -> ChunkDescriptor:
     """Verify one payload against its scope-bound manifest descriptor."""
 
     if (
-        chunk.snapshot_id != manifest.snapshot_id
+        chunk.schema_version != manifest.schema_version
+        or chunk.snapshot_id != manifest.snapshot_id
         or chunk.edge_node_id != manifest.edge_node_id
         or chunk.tenant_id != manifest.tenant_id
         or chunk.branch_id != manifest.branch_id
@@ -405,6 +444,7 @@ def verify_chunk(manifest: Manifest, chunk: ChunkRead) -> ChunkDescriptor:
         component=chunk.component,
         chunk_index=chunk.chunk_index,
         payload=chunk.payload,
+        schema_version=manifest.schema_version,
     )
     if not hmac.compare_digest(expected_payload_hash, chunk.payload_hash):
         raise ReadSnapshotValidationError("Chunk payload hash does not match")

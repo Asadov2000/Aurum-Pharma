@@ -11,7 +11,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
@@ -23,6 +23,7 @@ from app.core.security import (
 )
 
 CRUD_TABLES = {
+    "pos_unit_cart_item",
     "barcode",
     "batch",
     "branch",
@@ -62,11 +63,52 @@ NO_DELETE_TABLES = {
 }
 
 APPEND_ONLY_TABLES = {
+    "pos_training_checkout",
+    "pos_mixed_electronic_refund_posting",
+    "pos_mixed_electronic_refund_outcome",
+    "pos_mixed_electronic_refund_binding",
+    "pos_mixed_electronic_refund_binding_cancel",
+    "pos_mixed_electronic_refund_activation",
+    "pos_mixed_electronic_refund_intent",
+    "pos_unit_electronic_refund_binding",
+    "pos_unit_electronic_refund_binding_cancel",
+    "pos_unit_electronic_refund_activation",
+    "pos_unit_electronic_refund_outcome",
+    "pos_unit_electronic_refund_posting",
+    "pos_unit_electronic_refund_intent",
+    "pos_unit_payment_attempt_binding",
+    "pos_unit_refund_payment_component",
+    "pos_unit_checkout_payment_component",
+    "unit_legacy_reconciliation_record",
+    "pos_mixed_cash_refund",
+    "pos_mixed_zero_return",
+    "pos_mixed_checkout",
+    "pos_mixed_return_command",
+    "pos_mixed_return_line",
+    "pos_mixed_return_slice",
+    "pos_physical_zero_return",
+    "pos_physical_cash_refund",
+    "pos_physical_checkout",
+    "pos_physical_cash_cancellation",
+    "pos_physical_return_command",
+    "pos_physical_return_line",
+    "pos_physical_return_slice",
+    "unit_stock_cart_command_v2",
+    "unit_stock_cart_line_v2",
+    "unit_stock_movement_v2",
+    "pos_unit_cash_intent",
+    "pos_unit_payment_plan_intent",
+    "pos_unit_payment_plan_binding",
+    "pos_unit_payment_plan_binding_cancel",
+    "pos_unit_return_command",
+    "pos_unit_return_slice",
     "offline_policy_inbox",
     "batch_movement",
     "customer_return_disposition",
     "customer_return_quarantine_item",
     "pos_command",
+    "pos_unit_sale_command",
+    "pos_unit_sale_line",
     "pos_refund_reference",
     "supplier_return",
     "sync_read_snapshot_chunk",
@@ -76,10 +118,31 @@ APPEND_ONLY_TABLES = {
     "sync_read_inventory_projection",
     "sync_read_inventory_rollup",
     "sync_read_supplier_projection",
+    "unit_stock_entry",
+    "unit_stock_lot",
+    "unit_stock_opened_pack",
+    "unit_stock_operation",
+    "unit_stock_entry_v2",
+    "unit_stock_lot_v2",
+    "unit_stock_operation_v2",
     "write_off",
 }
 
 READ_ONLY_TABLES = {
+    "sync_retail_refund_source",
+    "sync_retail_refund_event",
+    "sync_retail_refund_anchor",
+    "sync_retail_refund_projection",
+    "sync_physical_stock_event",
+    "sync_physical_stock_anchor",
+    "sync_physical_stock_projection",
+    "sync_physical_stock_baseline",
+    "sync_retail_event_anchor",
+    "pos_retail_checkout_event",
+    "pos_retail_checkout_origin",
+    "unit_stock_opening_pack_v2",
+    "unit_legacy_transition",
+    "unit_stock_opened_pack_v2",
     "access_role_version",
     "access_role_version_permission",
     "authorization_policy_revision",
@@ -128,6 +191,15 @@ READ_ONLY_TABLES = {
 }
 
 NO_ACCESS_TABLES = {
+    "sync_retail_refund_producer_gate",
+    "sync_physical_stock_producer_gate",
+    "sync_physical_stock_source",
+    "sync_retail_event_producer_gate",
+    "physical_writeoff_command",
+    "physical_writeoff_entry",
+    "physical_writeoff_cancellation",
+    "physical_customer_return_disposition",
+    "mixed_customer_return_disposition",
     "billing_cash_document",
     "auth_identity_code",
     "alembic_version",
@@ -200,12 +272,225 @@ SYNC_OUTBOX_INSERT_COLUMNS = {
     "projection_checksum",
 }
 
+PHYSICAL_STOCK_PROJECTION_INSERT_COLUMNS = {
+    "source_event_id",
+    "tenant_id",
+    "branch_id",
+    "origin_node_id",
+    "writer_epoch",
+    "sequence",
+    "operation_id",
+    "source_id",
+    "payload",
+    "source_payload_hash",
+    "projection_hash",
+}
+
 RUNTIME_VIEWS = {
     "v_active_subscription",
     "v_batch_with_expiry_status",
 }
 
+PRIVATE_VIEWS = {"unit_electronic_checkout_marker"}
+PRIVATE_VIEW_ROLES = {
+    "aurum_app",
+    "aurum_support",
+    "aurum_worker",
+    "aurum_catalog_worker",
+    "aurum_billing_worker",
+    "aurum_mailer",
+    "aurum_edge_cash_executor",
+    "aurum_edge_cash_owner",
+}
+
 CUSTOM_FUNCTIONS = {
+    "edge_mixed_legacy_stock_v1",
+    "emit_native_mixed_retail_event_v1",
+    "complete_edge_mixed_cash_v1",
+    "edge_physical_uuid5_v1",
+    "edge_physical_pack_take_v1",
+    "edge_physical_post_v1",
+    "edge_physical_allocate_v1",
+    "native_edge_physical_actor_v1",
+    "native_edge_physical_context_v1",
+    "lock_native_physical_gates_v1",
+    "emit_native_physical_retail_event_v1",
+    "complete_edge_physical_cash_v1",
+    "replay_edge_retail_cash_v1",
+    "lock_edge_retail_cash_inputs_v1",
+    "lock_edge_retail_cash_draft_v1",
+    "prepare_edge_retail_cash_v1",
+    "trg_retail_refund_private_guard",
+    "trg_retail_refund_audit",
+    "trg_retail_refund_capture",
+    "retail_refund_source_payload",
+    "emit_retail_refund_source",
+    "trg_retail_refund_complete",
+    "trg_retail_refund_projection_guard",
+    "trg_retail_refund_other_slot",
+    "read_physical_writeoff_cost_source",
+    "trg_sync_stream_reservation_transaction",
+    "physical_stock_time",
+    "physical_stock_pack_state",
+    "physical_stock_initial_lot",
+    "physical_stock_initial_source",
+    "physical_stock_source_payload",
+    "trg_physical_stock_capture",
+    "trg_physical_catalog_revision",
+    "emit_physical_stock_source",
+    "trg_physical_stock_complete",
+    "trg_physical_stock_audit",
+    "trg_physical_stock_private_guard",
+    "trg_physical_stock_projection_guard",
+    "trg_physical_stock_sale_slot",
+    "trg_retail_edge_anchor_guard",
+    "retail_event_canonical_json",
+    "retail_event_hash",
+    "trg_retail_event_gate_guard",
+    "trg_retail_event_capture",
+    "trg_retail_event_immutable",
+    "assert_retail_event_source",
+    "reserve_retail_checkout_event_position",
+    "store_retail_checkout_event",
+    "trg_retail_checkout_event_required",
+    "trg_capture_retail_checkout_origin",
+    "trg_retail_checkout_origin_guard",
+    "assert_training_checkout_stock_snapshot",
+    "assert_training_checkout_document",
+    "assert_training_checkout",
+    "trg_training_checkout_guard",
+    "training_checkout_sale_write_allowed",
+    "trg_training_checkout_complete",
+    "trg_training_checkout_return_boundary",
+    "mixed_electronic_refund_posting_write_allowed",
+    "assert_mixed_electronic_refund_posting",
+    "trg_mixed_electronic_refund_posting_guard",
+    "trg_mixed_electronic_refund_posting_complete",
+    "trg_mixed_electronic_refund_outcome_guard",
+    "trg_guard_mixed_refund_outcome_cross_type",
+    "mixed_electronic_refund_binding_active",
+    "trg_mixed_electronic_refund_binding_guard",
+    "trg_mixed_electronic_refund_binding_fence",
+    "trg_mixed_electronic_refund_activation_guard",
+    "trg_mixed_electronic_refund_intent_guard",
+    "trg_unit_electronic_refund_intent_guard",
+    "unit_electronic_refund_binding_active",
+    "trg_unit_electronic_refund_binding_guard",
+    "trg_unit_electronic_refund_binding_fence",
+    "trg_unit_electronic_refund_activation_guard",
+    "trg_unit_electronic_refund_outcome_guard",
+    "trg_guard_unit_refund_outcome_cross_type",
+    "unit_electronic_refund_posting_write_allowed",
+    "assert_unit_electronic_refund_posting",
+    "trg_unit_electronic_refund_posting_guard",
+    "trg_unit_electronic_refund_posting_complete",
+    "assert_mixed_electronic_checkout",
+    "assert_unit_electronic_checkout_source",
+    "unit_electronic_current_quote",
+    "assert_unit_electronic_checkout",
+    "assert_unit_electronic_payments",
+    "assert_unit_payment_attempt_binding",
+    "unit_electronic_payment_matches",
+    "unit_electronic_write_allowed",
+    "trg_unit_payment_attempt_binding_guard",
+    "trg_unit_payment_attempt_binding_complete",
+    "assert_unit_refund_payment_components",
+    "trg_unit_refund_payment_component_guard",
+    "trg_unit_refund_payment_component_complete",
+    "assert_unit_checkout_payment_components",
+    "trg_unit_checkout_payment_component_guard",
+    "trg_unit_checkout_payment_component_complete",
+    "physical_writeoff_selection",
+    "assert_physical_writeoff_actor",
+    "physical_writeoff_result",
+    "physical_writeoff_cancel_result",
+    "physical_writeoff_status",
+    "trg_physical_writeoff_immutable",
+    "trg_physical_writeoff_entry",
+    "trg_physical_writeoff_apply",
+    "trg_physical_writeoff_complete",
+    "record_physical_writeoff",
+    "cancel_physical_writeoff",
+    "unit_legacy_opening_state",
+    "unit_legacy_opening_time",
+    "trg_unit_opening_pack_guard",
+    "trg_unit_opening_pack_apply",
+    "trg_unit_initial_opened_basis_guard",
+    "assert_unit_legacy_opened_complete",
+    "post_unit_legacy_opened_transition",
+    "assert_unit_legacy_transition_actor",
+    "trg_unit_legacy_transition_immutable",
+    "unit_legacy_transition_row_matches",
+    "trg_unit_legacy_transition_movement",
+    "assert_unit_legacy_transition_complete",
+    "trg_unit_legacy_transition_complete",
+    "post_unit_legacy_transition",
+    "trg_unit_legacy_reconciliation_record_guard",
+    "validate_unit_legacy_reconciliation_count",
+    "trg_shift_unfinished_unit_cart",
+    "physical_customer_return_disposition_status",
+    "record_physical_customer_return_disposition",
+    "physical_customer_return_disposition_history",
+    "physical_disposition_source",
+    "physical_disposition_fingerprint",
+    "physical_disposition_prepare",
+    "trg_physical_disposition_guard",
+    "pos_stock_on_date_for_report",
+    "pos_quarantine_on_date_for_report",
+    "pos_gross_profit_for_report",
+    "pos_product_totals_for_report",
+    "mixed_customer_return_disposition_status",
+    "record_mixed_customer_return_disposition",
+    "mixed_customer_return_disposition_history",
+    "mixed_disposition_source",
+    "mixed_disposition_fingerprint",
+    "mixed_disposition_prepare",
+    "trg_mixed_disposition_guard",
+    "trg_mixed_cash_refund_guard",
+    "trg_mixed_zero_return_guard",
+    "trg_mixed_cash_refund_complete",
+    "trg_mixed_cash_refund_components",
+    "assert_mixed_checkout",
+    "trg_mixed_return_guard",
+    "trg_mixed_return_complete",
+    "trg_mixed_stock_checkout_binding",
+    "trg_mixed_checkout_guard",
+    "trg_mixed_checkout_complete",
+    "trg_mixed_checkout_cart_frozen",
+    "trg_mixed_checkout_movement_frozen",
+    "trg_mixed_checkout_return_boundary",
+    "physical_customer_return_queue",
+    "mixed_customer_return_queue",
+    "trg_physical_cash_refund_guard",
+    "trg_physical_zero_return_guard",
+    "trg_physical_cash_refund_complete",
+    "trg_physical_return_guard",
+    "trg_physical_return_complete",
+    "assert_physical_checkout",
+    "trg_physical_stock_checkout_binding",
+    "trg_physical_checkout_guard",
+    "trg_physical_checkout_complete",
+    "trg_physical_checkout_cart_frozen",
+    "trg_physical_cash_cancellation_guard",
+    "trg_cancelled_cash_checkout_fence",
+    "trg_unit_prescription_guard",
+    "trg_unit_cash_intent_guard",
+    "trg_unit_payment_plan_intent_guard",
+    "unit_intent_current_quote",
+    "unit_payment_binding_active",
+    "trg_unit_payment_binding_guard",
+    "trg_unit_payment_binding_fence",
+    "trg_unit_cart_guard",
+    "trg_unit_cart_payment_boundary",
+    "trg_unit_return_guard",
+    "trg_unit_return_complete",
+    "unit_lot_is_received_for_report",
+    "unit_lot_has_received_source",
+    "trg_unit_received_stock_complete",
+    "unit_incoming_uuid5",
+    "assert_unit_incoming_provenance",
+    "trg_unit_incoming_binding",
+    "trg_unit_incoming_complete",
     "command_staff_pay",
     "staff_pay_can_read",
     "staff_pay_employees",
@@ -511,6 +796,13 @@ CUSTOM_FUNCTIONS = {
     "trg_set_created_meta",
     "trg_set_updated_meta",
     "trg_update_batch_qty",
+    "trg_unit_stock_complete",
+    "trg_unit_stock_cost_identity",
+    "trg_unit_stock_cost_snapshot",
+    "trg_unit_stock_entry_apply",
+    "trg_unit_stock_guard",
+    "trg_pos_unit_line_guard",
+    "trg_pos_unit_line_complete",
     "trg_validate_edge_cash_node_identity",
     "trg_validate_customer_return_disposition_insert",
     "trg_validate_customer_return_quarantine_insert",
@@ -525,6 +817,32 @@ CUSTOM_FUNCTIONS = {
     "trg_reject_billing_pricing_event_mutation",
     "trg_reject_immutable_billing_financial_mutation",
     "trg_guard_batch_qty_ledger",
+    "trg_guard_batch_unit_packaging_preparation",
+    "trg_validate_incoming_unit_packaging_preparation",
+    "trg_guard_batch_unit_snapshot_v2",
+    "trg_validate_incoming_unit_snapshot_v2",
+    "unit_incoming_v2_fingerprint",
+    "assert_unit_incoming_v2_source",
+    "trg_unit_incoming_v2_binding",
+    "trg_unit_stock_v2_actor",
+    "trg_unit_stock_v2_guard",
+    "trg_unit_stock_v2_apply",
+    "trg_unit_stock_v2_complete",
+    "trg_unit_incoming_v2_document",
+    "unit_pack_v2_remaining",
+    "unit_pack_v2_initial_state",
+    "unit_pack_v2_assert_transition",
+    "unit_cart_v2_fingerprint",
+    "assert_unit_cart_v2_complete",
+    "trg_unit_cart_v2_actor",
+    "trg_unit_lot_v2_block_actor",
+    "trg_unit_cart_v2_guard",
+    "trg_unit_pack_v2_projection_guard",
+    "trg_unit_movement_v2_guard",
+    "trg_unit_movement_v2_apply",
+    "trg_unit_cart_v2_complete",
+    "trg_unit_movement_v2_cost_snapshot",
+    "trg_unit_cart_v2_retail_snapshot",
     "trg_reject_subscription_price_application_mutation",
     "trg_lock_billing_pricing_plan",
     "trg_lock_tenant_billing_scope",
@@ -536,6 +854,28 @@ CUSTOM_FUNCTIONS = {
 }
 
 APP_EXECUTABLE_FUNCTIONS = {
+    "read_physical_writeoff_cost_source",
+    "reserve_retail_checkout_event_position",
+    "store_retail_checkout_event",
+    "training_checkout_sale_write_allowed",
+    "physical_writeoff_status",
+    "record_physical_writeoff",
+    "cancel_physical_writeoff",
+    "post_unit_legacy_transition",
+    "physical_customer_return_disposition_status",
+    "record_physical_customer_return_disposition",
+    "physical_customer_return_disposition_history",
+    "pos_stock_on_date_for_report",
+    "pos_quarantine_on_date_for_report",
+    "pos_gross_profit_for_report",
+    "pos_product_totals_for_report",
+    "mixed_customer_return_disposition_status",
+    "record_mixed_customer_return_disposition",
+    "mixed_customer_return_disposition_history",
+    "physical_customer_return_queue",
+    "mixed_customer_return_queue",
+    "unit_lot_is_received_for_report",
+    "unit_lot_has_received_source",
     "command_staff_pay",
     "staff_pay_can_read",
     "staff_pay_employees",
@@ -753,13 +1093,36 @@ WHERE schemas.nspname = 'public'
 ORDER BY relations.relname
 """
 
+PRIVATE_VIEW_PRIVILEGES_SQL = """
+SELECT
+  relations.relname,
+  roles.rolname,
+  pg_catalog.has_table_privilege(
+    roles.oid, relations.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+  ) AS has_table_privilege,
+  pg_catalog.has_any_column_privilege(
+    roles.oid, relations.oid, 'SELECT,INSERT,UPDATE,REFERENCES'
+  ) AS has_column_privilege
+FROM pg_catalog.pg_class AS relations
+JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+CROSS JOIN pg_catalog.pg_roles AS roles
+WHERE schemas.nspname = 'public' AND relations.relkind = 'v'
+  AND relations.relname::TEXT = ANY(CAST(:views AS TEXT[]))
+  AND roles.rolname::TEXT = ANY(CAST(:roles AS TEXT[]))
+ORDER BY relations.relname, roles.rolname
+"""
+
 CUSTOM_FUNCTION_PRIVILEGES_SQL = """
 SELECT
   routines.proname,
+  routines.proconfig,
   routines.prosecdef AS is_security_definer,
   pg_catalog.has_function_privilege(
     'aurum_app', routines.oid, 'EXECUTE'
   ) AS app_can_execute,
+  pg_catalog.has_function_privilege(
+    'aurum_support', routines.oid, 'EXECUTE'
+  ) AS support_can_execute,
   pg_catalog.has_function_privilege(
     'aurum_app', routines.oid, 'EXECUTE WITH GRANT OPTION'
   ) AS is_grantable,
@@ -949,6 +1312,75 @@ WHERE attributes.attrelid = 'public.sync_outbox'::REGCLASS
 ORDER BY attributes.attname
 """
 
+PHYSICAL_STOCK_PROJECTION_COLUMN_PRIVILEGES_SQL = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+    "public.sync_outbox", "public.sync_physical_stock_projection"
+)
+SYNC_STREAM_COLUMN_PRIVILEGES_SQL = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+    "public.sync_outbox", "public.sync_stream"
+)
+
+
+UNIT_STOCK_COLUMN_PRIVILEGES_SQL = """
+SELECT
+  roles.role_name,
+  relations.relname,
+  attributes.attname,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'SELECT'
+  ) AS can_select,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'INSERT'
+  ) AS can_insert,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'UPDATE'
+  ) AS can_update,
+  pg_catalog.has_column_privilege(
+    roles.role_name, relations.oid, attributes.attname, 'UPDATE WITH GRANT OPTION'
+  ) AS update_is_grantable
+FROM pg_catalog.pg_attribute AS attributes
+JOIN pg_catalog.pg_class AS relations ON relations.oid = attributes.attrelid
+JOIN pg_catalog.pg_namespace AS schemas ON schemas.oid = relations.relnamespace
+CROSS JOIN (VALUES ('aurum_app'), ('aurum_support')) AS roles(role_name)
+WHERE schemas.nspname = 'public'
+  AND relations.relname IN (
+    'unit_stock_operation', 'unit_stock_entry', 'unit_stock_lot', 'unit_stock_opened_pack'
+  )
+  AND attributes.attnum > 0
+  AND NOT attributes.attisdropped
+ORDER BY roles.role_name, relations.relname, attributes.attname
+"""
+
+
+PHYSICAL_V2_COLUMN_PRIVILEGES_SQL = UNIT_STOCK_COLUMN_PRIVILEGES_SQL.replace(
+    "'unit_stock_operation', 'unit_stock_entry', 'unit_stock_lot', 'unit_stock_opened_pack'",
+    "'unit_stock_lot_v2', 'unit_stock_opened_pack_v2'",
+)
+
+
+async def _assert_all_stock_column_privileges(conn: AsyncConnection) -> None:
+    await _assert_retail_refund_projection_columns(conn)
+    _assert_unit_stock_column_privileges(
+        list((await conn.execute(text(UNIT_STOCK_COLUMN_PRIVILEGES_SQL))).mappings())
+    )
+    _assert_physical_v2_column_privileges(
+        list((await conn.execute(text(PHYSICAL_V2_COLUMN_PRIVILEGES_SQL))).mappings())
+    )
+    await _assert_physical_stock_projection_columns(conn)
+
+
+def _assert_physical_v2_column_privileges(rows: list[RowMapping]) -> None:
+    assert {row["relname"] for row in rows} == {"unit_stock_lot_v2", "unit_stock_opened_pack_v2"}
+    assert all(row["can_select"] for row in rows)
+    assert all(row["can_insert"] == (row["relname"] == "unit_stock_lot_v2") for row in rows)
+    assert all(not row["update_is_grantable"] for row in rows)
+    assert {
+        (row["role_name"], row["relname"], row["attname"]) for row in rows if row["can_update"]
+    } == {
+        ("aurum_app", "unit_stock_lot_v2", "is_blocked"),
+        ("aurum_app", "unit_stock_lot_v2", "updated_at"),
+        ("aurum_app", "unit_stock_opened_pack_v2", "updated_at"),
+    }
+
 
 def _assert_tenant_account_support_privileges(
     rows: list[RowMapping],
@@ -965,6 +1397,296 @@ def _assert_tenant_account_support_privileges(
         "tenant_membership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
         "tenant_ownership": {"SELECT", "INSERT", "UPDATE", "DELETE"},
         "tenant_invitation": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    }
+
+
+def _assert_unit_stock_column_privileges(rows: list[RowMapping]) -> None:
+    assert {row["relname"] for row in rows} == {
+        "unit_stock_operation",
+        "unit_stock_entry",
+        "unit_stock_lot",
+        "unit_stock_opened_pack",
+    }
+    assert all(row["can_select"] and row["can_insert"] for row in rows)
+    assert all(not row["update_is_grantable"] for row in rows)
+    assert {
+        (row["role_name"], row["relname"], row["attname"]) for row in rows if row["can_update"]
+    } == {
+        (role, table, column)
+        for role in ("aurum_app", "aurum_support")
+        for table, column in (
+            ("unit_stock_lot", "closed_packs"),
+            ("unit_stock_opened_pack", "remaining_units"),
+        )
+    }
+
+
+def _assert_unit_stock_function_privileges(rows: list[RowMapping]) -> None:
+    names = {
+        "trg_unit_stock_complete",
+        "trg_unit_stock_cost_identity",
+        "trg_unit_stock_cost_snapshot",
+        "trg_unit_stock_entry_apply",
+        "trg_unit_stock_guard",
+    }
+    unit_stock_functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(unit_stock_functions) == names
+    assert all(not row["app_can_execute"] for row in unit_stock_functions.values())
+    assert all(not row["support_can_execute"] for row in unit_stock_functions.values())
+    assert {name for name, row in unit_stock_functions.items() if row["is_security_definer"]} == {
+        "trg_unit_stock_complete",
+        "trg_unit_stock_cost_snapshot",
+        "trg_unit_stock_entry_apply",
+    }
+
+
+def _assert_incoming_packaging_function_privileges(rows: list[RowMapping]) -> None:
+    names = {
+        "trg_guard_batch_unit_packaging_preparation",
+        "trg_validate_incoming_unit_packaging_preparation",
+        "trg_guard_batch_unit_snapshot_v2",
+        "trg_validate_incoming_unit_snapshot_v2",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(functions) == names
+    for row in functions.values():
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
+    assert {name for name, row in functions.items() if row["is_security_definer"]} == {
+        "trg_validate_incoming_unit_packaging_preparation",
+        "trg_validate_incoming_unit_snapshot_v2",
+    }
+
+
+def _assert_mixed_disposition_function_privileges(rows: list[RowMapping]) -> None:
+    private_names = {
+        "mixed_disposition_source",
+        "mixed_disposition_fingerprint",
+        "mixed_disposition_prepare",
+        "trg_mixed_disposition_guard",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in private_names}
+    assert set(functions) == private_names
+    for name, function in functions.items():
+        assert not function["app_can_execute"]
+        assert not function["support_can_execute"]
+        assert not function["public_can_execute"]
+        assert function["is_security_definer"] == (
+            name in {"mixed_disposition_source", "mixed_disposition_prepare"}
+        )
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "record_mixed_customer_return_disposition",
+        "mixed_customer_return_disposition_history",
+        "mixed_customer_return_disposition_status",
+    ):
+        function = next(row for row in rows if row["proname"] == name)
+        assert function["is_security_definer"] is True
+        assert function["support_can_execute"] is False
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+def _assert_physical_disposition_function_privileges(rows: list[RowMapping]) -> None:
+    private_names = {
+        "physical_disposition_source",
+        "physical_disposition_fingerprint",
+        "physical_disposition_prepare",
+        "trg_physical_disposition_guard",
+    }
+    functions = {row["proname"]: row for row in rows if row["proname"] in private_names}
+    assert set(functions) == private_names
+    for name, function in functions.items():
+        assert not function["app_can_execute"]
+        assert not function["support_can_execute"]
+        assert not function["public_can_execute"]
+        assert function["is_security_definer"] == (
+            name in {"physical_disposition_source", "physical_disposition_prepare"}
+        )
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "record_physical_customer_return_disposition",
+        "physical_customer_return_disposition_history",
+        "physical_customer_return_disposition_status",
+    ):
+        function = next(row for row in rows if row["proname"] == name)
+        assert function["is_security_definer"] is True
+        assert function["support_can_execute"] is False
+        assert function["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+def _assert_prepared_stock_function_privileges(rows: list[RowMapping]) -> None:
+    _assert_unit_stock_function_privileges(rows)
+    _assert_incoming_packaging_function_privileges(rows)
+    _assert_mixed_disposition_function_privileges(rows)
+    _assert_physical_disposition_function_privileges(rows)
+    return_names = {
+        "trg_mixed_cash_refund_guard",
+        "trg_mixed_zero_return_guard",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
+        "trg_mixed_return_guard",
+        "trg_mixed_return_complete",
+        "trg_physical_return_guard",
+        "trg_physical_return_complete",
+        "trg_physical_cash_refund_guard",
+        "trg_physical_zero_return_guard",
+        "trg_physical_cash_refund_complete",
+    }
+    return_functions = {row["proname"]: row for row in rows if row["proname"] in return_names}
+    assert set(return_functions) == return_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in return_functions.values()
+    )
+    assert {name for name, row in return_functions.items() if row["is_security_definer"]} == {
+        "trg_mixed_return_complete",
+        "trg_physical_return_complete",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
+    }
+    for name in (
+        "trg_mixed_return_guard",
+        "trg_mixed_return_complete",
+        "trg_mixed_cash_refund_guard",
+        "trg_mixed_zero_return_guard",
+        "trg_mixed_cash_refund_complete",
+        "trg_mixed_cash_refund_components",
+    ):
+        assert return_functions[name]["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    cash_names = {
+        "trg_physical_cash_cancellation_guard",
+        "trg_cancelled_cash_checkout_fence",
+        "assert_physical_checkout",
+        "trg_physical_stock_checkout_binding",
+        "trg_physical_checkout_guard",
+        "trg_physical_checkout_complete",
+        "trg_physical_checkout_cart_frozen",
+    }
+    cash_functions = {row["proname"]: row for row in rows if row["proname"] in cash_names}
+    assert set(cash_functions) == cash_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in cash_functions.values()
+    )
+    assert {name for name, row in cash_functions.items() if row["is_security_definer"]} == (
+        cash_names - {"trg_physical_checkout_guard"}
+    )
+    mixed_names = {
+        "assert_mixed_checkout",
+        "trg_mixed_stock_checkout_binding",
+        "trg_mixed_checkout_guard",
+        "trg_mixed_checkout_complete",
+        "trg_mixed_checkout_cart_frozen",
+        "trg_mixed_checkout_movement_frozen",
+        "trg_mixed_checkout_return_boundary",
+    }
+    mixed_functions = {row["proname"]: row for row in rows if row["proname"] in mixed_names}
+    assert set(mixed_functions) == mixed_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in mixed_functions.values()
+    )
+    assert {name for name, row in mixed_functions.items() if row["is_security_definer"]} == (
+        mixed_names - {"trg_mixed_checkout_guard"}
+    )
+    physical_names = {
+        "unit_pack_v2_remaining",
+        "unit_pack_v2_initial_state",
+        "unit_pack_v2_assert_transition",
+        "unit_cart_v2_fingerprint",
+        "assert_unit_cart_v2_complete",
+        "trg_unit_cart_v2_actor",
+        "trg_unit_lot_v2_block_actor",
+        "trg_unit_cart_v2_guard",
+        "trg_unit_pack_v2_projection_guard",
+        "trg_unit_movement_v2_guard",
+        "trg_unit_movement_v2_apply",
+        "trg_unit_cart_v2_complete",
+        "trg_unit_movement_v2_cost_snapshot",
+        "trg_unit_cart_v2_retail_snapshot",
+    }
+    physical_functions = {row["proname"]: row for row in rows if row["proname"] in physical_names}
+    assert set(physical_functions) == physical_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in physical_functions.values()
+    )
+    assert {name for name, row in physical_functions.items() if row["is_security_definer"]} == (
+        physical_names - {"trg_unit_cart_v2_actor", "trg_unit_lot_v2_block_actor"}
+    )
+    v2_names = {
+        "unit_incoming_v2_fingerprint",
+        "assert_unit_incoming_v2_source",
+        "trg_unit_incoming_v2_binding",
+        "trg_unit_stock_v2_actor",
+        "trg_unit_stock_v2_guard",
+        "trg_unit_stock_v2_apply",
+        "trg_unit_stock_v2_complete",
+        "trg_unit_incoming_v2_document",
+    }
+    v2_functions = {row["proname"]: row for row in rows if row["proname"] in v2_names}
+    assert set(v2_functions) == v2_names
+    assert all(
+        not row["app_can_execute"]
+        and not row["support_can_execute"]
+        and not row["public_can_execute"]
+        for row in v2_functions.values()
+    )
+    assert {name for name, row in v2_functions.items() if row["is_security_definer"]} == (
+        v2_names - {"trg_unit_stock_v2_actor"}
+    )
+    received_functions = {
+        row["proname"]: row
+        for row in rows
+        if row["proname"]
+        in {
+            "unit_lot_has_received_source",
+            "unit_lot_is_received_for_report",
+            "trg_unit_received_stock_complete",
+        }
+    }
+    assert set(received_functions) == {
+        "unit_lot_has_received_source",
+        "unit_lot_is_received_for_report",
+        "trg_unit_received_stock_complete",
+    }
+    for name, row in received_functions.items():
+        assert row["is_security_definer"] is True
+        assert row["app_can_execute"] is (name != "trg_unit_received_stock_complete")
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
+    incoming_names = {
+        "unit_incoming_uuid5",
+        "assert_unit_incoming_provenance",
+        "trg_unit_incoming_binding",
+        "trg_unit_incoming_complete",
+        "trg_guard_incoming_document_lifecycle",
+        "trg_validate_incoming_acceptance_integrity",
+    }
+    incoming_functions = {row["proname"]: row for row in rows if row["proname"] in incoming_names}
+    assert set(incoming_functions) == incoming_names
+    for row in incoming_functions.values():
+        assert row["is_security_definer"] is True
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["public_can_execute"] is False
+    names = {"trg_pos_unit_line_guard", "trg_pos_unit_line_complete"}
+    functions = {row["proname"]: row for row in rows if row["proname"] in names}
+    assert set(functions) == names
+    assert all(not row["app_can_execute"] for row in functions.values())
+    assert all(not row["support_can_execute"] for row in functions.values())
+    assert {name for name, row in functions.items() if row["is_security_definer"]} == {
+        "trg_pos_unit_line_complete",
+        "trg_pos_unit_line_guard",
     }
 
 
@@ -986,10 +1708,316 @@ async def app_engine_privileges() -> AsyncIterator[AsyncEngine]:
         await engine.dispose()
 
 
+async def _assert_physical_return_journal_table_privileges(conn: AsyncConnection) -> None:
+    journal_privileges = list((await conn.execute(text("""
+                    SELECT roles.rolname,relations.relname,checks.privilege,
+                      pg_get_userbyid(relations.relowner) AS owner,
+                      relations.relrowsecurity,relations.relforcerowsecurity,
+                      has_table_privilege(roles.oid,relations.oid,checks.privilege) AS granted,
+                      has_table_privilege(roles.oid,relations.oid,
+                        checks.privilege||' WITH GRANT OPTION') AS grantable
+                    FROM pg_catalog.pg_class relations
+                    JOIN pg_catalog.pg_namespace schemas ON schemas.oid=relations.relnamespace
+                    CROSS JOIN pg_catalog.pg_roles roles
+                    CROSS JOIN (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),
+                      ('TRUNCATE'),('REFERENCES'),('TRIGGER')) checks(privilege)
+                    WHERE schemas.nspname='public' AND relations.relname IN (
+                      'physical_writeoff_command','physical_writeoff_entry',
+                      'physical_writeoff_cancellation',
+                      'mixed_customer_return_disposition','physical_customer_return_disposition',
+                      'pos_training_checkout',
+                      'pos_mixed_cash_refund','pos_mixed_zero_return',
+                      'pos_mixed_return_command','pos_mixed_return_line','pos_mixed_return_slice',
+                      'pos_physical_cash_cancellation',
+                      'pos_physical_return_command','pos_physical_return_line',
+                      'pos_physical_return_slice','pos_physical_cash_refund','pos_physical_zero_return')
+                    AND roles.rolname IN ('aurum_app','aurum_support','aurum_worker',
+                      'aurum_catalog_worker','aurum_billing_worker','aurum_mailer',
+                      'aurum_edge_cash_executor')
+                """))).mappings())
+    journal_tables = {
+        "pos_physical_cash_cancellation",
+        "pos_training_checkout",
+        "physical_writeoff_command",
+        "physical_writeoff_entry",
+        "physical_writeoff_cancellation",
+        "physical_customer_return_disposition",
+        "mixed_customer_return_disposition",
+        "pos_mixed_cash_refund",
+        "pos_mixed_zero_return",
+        "pos_mixed_return_command",
+        "pos_mixed_return_line",
+        "pos_mixed_return_slice",
+        "pos_physical_zero_return",
+        "pos_physical_cash_refund",
+        "pos_physical_return_command",
+        "pos_physical_return_line",
+        "pos_physical_return_slice",
+    }
+    assert {row["relname"] for row in journal_privileges} == journal_tables
+    assert all(
+        row["owner"] == "aurum_schema_owner"
+        and row["relrowsecurity"] is True
+        and row["relforcerowsecurity"] is True
+        for row in journal_privileges
+    )
+    journal_roles = {row["rolname"] for row in journal_privileges}
+    assert {"aurum_app", "aurum_support", "aurum_worker"} <= journal_roles
+    journal_actual: dict[tuple[str, str], set[str]] = {
+        (role, table): set() for role in journal_roles for table in journal_tables
+    }
+    for row in journal_privileges:
+        assert row["grantable"] is False
+        if row["granted"]:
+            journal_actual[(row["rolname"], row["relname"])].add(row["privilege"])
+    wrapper_only_tables = {
+        "physical_writeoff_command",
+        "physical_writeoff_entry",
+        "physical_writeoff_cancellation",
+        "mixed_customer_return_disposition",
+        "physical_customer_return_disposition",
+    }
+    assert journal_actual == {
+        (role, table): (
+            {"SELECT"}
+            if role == "aurum_support"
+            else (
+                {"SELECT", "INSERT"}
+                if role == "aurum_app" and table not in wrapper_only_tables
+                else set()
+            )
+        )
+        for role in journal_roles
+        for table in journal_tables
+    }
+
+
+def _assert_runtime_relation_privileges(rows: list[RowMapping]) -> None:
+    expected = {
+        **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
+        **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
+        **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
+        **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
+        **{table: set() for table in NO_ACCESS_TABLES | PRIVATE_VIEWS},
+    }
+    actual: dict[str, set[str]] = {relation: set() for relation in expected}
+    for row in rows:
+        assert row["relname"] in expected
+        assert row["is_grantable"] is False
+        if row["has_privilege"]:
+            actual[row["relname"]].add(row["privilege"])
+    assert actual == expected
+
+
+def _assert_private_inventory_guards(function_privileges: list[RowMapping]) -> None:
+    for row in function_privileges:
+        if row["proname"] not in {
+            "edge_mixed_legacy_stock_v1",
+            "emit_native_mixed_retail_event_v1",
+            "complete_edge_mixed_cash_v1",
+            "edge_physical_uuid5_v1",
+            "edge_physical_pack_take_v1",
+            "edge_physical_post_v1",
+            "edge_physical_allocate_v1",
+            "native_edge_physical_actor_v1",
+            "native_edge_physical_context_v1",
+            "lock_native_physical_gates_v1",
+            "emit_native_physical_retail_event_v1",
+            "complete_edge_physical_cash_v1",
+        }:
+            continue
+        assert row["app_can_execute"] is False
+        assert row["support_can_execute"] is False
+        assert row["proconfig"] == ["search_path=pg_catalog, pg_temp", "row_security=on"]
+        assert row["is_security_definer"] is (
+            row["proname"]
+            in {
+                "edge_physical_uuid5_v1",
+                "native_edge_physical_actor_v1",
+                "native_edge_physical_context_v1",
+                "lock_native_physical_gates_v1",
+            }
+        )
+    replay = next(
+        row for row in function_privileges if row["proname"] == "replay_edge_retail_cash_v1"
+    )
+    assert replay["is_security_definer"] is False
+    assert replay["app_can_execute"] is False
+    assert replay["support_can_execute"] is False
+    assert replay["proconfig"] == ["search_path=pg_catalog, pg_temp", "row_security=on"]
+    for name in (
+        "trg_physical_cash_cancellation_guard",
+        "trg_cancelled_cash_checkout_fence",
+        "trg_retail_refund_audit",
+        "trg_retail_refund_capture",
+        "retail_refund_source_payload",
+        "emit_retail_refund_source",
+        "trg_retail_refund_complete",
+        "trg_retail_refund_projection_guard",
+        "trg_retail_refund_other_slot",
+        "trg_sync_stream_reservation_transaction",
+        "physical_stock_initial_lot",
+        "physical_stock_initial_source",
+        "physical_stock_source_payload",
+        "trg_physical_stock_capture",
+        "emit_physical_stock_source",
+        "trg_physical_stock_complete",
+        "trg_physical_stock_audit",
+        "trg_physical_stock_projection_guard",
+        "trg_physical_stock_sale_slot",
+        "trg_retail_event_capture",
+        "assert_retail_event_source",
+        "trg_retail_checkout_event_required",
+        "trg_capture_retail_checkout_origin",
+        "trg_retail_checkout_origin_guard",
+        "assert_training_checkout_stock_snapshot",
+        "assert_training_checkout_document",
+        "assert_training_checkout",
+        "trg_training_checkout_guard",
+        "trg_training_checkout_complete",
+        "trg_training_checkout_return_boundary",
+        "mixed_electronic_refund_posting_write_allowed",
+        "assert_mixed_electronic_refund_posting",
+        "trg_mixed_electronic_refund_posting_guard",
+        "trg_mixed_electronic_refund_posting_complete",
+        "trg_mixed_electronic_refund_outcome_guard",
+        "trg_guard_mixed_refund_outcome_cross_type",
+        "mixed_electronic_refund_binding_active",
+        "trg_mixed_electronic_refund_binding_guard",
+        "trg_mixed_electronic_refund_binding_fence",
+        "trg_mixed_electronic_refund_activation_guard",
+        "trg_mixed_electronic_refund_intent_guard",
+        "trg_unit_electronic_refund_intent_guard",
+        "unit_electronic_refund_binding_active",
+        "trg_unit_electronic_refund_binding_guard",
+        "trg_unit_electronic_refund_binding_fence",
+        "trg_unit_electronic_refund_activation_guard",
+        "trg_unit_electronic_refund_outcome_guard",
+        "trg_guard_unit_refund_outcome_cross_type",
+        "unit_electronic_refund_posting_write_allowed",
+        "assert_unit_electronic_refund_posting",
+        "trg_unit_electronic_refund_posting_guard",
+        "trg_unit_electronic_refund_posting_complete",
+        "assert_mixed_electronic_checkout",
+        "assert_unit_electronic_checkout_source",
+        "unit_electronic_current_quote",
+        "assert_unit_electronic_checkout",
+        "assert_unit_electronic_payments",
+        "assert_unit_payment_attempt_binding",
+        "unit_electronic_payment_matches",
+        "unit_electronic_write_allowed",
+        "trg_unit_payment_attempt_binding_guard",
+        "trg_unit_payment_attempt_binding_complete",
+        "assert_unit_refund_payment_components",
+        "trg_unit_refund_payment_component_guard",
+        "trg_unit_refund_payment_component_complete",
+        "assert_unit_checkout_payment_components",
+        "trg_unit_checkout_payment_component_guard",
+        "trg_unit_checkout_payment_component_complete",
+        "assert_physical_writeoff_actor",
+        "physical_writeoff_result",
+        "physical_writeoff_cancel_result",
+        "trg_physical_writeoff_immutable",
+        "trg_physical_writeoff_entry",
+        "trg_physical_writeoff_apply",
+        "trg_physical_writeoff_complete",
+        "unit_legacy_opening_state",
+        "unit_legacy_opening_time",
+        "trg_unit_opening_pack_guard",
+        "trg_unit_opening_pack_apply",
+        "trg_unit_initial_opened_basis_guard",
+        "assert_unit_legacy_opened_complete",
+        "post_unit_legacy_opened_transition",
+        "assert_unit_legacy_transition_actor",
+        "unit_legacy_transition_row_matches",
+        "trg_unit_legacy_transition_movement",
+        "assert_unit_legacy_transition_complete",
+        "trg_unit_legacy_transition_complete",
+        "trg_unit_legacy_reconciliation_record_guard",
+        "validate_unit_legacy_reconciliation_count",
+        "trg_shift_unfinished_unit_cart",
+    ):
+        guard = next(row for row in function_privileges if row["proname"] == name)
+        assert guard["is_security_definer"] is True
+        assert guard["app_can_execute"] is False
+        assert guard["support_can_execute"] is False
+        assert guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "trg_retail_edge_anchor_guard",
+        "trg_retail_refund_private_guard",
+        "physical_stock_time",
+        "physical_stock_pack_state",
+        "trg_physical_catalog_revision",
+        "trg_physical_stock_private_guard",
+        "trg_unit_legacy_transition_immutable",
+        "physical_writeoff_selection",
+        "retail_event_canonical_json",
+        "retail_event_hash",
+        "trg_retail_event_gate_guard",
+        "trg_retail_event_immutable",
+    ):
+        journal_guard = next(row for row in function_privileges if row["proname"] == name)
+        assert journal_guard["is_security_definer"] is False
+        assert journal_guard["app_can_execute"] is False
+        assert journal_guard["support_can_execute"] is False
+        assert journal_guard["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+    for name in (
+        "reserve_retail_checkout_event_position",
+        "read_physical_writeoff_cost_source",
+        "store_retail_checkout_event",
+        "training_checkout_sale_write_allowed",
+        "post_unit_legacy_transition",
+        "physical_writeoff_status",
+        "record_physical_writeoff",
+        "cancel_physical_writeoff",
+    ):
+        posting = next(row for row in function_privileges if row["proname"] == name)
+        assert posting["is_security_definer"] is True
+        assert posting["app_can_execute"] is True
+        assert posting["support_can_execute"] is False
+        assert posting["proconfig"] == ["search_path=pg_catalog, pg_temp"]
+
+
+async def _assert_retail_refund_projection_columns(conn: AsyncConnection) -> None:
+    query = SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL.replace(
+        "public.sync_outbox", "public.sync_retail_refund_projection"
+    )
+    columns = list((await conn.execute(text(query))).mappings())
+    assert {row["attname"] for row in columns if row["can_insert"]} == {
+        "source_event_id",
+        "tenant_id",
+        "branch_id",
+        "parent_sale_id",
+        "origin_node_id",
+        "writer_epoch",
+        "sequence",
+        "operation_id",
+        "source_id",
+        "payload",
+        "source_payload_hash",
+        "projection_hash",
+    }
+    assert not any(row["can_update"] for row in columns)
+
+
+async def _assert_physical_stock_projection_columns(conn: AsyncConnection) -> None:
+    result = await conn.execute(text(PHYSICAL_STOCK_PROJECTION_COLUMN_PRIVILEGES_SQL))
+    columns = list(result.mappings())
+    assert {
+        row["attname"] for row in columns if row["can_insert"]
+    } == PHYSICAL_STOCK_PROJECTION_INSERT_COLUMNS
+    assert not any(row["can_update"] for row in columns)
+    stream_result = await conn.execute(text(SYNC_STREAM_COLUMN_PRIVILEGES_SQL))
+    stream_columns = list(stream_result.mappings())
+    assert "last_reservation_transaction_id" in {row["attname"] for row in stream_columns}
+    assert not any(row["can_insert"] or row["can_update"] for row in stream_columns)
+
+
 async def test_runtime_role_has_only_row_level_table_privileges(
     support_engine_privileges: AsyncEngine,
 ) -> None:
     async with support_engine_privileges.connect() as conn:
+        await _assert_physical_return_journal_table_privileges(conn)
         relation_result = await conn.execute(text(RELATION_PRIVILEGES_SQL))
         relation_privileges = list(relation_result.mappings())
         defaults_result = await conn.execute(text(DEFAULT_PRIVILEGES_SQL))
@@ -998,6 +2026,14 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         database_privileges = database_result.mappings().one()
         view_security_result = await conn.execute(text(RUNTIME_VIEW_SECURITY_SQL))
         view_security = list(view_security_result.mappings())
+        private_view_privileges = list(
+            (
+                await conn.execute(
+                    text(PRIVATE_VIEW_PRIVILEGES_SQL),
+                    {"views": sorted(PRIVATE_VIEWS), "roles": sorted(PRIVATE_VIEW_ROLES)},
+                )
+            ).mappings()
+        )
         function_result = await conn.execute(text(CUSTOM_FUNCTION_PRIVILEGES_SQL))
         function_privileges = list(function_result.mappings())
         definer_result = await conn.execute(text(APP_EXECUTABLE_SECURITY_DEFINERS_SQL))
@@ -1010,24 +2046,11 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         app_user_column_privileges = list(app_user_column_result.mappings())
         sync_outbox_column_result = await conn.execute(text(SYNC_OUTBOX_COLUMN_PRIVILEGES_SQL))
         sync_outbox_column_privileges = list(sync_outbox_column_result.mappings())
+        await _assert_all_stock_column_privileges(conn)
         tenant_account_result = await conn.execute(text(TENANT_ACCOUNT_TABLE_PRIVILEGES_SQL))
         tenant_account_privileges = list(tenant_account_result.mappings())
 
-    expected_relations = {
-        **{table: {"SELECT", "INSERT", "UPDATE", "DELETE"} for table in CRUD_TABLES},
-        **{table: {"SELECT", "INSERT", "UPDATE"} for table in NO_DELETE_TABLES},
-        **{table: {"SELECT", "INSERT"} for table in APPEND_ONLY_TABLES},
-        **{table: {"SELECT"} for table in READ_ONLY_TABLES | RUNTIME_VIEWS},
-        **{table: set() for table in NO_ACCESS_TABLES},
-    }
-    actual_relations: dict[str, set[str]] = {relation: set() for relation in expected_relations}
-    for row in relation_privileges:
-        assert row["relname"] in expected_relations
-        assert row["is_grantable"] is False
-        if row["has_privilege"]:
-            actual_relations[row["relname"]].add(row["privilege"])
-
-    assert actual_relations == expected_relations
+    _assert_runtime_relation_privileges(relation_privileges)
     assert default_privileges == []
     assert database_privileges == {
         "app_can_connect": True,
@@ -1035,19 +2058,37 @@ async def test_runtime_role_has_only_row_level_table_privileges(
         "app_can_create_temp": False,
         "public_has_privileges": False,
     }
-    assert {row["relname"] for row in view_security} == RUNTIME_VIEWS
+    assert {row["relname"] for row in view_security} == RUNTIME_VIEWS | PRIVATE_VIEWS
     assert all(row["owner"] == "aurum_schema_owner" for row in view_security)
     assert {
         row["attname"] for row in sync_outbox_column_privileges if row["can_insert"]
     } == SYNC_OUTBOX_INSERT_COLUMNS
     assert not any(row["can_update"] for row in sync_outbox_column_privileges)
-    assert all("security_invoker=true" in row["options"] for row in view_security)
+    assert all(
+        "security_invoker=true" in row["options"]
+        for row in view_security
+        if row["relname"] in RUNTIME_VIEWS
+    )
+    assert all(
+        row["options"] == ["security_barrier=true"]
+        for row in view_security
+        if row["relname"] in PRIVATE_VIEWS
+    )
+    assert {(row["relname"], row["rolname"]) for row in private_view_privileges} == {
+        (view, role) for view in PRIVATE_VIEWS for role in PRIVATE_VIEW_ROLES
+    }
+    assert all(
+        not row["has_table_privilege"] and not row["has_column_privilege"]
+        for row in private_view_privileges
+    )
     assert {row["proname"] for row in function_privileges} == CUSTOM_FUNCTIONS
     assert {
         row["proname"] for row in function_privileges if row["app_can_execute"]
     } == APP_EXECUTABLE_FUNCTIONS
     assert all(row["is_grantable"] is False for row in function_privileges)
     assert all(row["public_can_execute"] is False for row in function_privileges)
+    _assert_private_inventory_guards(function_privileges)
+    _assert_prepared_stock_function_privileges(function_privileges)
     assert executable_definers == APP_EXECUTABLE_SECURITY_DEFINERS
     assert {
         (row["extname"], row["signature"]) for row in extension_privileges if row["app_can_execute"]

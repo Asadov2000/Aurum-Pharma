@@ -1,33 +1,51 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-ARG GO_IMAGE=golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+ARG GO_IMAGE=golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
 
 FROM ${GO_IMAGE} AS tools-builder
+
+# Avoid HTTP/2 transport failures while retaining HTTPS and checksum verification.
+ENV GODEBUG=http2client=0
+
+ARG TARGETARCH
 
 RUN apk add --no-cache git
 
 WORKDIR /src/restic
-RUN go mod init aurum.local/restic \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    go mod init aurum.local/restic \
     && go get github.com/restic/restic/cmd/restic@v0.19.1 \
-    && go get golang.org/x/net@v0.58.0 \
-        golang.org/x/text@v0.41.0 \
+    && go get golang.org/x/net@v0.60.0 \
+        golang.org/x/text@v0.42.0 \
+        golang.org/x/crypto@v0.57.0 \
         google.golang.org/grpc@v1.83.2 \
-    && go get golang.org/x/crypto@v0.55.0 \
+        github.com/klauspost/compress@v1.18.7 \
+        github.com/go-jose/go-jose/v4@v4.1.6 \
+    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto \
+        github.com/klauspost/compress github.com/go-jose/go-jose/v4 \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-        -o /out/restic github.com/restic/restic/cmd/restic
+        -o /out/restic github.com/restic/restic/cmd/restic \
+    && go version -m /out/restic | awk '$1 == "dep" && $2 == "github.com/klauspost/compress" { print $2, $3; ok = ($3 == "v1.18.7") } END { exit !ok }' \
+    && go version -m /out/restic | awk '$1 == "dep" && $2 == "github.com/go-jose/go-jose/v4" { print $2, $3; ok = ($3 == "v4.1.6") } END { exit !ok }'
 
 WORKDIR /src/minio-client
-RUN go mod init aurum.local/minio-client \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    go mod init aurum.local/minio-client \
     && go get github.com/minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096 \
     && go get github.com/prometheus/prometheus@v0.311.3 \
-        golang.org/x/net@v0.58.0 \
-        golang.org/x/text@v0.41.0 \
-        google.golang.org/grpc@v1.83.2 \
     && go get github.com/prometheus/common/model@v0.67.5 \
         github.com/prometheus/prometheus/model/labels@v0.311.3 \
-    && go get golang.org/x/crypto@v0.55.0 \
+    && go get golang.org/x/net@v0.60.0 \
+        golang.org/x/text@v0.42.0 \
+        golang.org/x/crypto@v0.57.0 \
+        google.golang.org/grpc@v1.83.2 \
+        github.com/klauspost/compress@v1.18.7 \
+    && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto github.com/klauspost/compress \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-        -o /out/mc github.com/minio/mc
+        -o /out/mc github.com/minio/mc \
+    && go version -m /out/mc | awk '$1 == "dep" && $2 == "github.com/klauspost/compress" { print $2, $3; ok = ($3 == "v1.18.7") } END { exit !ok }'
 
 FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 AS runtime
 

@@ -2,6 +2,7 @@ import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DRAFT_TTL_MIN, draftKey, loadDraft, saveDraft } from "@/features/pos/draftStorage";
+import { unitPaymentMarkerKey } from "@/features/pos/unitPaymentPreparationPresence";
 
 const REG = "reg-1";
 const ATTEMPT_ID = "30000000-0000-4000-8000-000000000001";
@@ -23,6 +24,25 @@ describe("loadDraft (POS draft TTL)", () => {
       externalPaymentReviewRequired: false,
     });
   });
+
+  it.each([ATTEMPT_ID, "corrupt-marker"])(
+    "retains an expired draft while preparation recovery exists: %s",
+    (marker) => {
+      window.localStorage.setItem(
+        draftKey(REG, POS_SCOPE),
+        JSON.stringify({ saleId: "s-preparation", nameById: {}, savedAt: 0 }),
+      );
+      window.localStorage.setItem(unitPaymentMarkerKey("s-preparation", POS_SCOPE), marker);
+      expect(loadDraft(REG, 1)).toMatchObject({ saleId: "s-preparation", expired: false });
+      // A marker from another cashier cannot preserve this cashier's stale draft.
+      window.localStorage.removeItem(unitPaymentMarkerKey("s-preparation", POS_SCOPE));
+      window.localStorage.setItem(
+        unitPaymentMarkerKey("s-preparation", { ...POS_SCOPE, userId: "another-cashier" }),
+        marker,
+      );
+      expect(loadDraft(REG, 1)).toMatchObject({ saleId: null, expired: true });
+    },
+  );
 
   it("restores a fresh draft", () => {
     window.localStorage.setItem(

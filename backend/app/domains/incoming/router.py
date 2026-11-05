@@ -8,7 +8,18 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import UUID4
@@ -21,12 +32,18 @@ from app.core.deps import (
     require_recent_account_mfa,
 )
 from app.core.errors import BusinessRuleError
+from app.domains.incoming.acceptance import (
+    acceptance_revision,
+    physical_receiving_ready,
+    stock_mode,
+)
 from app.domains.incoming.draft_service import IncomingDraftService
 from app.domains.incoming.invoice_parser import MAX_INVOICE_FILE_BYTES
 from app.domains.incoming.invoice_service import IncomingInvoiceService
 from app.domains.incoming.models import IncomingDraftRow
 from app.domains.incoming.repository import IncomingRepository
 from app.domains.incoming.schemas import (
+    IncomingAcceptRequest,
     IncomingDocumentCreate,
     IncomingDocumentList,
     IncomingDocumentRead,
@@ -247,20 +264,24 @@ async def get_incoming(
     branch_scope = user.branch_scope_for("incoming.view")
     details = await service.get_document_details(document_id, allowed_branch_ids=branch_scope)
     items = await service.list_item_details(document_id, allowed_branch_ids=branch_scope)
+    source_items = [item.item for item in items]
     return IncomingDocumentWithItems(
         **IncomingDocumentRead.model_validate(details.document)
         .model_copy(
             update={
+                "stock_mode": stock_mode(source_items),
                 "total_amount": (
                     details.document.total_amount
                     if _can_view_incoming_cost(user, details.document.branch_id)
                     else None
-                )
+                ),
             }
         )
         .model_dump(exclude={"branch_name", "supplier_name"}),
         branch_name=details.branch_name,
         supplier_name=details.supplier_name,
+        physical_receiving_ready=physical_receiving_ready(details.document, source_items),
+        acceptance_revision=acceptance_revision(details.document, source_items),
         items=[
             IncomingItemRead(
                 **IncomingItemRead.model_validate(item.item)
@@ -554,13 +575,25 @@ async def accept_incoming(
         Depends(require_branch_permission("incoming.finalize", policy="resource")),
     ],
     service: Annotated[IncomingService, Depends(_service)],
+    body: Annotated[IncomingAcceptRequest | None, Body()] = None,
 ) -> IncomingDocumentRead:
-    doc = await service.accept(
+    request = body or IncomingAcceptRequest()
+    doc = await service.accept_for_stock(
         document_id,
+        tenant_id=_current_tenant_or_400(user),
         actor_id=user.user_id,
         allowed_branch_ids=user.branch_scope_for("incoming.finalize"),
+        stock_mode=request.stock_mode,
+        expected_revision=request.expected_revision,
     )
-    return IncomingDocumentRead.model_validate(doc)
+    return IncomingDocumentRead.model_validate(doc).model_copy(
+        update={
+            "stock_mode": request.stock_mode,
+            "total_amount": (
+                doc.total_amount if _can_view_incoming_cost(user, doc.branch_id) else None
+            ),
+        }
+    )
 
 
 @router.post(

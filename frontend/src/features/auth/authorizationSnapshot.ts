@@ -1,22 +1,17 @@
 import { type MeResponse } from "./types";
 
-const presentationFields = new Set([
-  "email",
-  "full_name",
-  "last_login_at",
-  "tenant_name",
-  "reason",
-]);
+const presentationFields = ["email", "full_name", "last_login_at", "tenant_name", "reason"];
 
 function canonicalAuthorityValue(key: string, value: unknown): unknown {
-  if (presentationFields.has(key)) return undefined;
+  if (presentationFields.includes(key)) return undefined;
   // All arrays in MeResponse contain strings (permissions, branches, capabilities).
   if (Array.isArray(value)) return [...new Set(value as unknown[])].sort();
   if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-        left.localeCompare(right),
-      ),
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, record[key]]),
     );
   }
   return value;

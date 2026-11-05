@@ -109,15 +109,15 @@ export function loadSidebarPreferences(scope: string): SidebarPreferences {
 }
 
 export function saveSidebarPreferences(scope: string, preferences: SidebarPreferences): void {
+  const config = parseSidebarPreferences(preferences);
   try {
-    window.localStorage.setItem(
-      sidebarStorageKey(scope),
-      JSON.stringify(parseSidebarPreferences(preferences)),
-    );
+    window.localStorage.setItem(sidebarStorageKey(scope), JSON.stringify(config));
   } catch {
     // The current session remains usable when the browser blocks preferences.
   }
-  window.dispatchEvent(new CustomEvent(SIDEBAR_PREFERENCES_CHANGED_EVENT, { detail: { scope } }));
+  window.dispatchEvent(
+    new CustomEvent(SIDEBAR_PREFERENCES_CHANGED_EVENT, { detail: { scope, preferences: config } }),
+  );
 }
 
 export function orderSidebarItems<T extends { to: string }>(

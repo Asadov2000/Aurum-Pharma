@@ -4,7 +4,7 @@ import {
   DESKTOP_BARCODE_SCANNED_EVENT,
   normalizeDesktopBarcode,
   type DesktopBarcodeScanEvent,
-} from "@/lib/desktopBridge";
+} from "@/lib/desktopRuntime";
 
 import { emptyScanBuffer, feedScanKey } from "./barcodeScan";
 

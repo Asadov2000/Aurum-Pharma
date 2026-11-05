@@ -568,6 +568,21 @@ async def _create_scaffold(connection: AsyncConnection) -> _LedgerScaffold:
                     )
                 )
             )
+            # 0190, 0223 and 0224 queue completion events even for ordinary
+            # Edge sales. Validate them before ALTER TABLE restores the guards;
+            # PostgreSQL rejects trigger DDL while those events are pending.
+            await connection.execute(
+                text(
+                    "SET CONSTRAINTS mixed_cash_refund_complete, "
+                    "mixed_electronic_refund_posting_complete, training_checkout_complete IMMEDIATE"
+                )
+            )
+            await connection.execute(
+                text(
+                    "SET CONSTRAINTS mixed_cash_refund_complete, "
+                    "mixed_electronic_refund_posting_complete, training_checkout_complete DEFERRED"
+                )
+            )
         finally:
             await connection.execute(
                 text("ALTER TABLE public.sale ENABLE TRIGGER trg_guard_sale_immutability")

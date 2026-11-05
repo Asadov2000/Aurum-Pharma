@@ -140,6 +140,13 @@ async function swipeCardUp(page: Page, card: Locator) {
       // A real gesture spans rendered frames; this is its cadence, not a load wait.
       await page.waitForTimeout(16);
     }
+    // Stop the finger before lifting it: a fast release starts a fling whose
+    // next tap only stops scrolling. This hold is part of the gesture cadence.
+    await page.waitForTimeout(200);
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: endY }],
+    });
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before + 40);
   } finally {

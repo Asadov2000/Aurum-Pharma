@@ -41,6 +41,8 @@ vi.mock("@/features/settings/queries", () => ({
     error: null,
     refetch: state.refetch,
   }),
+}));
+vi.mock("@/features/settings/preferencesMutation", () => ({
   useUpdateUserPreferences: () => ({
     error: null,
     isPending: false,
@@ -154,6 +156,24 @@ describe("usePreferenceAutosave", () => {
         density: "touch",
       }),
     );
+  });
+
+  it("retains an unconfirmed patch when its response arrives after unmount", async () => {
+    const request = deferred<UserPreferences>();
+    state.mutateAsync.mockReturnValueOnce(request.promise);
+    const { result, unmount } = renderHook(() => usePreferenceAutosave("test-channel"));
+    act(() => result.current.enqueue({ theme: "dark" }));
+    await waitFor(() => expect(state.mutateAsync).toHaveBeenCalledTimes(1));
+    unmount();
+    await act(async () => {
+      request.resolve({ ...state.preferences, theme: "dark", version: 2 });
+      await request.promise;
+    });
+    expect(
+      JSON.parse(
+        localStorage.getItem("aurum:preferences-pending:v1:user-1%3Atenant-1:test-channel") ?? "{}",
+      ),
+    ).toEqual({ theme: "dark" });
   });
 });
 

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type MeResponse } from "@/features/auth/types";
 import { type SupportAccessSession } from "@/features/supportAccess/types";
 import { useSupportAccessStore } from "@/stores/supportAccess";
+import { captureSupportAuthority } from "@/features/supportAccess/authority";
+import { useAuthStore } from "@/stores/auth";
 
 const mocks = vi.hoisted(() => ({
   clearContext: vi.fn(),
@@ -54,6 +56,7 @@ describe("SupportAccessBanner", () => {
     vi.setSystemTime(new Date("2026-07-22T10:00:00Z"));
     mocks.clearContext.mockReset().mockImplementation(async () => {
       useSupportAccessStore.getState().clear();
+      return captureSupportAuthority();
     });
     mocks.navigate.mockReset().mockResolvedValue(undefined);
     mocks.revoke.mockReset().mockResolvedValue(undefined);
@@ -73,6 +76,7 @@ describe("SupportAccessBanner", () => {
       support_access: active,
     } as MeResponse;
 
+    useAuthStore.getState().setUser(mocks.user);
     render(<SupportAccessBanner />);
     expect(screen.getByText("Shifo")).toBeInTheDocument();
 
@@ -94,6 +98,7 @@ describe("SupportAccessBanner", () => {
     } as MeResponse;
     mocks.revoke.mockRejectedValueOnce(new Error("offline"));
 
+    useAuthStore.getState().setUser(mocks.user);
     render(<SupportAccessBanner />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Завершить" }));
@@ -103,5 +108,44 @@ describe("SupportAccessBanner", () => {
     expect(mocks.clearContext).toHaveBeenCalledTimes(1);
     expect(useSupportAccessStore.getState().active).toBeNull();
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/admin/tenants" });
+  });
+
+  it("does not clear or navigate away from a newer context after a late expiry failure", async () => {
+    const active = session("2026-07-22T10:00:01Z");
+    useSupportAccessStore.getState().setActive(active);
+    mocks.user = { support_access: active } as MeResponse;
+    let rejectRefresh!: (error: Error) => void;
+    mocks.clearContext.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectRefresh = reject;
+      }),
+    );
+    useAuthStore.getState().setUser(mocks.user);
+    render(<SupportAccessBanner />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    const newer = { ...active, id: "44444444-4444-4444-8444-444444444444" };
+    await act(async () => {
+      useSupportAccessStore.getState().setActive(newer);
+      rejectRefresh(new Error("late offline"));
+    });
+    expect(useSupportAccessStore.getState().active).toEqual(newer);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("ignores an old expiry timer before React cleans up its effect", async () => {
+    const active = session("2026-07-22T10:00:01Z");
+    useSupportAccessStore.getState().setActive(active);
+    mocks.user = { support_access: active } as MeResponse;
+    useAuthStore.getState().setUser(mocks.user);
+    render(<SupportAccessBanner />);
+    const newer = { ...active, id: "44444444-4444-4444-8444-444444444444" };
+    await act(async () => {
+      useSupportAccessStore.getState().setActive(newer);
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(mocks.clearContext).not.toHaveBeenCalled();
+    expect(useSupportAccessStore.getState().active).toEqual(newer);
   });
 });

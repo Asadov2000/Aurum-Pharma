@@ -4,29 +4,18 @@ import { isAxiosError } from "axios";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import {
-  Button,
-  FormError,
-  Label,
-  Modal,
-  Select,
-  SkeletonRows,
-  Textarea,
-} from "@/components/ui";
+import { Button, FormError, Label, Modal, Select, SkeletonRows, Textarea } from "@/components/ui";
 import { formatBillingDate, formatBillingMoney } from "@/features/billing/format";
 import { describeApiError } from "@/lib/errorMessages";
+import { createOperationId } from "@/lib/operationId";
 
-import { createOperationId } from "./operationId";
 import {
   platformBillingKeys,
   usePlatformPaymentSubmissionDetail,
   useRejectPlatformPaymentSubmission,
   useReviewPlatformPaymentSubmission,
 } from "./queries";
-import {
-  type PlatformBankPaymentReview,
-  type PlatformPaymentSubmissionListItem,
-} from "./types";
+import { type PlatformBankPaymentReview, type PlatformPaymentSubmissionListItem } from "./types";
 
 const PRIMARY_TJS_ACCOUNT_KEY = "aurum_tjs_primary";
 
@@ -78,11 +67,7 @@ export function PaymentSubmissionReviewModal({
   const queryClient = useQueryClient();
   const tenantId = item?.tenant_id ?? "";
   const submissionId = item?.submission_id ?? "";
-  const detailQuery = usePlatformPaymentSubmissionDetail(
-    tenantId,
-    submissionId,
-    item !== null,
-  );
+  const detailQuery = usePlatformPaymentSubmissionDetail(tenantId, submissionId, item !== null);
   const reviewMutation = useReviewPlatformPaymentSubmission();
   const rejectionMutation = useRejectPlatformPaymentSubmission();
   const [mode, setMode] = useState<"review" | "reject">("review");

@@ -2,7 +2,7 @@
 
 ARG NODE_IMAGE=node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 ARG CADDY_IMAGE=caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
-ARG GO_IMAGE=golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+ARG GO_IMAGE=golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
 
 FROM ${NODE_IMAGE} AS builder
 
@@ -22,19 +22,29 @@ RUN pnpm build
 
 FROM ${GO_IMAGE} AS caddy-builder
 
+ARG TARGETARCH
+
 WORKDIR /src
 
-RUN set -eu; \
+RUN --mount=type=cache,id=aurum-go-mod-${TARGETARCH},target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=aurum-go-build-${TARGETARCH},target=/root/.cache/go-build,sharing=locked \
+    set -eu; \
     go mod init aurum.local/caddy; \
     attempt=1; \
     while true; do \
         if GODEBUG=http2client=0 go get github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4 \
-            && GODEBUG=http2client=0 go get golang.org/x/net@v0.58.0 \
-                golang.org/x/text@v0.41.0 \
+            && GODEBUG=http2client=0 go get golang.org/x/net@v0.60.0 \
+                golang.org/x/text@v0.42.0 \
+                golang.org/x/crypto@v0.57.0 \
                 google.golang.org/grpc@v1.83.2 \
-            && GODEBUG=http2client=0 go get golang.org/x/crypto@v0.55.0 \
+                github.com/klauspost/compress@v1.18.7 \
+                github.com/go-jose/go-jose/v4@v4.1.6 \
+            && go list -m golang.org/x/net golang.org/x/text golang.org/x/crypto \
+                github.com/klauspost/compress github.com/go-jose/go-jose/v4 \
             && GODEBUG=http2client=0 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
-                -o /usr/local/bin/caddy github.com/caddyserver/caddy/v2/cmd/caddy; then \
+                -o /usr/local/bin/caddy github.com/caddyserver/caddy/v2/cmd/caddy \
+            && go version -m /usr/local/bin/caddy | awk '$1 == "dep" && $2 == "github.com/klauspost/compress" { print $2, $3; ok = ($3 == "v1.18.7") } END { exit !ok }' \
+            && go version -m /usr/local/bin/caddy | awk '$1 == "dep" && $2 == "github.com/go-jose/go-jose/v4" { print $2, $3; ok = ($3 == "v4.1.6") } END { exit !ok }'; then \
             break; \
         fi; \
         if [ "$attempt" -ge 3 ]; then \

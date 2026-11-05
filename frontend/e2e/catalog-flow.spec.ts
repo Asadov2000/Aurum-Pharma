@@ -31,9 +31,47 @@ test.describe("Catalog flow (owner)", () => {
     await dialog.getByLabel("Название лекарства").fill(name);
     await dialog.getByLabel("Условия отпуска", { exact: true }).selectOption("otc");
     await dialog.getByLabel("Условия хранения", { exact: true }).selectOption("normal");
-    await dialog.getByLabel(/Цена по умолчанию/).fill("12.50");
+    await dialog.getByLabel("Цена целой упаковки, TJS").fill("12.50");
+    await dialog.getByRole("button", { name: "Добавить настройку", exact: true }).click();
+    await dialog.getByLabel("Количество в упаковке").fill("20");
+    await dialog.getByLabel("Что в упаковке").selectOption("capsule");
+    await dialog.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
+    await dialog.getByLabel("Штук в одном блистере").fill("10");
+    await dialog.getByLabel("Цена одной штуки, TJS").fill("0,40");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.getByLabel("Количество в упаковке").scrollIntoViewIfNeeded();
+    await expect(dialog.getByLabel("Что в упаковке")).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: /^Добавить товар$/ })).toBeInViewport();
+    const mobileCount = await dialog.getByLabel("Количество в упаковке").boundingBox();
+    const mobileUnit = await dialog.getByLabel("Что в упаковке").boundingBox();
+    if (!mobileCount || !mobileUnit)
+      throw new Error("Поля размера упаковки не видны на мобильном экране");
+    expect(mobileUnit.x).toBeGreaterThanOrEqual(mobileCount.x + mobileCount.width);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const createdResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/catalog") &&
+        response.ok(),
+    );
     await dialog.getByRole("button", { name: /^Добавить товар$/ }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
+    const created = (await (await createdResponse).json()) as {
+      pack_size: string;
+      base_price: string;
+      unit_sale_preparation: unknown;
+    };
+    expect(created.pack_size).toBe("20 капсул");
+    expect(created.base_price).toBe("12.50");
+    expect(created.unit_sale_preparation).toEqual({
+      version: 1,
+      state: "prepared",
+      unit: "capsule",
+      units_per_pack: 20,
+      units_per_blister: 10,
+      dispense_step: 1,
+      unit_price: "0.40",
+    });
 
     // Modal closes and the row appears. Catalog page uses a trigram search;
     // search by the unique name tail so accumulated same-prefix rows don't
@@ -87,6 +125,8 @@ test.describe("Catalog flow (owner)", () => {
     await selectActionMenuItem(page, `Действия для ${name}`, "Изменить");
 
     const dialog = page.locator('div[role="dialog"]');
+    // Finish the initial detail read before mutating the same item's barcodes.
+    await expect(dialog.getByText("Пока нет штрихкодов", { exact: true })).toBeVisible();
     const code = `123456${Date.now().toString().slice(-7)}`.slice(0, 13);
     const addBarcodeResponse = page.waitForResponse(
       (response) =>
@@ -101,6 +141,117 @@ test.describe("Catalog flow (owner)", () => {
     // Newly added barcode shows up in the per-item list.
     await addBarcodeResponse;
     await expect(dialog.getByText(code)).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("saves composition in the catalog editor and removes preparation without changing pack price", async ({
+    page,
+  }) => {
+    const apiAnon = await request.newContext();
+    const tokens = await apiLogin(apiAnon, OWNER);
+    const api = await apiContext(tokens.access_token);
+    const name = uniqueName("E2E Unit Preparation");
+    try {
+      const created = await api.post("catalog", {
+        data: {
+          brand_name: name,
+          dispensing_type: "otc",
+          storage_type: "normal",
+          base_price: "30.00",
+        },
+      });
+      expect(created.ok()).toBeTruthy();
+      const item = (await created.json()) as { id: string };
+      await loginInBrowser(page, OWNER);
+      await page.goto("/catalog");
+      await page.getByLabel(/Поиск/).fill(catalogSearchKey(name));
+      await expect(catalogItem(page, name)).toBeVisible({ timeout: 15_000 });
+      await catalogItem(page, name)
+        .getByRole("button", { name: `Открыть карточку ${name}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Карточка товара" })
+        .getByRole("button", { name: "Изменить позицию" })
+        .click();
+      const editor = page.getByRole("dialog", { name: `Изменить товар: ${name}` });
+      await expect(
+        editor.getByRole("heading", { name: "Целая упаковка", exact: true }),
+      ).toBeVisible();
+      await expect(
+        editor.getByRole("heading", { name: "Поштучно и блистерами", exact: true }),
+      ).toBeVisible();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
+      await editor.getByRole("button", { name: "Добавить настройку", exact: true }).click();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
+      await expect(page.getByRole("dialog", { name: "Подготовка поштучного отпуска" })).toHaveCount(
+        0,
+      );
+      await editor.getByLabel("Количество в упаковке").fill("20");
+      await editor.getByLabel("Что в упаковке").selectOption("tablet");
+      await editor.getByText("В пачке есть блистеры (плажки)", { exact: true }).click();
+      await editor.getByLabel("Штук в одном блистере").fill("3");
+      await editor.getByLabel("Цена одной штуки, TJS").fill("1,50");
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor.getByRole("alert")).toContainText("целое число блистеров");
+      await editor.getByLabel("Штук в одном блистере").fill("10");
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor).toBeHidden();
+      const savedResponse = await api.get(`catalog/${item.id}`);
+      expect(savedResponse.ok()).toBeTruthy();
+      const saved = (await savedResponse.json()) as {
+        base_price: string;
+        pack_size: string;
+        unit_sale_preparation: unknown;
+      };
+      expect(saved.base_price).toBe("30.00");
+      expect(saved.pack_size).toBe("20 таблеток");
+      expect(saved.unit_sale_preparation).toEqual({
+        version: 1,
+        state: "prepared",
+        unit: "tablet",
+        units_per_pack: 20,
+        dispense_step: 1,
+        units_per_blister: 10,
+        unit_price: "1.50",
+      });
+      await catalogItem(page, name)
+        .getByRole("button", { name: `Открыть карточку ${name}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Карточка товара" })
+        .getByRole("button", { name: "Изменить позицию" })
+        .click();
+      await expect(editor.getByLabel("Количество в упаковке")).toHaveValue("20");
+      await expect(editor.getByLabel("Что в упаковке")).toHaveValue("tablet");
+      await expect(editor.getByLabel("Штук в одном блистере")).toHaveValue("10");
+      await expect(editor.getByLabel("Цена одной штуки, TJS")).toHaveValue("1.50");
+      await expect(
+        editor.getByRole("textbox", { name: "Размер упаковки", exact: true }),
+      ).toHaveCount(0);
+      await editor.getByRole("button", { name: "Убрать настройку", exact: true }).click();
+      await expect(
+        editor.getByRole("heading", { name: "Целая упаковка", exact: true }),
+      ).toBeVisible();
+      await expect(
+        editor.getByRole("heading", { name: "Поштучно и блистерами", exact: true }),
+      ).toBeVisible();
+      await expect(editor.getByLabel("Цена целой упаковки, TJS")).toBeEnabled();
+      await expect(editor.getByLabel("Размер упаковки")).toHaveValue("20 таблеток");
+      await editor.getByRole("button", { name: "Сохранить изменения" }).click();
+      await expect(editor).toBeHidden();
+      const clearedResponse = await api.get(`catalog/${item.id}`);
+      const cleared = (await clearedResponse.json()) as {
+        base_price: string;
+        pack_size: string;
+        unit_sale_preparation: unknown;
+      };
+      expect(clearedResponse.ok()).toBeTruthy();
+      expect(cleared.unit_sale_preparation).toBeNull();
+      expect(cleared.base_price).toBe("30.00");
+      expect(cleared.pack_size).toBe("20 таблеток");
+    } finally {
+      await apiAnon.dispose();
+      await api.dispose();
+    }
   });
 
   test("trigram search filters the table after the debounce window", async ({ page }) => {
@@ -138,6 +289,7 @@ test.describe("Catalog flow (owner)", () => {
       data: { brand_name: name, dispensing_type: "otc", storage_type: "normal" },
     });
     expect(createRes.ok()).toBeTruthy();
+    const created: { id: string } = await createRes.json();
     await apiAnon.dispose();
     await api.dispose();
 
@@ -158,10 +310,32 @@ test.describe("Catalog flow (owner)", () => {
         /\/api\/v1\/catalog\/[^/]+\/image$/.test(response.url()) &&
         response.ok(),
     );
+    const imageResponses = Promise.all(
+      ["thumbnail", "display"].map((variant) =>
+        page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            response.request().method() === "GET" &&
+            url.pathname.startsWith(`/api/v1/catalog/${created.id}/image/`) &&
+            url.pathname.endsWith(`/${variant}`) &&
+            response.ok()
+          );
+        }),
+      ),
+    );
     await details
       .getByLabel("Выбрать фотографию товара")
       .setInputFiles("public/icons/icon-192.png");
     await uploadResponse;
+    for (const response of await imageResponses) {
+      expect(new URL(response.url()).searchParams.get("media-policy")).toBe("2");
+      expect(response.headers()["cache-control"]).toBe("private, no-store");
+      const vary = response
+        .headers()
+        .vary.toLowerCase()
+        .split(/\s*,\s*/);
+      expect(vary).toEqual(expect.arrayContaining(["authorization", "x-aurum-support-session"]));
+    }
 
     await expect(details.getByText("Фотография товара", { exact: true })).toBeVisible();
     await expect(details.getByRole("img", { name: `Упаковка ${name}` })).toBeVisible({

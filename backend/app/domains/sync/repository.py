@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import Uuid, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +26,9 @@ from app.domains.sync.models import (
     SyncInboxEvent,
     SyncNode,
     SyncOutboxEvent,
+    SyncPhysicalStockAnchor,
+    SyncPhysicalStockBaseline,
+    SyncPhysicalStockProjection,
     SyncQuarantineIncident,
     SyncReadBarcodeProjection,
     SyncReadCatalogProjection,
@@ -35,6 +40,9 @@ from app.domains.sync.models import (
     SyncReadSnapshotComponent,
     SyncReadSnapshotCursor,
     SyncReadSupplierProjection,
+    SyncRetailEventAnchor,
+    SyncRetailRefundAnchor,
+    SyncRetailRefundProjection,
     SyncSaleProjection,
     SyncShadowReport,
     SyncStream,
@@ -91,9 +99,14 @@ def _is_projection_operation_collision(exc: IntegrityError) -> bool:
     constraint_name = getattr(exc.orig, "constraint_name", None) or getattr(
         cause, "constraint_name", None
     )
-    return constraint_name == "uq_sync_sale_projection_operation" or (
-        "uq_sync_sale_projection_operation" in str(exc)
-    )
+    constraints = {
+        "uq_sync_sale_projection_operation",
+        "uq_sync_retail_refund_projection_operation",
+        "uq_sync_retail_refund_projection_source_sale",
+        "uq_sync_retail_refund_projection_sequence",
+        "sync_retail_refund_projection_pkey",
+    }
+    return constraint_name in constraints or any(name in str(exc) for name in constraints)
 
 
 def _substring_pattern(value: str) -> str:
@@ -748,6 +761,7 @@ class SyncCloudRepository:
         branch_id: UUID,
         edge_node_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> tuple[SyncReadSnapshot, list[SyncReadSnapshotComponent]] | None:
         result = await self.session.execute(
             select(SyncReadSnapshot)
@@ -757,6 +771,7 @@ class SyncCloudRepository:
                 SyncReadSnapshot.node_id == edge_node_id,
                 SyncReadSnapshot.credential_kid == credential_kid,
                 SyncReadSnapshot.status == "ready",
+                SyncReadSnapshot.schema_version == schema_version,
             )
             .order_by(SyncReadSnapshot.source_revision.desc())
             .limit(1)
@@ -1663,6 +1678,301 @@ class SyncEdgeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    @asynccontextmanager
+    async def event_savepoint(self) -> AsyncIterator[None]:
+        """Rollback one retail event without retaining an incomplete inbox/cursor."""
+        async with self.session.begin_nested():
+            yield
+
+    async def get_retail_refund_anchor(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        event_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        sequence: int | None = None,
+    ) -> SyncRetailRefundAnchor | None:
+        query = select(SyncRetailRefundAnchor).where(
+            SyncRetailRefundAnchor.tenant_id == tenant_id,
+            SyncRetailRefundAnchor.branch_id == branch_id,
+            SyncRetailRefundAnchor.target_edge_node_id == edge_node_id,
+        )
+        if event_id is not None:
+            query = query.where(SyncRetailRefundAnchor.event_id == event_id)
+        else:
+            query = query.where(
+                SyncRetailRefundAnchor.origin_node_id == origin_node_id,
+                SyncRetailRefundAnchor.writer_epoch == writer_epoch,
+                SyncRetailRefundAnchor.sequence == sequence,
+            )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def get_retail_refund_projection(
+        self, event_id: UUID
+    ) -> SyncRetailRefundProjection | None:
+        return await self.session.get(SyncRetailRefundProjection, event_id)
+
+    async def get_retail_refund_projection_by_source(
+        self, *, tenant_id: UUID, source_id: UUID
+    ) -> SyncRetailRefundProjection | None:
+        query = select(SyncRetailRefundProjection).where(
+            SyncRetailRefundProjection.tenant_id == tenant_id,
+            SyncRetailRefundProjection.source_id == source_id,
+        )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def insert_retail_refund_projection(
+        self, envelope: SyncEventEnvelope, *, parent_sale_id: UUID
+    ) -> SyncRetailRefundProjection:
+        statement = (
+            insert(SyncRetailRefundProjection)
+            .values(
+                source_event_id=envelope.event_id,
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                parent_sale_id=parent_sale_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                operation_id=envelope.operation_id,
+                source_id=envelope.aggregate_id,
+                payload=envelope.payload,
+                source_payload_hash=envelope.payload_hash,
+                projection_hash=envelope.projection_hash,
+            )
+            .returning(SyncRetailRefundProjection)
+        )
+        try:
+            return (await self.session.execute(statement)).scalar_one()
+        except IntegrityError as exc:
+            if _is_projection_operation_collision(exc):
+                raise SyncProjectionOperationCollision from exc
+            raise
+
+    async def list_retail_refund_projections(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        parent_sale_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        after_sequence: int | None = None,
+    ) -> list[SyncRetailRefundProjection]:
+        query = select(SyncRetailRefundProjection).where(
+            SyncRetailRefundProjection.tenant_id == tenant_id,
+            SyncRetailRefundProjection.branch_id == branch_id,
+        )
+        if parent_sale_id is not None:
+            query = query.where(SyncRetailRefundProjection.parent_sale_id == parent_sale_id)
+        if origin_node_id is not None:
+            query = query.where(SyncRetailRefundProjection.origin_node_id == origin_node_id)
+        if writer_epoch is not None:
+            query = query.where(SyncRetailRefundProjection.writer_epoch == writer_epoch)
+        if after_sequence is not None:
+            query = query.where(SyncRetailRefundProjection.sequence > after_sequence)
+        return list(
+            await self.session.scalars(
+                query.order_by(
+                    SyncRetailRefundProjection.writer_epoch, SyncRetailRefundProjection.sequence
+                ).limit(10_001)
+            )
+        )
+
+    async def get_sale_projection_for_update(self, sale_id: UUID) -> SyncSaleProjection | None:
+        """Serialize refund history with a transaction mutex, using SELECT-only ACL."""
+        query = (
+            select(SyncSaleProjection)
+            .where(
+                SyncSaleProjection.sale_id == sale_id,
+                SyncSaleProjection.tenant_id == func.current_tenant_id(),
+                SyncSaleProjection.branch_id
+                == func.nullif(func.current_setting("app.branch_id", True), "").cast(Uuid),
+            )
+            .execution_options(populate_existing=True)
+        )
+        parent = (await self.session.execute(query)).scalar_one_or_none()
+        if parent is None:
+            return None
+        await self.lock_retail_refund_parents(
+            tenant_id=parent.tenant_id,
+            branch_id=parent.branch_id,
+            parent_sale_ids=(parent.sale_id,),
+        )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def lock_retail_refund_parents(
+        self, *, tenant_id: UUID, branch_id: UUID, parent_sale_ids: tuple[UUID, ...]
+    ) -> None:
+        """One transaction mutex serializes the branch's refunds across epoch cursors.
+
+        No UPDATE privilege is granted to the immutable parent projection. The
+        existing scoped parent read prevents foreign or invented IDs acquiring a
+        mutex. All refund batches and per-event checks use this same key; reads
+        for verification and materialization never call this method.
+        """
+        query = (
+            select(SyncSaleProjection.sale_id)
+            .where(
+                SyncSaleProjection.tenant_id == tenant_id,
+                SyncSaleProjection.branch_id == branch_id,
+                SyncSaleProjection.tenant_id == func.current_tenant_id(),
+                SyncSaleProjection.branch_id
+                == func.nullif(func.current_setting("app.branch_id", True), "").cast(Uuid),
+                SyncSaleProjection.sale_id.in_(parent_sale_ids),
+            )
+            .limit(1)
+        )
+        if await self.session.scalar(query) is None:
+            return
+        await self.session.execute(
+            text(
+                "SELECT pg_catalog.pg_advisory_xact_lock(" "pg_catalog.hashtextextended(:scope,0))"
+            ),
+            {"scope": f"aurum-retail-refund-history:{tenant_id}:{branch_id}"},
+        )
+
+    async def get_physical_stock_anchor(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        event_id: UUID | None = None,
+        origin_node_id: UUID | None = None,
+        writer_epoch: int | None = None,
+        sequence: int | None = None,
+    ) -> SyncPhysicalStockAnchor | None:
+        query = select(SyncPhysicalStockAnchor).where(
+            SyncPhysicalStockAnchor.tenant_id == tenant_id,
+            SyncPhysicalStockAnchor.branch_id == branch_id,
+            SyncPhysicalStockAnchor.target_edge_node_id == edge_node_id,
+        )
+        if event_id is not None:
+            query = query.where(SyncPhysicalStockAnchor.event_id == event_id)
+        else:
+            query = query.where(
+                SyncPhysicalStockAnchor.origin_node_id == origin_node_id,
+                SyncPhysicalStockAnchor.writer_epoch == writer_epoch,
+                SyncPhysicalStockAnchor.sequence == sequence,
+            )
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def get_physical_stock_projection(
+        self, event_id: UUID
+    ) -> SyncPhysicalStockProjection | None:
+        return await self.session.get(SyncPhysicalStockProjection, event_id)
+
+    async def get_physical_stock_baseline(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        snapshot_id: UUID,
+    ) -> SyncPhysicalStockBaseline | None:
+        return await self.session.get(
+            SyncPhysicalStockBaseline, (tenant_id, branch_id, edge_node_id, snapshot_id)
+        )
+
+    async def insert_physical_stock_projection(
+        self, envelope: SyncEventEnvelope
+    ) -> SyncPhysicalStockProjection:
+        statement = (
+            insert(SyncPhysicalStockProjection)
+            .values(
+                source_event_id=envelope.event_id,
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                sequence=envelope.sequence,
+                operation_id=envelope.operation_id,
+                source_id=envelope.aggregate_id,
+                payload=envelope.payload,
+                source_payload_hash=envelope.payload_hash,
+                projection_hash=envelope.projection_hash,
+            )
+            .returning(SyncPhysicalStockProjection)
+        )
+        return (await self.session.execute(statement)).scalar_one()
+
+    async def list_physical_stock_projections(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
+        after_sequence: int,
+    ) -> list[SyncPhysicalStockProjection]:
+        result = await self.session.scalars(
+            select(SyncPhysicalStockProjection)
+            .where(
+                SyncPhysicalStockProjection.tenant_id == tenant_id,
+                SyncPhysicalStockProjection.branch_id == branch_id,
+                SyncPhysicalStockProjection.origin_node_id == origin_node_id,
+                SyncPhysicalStockProjection.writer_epoch == writer_epoch,
+                SyncPhysicalStockProjection.sequence > after_sequence,
+            )
+            .order_by(SyncPhysicalStockProjection.sequence)
+        )
+        return list(result)
+
+    async def get_retail_event_anchor(
+        self,
+        *,
+        event_id: UUID,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> SyncRetailEventAnchor | None:
+        result = await self.session.execute(
+            select(SyncRetailEventAnchor).where(
+                SyncRetailEventAnchor.event_id == event_id,
+                SyncRetailEventAnchor.tenant_id == tenant_id,
+                SyncRetailEventAnchor.branch_id == branch_id,
+                SyncRetailEventAnchor.target_edge_node_id == edge_node_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_local_edge_node_id(self) -> UUID | None:
+        value = await self.session.scalar(
+            text("SELECT NULLIF(current_setting('app.edge_node_id',true),'')")
+        )
+        if not isinstance(value, str):
+            return None
+        try:
+            return UUID(value)
+        except ValueError:
+            return None
+
+    async def get_retail_event_anchor_by_position(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        origin_node_id: UUID,
+        writer_epoch: int,
+        sequence: int,
+    ) -> SyncRetailEventAnchor | None:
+        result = await self.session.execute(
+            select(SyncRetailEventAnchor).where(
+                SyncRetailEventAnchor.tenant_id == tenant_id,
+                SyncRetailEventAnchor.branch_id == branch_id,
+                SyncRetailEventAnchor.target_edge_node_id == edge_node_id,
+                SyncRetailEventAnchor.origin_node_id == origin_node_id,
+                SyncRetailEventAnchor.writer_epoch == writer_epoch,
+                SyncRetailEventAnchor.sequence == sequence,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_active_read_snapshot_id(
         self,
         *,
@@ -1957,6 +2267,18 @@ class SyncEdgeRepository:
             )
         )
 
+    async def lock_read_snapshot_install(
+        self,
+        *,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+            {"scope": (f"edge-read:{tenant_id}:{branch_id}:" f"{edge_node_id}")},
+        )
+
     async def install_read_snapshot(
         self,
         *,
@@ -1965,14 +2287,10 @@ class SyncEdgeRepository:
         projection: IndexedReadProjection,
     ) -> None:
         manifest = envelope.manifest
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
-            {
-                "scope": (
-                    f"edge-read:{manifest.tenant_id}:{manifest.branch_id}:"
-                    f"{manifest.edge_node_id}"
-                )
-            },
+        await self.lock_read_snapshot_install(
+            tenant_id=manifest.tenant_id,
+            branch_id=manifest.branch_id,
+            edge_node_id=manifest.edge_node_id,
         )
         scope_values = {
             "snapshot_id": manifest.snapshot_id,
@@ -2027,7 +2345,9 @@ class SyncEdgeRepository:
             insert(SyncReadProjection).values(
                 **projection_scope,
                 source_revision=manifest.source_revision,
-                projection_version=1,
+                projection_version=manifest.schema_version,
+                payload=[row.model_dump(mode="json") for row in projection.physical],
+                physical_count=len(projection.physical),
                 status="building",
                 foundation_payload=projection.foundation.model_dump(mode="json"),
                 catalog_count=len(projection.catalog),
@@ -2234,7 +2554,7 @@ class SyncEdgeRepository:
         start_projection_checksum: str,
     ) -> SyncCursor:
         result = await self.session.execute(
-            insert(SyncCursor)
+            pg_insert(SyncCursor)
             .values(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
@@ -2248,9 +2568,29 @@ class SyncEdgeRepository:
                 projection_checksum=start_projection_checksum,
                 status="synced",
             )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    SyncCursor.tenant_id,
+                    SyncCursor.branch_id,
+                    SyncCursor.origin_node_id,
+                    SyncCursor.writer_epoch,
+                ]
+            )
             .returning(SyncCursor)
         )
-        return result.scalar_one()
+        inserted = result.scalar_one_or_none()
+        if inserted is not None:
+            return inserted
+        existing = await self.get_cursor(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
+            for_update=True,
+        )
+        if existing is None:
+            raise RuntimeError("Edge sync cursor disappeared during initialization")
+        return existing
 
     async def update_cursor(
         self,
@@ -2378,6 +2718,8 @@ class SyncEdgeRepository:
         payments: list[dict[str, object]],
         source_payload_hash: str,
         projection_hash: str,
+        schema_version: int = 1,
+        stock_command_id: UUID | None = None,
     ) -> SyncSaleProjection:
         statement = (
             insert(SyncSaleProjection)
@@ -2407,6 +2749,8 @@ class SyncEdgeRepository:
                 payments=payments,
                 source_payload_hash=source_payload_hash,
                 projection_hash=projection_hash,
+                schema_version=schema_version,
+                stock_command_id=stock_command_id,
             )
             .returning(SyncSaleProjection)
         )

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import {
   Badge,
@@ -30,6 +30,10 @@ import { expiryLabel, expiryTone, movementLabel, movementSourceLabel } from "./l
 import { useBatchQuery } from "./queries";
 import { type Movement } from "./types";
 import { WriteOffForm } from "./WriteOffForm";
+
+const LegacyTransitionPanel = lazy(() =>
+  import("./LegacyTransitionPanel").then((module) => ({ default: module.LegacyTransitionPanel })),
+);
 
 export function BatchDetailModal({
   batchId,
@@ -233,6 +237,12 @@ export function BatchDetailModal({
             <Field label="Код партии" value={batch.id.slice(0, 8)} mono />
           </dl>
         </section>
+
+        {!isPreview && (
+          <Suspense fallback={<SkeletonRows rows={3} />}>
+            <LegacyTransitionPanel batch={batch} />
+          </Suspense>
+        )}
 
         <section aria-labelledby="batch-movements-heading">
           <div className="flex flex-wrap items-baseline justify-between gap-2">

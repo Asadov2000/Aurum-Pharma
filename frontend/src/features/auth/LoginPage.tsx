@@ -32,6 +32,7 @@ export function LoginPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
   const flowVersionRef = useRef(0);
+  const hydrated = useAuthStore((state) => state.hydrated);
   const setTokens = useAuthStore((state) => state.setTokens);
   const setUser = useAuthStore((state) => state.setUser);
   const navigate = useNavigate();
@@ -97,7 +98,11 @@ export function LoginPage(): JSX.Element {
   return (
     <LoginLayout publicWebsiteUrl={publicWebsiteUrl} wide={enrollmentVisible}>
       <LogoutNotice />
-      {challenge ? (
+      {!hydrated ? (
+        <p role="status" className="text-sm text-foreground-secondary">
+          Проверяем сессию…
+        </p>
+      ) : challenge ? (
         <Suspense
           fallback={
             <div className="space-y-4">

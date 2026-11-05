@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+from uuid import UUID
 
 from openpyxl import load_workbook
 from sqlalchemy import text
@@ -14,12 +15,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.service import POSService
+from tests.platform_access_helpers import create_test_platform_user
+
+
+async def _stock_reader(session: AsyncSession, tenant_id: UUID) -> None:
+    reader = await create_test_platform_user(session, access_kind="developer")
+    await session.execute(
+        text(
+            "SELECT set_config('app.user_id',:actor,true),"
+            "set_config('app.tenant_id',:tenant,true)"
+        ),
+        {"actor": str(reader.id), "tenant": str(tenant_id)},
+    )
 
 
 async def test_fractional_stock_totals_and_filtered_export_match_screen(
     db_session: AsyncSession, pos_scaffold
 ) -> None:
     s = await pos_scaffold(batch_qty=Decimal("0.005"))
+    await _stock_reader(db_session, s["tenant"].id)
     inventory = InventoryRepository(db_session)
     today = await _today(db_session)
     second = await inventory.create_batch(
@@ -55,7 +69,8 @@ async def test_fractional_stock_totals_and_filtered_export_match_screen(
         page_size=50,
     )
     assert data.total_value == overview.total_value == Decimal("0.04")
-    assert sum(row.value for row in overview.rows) == overview.total_value
+    assert all(row.value is not None for row in overview.rows)
+    assert sum(row.value for row in overview.rows if row.value is not None) == overview.total_value
     s["branch"].is_active = False
     await db_session.flush()
     archived = await service.build_stock_on_date(
@@ -85,9 +100,12 @@ async def test_fractional_stock_totals_and_filtered_export_match_screen(
             expires_within_days=expiry,
         )
         sheet = load_workbook(BytesIO(content)).active
+        assert sheet is not None
         assert overview.total == expected_rows
         assert sheet.max_row == 4 + expected_rows
-        assert sheet.cell(sheet.max_row, 8).value == float(overview.total_value)
+        value_column = next(cell.column for cell in sheet[3] if cell.value == "Стоимость")
+        assert overview.total_value is not None
+        assert sheet.cell(sheet.max_row, value_column).value == float(overview.total_value)
 
 
 async def _today(db: AsyncSession) -> date:
@@ -111,6 +129,7 @@ async def _sell(service: POSService, s, qty: Decimal, paid: Decimal) -> None:  #
 async def test_stock_on_date_value_and_totals(db_session: AsyncSession, pos_scaffold) -> None:
     # batch: +100 in, purchase_price 3.00. Sell 30 → 70 remain.
     s = await pos_scaffold(batch_qty=100, sale_price=10)
+    await _stock_reader(db_session, s["tenant"].id)
     service = POSService(POSRepository(db_session))
     await service.open_shift(
         tenant_id=s["tenant"].id,
@@ -140,6 +159,7 @@ async def test_stock_on_date_excludes_movements_after_the_date(
         sale_price=10,
         movement_created_at=datetime.now(UTC) - timedelta(days=5),
     )
+    await _stock_reader(db_session, s["tenant"].id)
     service = POSService(POSRepository(db_session))
     await service.open_shift(
         tenant_id=s["tenant"].id,
@@ -168,6 +188,7 @@ async def test_stock_on_date_excludes_movements_after_the_date(
 
 async def test_stock_on_date_empty_is_valid_file(db_session: AsyncSession, pos_scaffold) -> None:
     s = await pos_scaffold(batch_qty=100)
+    await _stock_reader(db_session, s["tenant"].id)
     service = POSService(POSRepository(db_session))
     today = await _today(db_session)
 
@@ -193,6 +214,7 @@ async def test_stock_on_date_uses_tenant_timezone(db_session: AsyncSession, pos_
         batch_qty=100,
         movement_created_at=datetime(2026, 6, 14, 20, 0, tzinfo=UTC),
     )
+    await _stock_reader(db_session, s["tenant"].id)
     service = POSService(POSRepository(db_session))
 
     # Local day 2026-06-15 sees the incoming → stock present.

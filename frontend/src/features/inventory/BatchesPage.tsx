@@ -55,11 +55,15 @@ const CustomerReturnsPanel = lazy(() =>
 
 type BlockedFilter = "" | "active" | "blocked";
 type BatchView = "table" | "cards";
-type InventorySection = "saleable" | "customer_returns";
+type InventorySection = "saleable" | "customer_returns" | "physical";
+const PhysicalLotsPanel = lazy(() =>
+  import("./PhysicalLotsPanel").then((module) => ({ default: module.PhysicalLotsPanel })),
+);
 
 const inventorySections = [
   { value: "saleable", label: "Продаваемые партии" },
   { value: "customer_returns", label: "Возвраты покупателей" },
+  { value: "physical", label: "Поштучные партии" },
 ] as const;
 
 const VIEW_STORAGE_KEY = "aurum:batches:view:v1";
@@ -83,7 +87,8 @@ export function BatchesPage(): JSX.Element {
 function CloudBatchesPage(): JSX.Element {
   const { user } = useAuth();
   const quickActions = useQuickActionPreferences("batches");
-  const canViewCustomerReturns = hasPermission(user, "customer_returns.view");
+  const canAccessCustomerReturns =
+    hasPermission(user, "customer_returns.view") || hasPermission(user, "customer_returns.resolve");
   const [section, setSection] = useState<InventorySection>("saleable");
   const filterPreferenceKey = useFilterPreferenceKey("batches");
   const [batchNumberInput, setBatchNumberInput] = useState("");
@@ -104,8 +109,8 @@ function CloudBatchesPage(): JSX.Element {
   const branchFilterName = branches.data?.find((branch) => branch.id === branchId)?.name;
 
   useEffect(() => {
-    if (!canViewCustomerReturns && section !== "saleable") setSection("saleable");
-  }, [canViewCustomerReturns, section]);
+    if (!canAccessCustomerReturns && section === "customer_returns") setSection("saleable");
+  }, [canAccessCustomerReturns, section]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -129,8 +134,10 @@ function CloudBatchesPage(): JSX.Element {
     }),
     [batchNumber, blockedFilter, branchId, catalogId, expiry, page, showEmpty],
   );
-  const { data, isLoading, isFetching, isPlaceholderData, error, refetch } =
-    useBatchesQuery(params);
+  const { data, isLoading, isFetching, isPlaceholderData, error, refetch } = useBatchesQuery(
+    params,
+    section === "saleable",
+  );
   const isShowingPreviousResults = isPlaceholderData && isFetching;
   const filtersActive = Boolean(
     batchNumberInput || branchId || catalogId || expiry || blockedFilter || showEmpty,
@@ -167,18 +174,22 @@ function CloudBatchesPage(): JSX.Element {
 
   return (
     <div className="space-y-4">
-      <ContextHelpPortal
-        pathname="/batches"
-        inventorySection={
-          section === "customer_returns" && canViewCustomerReturns ? "customer_returns" : "saleable"
-        }
-      />
+      {section !== "physical" && (
+        <ContextHelpPortal
+          pathname="/batches"
+          inventorySection={
+            section === "customer_returns" && canAccessCustomerReturns
+              ? "customer_returns"
+              : "saleable"
+          }
+        />
+      )}
       <PageHeader
         title="Партии"
         description="Остатки, сроки годности и движения товара по аптечным точкам."
         showTitleOnDesktop
         meta={
-          data ? (
+          section === "saleable" && data ? (
             <span aria-live="polite">
               {data.total} партий{isFetching && !isLoading ? " · обновление" : ""}
             </span>
@@ -186,17 +197,25 @@ function CloudBatchesPage(): JSX.Element {
         }
       />
 
-      {canViewCustomerReturns ? (
+      {hasPermission(user, "batches.view") || canAccessCustomerReturns ? (
         <SegmentedControl
           value={section}
-          options={inventorySections}
+          options={inventorySections.filter((item) =>
+            item.value === "customer_returns"
+              ? canAccessCustomerReturns
+              : item.value !== "physical" || hasPermission(user, "batches.view"),
+          )}
           onChange={setSection}
           label="Раздел складского учёта"
           className="w-full sm:w-auto"
         />
       ) : null}
 
-      {section === "customer_returns" && canViewCustomerReturns ? (
+      {section === "physical" && hasPermission(user, "batches.view") ? (
+        <Suspense fallback={<SkeletonRows rows={6} />}>
+          <PhysicalLotsPanel />
+        </Suspense>
+      ) : section === "customer_returns" && canAccessCustomerReturns ? (
         <Suspense fallback={<SkeletonRows rows={6} />}>
           <CustomerReturnsPanel />
         </Suspense>

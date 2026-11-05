@@ -18,14 +18,16 @@ import hashlib
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
-from typing import Any
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, localcontext
+from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anyio
 import structlog
+from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, InternalError
@@ -47,6 +49,16 @@ from app.domains.foundation.repository import FoundationRepository
 from app.domains.inventory.models import Batch
 from app.domains.inventory.repository import InventoryRepository
 from app.domains.inventory.service import InventoryService
+from app.domains.pos.draft_fefo import DraftDemand, plan_draft_fefo
+from app.domains.pos.mixed_cash_refund_read import (
+    mixed_cash_refund_lines,
+    mixed_cash_refund_snapshot,
+)
+from app.domains.pos.mixed_cash_refund_schemas import MixedCashRefundReceiptV4
+from app.domains.pos.mixed_documents import MixedReceiptDocumentV4
+from app.domains.pos.mixed_electronic_refund_posting_schemas import MixedElectronicRefundReceiptV4
+from app.domains.pos.mixed_electronic_refund_receipt_read import mixed_electronic_refund_snapshot
+from app.domains.pos.mixed_receipt_read import mixed_receipt_lines, mixed_receipt_snapshot
 from app.domains.pos.models import (
     POSCommand,
     POSFavorite,
@@ -59,7 +71,15 @@ from app.domains.pos.models import (
     SalePayment,
     Shift,
 )
+from app.domains.pos.physical_cash_refund_read import (
+    physical_cash_refund_lines,
+    physical_cash_refund_snapshot,
+)
+from app.domains.pos.physical_cash_refund_schemas import PhysicalCashRefundReceiptV3
+from app.domains.pos.physical_documents import PhysicalReceiptDocumentV3
+from app.domains.pos.physical_receipt_read import physical_receipt_lines, physical_receipt_snapshot
 from app.domains.pos.receipt_pdf import get_or_render_receipt_pdf
+from app.domains.pos.refund_payment_allocation import allocate_refund_payments
 from app.domains.pos.repository import (
     FavoriteCatalogRow,
     PaymentReconciliationRow,
@@ -77,6 +97,7 @@ from app.domains.pos.schemas import (
     POSRefundAttemptPaymentRead,
     POSRefundAttemptRead,
     POSSaleCreateCommandResult,
+    ProductQuantityBasis,
     ReceiptData,
     ReceiptLine,
     ReceiptPayment,
@@ -97,12 +118,19 @@ from app.domains.pos.schemas import (
     StockOnDateData,
     StockOnDateOverview,
     StockRow,
+    TopProductPhysicalQuantity,
     TopProductRow,
     TopProductsOverview,
     ZReportData,
     ZReportPaymentBreakdown,
 )
 from app.domains.pos.stock_on_date_xlsx import render_stock_on_date_xlsx
+from app.domains.pos.training_checkout_schemas import TrainingReceiptDocumentV1
+from app.domains.pos.training_receipt_read import training_receipt_lines, training_receipt_snapshot
+from app.domains.pos.unit_cart_repository import UnitCartRepository
+from app.domains.pos.unit_cart_service import UnitCartItemSnapshot
+from app.domains.pos.unit_electronic_refund_posting_schemas import PhysicalElectronicRefundReceiptV3
+from app.domains.pos.unit_electronic_refund_receipt_read import electronic_refund_snapshot
 from app.domains.pos.z_report_xlsx import get_or_render_z_report_xlsx
 from app.domains.sync.integrity import (
     canonical_json_hash,
@@ -518,7 +546,10 @@ class POSService:
         attempt = await self.repo.lock_payment_attempt(attempt_id)
         if attempt is None or attempt.tenant_id != tenant_id or attempt.sale_id != sale.id:
             raise NotFoundError("Payment attempt not found")
-        if attempt.amount > sale.total_amount:
+        if (
+            attempt.amount > sale.total_amount
+            and not await self.repo.has_bound_unit_payment_attempt(attempt)
+        ):
             raise BusinessRuleError("Payment attempt exceeds the current sale total")
         if attempt.status in {"confirmed", "consumed"}:
             if (
@@ -733,6 +764,10 @@ class POSService:
         Decimal,
         list[tuple[str, Decimal]],
     ]:
+        if training_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Training unit sale refunds are not supported")
+        if mixed_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Mixed sale refunds are not supported yet")
         await self._assert_consumed_refund_history(parent)
         parent_items, already_refunded = await self._validate_refund_items(
             parent_sale_id=parent.id,
@@ -1400,17 +1435,29 @@ class POSService:
         cash_in = Decimal(totals.get("cash", "0"))
         expected = shift.opening_cash + cash_in
         diff = closing_cash_actual - expected
-        return await self.repo.update_shift(
-            shift,
-            status="closed",
-            closed_at=self._now(),
-            closed_by_user_id=closed_by_user_id,
-            closing_cash_actual=closing_cash_actual,
-            closing_cash_expected=expected,
-            closing_difference=diff,
-            totals=totals,
-            notes=notes,
-        )
+        try:
+            return await self.repo.update_shift(
+                shift,
+                status="closed",
+                closed_at=self._now(),
+                closed_by_user_id=closed_by_user_id,
+                closing_cash_actual=closing_cash_actual,
+                closing_cash_expected=expected,
+                closing_difference=diff,
+                totals=totals,
+                notes=notes,
+            )
+        except IntegrityError as exc:
+            # Managers cannot read another cashier's prepared rows through RLS.
+            # The database guard still prevents stranding that cashier's draft.
+            constraint = getattr(exc.orig, "constraint_name", None) or getattr(
+                getattr(exc.orig, "__cause__", None), "constraint_name", None
+            )
+            if constraint != "ck_shift_unfinished_unit_cart":
+                raise
+            raise BusinessRuleError(
+                "Cannot close a shift while unfinished sales contain items or payments"
+            ) from exc
 
     async def z_report(
         self,
@@ -2086,12 +2133,13 @@ class POSService:
         operation_id: UUID,
         operation_hash: str,
         draft_sale_id: UUID | None,
+        items: list[tuple[UUID, Decimal]],
         can_manage_tenant: bool,
         allowed_branch_ids: set[UUID] | None,
         allowed_manage_branch_ids: set[UUID] | None,
-    ) -> Sale:
+    ) -> tuple[Sale, list[tuple[UUID, Decimal]]]:
         if draft_sale_id is None:
-            return await self.create_sale(
+            sale = await self.create_sale(
                 tenant_id=tenant_id,
                 register_id=register_id,
                 cashier_user_id=cashier_user_id,
@@ -2101,6 +2149,7 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_manage_branch_ids=allowed_manage_branch_ids,
             )
+            return sale, items
 
         sale = await self._lock_sale(draft_sale_id)
         self._assert_sale_owned_or_managed(
@@ -2123,13 +2172,24 @@ class POSService:
         has_prescriptions = bool(await self.repo.list_prescriptions(sale.id))
         if has_payments or has_prescriptions:
             raise BusinessRuleError("Checkout draft contains legacy financial data")
+        draft_items = [
+            (item.catalog_id, item.qty)
+            for item in await self.repo.list_checkout_draft_items(sale.id)
+        ]
+        if draft_items and dict(self._aggregate_checkout_items(draft_items)) == dict(items):
+            # Keep the displayed line rounding when the requested cart is unchanged.
+            # FEFO order prevents existing batch slices from being split a second time.
+            catalog_order = {catalog_id: index for index, (catalog_id, _) in enumerate(items)}
+            draft_items.sort(key=lambda item: catalog_order[item[0]])
+            items = draft_items
         await self.repo.delete_items(sale.id)
-        return await self.repo.update_sale(
+        sale = await self.repo.update_sale(
             sale,
             total_amount=Decimal("0"),
             operation_id=operation_id,
             operation_hash=operation_hash,
         )
+        return sale, items
 
     async def checkout(
         self,
@@ -2187,18 +2247,19 @@ class POSService:
                 },
             )
         self._validate_checkout_payments(normalized_payments)
-        sale = await self._prepare_checkout_sale(
+        sale, checkout_items = await self._prepare_checkout_sale(
             tenant_id=tenant_id,
             register_id=register_id,
             cashier_user_id=cashier_user_id,
             operation_id=operation_id,
             operation_hash=operation_hash,
             draft_sale_id=draft_sale_id,
+            items=aggregated_items,
             can_manage_tenant=can_manage_tenant,
             allowed_branch_ids=allowed_branch_ids,
             allowed_manage_branch_ids=allowed_manage_branch_ids,
         )
-        for catalog_id, qty in aggregated_items:
+        for catalog_id, qty in checkout_items:
             await self.add_item(
                 sale_id=sale.id,
                 catalog_id=catalog_id,
@@ -2386,6 +2447,21 @@ class POSService:
     @staticmethod
     def get_receipt_item_names(sale: Sale) -> dict[int, str]:
         """Return immutable line names for a completed receipt snapshot."""
+        if training_receipt_snapshot(sale) is not None:
+            return {}
+        if (
+            mixed_electronic_refund_snapshot(sale) is not None
+            or mixed_cash_refund_snapshot(sale) is not None
+            or mixed_receipt_snapshot(sale) is not None
+        ):
+            # Mixed global positions cannot be joined to legacy SaleItem positions.
+            return {}
+        refund = electronic_refund_snapshot(sale) or physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return {line.position: line.name for line in refund.lines}
+        physical = physical_receipt_snapshot(sale)
+        if physical is not None:
+            return {line.position: line.name for line in physical.lines}
         if sale.receipt_snapshot is None:
             return {}
         try:
@@ -2395,6 +2471,35 @@ class POSService:
         if snapshot.sale_id != sale.id:
             raise AurumError("Receipt snapshot does not match the sale")
         return {line.position: line.name for line in snapshot.items}
+
+    @staticmethod
+    def get_physical_receipt_items(sale: Sale) -> list[ReceiptLine]:
+        """Read physical lines after the caller has authorized access to the sale."""
+        if training_receipt_snapshot(sale) is not None:
+            return []
+        if (
+            mixed_electronic_refund_snapshot(sale) is not None
+            or mixed_cash_refund_snapshot(sale) is not None
+            or mixed_receipt_snapshot(sale) is not None
+        ):
+            return []
+        refund = electronic_refund_snapshot(sale) or physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return physical_cash_refund_lines(refund)
+        snapshot = physical_receipt_snapshot(sale)
+        return physical_receipt_lines(snapshot) if snapshot is not None else []
+
+    @staticmethod
+    def get_mixed_receipt_items(sale: Sale) -> list[ReceiptLine]:
+        """Keep mixed global positions separate from legacy and physical-only reads."""
+        training = training_receipt_snapshot(sale)
+        if training is not None:
+            return training_receipt_lines(training)
+        refund = mixed_electronic_refund_snapshot(sale) or mixed_cash_refund_snapshot(sale)
+        if refund is not None:
+            return mixed_cash_refund_lines(refund)
+        snapshot = mixed_receipt_snapshot(sale)
+        return mixed_receipt_lines(snapshot) if snapshot is not None else []
 
     async def _lock_sale(self, sale_id: UUID) -> Sale:
         sale = await self.repo.lock_sale(sale_id)
@@ -2499,6 +2604,13 @@ class POSService:
         payments = await self.repo.list_payments(sale.id)
         return sale, items, payments
 
+    async def get_prepared_cart_items(self, sale: Sale) -> list[UnitCartItemSnapshot]:
+        """Read intentions after the caller has authorized access to this sale."""
+        return [
+            UnitCartItemSnapshot.model_validate(item, from_attributes=True)
+            for item in await self.repo.list_prepared_cart_items(sale.tenant_id, sale.id)
+        ]
+
     # ---- receipt (print / PDF) ----
 
     async def _compose_receipt_data(
@@ -2595,6 +2707,92 @@ class POSService:
             change=change,
         )
 
+    async def _compose_physical_receipt_data(
+        self,
+        sale: Sale,
+        snapshot: (
+            PhysicalReceiptDocumentV3
+            | PhysicalCashRefundReceiptV3
+            | PhysicalElectronicRefundReceiptV3
+            | MixedReceiptDocumentV4
+            | MixedCashRefundReceiptV4
+            | MixedElectronicRefundReceiptV4
+            | TrainingReceiptDocumentV1
+        ),
+    ) -> ReceiptData:
+        # Versioned receipts store retail facts, not historical pharmacy/cashier headers.
+        tenant = await self.repo.session.get(Tenant, sale.tenant_id)
+        branch = await self.repo.session.get(Branch, sale.branch_id)
+        cashier_name = await self.repo.get_user_display_name(sale.cashier_user_id)
+        timezone_name = await self._report_tz(sale.tenant_id)
+        try:
+            local_datetime = snapshot.completed_at.astimezone(ZoneInfo(timezone_name))
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise AurumError("Tenant report timezone is invalid") from exc
+        if isinstance(snapshot, TrainingReceiptDocumentV1):
+            lines = training_receipt_lines(snapshot)
+        elif isinstance(snapshot, MixedCashRefundReceiptV4 | MixedElectronicRefundReceiptV4):
+            lines = mixed_cash_refund_lines(snapshot)
+        elif isinstance(snapshot, PhysicalCashRefundReceiptV3 | PhysicalElectronicRefundReceiptV3):
+            lines = physical_cash_refund_lines(snapshot)
+        elif isinstance(snapshot, MixedReceiptDocumentV4):
+            lines = mixed_receipt_lines(snapshot)
+        else:
+            lines = physical_receipt_lines(snapshot)
+        return ReceiptData(
+            sale_id=sale.id,
+            is_refund=isinstance(
+                snapshot,
+                PhysicalCashRefundReceiptV3
+                | MixedCashRefundReceiptV4
+                | MixedElectronicRefundReceiptV4
+                | PhysicalElectronicRefundReceiptV3,
+            ),
+            status=sale.status,
+            pharmacy_name=tenant.name if tenant is not None else "",
+            branch_name=branch.name if branch is not None else "",
+            branch_address=branch.address if branch is not None else None,
+            branch_license=branch.license_number if branch is not None else None,
+            receipt_number=snapshot.receipt_number,
+            original_receipt_number=(
+                snapshot.parent_receipt_number
+                if isinstance(
+                    snapshot,
+                    PhysicalCashRefundReceiptV3
+                    | MixedCashRefundReceiptV4
+                    | MixedElectronicRefundReceiptV4
+                    | PhysicalElectronicRefundReceiptV3,
+                )
+                else None
+            ),
+            datetime=local_datetime,
+            cashier_name=cashier_name,
+            items=lines,
+            discount_total=sum((line.discount_amount for line in snapshot.lines), Decimal("0")),
+            total=snapshot.total_amount,
+            currency=snapshot.currency,
+            payments=(
+                [
+                    ReceiptPayment(method=part.method, amount=part.amount)
+                    for part in snapshot.simulated_payments
+                ]
+                if isinstance(snapshot, TrainingReceiptDocumentV1)
+                else (
+                    [ReceiptPayment(method="cash", amount=snapshot.total_amount)]
+                    if isinstance(snapshot, PhysicalCashRefundReceiptV3 | MixedCashRefundReceiptV4)
+                    else [
+                        ReceiptPayment(method=payment.method, amount=payment.amount)
+                        for payment in snapshot.payments
+                    ]
+                )
+            ),
+            # Training keeps simulated change; live versioned receipts do not save tender.
+            paid_total=None,
+            change=(
+                snapshot.change_amount if isinstance(snapshot, TrainingReceiptDocumentV1) else None
+            ),
+        )
+
     async def build_receipt(
         self,
         sale_id: UUID,
@@ -2616,6 +2814,22 @@ class POSService:
                 allowed_branch_ids=allowed_branch_ids,
                 allowed_view_branch_ids=allowed_view_branch_ids,
             )
+        saved_receipt = (
+            training_receipt_snapshot(sale)
+            or mixed_electronic_refund_snapshot(sale)
+            or mixed_cash_refund_snapshot(sale)
+        )
+        if saved_receipt is not None:
+            return await self._compose_physical_receipt_data(sale, saved_receipt)
+        refund = electronic_refund_snapshot(sale) or physical_cash_refund_snapshot(sale)
+        if refund is not None:
+            return await self._compose_physical_receipt_data(sale, refund)
+        mixed = mixed_receipt_snapshot(sale)
+        if mixed is not None:
+            return await self._compose_physical_receipt_data(sale, mixed)
+        physical = physical_receipt_snapshot(sale)
+        if physical is not None:
+            return await self._compose_physical_receipt_data(sale, physical)
         if sale.receipt_snapshot is not None:
             try:
                 snapshot = ReceiptData.model_validate(sale.receipt_snapshot)
@@ -2949,6 +3163,7 @@ class POSService:
         branch_id: UUID | None,
         sort_by: str,
         limit: int,
+        quantity_basis: str = "legacy_pack",
     ) -> TopProductsOverview:
         if date_from > date_to:
             raise BusinessRuleError(
@@ -2962,6 +3177,12 @@ class POSService:
             )
         if sort_by not in {"revenue", "quantity"}:
             raise BusinessRuleError("Unsupported top products sort")
+        try:
+            basis = TypeAdapter[ProductQuantityBasis](ProductQuantityBasis).validate_python(
+                quantity_basis
+            )
+        except PydanticValidationError:
+            raise BusinessRuleError("Unsupported top products quantity basis") from None
 
         raw = await self.repo.top_products(
             tenant_id=tenant_id,
@@ -2970,6 +3191,7 @@ class POSService:
             branch_id=branch_id,
             sort_by=sort_by,
             limit=limit,
+            quantity_basis=basis,
             tz=await self._report_tz(tenant_id),
         )
         branch_name: str | None = None
@@ -2977,23 +3199,30 @@ class POSService:
             branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
 
-        currency = str(raw[0]["currency"]) if raw else "TJS"
+        currency = raw[0].currency if raw else "TJS"
+        physical_quantities = TypeAdapter[list[TopProductPhysicalQuantity]](
+            list[TopProductPhysicalQuantity]
+        )
         return TopProductsOverview(
             date_from=date_from,
             date_to=date_to,
             branch_name=branch_name,
             currency=currency,
             sort_by=sort_by,
+            quantity_basis=basis,
             rows=[
                 TopProductRow(
-                    catalog_id=row["catalog_id"],
-                    name=row["name"] or "Без названия",
-                    form=row["form"],
-                    dosage=row["dosage"],
-                    pack_size=row["pack_size"],
-                    quantity=Decimal(str(row["quantity"])),
-                    revenue=Decimal(str(row["revenue"])).quantize(Decimal("0.01")),
-                    receipts_count=int(row["receipts_count"]),
+                    catalog_id=row.catalog_id,
+                    name=row.name or "Без названия",
+                    form=row.form,
+                    dosage=row.dosage,
+                    pack_size=row.pack_size,
+                    quantity=row.quantity,
+                    physical_quantities=physical_quantities.validate_python(
+                        row.physical_quantities
+                    ),
+                    revenue=row.revenue.quantize(Decimal("0.01")),
+                    receipts_count=row.receipts_count,
                 )
                 for row in raw
             ],
@@ -3010,7 +3239,7 @@ class POSService:
         query: str | None = None,
         expires_within_days: int | None = None,
     ) -> StockOnDateData:
-        raw = await self.repo.stock_on_date(
+        snapshot = await self.repo.stock_on_date(
             tenant_id=tenant_id,
             on_date=on_date,
             branch_id=branch_id,
@@ -3022,48 +3251,25 @@ class POSService:
                 else None
             ),
         )
-        foundation = FoundationRepository(self.repo.session)
-
+        branch_name: str | None = None
         if branch_id is not None:
-            branch = await foundation.get_branch(branch_id)
+            branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
-            show_branch_column = False
-        else:
-            branch_name = None
-            show_branch_column = True
-
-        rows: list[StockRow] = []
-        total_qty = Decimal("0")
-        total_value = Decimal("0")
-        currency = "TJS"
-        for r in raw:
-            currency = r["currency"] or currency
-            qty = Decimal(str(r["qty"]))
-            purchase_price = Decimal(str(r["purchase_price"]))
-            value = (qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            total_qty += qty
-            total_value += value
-            rows.append(
-                StockRow(
-                    name=r["name"] or "—",
-                    inn=r["inn"],
-                    branch_name=r["branch_name"],
-                    batch_number=r["batch_number"],
-                    expires_at=r["expires_at"],
-                    qty=qty,
-                    purchase_price=purchase_price,
-                    value=value,
-                )
-            )
-
         return StockOnDateData(
             on_date=on_date,
             branch_name=branch_name,
-            show_branch_column=show_branch_column,
-            currency=currency,
-            rows=rows,
-            total_qty=total_qty,
-            total_value=total_value,
+            show_branch_column=branch_id is None,
+            currency=snapshot.rows[0].currency if snapshot.rows else "TJS",
+            rows=[StockRow.model_validate(asdict(row)) for row in snapshot.rows],
+            total_qty=snapshot.total_qty,
+            total_value=snapshot.total_value,
+            known_total_value=snapshot.known_total_value,
+            cost_status=TypeAdapter[Literal["known", "partial", "hidden"]](
+                Literal["known", "partial", "hidden"]
+            ).validate_python(snapshot.cost_status),
+            physical_quantities=TypeAdapter[list[TopProductPhysicalQuantity]](
+                list[TopProductPhysicalQuantity]
+            ).validate_python(snapshot.physical_quantities),
         )
 
     async def get_stock_on_date_xlsx(
@@ -3102,7 +3308,7 @@ class POSService:
             if expires_within_days is not None
             else None
         )
-        raw, total, total_qty, total_value = await self.repo.stock_on_date_overview(
+        snapshot = await self.repo.stock_on_date_overview(
             tenant_id=tenant_id,
             on_date=on_date,
             branch_id=branch_id,
@@ -3116,33 +3322,23 @@ class POSService:
         if branch_id is not None:
             branch = await FoundationRepository(self.repo.session).get_branch(branch_id)
             branch_name = branch.name if branch is not None else None
-        currency = str(raw[0]["currency"]) if raw else "TJS"
-        rows: list[StockRow] = []
-        for row in raw:
-            qty = Decimal(str(row["qty"]))
-            purchase_price = Decimal(str(row["purchase_price"]))
-            rows.append(
-                StockRow(
-                    name=row["name"] or "—",
-                    inn=row["inn"],
-                    branch_name=row["branch_name"],
-                    batch_number=row["batch_number"],
-                    expires_at=row["expires_at"],
-                    qty=qty,
-                    purchase_price=purchase_price,
-                    value=(qty * purchase_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
-                )
-            )
         return StockOnDateOverview(
             on_date=on_date,
             branch_name=branch_name,
-            currency=currency,
-            rows=rows,
-            total=total,
+            currency=snapshot.rows[0].currency if snapshot.rows else "TJS",
+            rows=[StockRow.model_validate(asdict(row)) for row in snapshot.rows],
+            total=snapshot.total,
             page=page,
             page_size=page_size,
-            total_qty=total_qty,
-            total_value=total_value.quantize(Decimal("0.01")),
+            total_qty=snapshot.total_qty,
+            total_value=snapshot.total_value,
+            known_total_value=snapshot.known_total_value,
+            cost_status=TypeAdapter[Literal["known", "partial", "hidden"]](
+                Literal["known", "partial", "hidden"]
+            ).validate_python(snapshot.cost_status),
+            physical_quantities=TypeAdapter[list[TopProductPhysicalQuantity]](
+                list[TopProductPhysicalQuantity]
+            ).validate_python(snapshot.physical_quantities),
         )
 
     @staticmethod
@@ -3272,46 +3468,7 @@ class POSService:
             )
         self._assert_catalog_dispensing_allowed(catalog)
 
-        inventory = InventoryService(InventoryRepository(self.repo.session))
-        selection = await inventory.find_batches_fefo(
-            tenant_id=sale.tenant_id,
-            catalog_id=catalog_id,
-            branch_id=sale.branch_id,
-            qty_needed=qty,
-            today=today,
-        )
-        if selection.total_picked < qty:
-            raise BusinessRuleError(
-                "Insufficient stock for this catalog item",
-                details={
-                    "requested": str(qty),
-                    "available": str(selection.total_picked),
-                },
-            )
-        created: list[SaleItem] = []
-        for pick in selection.picks:
-            unit_price = pick.batch.sale_price or catalog.base_price or Decimal("0")
-            if unit_price <= 0:
-                raise BusinessRuleError(
-                    "Catalog item has no valid sale price",
-                    details={"catalog_id": str(catalog_id)},
-                )
-            total_price = (unit_price * pick.qty).quantize(Decimal("0.01"))
-            position = await self.repo.next_item_position(sale.id)
-            item = await self.repo.insert_item(
-                tenant_id=sale.tenant_id,
-                sale_id=sale.id,
-                catalog_id=catalog_id,
-                batch_id=pick.batch.id,
-                qty=pick.qty,
-                unit_price=unit_price,
-                total_price=total_price,
-                position=position,
-            )
-            created.append(item)
-
-        # Recompute sale total
-        await self._recompute_total(sale)
+        created = await self._reallocate_draft_catalog(sale, catalog, added_qty=qty, today=today)
         requires_rx = catalog.dispensing_type == "prescription"
         return created, requires_rx
 
@@ -3339,10 +3496,9 @@ class POSService:
         item = await self.repo.get_item(item_id)
         if item is None or item.sale_id != sale_id:
             raise NotFoundError("Sale item not found")
-        total_price = (item.unit_price * qty).quantize(Decimal("0.01"))
-        updated = await self.repo.update_item(item, qty=qty, total_price=total_price)
-        await self._recompute_total(sale)
-        return updated
+        catalog = await self._draft_catalog(sale, item.catalog_id)
+        await self._reallocate_draft_catalog(sale, catalog, changed_item=item, changed_qty=qty)
+        return item
 
     async def delete_item(
         self,
@@ -3364,10 +3520,129 @@ class POSService:
         )
         self._assert_draft(sale)
         await self._assert_sale_cart_mutable(sale.id)
-        rows = await self.repo.delete_item(item_id, sale_id=sale_id)
-        if rows == 0:
+        item = await self.repo.get_item(item_id)
+        if item is None or item.sale_id != sale_id:
             raise NotFoundError("Sale item not found")
-        await self._recompute_total(sale)
+        catalog = await self._draft_catalog(sale, item.catalog_id)
+        await self._reallocate_draft_catalog(sale, catalog, removed_item=item)
+
+    async def _draft_catalog(self, sale: Sale, catalog_id: UUID) -> TenantCatalog:
+        catalog = await self.repo.session.get(TenantCatalog, catalog_id)
+        if catalog is None or catalog.tenant_id != sale.tenant_id:
+            raise NotFoundError("Catalog item not found")
+        return catalog
+
+    async def _reallocate_draft_catalog(
+        self,
+        sale: Sale,
+        catalog: TenantCatalog,
+        *,
+        added_qty: Decimal | None = None,
+        changed_item: SaleItem | None = None,
+        changed_qty: Decimal | None = None,
+        removed_item: SaleItem | None = None,
+        today: date | None = None,
+    ) -> list[SaleItem]:
+        items = await self.repo.list_items(sale.id)
+        demands = [
+            DraftDemand(
+                item,
+                (
+                    changed_qty
+                    if (
+                        changed_item is not None
+                        and item.id == changed_item.id
+                        and changed_qty is not None
+                    )
+                    else item.qty
+                ),
+                item.discount_amount,
+            )
+            for item in items
+            if item.catalog_id == catalog.id
+            and (removed_item is None or item.id != removed_item.id)
+        ]
+        if added_qty is not None:
+            demands.append(DraftDemand(None, added_qty, Decimal("0")))
+        if any(demand.quantity <= 0 for demand in demands):
+            raise BusinessRuleError("Draft item quantity must be positive")
+        needed = sum((demand.quantity for demand in demands), Decimal("0"))
+        inventory = InventoryService(InventoryRepository(self.repo.session))
+        selection = await inventory.find_batches_fefo(
+            tenant_id=sale.tenant_id,
+            catalog_id=catalog.id,
+            branch_id=sale.branch_id,
+            qty_needed=needed,
+            today=today,
+        )
+        if selection.total_picked < needed:
+            if removed_item is not None:
+                async with self.repo.session.begin_nested():
+                    await self.repo.delete_item(removed_item.id, sale_id=sale.id)
+                    await self._recompute_total(sale)
+                return []
+            if (
+                changed_item is not None
+                and changed_qty is not None
+                and changed_qty < changed_item.qty
+            ):
+                # Other sales or expiry may leave the draft oversubscribed. Let
+                # the cashier reduce it progressively without repricing other rows.
+                with localcontext(Context(prec=28, rounding=ROUND_HALF_EVEN)):
+                    gross = (changed_item.unit_price * changed_qty).quantize(Decimal("0.01"))
+                    total = gross - changed_item.discount_amount
+                if total < 0:
+                    raise BusinessRuleError("Draft discount exceeds the reduced line amount")
+                async with self.repo.session.begin_nested():
+                    await self.repo.update_item(changed_item, qty=changed_qty, total_price=total)
+                    await self._recompute_total(sale)
+                return []
+            raise BusinessRuleError(
+                "Insufficient stock for this catalog item",
+                details={"requested": str(needed), "available": str(selection.total_picked)},
+            )
+        planned = plan_draft_fefo(demands, selection.picks, catalog.base_price)
+        created: list[SaleItem] = []
+        # Complete planning before the first write; keep original IDs on first slices.
+        async with self.repo.session.begin_nested():
+            if removed_item is not None:
+                await self.repo.delete_item(removed_item.id, sale_id=sale.id)
+            position = max((item.position for item in items), default=0)
+            for part in planned:
+                original = part.demand.item
+                if original is not None and part.first:
+                    await self.repo.update_item(
+                        original,
+                        batch_id=part.pick.batch.id,
+                        qty=part.quantity,
+                        unit_price=part.unit_price,
+                        total_price=part.total_price,
+                        discount_amount=part.discount,
+                    )
+                    continue
+                position += 1
+                item = await self.repo.insert_item(
+                    tenant_id=sale.tenant_id,
+                    sale_id=sale.id,
+                    catalog_id=catalog.id,
+                    batch_id=part.pick.batch.id,
+                    qty=part.quantity,
+                    unit_price=part.unit_price,
+                    total_price=part.total_price,
+                    discount_amount=part.discount,
+                    position=position,
+                )
+                if original is None:
+                    created.append(item)
+                else:
+                    await self.repo.copy_item_prescriptions(
+                        tenant_id=sale.tenant_id,
+                        sale_id=sale.id,
+                        source_item_id=original.id,
+                        target_item_id=item.id,
+                    )
+            await self._recompute_total(sale)
+        return created
 
     async def add_item_command(
         self,
@@ -3743,7 +4018,9 @@ class POSService:
             catalog = await self.repo.session.get(TenantCatalog, item.catalog_id)
             if catalog is not None and catalog.dispensing_type == "prescription":
                 rx_item_ids.add(item.id)
-        if not rx_item_ids:
+        if not rx_item_ids and (
+            requested_item_id is not None or not await self._has_active_physical_rx_item(sale)
+        ):
             raise BusinessRuleError("Prescription log is not applicable to this sale")
         if requested_item_id is not None and requested_item_id not in rx_item_ids:
             raise BusinessRuleError("Prescription log must reference a prescription item")
@@ -3755,6 +4032,21 @@ class POSService:
             "created_by": actor_id,
         }
         return await self.repo.insert_prescription(**payload)
+
+    async def _has_active_physical_rx_item(self, sale: Sale) -> bool:
+        cart = UnitCartRepository(self.repo.session)
+        items = await cart.list_items(sale.tenant_id, sale.id)
+        catalog_ids = {item.catalog_id for item in items if item.physical_packaging is not None}
+        for catalog_id in sorted(catalog_ids, key=str):
+            catalog = await cart.lock_catalog(sale.tenant_id, catalog_id)
+            if (
+                catalog is not None
+                and catalog.is_active
+                and catalog.deleted_at is None
+                and catalog.dispensing_type == "prescription"
+            ):
+                return True
+        return False
 
     # =========================================================================
     # Complete — the critical path
@@ -3891,6 +4183,8 @@ class POSService:
         self,
         sale: Sale,
         items: list[SaleItem],
+        *,
+        actor_id: UUID | None = None,
     ) -> None:
         await self._lock_sellable_catalogs(sale, items)
         settings = await FoundationRepository(self.repo.session).get_settings_for_pos(
@@ -3928,6 +4222,7 @@ class POSService:
                     source_table="sale",
                     source_id=sale.id,
                     operation_key=f"pos:sale:{sale.id}:sale:{batch_id}",
+                    created_by=actor_id,
                 )
             except (IntegrityError, InternalError) as exc:
                 # The trigger and CHECK remain the final barrier if stock
@@ -4091,63 +4386,21 @@ class POSService:
         already_refunded: Mapping[str, Decimal],
     ) -> list[tuple[str, Decimal]]:
         per_method: dict[str, Decimal] = {}
-        for payment in original_payments:
-            if payment.amount > 0:
-                per_method[payment.payment_method] = (
-                    per_method.get(payment.payment_method, Decimal("0")) + payment.amount
-                )
-        source_total = sum(per_method.values(), Decimal("0"))
-        if source_total <= 0:
-            raise BusinessRuleError("Original sale has no valid payment allocation")
-
-        quantum = Decimal("0.01")
-        methods = list(per_method)
-        remaining = {
-            method: max(
-                Decimal("0"),
-                per_method[method] - already_refunded.get(method, Decimal("0")),
-            )
-            for method in methods
-        }
-        remaining_total = sum(remaining.values(), Decimal("0"))
-        if refund_total > remaining_total:
-            raise BusinessRuleError("Refund exceeds the remaining original payment allocation")
-        if refund_total == remaining_total:
-            return [(method, remaining[method]) for method in methods if remaining[method] > 0]
-
-        exact = {method: refund_total * per_method[method] / source_total for method in methods}
-        allocated = {
-            method: min(
-                remaining[method],
-                exact[method].quantize(quantum, rounding=ROUND_DOWN),
-            )
-            for method in methods
-        }
-        missing_cents = int(
-            ((refund_total - sum(allocated.values(), Decimal("0"))) / quantum).to_integral_value()
+        with localcontext(Context(prec=28, rounding=ROUND_HALF_EVEN)):
+            for payment in original_payments:
+                if payment.amount > 0:
+                    per_method[payment.payment_method] = (
+                        per_method.get(payment.payment_method, Decimal("0")) + payment.amount
+                    )
+        return allocate_refund_payments(
+            refund_total=refund_total,
+            original_amounts=per_method,
+            already_refunded={
+                method: amount
+                for method, amount in already_refunded.items()
+                if method in per_method
+            },
         )
-        remainder_order = sorted(
-            methods,
-            key=lambda method: (
-                exact[method] - allocated[method],
-                remaining[method] - allocated[method],
-            ),
-            reverse=True,
-        )
-        for _index in range(missing_cents):
-            method = next(
-                (
-                    candidate
-                    for candidate in remainder_order
-                    if allocated[candidate] + quantum <= remaining[candidate]
-                ),
-                None,
-            )
-            if method is None:
-                raise AurumError("Unable to allocate refund across original payment methods")
-            allocated[method] += quantum
-
-        return [(method, allocated[method]) for method in methods if allocated[method] > 0]
 
     async def _find_existing_refund(
         self,
@@ -4641,6 +4894,8 @@ class POSService:
         )
         parent = await self._lock_sale(parent_sale_id)
         self._assert_branch_allowed(parent.branch_id, allowed_branch_ids=allowed_branch_ids)
+        if training_receipt_snapshot(parent) is not None:
+            raise BusinessRuleError("Training unit sale refunds are not supported")
         existing = await self._find_existing_refund(
             parent=parent,
             operation_id=effective_operation_id,

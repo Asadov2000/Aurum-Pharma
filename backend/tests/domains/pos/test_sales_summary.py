@@ -17,6 +17,7 @@ from app.domains.pos.repository import POSRepository
 from app.domains.pos.sales_summary_xlsx import render_sales_summary_xlsx
 from app.domains.pos.service import POSService
 from app.domains.pos.z_report_xlsx import render_z_report_xlsx
+from tests.platform_access_helpers import create_test_platform_user
 
 
 async def test_discounted_reports_reconcile_with_payments_and_refunds(
@@ -49,6 +50,14 @@ async def test_discounted_reports_reconcile_with_payments_and_refunds(
         "date_to": today,
         "branch_id": None,
     }
+    reader = await create_test_platform_user(db_session, access_kind="developer")
+    await db_session.execute(
+        text(
+            "SELECT set_config('app.user_id',:actor,true),"
+            "set_config('app.tenant_id',:tenant,true)"
+        ),
+        {"actor": str(reader.id), "tenant": str(s["tenant"].id)},
+    )
     summary = await service.build_sales_summary(**filters)
     overview = await service.get_sales_summary_overview(**filters)
     top = await service.get_top_products_overview(**filters, sort_by="revenue", limit=20)

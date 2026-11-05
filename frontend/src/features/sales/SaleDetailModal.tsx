@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { Badge, Button, Modal, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
@@ -9,8 +9,29 @@ import { type PaymentMethodRead } from "@/features/pos/types";
 import { describeApiError } from "@/lib/errorMessages";
 
 import { useSaleDetailsQuery } from "./queries";
+import {
+  isElectronicRefundCandidate,
+  isMixedElectronicRefundCandidate,
+} from "./electronicRefundEligibility";
 import { RefundModal } from "./RefundModal";
 import { type SaleListItem } from "./types";
+
+const PhysicalRefundModal = lazy(async () => {
+  const module = await import("./PhysicalRefundModal");
+  return { default: module.PhysicalRefundModal };
+});
+const MixedRefundModal = lazy(async () => {
+  const module = await import("./MixedRefundModal");
+  return { default: module.MixedRefundModal };
+});
+const ElectronicRefundModal = lazy(async () => {
+  const module = await import("./ElectronicRefundModal");
+  return { default: module.ElectronicRefundModal };
+});
+const MixedElectronicRefundModal = lazy(async () => {
+  const module = await import("./MixedElectronicRefundModal");
+  return { default: module.MixedElectronicRefundModal };
+});
 
 export function SaleDetailModal({
   row,
@@ -24,7 +45,9 @@ export function SaleDetailModal({
   // currentId can swap to a freshly-created return sale (after refund) or to
   // the parent sale (when viewing a return), so navigation stays in-modal.
   const [currentId, setCurrentId] = useState(row.id);
-  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundOpen, setRefundOpen] = useState<
+    "legacy" | "physical" | "mixed" | "electronic" | "mixed-electronic" | null
+  >(null);
   const [printOpen, setPrintOpen] = useState(false);
   const details = useSaleDetailsQuery(currentId);
   const { data, isLoading, error } = details;
@@ -35,14 +58,26 @@ export function SaleDetailModal({
 
   useEffect(() => {
     setCurrentId(row.id);
+    setRefundOpen(null);
   }, [row.id]);
 
   const isRefund = data ? data.sale_type === "return" : row.is_refund;
+  const isMixed = (data?.mixed_items?.length ?? 0) > 0;
+  const refundKind =
+    data && isMixedElectronicRefundCandidate(data)
+      ? "mixed-electronic"
+      : data && isElectronicRefundCandidate(data)
+        ? "electronic"
+        : isMixed
+          ? "mixed"
+          : (data?.physical_items?.length ?? 0) > 0
+            ? "physical"
+            : "legacy";
   const hasRefundableItems =
     data?.items.some((item) => Number(item.qty) - Number(item.refunded_qty ?? "0") > 0.0005) ??
     false;
   const hasRefundedItems =
-    data?.items.some((item) => Number(item.refunded_qty ?? "0") > 0.0005) ?? false;
+    !isMixed && (data?.items.some((item) => Number(item.refunded_qty ?? "0") > 0.0005) ?? false);
 
   return (
     <Modal
@@ -112,24 +147,48 @@ export function SaleDetailModal({
                 <TR>
                   <TH>Товар</TH>
                   <TH className="text-right">Кол-во</TH>
-                  {!isRefund && <TH className="text-right">Возвращено</TH>}
+                  {!isRefund &&
+                    !isMixed &&
+                    (!data.physical_items?.length || data.items.length > 0) && (
+                      <TH className="text-right">Возвращено</TH>
+                    )}
                   <TH className="text-right">Цена</TH>
                   <TH className="text-right">Сумма</TH>
                 </TR>
               </THead>
               <TBody>
-                {data.items.map((it) => (
-                  <TR key={it.id}>
+                {!isMixed &&
+                  data.items.map((it) => (
+                    <TR key={it.id}>
+                      <TD>
+                        <p className="font-medium">{it.name ?? `Товар, строка ${it.position}`}</p>
+                        <p className="text-xs text-foreground-muted">
+                          Партия {it.batch_number ?? "без номера"}
+                        </p>
+                      </TD>
+                      <TD className="text-right font-mono">{formatQty(it.qty)}</TD>
+                      {!isRefund && (
+                        <TD className="text-right font-mono">
+                          {formatQty(it.refunded_qty ?? "0")}
+                        </TD>
+                      )}
+                      <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
+                      <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
+                    </TR>
+                  ))}
+                {(isMixed ? data.mixed_items : data.physical_items)?.map((it) => (
+                  <TR key={`${isMixed ? "mixed" : "physical"}-${it.position}`}>
                     <TD>
-                      <p className="font-medium">{it.name ?? `Товар, строка ${it.position}`}</p>
-                      <p className="text-xs text-foreground-muted">
-                        Партия {it.batch_number ?? "без номера"}
-                      </p>
+                      <p className="font-medium">{it.name}</p>
+                      {it.quantity_description && (
+                        <p className="text-xs text-foreground-muted">{it.quantity_description}</p>
+                      )}
                     </TD>
-                    <TD className="text-right font-mono">{formatQty(it.qty)}</TD>
-                    {!isRefund && (
-                      <TD className="text-right font-mono">{formatQty(it.refunded_qty ?? "0")}</TD>
-                    )}
+                    <TD className="text-right font-mono">
+                      {formatQty(it.qty)}
+                      {it.unit_label ? ` ${it.unit_label}` : ""}
+                    </TD>
+                    {!isRefund && !isMixed && data.items.length > 0 && <TD />}
                     <TD className="text-right font-mono">{formatMoney(it.unit_price)}</TD>
                     <TD className="text-right font-mono">{formatMoney(it.total_price)}</TD>
                   </TR>
@@ -167,8 +226,8 @@ export function SaleDetailModal({
             {canRefund &&
               data.sale_type === "sale" &&
               data.status === "completed" &&
-              hasRefundableItems && (
-                <Button onClick={() => setRefundOpen(true)}>Оформить возврат</Button>
+              (isMixed || hasRefundableItems || (data.physical_items?.length ?? 0) > 0) && (
+                <Button onClick={() => setRefundOpen(refundKind)}>Оформить возврат</Button>
               )}
             <Button variant="ghost" onClick={onClose}>
               Закрыть
@@ -177,16 +236,69 @@ export function SaleDetailModal({
         </div>
       )}
 
-      {canRefund && refundOpen && data && (
-        <RefundModal
-          sale={data}
-          onClose={() => setRefundOpen(false)}
-          onRefunded={(returnSaleId) => {
-            setRefundOpen(false);
-            setCurrentId(returnSaleId); // show the fresh return receipt
-          }}
-        />
-      )}
+      {canRefund &&
+        refundOpen === refundKind &&
+        data &&
+        data.sale_type === "sale" &&
+        data.status === "completed" &&
+        (refundKind === "mixed-electronic" ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <MixedElectronicRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(saleId) => {
+                setRefundOpen(null);
+                setCurrentId(saleId);
+              }}
+            />
+          </Suspense>
+        ) : refundKind === "electronic" ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <ElectronicRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(saleId) => {
+                setRefundOpen(null);
+                setCurrentId(saleId);
+              }}
+            />
+          </Suspense>
+        ) : isMixed ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <MixedRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(returnSaleId) => {
+                setRefundOpen(null);
+                setCurrentId(returnSaleId);
+              }}
+            />
+          </Suspense>
+        ) : (data.physical_items?.length ?? 0) > 0 ? (
+          <Suspense fallback={<p role="status">Загружаем форму возврата…</p>}>
+            <PhysicalRefundModal
+              key={data.id}
+              sale={data}
+              onClose={() => setRefundOpen(null)}
+              onRefunded={(returnSaleId) => {
+                setRefundOpen(null);
+                setCurrentId(returnSaleId);
+              }}
+            />
+          </Suspense>
+        ) : (
+          <RefundModal
+            sale={data}
+            onClose={() => setRefundOpen(null)}
+            onRefunded={(returnSaleId) => {
+              setRefundOpen(null);
+              setCurrentId(returnSaleId); // show the fresh return receipt
+            }}
+          />
+        ))}
 
       {printOpen && data && (
         <ReceiptPrintModal

@@ -12,8 +12,8 @@ import {
   type TopProductsParams,
 } from "./types";
 
-export async function getZReport(shiftId: string): Promise<ZReport> {
-  const { data } = await api.get<ZReport>(`/shifts/${shiftId}/z-report`);
+export async function getZReport(shiftId: string, signal?: AbortSignal): Promise<ZReport> {
+  const { data } = await api.get<ZReport>(`/shifts/${shiftId}/z-report`, { signal });
   return data;
 }
 

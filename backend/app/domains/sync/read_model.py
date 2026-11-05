@@ -155,6 +155,11 @@ class LocalReadModel:
                 envelope = ManifestRead(
                     manifest=Manifest(
                         schema_version=snapshot.schema_version,
+                        profile=(
+                            "physical_read_only_v2"
+                            if snapshot.schema_version == 2
+                            else "read_only_v1"
+                        ),
                         snapshot_id=snapshot.snapshot_id,
                         edge_node_id=snapshot.node_id,
                         tenant_id=snapshot.tenant_id,
@@ -169,7 +174,7 @@ class LocalReadModel:
                     signature_algorithm=snapshot.signature_algorithm,
                     signature=snapshot.signature,
                 )
-                manifest = verify_manifest(envelope, credential=credential)
+                manifest = verify_manifest(envelope, credential=credential, allow_physical=True)
                 for chunk in chunks:
                     raw_items = chunk.payload.get("items")
                     if not isinstance(raw_items, list) or any(

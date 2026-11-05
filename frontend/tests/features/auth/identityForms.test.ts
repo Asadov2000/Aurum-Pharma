@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { newPasswordSchema } from "@/features/auth/identityForms";
+import { z } from "zod";
+
+import { emailIdentitySchema, phoneIdentitySchema, oneTimeCodeSchema, newPasswordSchema } from "@/features/auth/identityForms";
 
 describe("new password byte boundary", () => {
   it("accepts 36 Cyrillic letters (72 UTF-8 bytes) without changing the password", () => {
@@ -30,4 +32,36 @@ describe("new password byte boundary", () => {
     expect(newPasswordSchema.parse(password)).toBe(password);
     expect(newPasswordSchema.safeParse(` ${"я".repeat(36)}`).success).toBe(false);
   });
+});
+
+
+describe("auth mini schemas preserve classic validation", () => {
+  const baseline = {
+    email: z.string().trim().min(1, "Введите email").email("Некорректный email"),
+    phone: z.string().transform((value) => {
+      const compact = value.replace(/[\s()-]/g, "");
+      if (/^\d{9}$/.test(compact)) return `+992${compact}`;
+      if (/^992\d{9}$/.test(compact)) return `+${compact}`;
+      return compact;
+    }).pipe(z.string().regex(/^\+992\d{9}$/, "Введите номер +992 и 9 цифр")),
+    code: z.string().trim().regex(/^\d{6}$/, "Код состоит из 6 цифр"),
+  };
+  const mini = { email: emailIdentitySchema, phone: phoneIdentitySchema, code: oneTimeCodeSchema };
+  const inputs: Record<keyof typeof mini, unknown[]> = {
+    email: ["  owner@aurum.tj  ", "", "   ", "not-email", "a..b@aurum.tj", null, undefined, 123],
+    phone: ["90 123 45 67", "992901234567", "+992 (90) 123-45-67", "+79012345678", "", null, undefined, 123],
+    code: [" 123456 ", "12345", "1234567", "abcdef", "", null, undefined, 123456],
+  };
+  for (const key of ["email", "phone", "code"] as const) {
+    it(`preserves ${key} parsed values and every issue`, () => {
+      for (const input of inputs[key]) {
+        const expected = baseline[key].safeParse(input);
+        const actual = mini[key].safeParse(input);
+        expect(actual.success).toBe(expected.success);
+        if (actual.success && expected.success) expect(actual.data).toEqual(expected.data);
+        if (!actual.success && !expected.success)
+          expect(actual.error.issues).toEqual(expected.error.issues);
+      }
+    });
+  }
 });

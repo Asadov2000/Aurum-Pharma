@@ -3,12 +3,13 @@ import axios, {
   type AxiosError,
   type AxiosInstance,
   type AxiosRequestConfig,
+  type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from "axios";
 
 import { getAuthSessionGeneration } from "@/stores/auth";
 import { getAuthEpoch } from "@/features/auth/logoutState";
-import { getSupportAccessSessionId } from "@/stores/supportAccess";
+import { getSupportAccessRevision, getSupportAccessSessionId } from "@/stores/supportAccess";
 
 const DEV_API_BASE_URL = "http://localhost:8000/api/v1";
 const SAME_ORIGIN_API_BASE_URL = "/api/v1";
@@ -66,13 +67,14 @@ export const api: AxiosInstance = axios.create({
   },
 });
 
-interface RetryConfig extends InternalAxiosRequestConfig {
-  _authEpoch?: string | null;
-  _authSessionGeneration?: number;
+export interface RetryConfig extends InternalAxiosRequestConfig {
+  _auth?: { generation: number; epoch: string | null };
+  _supportRevision?: number;
   _retry?: boolean;
   _skipAuth?: boolean;
   _skipRefresh?: boolean;
   _stepUpRetry?: boolean;
+  _deferStepUp?: boolean;
 }
 
 type TokenGetter = () => string | null;
@@ -80,12 +82,17 @@ type Refresher = () => Promise<string | null>;
 type StepUpRequester = () => Promise<string | null>;
 type OnAuthFailure = () => void;
 type OnSupportAccessFailure = () => void;
+export type FreshAccessRecovery = (
+  consume: (accessToken: string) => Promise<AxiosResponse<unknown>>,
+  assertRequestCurrent: () => void,
+) => Promise<AxiosResponse<unknown> | null>;
 
 let getAccess: TokenGetter = () => null;
 let refresh: Refresher = async () => null;
 let requestStepUp: StepUpRequester = async () => null;
 let onAuthFailure: OnAuthFailure = () => {};
 let onSupportAccessFailure: OnSupportAccessFailure = () => {};
+let recoverWithFreshAccess: FreshAccessRecovery | null = null;
 
 export function configureAuthHooks(opts: {
   getAccessToken: TokenGetter;
@@ -93,12 +100,14 @@ export function configureAuthHooks(opts: {
   requestMfaStepUp: StepUpRequester;
   onAuthFailure: OnAuthFailure;
   onSupportAccessFailure?: OnSupportAccessFailure;
+  recoverWithFreshAccess?: FreshAccessRecovery;
 }): void {
   getAccess = opts.getAccessToken;
   refresh = opts.refreshTokens;
   requestStepUp = opts.requestMfaStepUp;
   onAuthFailure = opts.onAuthFailure;
   onSupportAccessFailure = opts.onSupportAccessFailure ?? (() => {});
+  recoverWithFreshAccess = opts.recoverWithFreshAccess ?? null;
 }
 
 function supportContextPath(config: InternalAxiosRequestConfig): string | null {
@@ -120,8 +129,10 @@ function supportContextPath(config: InternalAxiosRequestConfig): string | null {
 function acceptsSupportContext(pathname: string | null, method: string | undefined): boolean {
   if (pathname === null) return false;
   const normalizedMethod = (method ?? "GET").toUpperCase();
-  if (pathname === "/auth/me" || pathname === "/auth/profile") return normalizedMethod === "GET";
-  if (pathname === "/permissions" || pathname === "/templates") {
+  if (
+    ["/auth/me", "/auth/profile", "/permissions", "/templates", "/branches"].includes(pathname) ||
+    pathname.startsWith("/branches/")
+  ) {
     return normalizedMethod === "GET";
   }
   if (pathname === "/roles" || pathname.startsWith("/roles/")) {
@@ -130,32 +141,48 @@ function acceptsSupportContext(pathname: string | null, method: string | undefin
   if (pathname === "/users" || pathname.startsWith("/users/")) {
     return ["GET", "POST", "PATCH", "DELETE"].includes(normalizedMethod);
   }
-  if (pathname === "/branches" || pathname.startsWith("/branches/")) {
-    return normalizedMethod === "GET";
-  }
   return false;
+}
+
+function hasAuthSession(generation: number, epoch: string | null): boolean {
+  return generation === getAuthSessionGeneration() && epoch === getAuthEpoch();
+}
+
+function hasCurrentAuthority(
+  config: RetryConfig,
+): config is RetryConfig & { _auth: { generation: number; epoch: string | null } } {
+  return (
+    config._auth !== undefined &&
+    hasAuthSession(config._auth.generation, config._auth.epoch) &&
+    (config._supportRevision === undefined ||
+      config._supportRevision === getSupportAccessRevision())
+  );
+}
+
+function assertCurrentAuthority(config: RetryConfig): void {
+  if (!hasCurrentAuthority(config)) {
+    throw new CanceledError("Authentication session changed", config);
+  }
 }
 
 api.interceptors.request.use((config) => {
   const cfg = config as RetryConfig;
-  if (cfg._authEpoch === undefined) cfg._authEpoch = getAuthEpoch();
-  cfg._authSessionGeneration ??= getAuthSessionGeneration();
+  cfg._auth ??= { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() };
+  const pathname = supportContextPath(config);
   if (
-    cfg._authSessionGeneration !== getAuthSessionGeneration() ||
-    cfg._authEpoch !== getAuthEpoch()
+    acceptsSupportContext(pathname, config.method) ||
+    (pathname === "/admin/support-access/sessions" && config.method?.toUpperCase() === "POST")
   ) {
-    throw new CanceledError("Authentication session changed", config);
+    cfg._supportRevision ??= getSupportAccessRevision();
   }
+  assertCurrentAuthority(cfg);
   config.headers.delete("X-Aurum-Support-Session");
   if (cfg._skipAuth) return config;
   const token = getAccess();
-  if (cfg._authSessionGeneration !== getAuthSessionGeneration()) {
-    throw new CanceledError("Authentication session changed", config);
-  }
+  assertCurrentAuthority(cfg);
   if (token) {
     config.headers.set("Authorization", `Bearer ${token}`);
     const supportAccessSessionId = getSupportAccessSessionId();
-    const pathname = supportContextPath(config);
     if (supportAccessSessionId && acceptsSupportContext(pathname, config.method)) {
       config.headers.set("X-Aurum-Support-Session", supportAccessSessionId);
     }
@@ -167,55 +194,65 @@ api.interceptors.request.use((config) => {
 // we don't burn the refresh token twice and trigger reuse-detection.
 interface SessionTokenRequest {
   generation: number;
+  epoch: string | null;
   promise: Promise<string | null>;
 }
 
-let refreshing: SessionTokenRequest | null = null;
+type SessionTokenKind = "refresh" | "stepUp";
+const pendingTokenRequests: Record<SessionTokenKind, SessionTokenRequest | null> = {
+  refresh: null,
+  stepUp: null,
+};
 
-export function refreshAccessToken(
+function requestSessionToken(
+  kind: SessionTokenKind,
   generation = getAuthSessionGeneration(),
+  epoch = getAuthEpoch(),
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
-  if (refreshing?.generation === generation) return refreshing.promise;
+  if (!hasAuthSession(generation, epoch)) {
+    return Promise.resolve(null);
+  }
+  const current = pendingTokenRequests[kind];
+  if (current?.generation === generation && current.epoch === epoch) return current.promise;
   const pending: SessionTokenRequest = {
     generation,
-    promise: refresh()
+    epoch,
+    promise: (kind === "refresh" ? refresh : requestStepUp)()
       .then((token) => {
-        if (generation !== getAuthSessionGeneration()) return null;
-        if (!token) onAuthFailure();
+        if (!hasAuthSession(generation, epoch)) return null;
+        if (kind === "refresh" && !token) onAuthFailure();
         return token;
       })
       .finally(() => {
-        if (refreshing === pending) refreshing = null;
+        if (pendingTokenRequests[kind] === pending) pendingTokenRequests[kind] = null;
       }),
   };
-  refreshing = pending;
+  pendingTokenRequests[kind] = pending;
   return pending.promise;
 }
 
-let steppingUp: SessionTokenRequest | null = null;
+export function refreshAccessToken(
+  generation?: number,
+  epoch?: string | null,
+): Promise<string | null> {
+  return requestSessionToken("refresh", generation, epoch);
+}
 
 export function requestStepUpAccessToken(
-  generation = getAuthSessionGeneration(),
+  generation?: number,
+  epoch?: string | null,
 ): Promise<string | null> {
-  if (generation !== getAuthSessionGeneration()) return Promise.resolve(null);
-  if (steppingUp?.generation === generation) return steppingUp.promise;
-  const pending: SessionTokenRequest = {
-    generation,
-    promise: requestStepUp()
-      .then((token) => (generation === getAuthSessionGeneration() ? token : null))
-      .finally(() => {
-        if (steppingUp === pending) steppingUp = null;
-      }),
-  };
-  steppingUp = pending;
-  return pending.promise;
+  return requestSessionToken("stepUp", generation, epoch);
+}
+
+function accessFailureReason(error: AxiosError): unknown {
+  if (error.response?.status !== 403) return undefined;
+  const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
+  return data?.error?.details?.reason;
 }
 
 export function isMfaStepUpRequired(error: AxiosError): boolean {
-  if (error.response?.status !== 403) return false;
-  const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  const reason = data?.error?.details?.reason;
+  const reason = accessFailureReason(error);
   return (
     reason === "mfa_step_up_required" ||
     reason === "password_step_up_required" ||
@@ -224,76 +261,72 @@ export function isMfaStepUpRequired(error: AxiosError): boolean {
 }
 
 export function isSupportAccessInactive(error: AxiosError): boolean {
-  if (error.response?.status !== 403) return false;
-  const data = error.response.data as { error?: { details?: { reason?: unknown } } } | undefined;
-  return data?.error?.details?.reason === "support_access_inactive";
+  return accessFailureReason(error) === "support_access_inactive";
 }
 
 api.interceptors.response.use(
   (response) => {
     const cfg = response.config as RetryConfig;
-    if (
-      cfg._authSessionGeneration !== getAuthSessionGeneration() ||
-      cfg._authEpoch !== getAuthEpoch()
-    ) {
-      throw new CanceledError("Authentication session changed", response.config);
-    }
+    assertCurrentAuthority(cfg);
     return response;
   },
   async (error: AxiosError) => {
     const original = error.config as RetryConfig | undefined;
-    if (
-      !original ||
-      original._authSessionGeneration !== getAuthSessionGeneration() ||
-      original._authEpoch !== getAuthEpoch()
-    ) {
+    if (!original || !hasCurrentAuthority(original)) {
       return Promise.reject(error);
     }
-    const generation = original._authSessionGeneration;
     if (isSupportAccessInactive(error)) {
-      onSupportAccessFailure();
+      if (original._supportRevision !== undefined) onSupportAccessFailure();
       return Promise.reject(error);
     }
-    if (original && !original._skipAuth && !original._stepUpRetry && isMfaStepUpRequired(error)) {
-      original._stepUpRetry = true;
-      const newAccess = await requestStepUpAccessToken(generation);
-      if (!newAccess || generation !== getAuthSessionGeneration()) {
-        return Promise.reject(error);
-      }
-      original.headers.set("Authorization", `Bearer ${newAccess}`);
-      return api.request(original);
-    }
-
+    const needsStepUp =
+      !original._skipAuth &&
+      !original._stepUpRetry &&
+      !original._deferStepUp &&
+      isMfaStepUpRequired(error);
     if (
-      !original ||
-      original._skipAuth ||
-      original._skipRefresh ||
-      original._retry ||
-      error.response?.status !== 401
+      !needsStepUp &&
+      (original._skipAuth ||
+        original._skipRefresh ||
+        original._retry ||
+        error.response?.status !== 401)
     ) {
       return Promise.reject(error);
     }
-
-    original._retry = true;
-
-    const newAccess = await refreshAccessToken(generation);
-    if (!newAccess || generation !== getAuthSessionGeneration()) {
-      return Promise.reject(error);
-    }
-    original.headers.set("Authorization", `Bearer ${newAccess}`);
-    return api.request(original);
+    const { recoverApiResponse } = await import("./apiResponseRecovery");
+    return recoverApiResponse(original, error, {
+      isCurrent: hasCurrentAuthority,
+      isStepUpRequired: isMfaStepUpRequired,
+      refresh: refreshAccessToken,
+      stepUp: requestStepUpAccessToken,
+      request: api.request,
+      authFailure: onAuthFailure,
+      recover: recoverWithFreshAccess,
+    });
   },
 );
 
+// Capture before Axios schedules its asynchronous request interceptors.
+export function withAuthSession(
+  config?: AxiosRequestConfig,
+  bindSupportContext = false,
+): AxiosRequestConfig {
+  return {
+    ...config,
+    _auth: { generation: getAuthSessionGeneration(), epoch: getAuthEpoch() },
+    ...(bindSupportContext ? { _supportRevision: getSupportAccessRevision() } : {}),
+  } as AxiosRequestConfig;
+}
+
 export function withoutAuth(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipAuth: true } as AxiosRequestConfig;
+  return { ...config, _skipAuth: true } as AxiosRequestConfig;
 }
 
 export function withoutRefresh(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipRefresh: true } as AxiosRequestConfig;
+  return { ...config, _skipRefresh: true } as AxiosRequestConfig;
 }
 
 // A proof request must not recursively open the dialog that is submitting it.
 export function withoutStepUp(config?: AxiosRequestConfig): AxiosRequestConfig {
-  return { ...(config ?? {}), _skipRefresh: true, _stepUpRetry: true } as AxiosRequestConfig;
+  return { ...config, _skipRefresh: true, _stepUpRetry: true } as AxiosRequestConfig;
 }

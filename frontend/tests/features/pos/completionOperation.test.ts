@@ -71,6 +71,7 @@ describe("pending POS completion", () => {
 
     expect(loadDraft("register-1", 1)).toEqual({
       saleId: "sale-1",
+      status: "completed",
       nameById: {},
       expired: false,
       requiresRx: false,

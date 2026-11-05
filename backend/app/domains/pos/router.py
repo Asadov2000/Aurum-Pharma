@@ -29,6 +29,33 @@ from app.core.errors import BusinessRuleError, NotFoundError, PermissionDeniedEr
 from app.domains.audit.repository import AuditRepository
 from app.domains.audit.service import AuditService
 from app.domains.catalog.schemas import CatalogItemRead
+from app.domains.pos.mixed_cash_checkout_router import router as mixed_cash_checkout_router
+from app.domains.pos.mixed_cash_refund_router import router as mixed_cash_refund_router
+from app.domains.pos.mixed_electronic_checkout_router import (
+    router as mixed_electronic_checkout_router,
+)
+from app.domains.pos.mixed_electronic_refund_activation_router import (
+    router as mixed_electronic_refund_activation_router,
+)
+from app.domains.pos.mixed_electronic_refund_binding_router import (
+    router as mixed_electronic_refund_binding_router,
+)
+from app.domains.pos.mixed_electronic_refund_outcome_router import (
+    router as mixed_electronic_refund_outcome_router,
+)
+from app.domains.pos.mixed_electronic_refund_posting_router import (
+    router as mixed_electronic_refund_posting_router,
+)
+from app.domains.pos.mixed_electronic_refund_review_router import (
+    router as mixed_electronic_refund_review_router,
+)
+from app.domains.pos.mixed_zero_return_router import router as mixed_zero_return_router
+from app.domains.pos.physical_cart_router import router as physical_cart_router
+from app.domains.pos.physical_cash_checkout_router import router as physical_cash_checkout_router
+from app.domains.pos.physical_cash_refund_router import router as physical_cash_refund_router
+from app.domains.pos.physical_zero_return_router import router as physical_zero_return_router
+from app.domains.pos.profit_report_router import router as profit_report_router
+from app.domains.pos.quarantine_report_router import router as quarantine_report_router
 from app.domains.pos.repository import POSRepository
 from app.domains.pos.schemas import (
     PaymentAdd,
@@ -56,6 +83,7 @@ from app.domains.pos.schemas import (
     POSRefundReconciliationSummary,
     PrescriptionLogCreate,
     PrescriptionLogRead,
+    ProductQuantityBasis,
     ReceiptData,
     RefundCreate,
     SaleCheckoutRequest,
@@ -83,8 +111,56 @@ from app.domains.pos.schemas import (
     ZReport,
 )
 from app.domains.pos.service import POSService
+from app.domains.pos.training_checkout_router import router as training_checkout_router
+from app.domains.pos.unit_cart_repository import UnitCartRepository
+from app.domains.pos.unit_electronic_checkout_router import (
+    router as unit_electronic_checkout_router,
+)
+from app.domains.pos.unit_electronic_refund_activation_router import (
+    router as unit_electronic_refund_activation_router,
+)
+from app.domains.pos.unit_electronic_refund_binding_router import (
+    router as unit_electronic_refund_binding_router,
+)
+from app.domains.pos.unit_electronic_refund_outcome_router import (
+    router as unit_electronic_refund_outcome_router,
+)
+from app.domains.pos.unit_electronic_refund_posting_router import (
+    router as unit_electronic_refund_posting_router,
+)
+from app.domains.pos.unit_electronic_refund_review_router import (
+    router as unit_electronic_refund_review_router,
+)
+from app.domains.pos.unit_payment_active_router import router as unit_payment_active_router
+from app.domains.pos.unit_payment_binding_router import router as unit_payment_binding_router
+from app.domains.pos.unit_payment_plan_router import router as unit_payment_plan_router
 
 router = APIRouter(prefix="/api/v1", tags=["pos"])
+router.include_router(mixed_cash_checkout_router)
+router.include_router(mixed_cash_refund_router)
+router.include_router(mixed_electronic_refund_activation_router)
+router.include_router(mixed_electronic_refund_binding_router)
+router.include_router(mixed_electronic_refund_outcome_router)
+router.include_router(mixed_electronic_refund_posting_router)
+router.include_router(mixed_electronic_refund_review_router)
+router.include_router(mixed_zero_return_router)
+router.include_router(physical_cart_router)
+router.include_router(physical_cash_checkout_router)
+router.include_router(training_checkout_router)
+router.include_router(physical_cash_refund_router)
+router.include_router(physical_zero_return_router)
+router.include_router(quarantine_report_router)
+router.include_router(profit_report_router)
+router.include_router(mixed_electronic_checkout_router)
+router.include_router(unit_electronic_checkout_router)
+router.include_router(unit_electronic_refund_activation_router)
+router.include_router(unit_electronic_refund_binding_router)
+router.include_router(unit_electronic_refund_outcome_router)
+router.include_router(unit_electronic_refund_posting_router)
+router.include_router(unit_electronic_refund_review_router)
+router.include_router(unit_payment_active_router)
+router.include_router(unit_payment_plan_router)
+router.include_router(unit_payment_binding_router)
 
 
 async def _service(
@@ -152,6 +228,36 @@ def _effective_report_branch_id(user: CurrentUser, branch_id: UUID | None) -> UU
     if len(branch_scope) == 1:
         return next(iter(branch_scope))
     raise BusinessRuleError("branch_id is required for branch-scoped reports")
+
+
+async def _require_legacy_payment_attempt_route(
+    user: CurrentUser,
+    service: POSService,
+    *,
+    sale_id: UUID | None = None,
+    attempt_id: UUID | None = None,
+) -> None:
+    """Keep external unit payments closed until their electronic refunds ship."""
+    tenant_id = _current_tenant_or_400(user)
+    if attempt_id is not None:
+        attempt = await service.repo.get_payment_attempt(attempt_id)
+        if attempt is None or attempt.tenant_id != tenant_id:
+            raise NotFoundError("Payment attempt not found")
+        sale_id = attempt.sale_id
+    if sale_id is None:
+        raise NotFoundError("Sale not found")
+    sale = await service.repo.get_sale(sale_id)
+    if sale is None or sale.tenant_id != tenant_id:
+        raise NotFoundError("Sale not found")
+    service._assert_sale_owned_or_managed(
+        sale,
+        actor_id=user.user_id,
+        can_manage_tenant=_can_manage_tenant_sales(user),
+        allowed_branch_ids=user.branch_scope_for_any("pos.sell", "pos.manage_sales"),
+        allowed_manage_branch_ids=_sale_manage_branch_scope(user),
+    )
+    if await UnitCartRepository(service.repo.session).list_items(tenant_id, sale_id):
+        raise BusinessRuleError("External unit payments are not available until electronic refunds")
 
 
 # =============================================================================
@@ -315,6 +421,7 @@ async def create_pos_payment_attempt(
     user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, sale_id=payload.sale_id)
     attempt = await service.create_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         sale_id=payload.sale_id,
@@ -388,6 +495,7 @@ async def begin_pos_payment_attempt_reconciliation(
     user: Annotated[CurrentUser, Depends(require_branch_permission("pos.sell", policy="resource"))],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.begin_payment_attempt_reconciliation(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,
@@ -413,6 +521,7 @@ async def confirm_pos_payment_attempt(
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.confirm_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,
@@ -440,6 +549,7 @@ async def void_pos_payment_attempt(
     ],
     service: Annotated[POSService, Depends(_service)],
 ) -> POSPaymentAttemptRead:
+    await _require_legacy_payment_attempt_route(user, service, attempt_id=attempt_id)
     attempt = await service.void_payment_attempt(
         tenant_id=_current_tenant_or_400(user),
         attempt_id=attempt_id,
@@ -735,7 +845,7 @@ async def get_current_shift(
         CurrentUser,
         Depends(
             require_any_branch_permission(
-                "pos.shift_open", "pos.shift_close", "pos.sell", policy="resource"
+                "pos.shift_open", "pos.shift_close", "pos.sell", "pos.refund", policy="resource"
             )
         ),
     ],
@@ -750,6 +860,7 @@ async def get_current_shift(
             "pos.shift_open",
             "pos.shift_close",
             "pos.sell",
+            "pos.refund",
         ),
         allowed_manage_branch_ids=_shift_manage_branch_scope(user),
     )
@@ -977,6 +1088,7 @@ async def top_products_overview(
     branch_id: Annotated[UUID | None, Query()] = None,
     sort_by: Annotated[Literal["revenue", "quantity"], Query()] = "revenue",
     limit: Annotated[int, Query(ge=5, le=100)] = 20,
+    quantity_basis: Annotated[ProductQuantityBasis, Query()] = "legacy_pack",
 ) -> TopProductsOverview:
     effective_branch_id = _effective_report_branch_id(user, branch_id)
     return await service.get_top_products_overview(
@@ -986,6 +1098,7 @@ async def top_products_overview(
         branch_id=effective_branch_id,
         sort_by=sort_by,
         limit=limit,
+        quantity_basis=quantity_basis,
     )
 
 
@@ -1283,7 +1396,8 @@ async def get_sale(
     refunded_quantities = (
         await service.get_refunded_quantities(sale.id) if sale.sale_type == "sale" else {}
     )
-    snapshot_names = service.get_receipt_item_names(sale)
+    mixed_items = service.get_mixed_receipt_items(sale)
+    snapshot_names = service.get_receipt_item_names(sale) if not mixed_items else {}
     return SaleDetails(
         **SaleRead.model_validate(sale).model_copy(update=lifecycle).model_dump(),
         items=[
@@ -1296,9 +1410,14 @@ async def get_sale(
                     "name": snapshot_names.get(si.position, current_name),
                 }
             )
-            for (si, batch_number, expires_at, days_to_expiry, current_name) in items
+            for (si, batch_number, expires_at, days_to_expiry, current_name) in (
+                items if not mixed_items else []
+            )
         ],
         payments=[PaymentRead.model_validate(p) for p in payments],
+        physical_items=service.get_physical_receipt_items(sale) if not mixed_items else [],
+        mixed_items=mixed_items,
+        prepared_cart_items=await service.get_prepared_cart_items(sale) if not mixed_items else [],
     )
 
 

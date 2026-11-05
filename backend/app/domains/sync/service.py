@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal, cast
@@ -20,6 +21,19 @@ from app.core.errors import (
     PermissionDeniedError,
 )
 from app.core.time import utc_now
+from app.domains.pos.mixed_documents import MixedCheckoutResultV4
+from app.domains.pos.physical_documents import PhysicalCheckoutResultV3
+from app.domains.pos.retail_refund_events import (
+    RetailRefundEventResult,
+    retail_refund_event_fingerprint,
+    validate_retail_refund_event,
+)
+from app.domains.pos.retail_sale_event_storage import (
+    RetailSaleEventAnchor,
+    decode_retail_sale_event,
+    encode_retail_sale_event,
+)
+from app.domains.pos.retail_sale_events import RetailCheckoutResult
 from app.domains.pos.schemas import SaleCheckoutResult, SaleRefundResult
 from app.domains.sync.activation_bootstrap import (
     ActivationBootstrapValidationError,
@@ -38,6 +52,7 @@ from app.domains.sync.bootstrap import (
 )
 from app.domains.sync.credentials import EdgeCredential, issue_edge_credential
 from app.domains.sync.integrity import (
+    canonical_json_bytes,
     canonical_json_hash,
     projection_stream_checksum,
     sale_projection_hash,
@@ -50,8 +65,23 @@ from app.domains.sync.models import (
     SyncCursor,
     SyncInboxEvent,
     SyncNode,
+    SyncOutboxEvent,
+    SyncPhysicalStockProjection,
+    SyncReadSnapshot,
+    SyncReadSnapshotComponent,
+    SyncRetailRefundProjection,
     SyncSaleProjection,
     SyncWriterActivation,
+)
+from app.domains.sync.physical_read_snapshot import PhysicalRecord
+from app.domains.sync.physical_stock_events import (
+    EVENT_TYPE as PHYSICAL_STOCK_EVENT_TYPE,
+)
+from app.domains.sync.physical_stock_events import (
+    PhysicalStockChange,
+    PhysicalStockEventAnchor,
+    decode_physical_stock_event,
+    encode_physical_stock_event,
 )
 from app.domains.sync.read_snapshot import (
     REQUIRED_COMPONENTS,
@@ -73,6 +103,7 @@ from app.domains.sync.read_snapshot_projection import (
     SupplierRecord,
     build_component_chunks,
 )
+from app.domains.sync.refund_read_projection import validate_retail_refund_parent
 from app.domains.sync.repository import (
     ActivationFoundationSource,
     SyncCloudRepository,
@@ -114,6 +145,7 @@ from app.domains.sync.schemas import (
 
 logger = structlog.get_logger("sync.service")
 CursorStatus = Literal["synced", "gap", "quarantined", "mismatch"]
+ProjectedSale = SaleCheckoutResult | SaleRefundResult | RetailCheckoutResult
 _QUARANTINE_INCIDENT_NAMESPACE = UUID("c4d7c709-8bd5-4f89-94cb-fcd324d8800b")
 
 
@@ -121,6 +153,21 @@ class _EnvelopeError(ValueError):
     def __init__(self, reason_code: str) -> None:
         self.reason_code = reason_code
         super().__init__(reason_code)
+
+
+def _require_compatible_delivery(rows: Sequence[SyncOutboxEvent]) -> None:
+    """Keep unsupported retail events in order until their receiver is ready."""
+    if any(
+        row.event_type
+        in {
+            "pos.sale.completed.v3",
+            "pos.sale.completed.v4",
+            PHYSICAL_STOCK_EVENT_TYPE,
+            "pos.sale.refunded.v6",
+        }
+        for row in rows
+    ):
+        raise BusinessRuleError("Retail event delivery requires a compatible receiver")
 
 
 def _quarantine_evidence_hash(
@@ -647,6 +694,32 @@ class SyncCloudService:
     def __init__(self, repo: SyncCloudRepository) -> None:
         self.repo = repo
 
+    async def _read_snapshot_for_version(
+        self,
+        *,
+        schema_version: int,
+        tenant_id: UUID,
+        branch_id: UUID,
+        edge_node_id: UUID,
+        credential_kid: UUID,
+    ) -> tuple[SyncReadSnapshot, list[SyncReadSnapshotComponent]] | None:
+        if schema_version == 1:
+            return await self.repo.get_latest_read_snapshot(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                edge_node_id=edge_node_id,
+                credential_kid=credential_kid,
+            )
+        if schema_version != 2:
+            raise BusinessRuleError("Unknown read snapshot version")
+        return await self.repo.get_latest_read_snapshot(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            edge_node_id=edge_node_id,
+            credential_kid=credential_kid,
+            schema_version=2,
+        )
+
     async def read_snapshot_manifest(
         self,
         *,
@@ -655,8 +728,10 @@ class SyncCloudService:
         branch_id: UUID,
         credential_kid: UUID,
         credential_digest: str | None = None,
+        schema_version: int = 1,
     ) -> ManifestRead:
-        stored = await self.repo.get_latest_read_snapshot(
+        stored = await self._read_snapshot_for_version(
+            schema_version=schema_version,
             tenant_id=tenant_id,
             branch_id=branch_id,
             edge_node_id=edge_node_id,
@@ -669,8 +744,10 @@ class SyncCloudService:
                 expected_branch_id=branch_id,
                 expected_credential_kid=credential_kid,
                 credential_digest=credential_digest,
+                schema_version=schema_version,
             )
-            stored = await self.repo.get_latest_read_snapshot(
+            stored = await self._read_snapshot_for_version(
+                schema_version=schema_version,
                 tenant_id=tenant_id,
                 branch_id=branch_id,
                 edge_node_id=edge_node_id,
@@ -713,6 +790,7 @@ class SyncCloudService:
             )
         manifest = Manifest(
             schema_version=snapshot.schema_version,
+            profile="physical_read_only_v2" if snapshot.schema_version == 2 else "read_only_v1",
             snapshot_id=snapshot.snapshot_id,
             edge_node_id=snapshot.node_id,
             tenant_id=snapshot.tenant_id,
@@ -730,6 +808,25 @@ class SyncCloudService:
             signature=snapshot.signature,
         )
 
+    async def _physical_records_for_version(
+        self,
+        *,
+        schema_version: int,
+        tenant_id: UUID,
+        branch_id: UUID,
+    ) -> tuple[PhysicalRecord, ...]:
+        if schema_version == 1:
+            return ()
+        if schema_version != 2:
+            raise BusinessRuleError("Unknown read snapshot version")
+        from app.domains.sync.physical_read_snapshot_repository import read_physical_source_facts
+        from app.domains.sync.physical_read_snapshot_service import build_physical_source_records
+
+        facts = await read_physical_source_facts(
+            self.repo.session, tenant_id=tenant_id, branch_id=branch_id
+        )
+        return build_physical_source_records(facts, tenant_id=tenant_id, branch_id=branch_id)
+
     async def publish_read_snapshot(
         self,
         *,
@@ -738,11 +835,22 @@ class SyncCloudService:
         expected_branch_id: UUID,
         expected_credential_kid: UUID,
         credential_digest: str,
+        schema_version: int = 1,
     ) -> ManifestRead:
         """Publish one internally consistent snapshot for an active Edge node."""
 
+        if schema_version == 2:
+            from app.domains.sync.physical_read_snapshot_repository import (
+                assert_physical_source_context,
+            )
+
+            await assert_physical_source_context(self.repo.session)
+            # No pending edits may be discarded. Clean identities must reload
+            # through this transaction's MVCC view, including foundation/legacy rows.
+            self.repo.session.expire_all()
         await self.repo.lock_read_snapshot_scope(edge_node_id)
-        stored = await self.repo.get_latest_read_snapshot(
+        stored = await self._read_snapshot_for_version(
+            schema_version=schema_version,
             tenant_id=expected_tenant_id,
             branch_id=expected_branch_id,
             edge_node_id=edge_node_id,
@@ -757,6 +865,7 @@ class SyncCloudService:
                     tenant_id=expected_tenant_id,
                     branch_id=expected_branch_id,
                     credential_kid=expected_credential_kid,
+                    schema_version=schema_version,
                 )
 
         foundation_source = await self.repo.read_snapshot_foundation_source(
@@ -770,6 +879,12 @@ class SyncCloudService:
         )
         inventory_rows = await self.repo.read_snapshot_inventory_source(
             tenant_id=expected_tenant_id, branch_id=expected_branch_id
+        )
+
+        physical = await self._physical_records_for_version(
+            schema_version=schema_version,
+            tenant_id=expected_tenant_id,
+            branch_id=expected_branch_id,
         )
 
         foundation = FoundationRecord(
@@ -899,14 +1014,15 @@ class SyncCloudService:
             )
             for batch, branch_name, product in inventory_rows
         )
-        source_fingerprint = canonical_json_hash(
-            {
-                "foundation": foundation.model_dump(mode="json", exclude={"source_fingerprint"}),
-                "catalog": [item.model_dump(mode="json") for item in catalog],
-                "suppliers": [item.model_dump(mode="json") for item in suppliers],
-                "inventory": [item.model_dump(mode="json") for item in inventory],
-            }
-        )
+        source_payload: dict[str, object] = {
+            "foundation": foundation.model_dump(mode="json", exclude={"source_fingerprint"}),
+            "catalog": [item.model_dump(mode="json") for item in catalog],
+            "suppliers": [item.model_dump(mode="json") for item in suppliers],
+            "inventory": [item.model_dump(mode="json") for item in inventory],
+        }
+        if schema_version == 2:
+            source_payload["physical"] = [item.model_dump(mode="json") for item in physical]
+        source_fingerprint = canonical_json_hash(source_payload)
         foundation = foundation.model_copy(update={"source_fingerprint": source_fingerprint})
         if stored is not None:
             latest, _ = stored
@@ -933,6 +1049,7 @@ class SyncCloudService:
                     tenant_id=expected_tenant_id,
                     branch_id=expected_branch_id,
                     credential_kid=expected_credential_kid,
+                    schema_version=schema_version,
                 )
         revision = await self.repo.next_read_snapshot_revision(
             tenant_id=expected_tenant_id,
@@ -945,6 +1062,7 @@ class SyncCloudService:
             suppliers=suppliers,
             inventory=inventory,
             chunk_size=get_settings().EDGE_READ_SNAPSHOT_CHUNK_SIZE,
+            physical=physical,
         )
         envelope, chunks = build_read_snapshot_manifest(
             ReadSnapshotScope(
@@ -957,6 +1075,7 @@ class SyncCloudService:
             credential_kid=expected_credential_kid,
             credential_digest=credential_digest,
             source_generated_at=utc_now(),
+            schema_version=cast(Literal[1, 2], schema_version),
         )
         await self.repo.publish_read_snapshot(envelope=envelope, chunks=chunks)
         return envelope
@@ -971,12 +1090,14 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> ChunkRead:
         manifest = await self.read_snapshot_manifest(
             edge_node_id=edge_node_id,
             tenant_id=tenant_id,
             branch_id=branch_id,
             credential_kid=credential_kid,
+            schema_version=schema_version,
         )
         if manifest.manifest.snapshot_id != snapshot_id:
             raise NotFoundError("Read snapshot not found")
@@ -1017,12 +1138,14 @@ class SyncCloudService:
         tenant_id: UUID,
         branch_id: UUID,
         credential_kid: UUID,
+        schema_version: int = 1,
     ) -> list[ChunkRead]:
         manifest = await self.read_snapshot_manifest(
             edge_node_id=edge_node_id,
             tenant_id=tenant_id,
             branch_id=branch_id,
             credential_kid=credential_kid,
+            schema_version=schema_version,
         )
         if manifest.manifest.snapshot_id != snapshot_id:
             raise NotFoundError("Read snapshot not found")
@@ -1173,6 +1296,7 @@ class SyncCloudService:
             after_sequence=effective_after,
             limit=limit + 1,
         )
+        _require_compatible_delivery(rows)
         has_more = len(rows) > limit
         rows = rows[:limit]
         envelopes: list[SyncEventEnvelope] = []
@@ -1221,6 +1345,7 @@ class SyncCloudService:
             limit=max(1, scope.checkpoint_sequence + 1),
             through_sequence=scope.checkpoint_sequence,
         )
+        _require_compatible_delivery(rows)
         if len(rows) != scope.checkpoint_sequence:
             raise AurumError("Bootstrap history is incomplete")
         events = [SyncEventEnvelope.model_validate(row) for row in rows]
@@ -1320,6 +1445,7 @@ class SyncCloudService:
             through_sequence=last_sequence,
             limit=settings.EDGE_BOOTSTRAP_CHUNK_SIZE + 1,
         )
+        _require_compatible_delivery(rows)
         if len(rows) != last_sequence - first_sequence + 1:
             raise AurumError("Bootstrap chunk history is incomplete")
         events = [SyncEventEnvelope.model_validate(row) for row in rows]
@@ -1647,7 +1773,7 @@ class SyncEdgeApplyService:
 
     @staticmethod
     def _same_inbox_event(existing: SyncInboxEvent, incoming: SyncEventEnvelope) -> bool:
-        return (
+        same = (
             existing.event_id == incoming.event_id
             and existing.tenant_id == incoming.tenant_id
             and existing.branch_id == incoming.branch_id
@@ -1659,6 +1785,316 @@ class SyncEdgeApplyService:
             and existing.projection_hash == incoming.projection_hash
             and existing.projection_checksum == incoming.projection_checksum
             and existing.status == "applied"
+        )
+        if existing.schema_version in (3, 4, 6) or incoming.schema_version in (3, 4, 6):
+            try:
+                same_payload = canonical_json_bytes(existing.payload) == canonical_json_bytes(
+                    incoming.payload
+                )
+            except (ValueError, TypeError, OverflowError):
+                return False
+            same = same and (
+                existing.operation_id == incoming.operation_id
+                and existing.aggregate_type == incoming.aggregate_type
+                and existing.aggregate_id == incoming.aggregate_id
+                and existing.event_type == incoming.event_type
+                and existing.schema_version == incoming.schema_version
+                and existing.occurred_at == incoming.occurred_at
+                and same_payload
+            )
+        return same
+
+    async def _validate_retail_slot(self, envelope: SyncEventEnvelope) -> None:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("retail_anchor_scope_unavailable")
+        refund = await self.repo.get_retail_refund_anchor(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+        )
+        if refund is not None and (
+            refund.event_id != envelope.event_id
+            or envelope.schema_version != 6
+            or envelope.event_type != "pos.sale.refunded.v6"
+        ):
+            raise _EnvelopeError("retail_refund_anchor_mismatch")
+        stock = await self.repo.get_physical_stock_anchor(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+        )
+        if stock is not None and (
+            stock.event_id != envelope.event_id
+            or envelope.schema_version != 5
+            or envelope.event_type != PHYSICAL_STOCK_EVENT_TYPE
+        ):
+            raise _EnvelopeError("physical_stock_anchor_mismatch")
+        row = await self.repo.get_retail_event_anchor_by_position(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+        )
+        if row is not None and (
+            row.event_id != envelope.event_id
+            or envelope.schema_version not in (3, 4)
+            or envelope.event_type != f"pos.sale.completed.v{envelope.schema_version}"
+        ):
+            raise _EnvelopeError("retail_anchor_mismatch")
+
+    async def _physical_stock_result(
+        self,
+        envelope: SyncEventEnvelope,
+        *,
+        previous_checksums: tuple[str, str] | None = None,
+    ) -> PhysicalStockChange:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("physical_stock_anchor_scope_unavailable")
+        row = await self.repo.get_physical_stock_anchor(
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+        )
+        if row is None:
+            raise _EnvelopeError("physical_stock_anchor_missing")
+        if previous_checksums is not None and (
+            row.previous_source_checksum != previous_checksums[0]
+            or row.previous_projection_checksum != previous_checksums[1]
+        ):
+            raise _EnvelopeError("physical_stock_anchor_checkpoint_mismatch")
+        try:
+            anchor = PhysicalStockEventAnchor(
+                tenant_id=row.tenant_id,
+                branch_id=row.branch_id,
+                origin_node_id=row.origin_node_id,
+                writer_epoch=row.writer_epoch,
+                sequence=row.sequence,
+                previous_source_checksum=row.previous_source_checksum,
+                previous_projection_checksum=row.previous_projection_checksum,
+                event_fingerprint=row.event_fingerprint,
+            )
+            return decode_physical_stock_event(
+                encode_physical_stock_event(envelope, anchor=anchor), anchor=anchor
+            )
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("physical_stock_anchor_mismatch") from exc
+
+    async def _retail_result(
+        self,
+        envelope: SyncEventEnvelope,
+        *,
+        previous_checksums: tuple[str, str] | None = None,
+    ) -> RetailCheckoutResult:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("retail_anchor_scope_unavailable")
+        row = await self.repo.get_retail_event_anchor(
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+        )
+        if row is None:
+            raise _EnvelopeError("retail_anchor_missing")
+        if row.event_id != envelope.event_id or row.target_edge_node_id != self._edge_node_id:
+            raise _EnvelopeError("retail_anchor_mismatch")
+        if previous_checksums is not None and (
+            row.previous_source_checksum != previous_checksums[0]
+            or row.previous_projection_checksum != previous_checksums[1]
+        ):
+            raise _EnvelopeError("retail_anchor_checkpoint_mismatch")
+        try:
+            anchor = RetailSaleEventAnchor(
+                tenant_id=row.tenant_id,
+                branch_id=row.branch_id,
+                origin_node_id=row.origin_node_id,
+                writer_epoch=row.writer_epoch,
+                sequence=row.sequence,
+                previous_source_checksum=row.previous_source_checksum,
+                previous_projection_checksum=row.previous_projection_checksum,
+                event_fingerprint=row.event_fingerprint,
+            )
+            record = encode_retail_sale_event(envelope, anchor=anchor)
+            result = decode_retail_sale_event(record, anchor=anchor)
+            if result.is_test:
+                raise ValueError("training retail events are not enabled")
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("retail_anchor_mismatch") from exc
+        return result
+
+    async def _refund_result(
+        self,
+        envelope: SyncEventEnvelope,
+        *,
+        previous_checksums: tuple[str, str] | None = None,
+        lock_parent: bool = False,
+        validate_parent: bool = True,
+    ) -> RetailRefundEventResult:
+        if self._edge_node_id is None:
+            raise _EnvelopeError("retail_refund_anchor_scope_unavailable")
+        row = await self.repo.get_retail_refund_anchor(
+            event_id=envelope.event_id,
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            edge_node_id=self._edge_node_id,
+        )
+        if row is None:
+            raise _EnvelopeError("retail_refund_anchor_missing")
+        if (
+            row.event_id != envelope.event_id
+            or row.tenant_id != envelope.tenant_id
+            or row.branch_id != envelope.branch_id
+            or row.target_edge_node_id != self._edge_node_id
+            or (row.origin_node_id, row.writer_epoch, row.sequence)
+            != (envelope.origin_node_id, envelope.writer_epoch, envelope.sequence)
+        ):
+            raise _EnvelopeError("retail_refund_anchor_mismatch")
+        checksums = (row.previous_source_checksum, row.previous_projection_checksum)
+        if previous_checksums is not None and previous_checksums != checksums:
+            raise _EnvelopeError("retail_refund_anchor_checkpoint_mismatch")
+        try:
+            result = validate_retail_refund_event(
+                envelope,
+                previous_source_checksum=checksums[0],
+                previous_projection_checksum=checksums[1],
+            )
+            if retail_refund_event_fingerprint(envelope) != row.event_fingerprint:
+                raise ValueError("Refund fingerprint differs from independent trust")
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("retail_refund_anchor_mismatch") from exc
+        if validate_parent:
+            await self._validate_retail_refund_parent(result, envelope, lock_parent=lock_parent)
+        return result
+
+    @staticmethod
+    def _assert_refund_projection(
+        row: SyncRetailRefundProjection,
+        envelope: SyncEventEnvelope,
+        result: RetailRefundEventResult,
+    ) -> None:
+        if (
+            row.source_event_id != envelope.event_id
+            or row.tenant_id != envelope.tenant_id
+            or row.branch_id != envelope.branch_id
+            or row.parent_sale_id != result.result.parent_sale_id
+            or row.origin_node_id != envelope.origin_node_id
+            or row.writer_epoch != envelope.writer_epoch
+            or row.sequence != envelope.sequence
+            or row.operation_id != envelope.operation_id
+            or row.source_id != envelope.aggregate_id
+            or row.source_payload_hash != envelope.payload_hash
+            or row.projection_hash != envelope.projection_hash
+            or canonical_json_bytes(row.payload) != canonical_json_bytes(envelope.payload)
+        ):
+            raise ValueError("Refund projection differs from its applied source")
+
+    async def _validate_retail_refund_parent(
+        self,
+        result: RetailRefundEventResult,
+        envelope: SyncEventEnvelope,
+        *,
+        lock_parent: bool,
+    ) -> None:
+        parent_id = result.result.parent_sale_id
+        parent = (
+            await self.repo.get_sale_projection_for_update(parent_id)
+            if lock_parent
+            else await self.repo.get_sale_projection(parent_id)
+        )
+        if parent is None:
+            raise _EnvelopeError("retail_refund_parent_missing")
+        if parent.schema_version not in (3, 4) or parent.sale_type != "sale":
+            raise _EnvelopeError("retail_refund_parent_version_unsupported")
+        source = await self.repo.get_inbox_event(parent.source_event_id)
+        if source is None or source.status != "applied":
+            raise _EnvelopeError("retail_refund_parent_source_missing")
+        try:
+            original = SyncEventEnvelope.model_validate(source, from_attributes=True)
+            trusted = await self._retail_result(original)
+            if (
+                parent.origin_node_id != original.origin_node_id
+                or parent.writer_epoch != original.writer_epoch
+                or parent.sequence != original.sequence
+                or parent.source_payload_hash != original.payload_hash
+                or parent.projection_hash != original.projection_hash
+                or canonical_json_bytes(self._projection_payload(parent))
+                != canonical_json_bytes(trusted.model_dump(mode="json"))
+                or (parent.writer_epoch, parent.sequence)
+                >= (envelope.writer_epoch, envelope.sequence)
+            ):
+                raise ValueError("Refund parent projection differs from historical source")
+            prior = await self._retail_refund_history(envelope, parent_id, lock_parent=lock_parent)
+            validate_retail_refund_parent(result, trusted, prior)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise _EnvelopeError("retail_refund_parent_mismatch") from exc
+
+    async def _retail_refund_history(
+        self, envelope: SyncEventEnvelope, parent_id: UUID, *, lock_parent: bool
+    ) -> list[RetailRefundEventResult]:
+        rows = await self.repo.list_retail_refund_projections(
+            tenant_id=envelope.tenant_id,
+            branch_id=envelope.branch_id,
+            parent_sale_id=parent_id,
+        )
+        if len(rows) > 10_000:
+            raise ValueError("Refund history bound exceeded")
+        current = envelope.writer_epoch, envelope.sequence
+        prior: list[RetailRefundEventResult] = []
+        for row in rows:
+            position = row.writer_epoch, row.sequence
+            if position >= current:
+                if lock_parent and row.source_event_id != envelope.event_id:
+                    raise ValueError("Refund history already contains a later event")
+                continue
+            inbox = await self.repo.get_inbox_event(row.source_event_id)
+            if inbox is None or inbox.status != "applied":
+                raise ValueError("Preceding refund has no applied source")
+            original = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+            old = await self._refund_result(original, validate_parent=False)
+            self._assert_refund_projection(row, original, old)
+            prior.append(old)
+        return prior
+
+    async def validate_refund_projection(
+        self, envelope: SyncEventEnvelope
+    ) -> RetailRefundEventResult:
+        """Read-only source/parent/prefix validation for the private materializer."""
+        if self._edge_node_id is None:
+            self._edge_node_id = await self.repo.get_local_edge_node_id()
+        await self._validate_retail_slot(envelope)
+        result = await self._refund_result(envelope)
+        row = await self.repo.get_retail_refund_projection(envelope.event_id)
+        inbox = await self.repo.get_inbox_event(envelope.event_id)
+        if row is None or inbox is None or inbox.status != "applied":
+            raise ValueError("Refund projection has no complete applied source")
+        original = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+        if canonical_json_bytes(original.model_dump(mode="json")) != canonical_json_bytes(
+            envelope.model_dump(mode="json")
+        ):
+            raise ValueError("Refund input differs from its applied source")
+        self._assert_refund_projection(row, envelope, result)
+        return result
+
+    async def _validate_incoming_event(
+        self, envelope: SyncEventEnvelope, *, cursor: SyncCursor
+    ) -> ProjectedSale:
+        if envelope.schema_version not in (3, 4):
+            return self._validate_event(
+                envelope,
+                previous_source_checksum=cursor.source_checksum,
+                previous_projection_checksum=cursor.projection_checksum,
+            )
+        return await self._retail_result(
+            envelope,
+            previous_checksums=(cursor.source_checksum, cursor.projection_checksum),
         )
 
     @staticmethod
@@ -1741,6 +2177,8 @@ class SyncEdgeApplyService:
         parent = await self.repo.get_sale_projection(refund.parent_sale_id)
         if parent is None:
             raise _EnvelopeError("refund_parent_missing")
+        if parent.schema_version not in (None, 1):
+            raise _EnvelopeError("refund_parent_version_unsupported")
         if (
             parent.sale_type != "sale"
             or parent.tenant_id != refund.tenant_id
@@ -1875,6 +2313,19 @@ class SyncEdgeApplyService:
             return cursor, halted
         return cursor, None
 
+    async def _validate_duplicate_event(self, envelope: SyncEventEnvelope) -> None:
+        if envelope.schema_version in (3, 4):
+            await self._retail_result(envelope)
+        elif envelope.schema_version == 5:
+            await self._physical_stock_result(envelope)
+        elif envelope.schema_version == 6:
+            try:
+                await self.validate_refund_projection(envelope)
+            except _EnvelopeError:
+                raise
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise _EnvelopeError("retail_refund_projection_mismatch") from exc
+
     async def _precheck_event(
         self,
         *,
@@ -1884,17 +2335,25 @@ class SyncEdgeApplyService:
         applied: int,
         duplicates: int,
     ) -> tuple[EdgeApplyResult | None, bool]:
+        scope_reason: str | None = None
         if (
             envelope.tenant_id != pull.tenant_id
             or envelope.branch_id != pull.branch_id
             or envelope.origin_node_id != pull.origin_node_id
             or envelope.writer_epoch != pull.writer_epoch
         ):
+            scope_reason = "event_scope_mismatch"
+        else:
+            try:
+                await self._validate_retail_slot(envelope)
+            except _EnvelopeError as exc:
+                scope_reason = exc.reason_code
+        if scope_reason is not None:
             halted = await self._stop(
                 cursor=cursor,
                 envelope=None,
                 cursor_status="quarantined",
-                reason_code="event_scope_mismatch",
+                reason_code=scope_reason,
                 applied=applied,
                 duplicates=duplicates,
             )
@@ -1902,13 +2361,19 @@ class SyncEdgeApplyService:
 
         existing = await self.repo.get_inbox_event(envelope.event_id)
         if envelope.sequence <= cursor.last_sequence:
+            reason_code = "event_identity_collision"
             if existing is not None and self._same_inbox_event(existing, envelope):
-                return None, True
+                try:
+                    await self._validate_duplicate_event(envelope)
+                except _EnvelopeError as exc:
+                    reason_code = exc.reason_code
+                else:
+                    return None, True
             halted = await self._stop(
                 cursor=cursor,
                 envelope=envelope if existing is None else None,
                 cursor_status="quarantined",
-                reason_code="event_identity_collision",
+                reason_code=reason_code,
                 applied=applied,
                 duplicates=duplicates,
             )
@@ -1943,12 +2408,146 @@ class SyncEdgeApplyService:
         applied: int,
         duplicates: int,
     ) -> EdgeApplyResult | None:
-        try:
-            sale = self._validate_event(
-                envelope,
-                previous_source_checksum=cursor.source_checksum,
-                previous_projection_checksum=cursor.projection_checksum,
+        if envelope.schema_version == 6:
+            return await self._apply_refund_event(
+                cursor=cursor, envelope=envelope, applied=applied, duplicates=duplicates
             )
+        if envelope.schema_version == 5:
+            return await self._apply_stock_event(
+                cursor=cursor, envelope=envelope, applied=applied, duplicates=duplicates
+            )
+        return await self._apply_new_sale_event(
+            cursor=cursor, envelope=envelope, applied=applied, duplicates=duplicates
+        )
+
+    async def _apply_refund_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        try:
+            async with self.repo.event_savepoint():
+                refund = await self._refund_result(
+                    envelope,
+                    previous_checksums=(cursor.source_checksum, cursor.projection_checksum),
+                    lock_parent=True,
+                )
+                if (
+                    await self.repo.get_retail_refund_projection(envelope.event_id) is not None
+                    or await self.repo.get_retail_refund_projection_by_source(
+                        tenant_id=envelope.tenant_id, source_id=envelope.aggregate_id
+                    )
+                    is not None
+                    or await self.repo.get_sale_projection(envelope.aggregate_id) is not None
+                    or await self.repo.get_sale_projection_by_operation_id(
+                        tenant_id=envelope.tenant_id, operation_id=envelope.operation_id
+                    )
+                    is not None
+                ):
+                    raise _EnvelopeError("retail_refund_projection_collision")
+                inbox = await self.repo.insert_inbox(envelope, status="received")
+                await self.repo.insert_retail_refund_projection(
+                    envelope, parent_sale_id=refund.result.parent_sale_id
+                )
+                await self.repo.mark_inbox(
+                    inbox, status="applied", reason_code=None, applied_at=utc_now()
+                )
+                await self.repo.update_cursor(
+                    cursor,
+                    last_sequence=envelope.sequence,
+                    last_event_id=envelope.event_id,
+                    source_checksum=envelope.stream_checksum,
+                    projection_checksum=envelope.projection_checksum,
+                    status="synced",
+                )
+        except SyncProjectionOperationCollision:
+            restored = await self.repo.get_cursor(
+                tenant_id=envelope.tenant_id,
+                branch_id=envelope.branch_id,
+                origin_node_id=envelope.origin_node_id,
+                writer_epoch=envelope.writer_epoch,
+                for_update=True,
+            )
+            if restored is None:
+                raise AurumError("Edge refund cursor disappeared during recovery") from None
+            return await self._stop(
+                cursor=restored,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="operation_id_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+        except _EnvelopeError as exc:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code=exc.reason_code,
+                applied=applied,
+                duplicates=duplicates,
+            )
+        return None
+
+    async def _apply_stock_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        try:
+            await self._physical_stock_result(
+                envelope, previous_checksums=(cursor.source_checksum, cursor.projection_checksum)
+            )
+        except _EnvelopeError as exc:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code=exc.reason_code,
+                applied=applied,
+                duplicates=duplicates,
+            )
+        if await self.repo.get_physical_stock_projection(envelope.event_id) is not None:
+            return await self._stop(
+                cursor=cursor,
+                envelope=envelope,
+                cursor_status="quarantined",
+                reason_code="physical_stock_projection_collision",
+                applied=applied,
+                duplicates=duplicates,
+            )
+        async with self.repo.event_savepoint():
+            inbox = await self.repo.insert_inbox(envelope, status="received")
+            await self.repo.insert_physical_stock_projection(envelope)
+            await self.repo.mark_inbox(
+                inbox, status="applied", reason_code=None, applied_at=utc_now()
+            )
+            await self.repo.update_cursor(
+                cursor,
+                last_sequence=envelope.sequence,
+                last_event_id=envelope.event_id,
+                source_checksum=envelope.stream_checksum,
+                projection_checksum=envelope.projection_checksum,
+                status="synced",
+            )
+        return None
+
+    async def _apply_new_sale_event(
+        self,
+        *,
+        cursor: SyncCursor,
+        envelope: SyncEventEnvelope,
+        applied: int,
+        duplicates: int,
+    ) -> EdgeApplyResult | None:
+        try:
+            sale = await self._validate_incoming_event(envelope, cursor=cursor)
         except _EnvelopeError as exc:
             return await self._stop(
                 cursor=cursor,
@@ -1995,45 +2594,24 @@ class SyncEdgeApplyService:
                     duplicates=duplicates,
                 )
 
-        inbox = await self.repo.insert_inbox(envelope, status="received")
         try:
-            await self.repo.insert_sale_projection(
-                sale_id=sale.sale_id,
-                tenant_id=sale.tenant_id,
-                branch_id=sale.branch_id,
-                origin_node_id=envelope.origin_node_id,
-                writer_epoch=envelope.writer_epoch,
-                sequence=envelope.sequence,
-                source_event_id=envelope.event_id,
-                operation_id=sale.operation_id,
-                sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
-                parent_sale_id=(
-                    sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None
-                ),
-                parent_fully_refunded=(
-                    sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
-                ),
-                register_id=sale.register_id,
-                shift_id=sale.shift_id,
-                cashier_user_id=sale.cashier_user_id,
-                receipt_number=sale.receipt_number,
-                receipt_seq=sale.receipt_seq,
-                sale_created_at=sale.created_at,
-                completed_at=sale.completed_at,
-                total_amount=sale.total_amount,
-                currency=sale.currency,
-                is_test=sale.is_test,
-                items=[
-                    cast(dict[str, object], item.model_dump(mode="json")) for item in sale.items
-                ],
-                payments=[
-                    cast(dict[str, object], payment.model_dump(mode="json"))
-                    for payment in sale.payments
-                ],
-                source_payload_hash=envelope.payload_hash,
-                projection_hash=envelope.projection_hash,
-            )
+            if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4):
+                async with self.repo.event_savepoint():
+                    await self._persist_new_event(cursor=cursor, envelope=envelope, sale=sale)
+            else:
+                await self._persist_new_event(cursor=cursor, envelope=envelope, sale=sale)
         except SyncProjectionOperationCollision:
+            if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4):
+                restored = await self.repo.get_cursor(
+                    tenant_id=envelope.tenant_id,
+                    branch_id=envelope.branch_id,
+                    origin_node_id=envelope.origin_node_id,
+                    writer_epoch=envelope.writer_epoch,
+                    for_update=True,
+                )
+                if restored is None:
+                    raise AurumError("Edge sync cursor disappeared during recovery") from None
+                cursor = restored
             return await self._stop(
                 cursor=cursor,
                 envelope=envelope,
@@ -2042,6 +2620,69 @@ class SyncEdgeApplyService:
                 applied=applied,
                 duplicates=duplicates,
             )
+        return None
+
+    async def _persist_new_event(
+        self, *, cursor: SyncCursor, envelope: SyncEventEnvelope, sale: ProjectedSale
+    ) -> None:
+        inbox = await self.repo.insert_inbox(envelope, status="received")
+        await self.repo.insert_sale_projection(
+            sale_id=sale.sale_id,
+            tenant_id=sale.tenant_id,
+            branch_id=sale.branch_id,
+            origin_node_id=envelope.origin_node_id,
+            writer_epoch=envelope.writer_epoch,
+            sequence=envelope.sequence,
+            source_event_id=envelope.event_id,
+            operation_id=sale.operation_id,
+            sale_type=("return" if isinstance(sale, SaleRefundResult) else "sale"),
+            parent_sale_id=(sale.parent_sale_id if isinstance(sale, SaleRefundResult) else None),
+            parent_fully_refunded=(
+                sale.parent_fully_refunded if isinstance(sale, SaleRefundResult) else None
+            ),
+            register_id=sale.register_id,
+            shift_id=sale.shift_id,
+            cashier_user_id=(
+                sale.cashier_id
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else sale.cashier_user_id
+            ),
+            receipt_number=sale.receipt_number,
+            receipt_seq=(
+                sale.receipt_sequence
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else sale.receipt_seq
+            ),
+            sale_created_at=sale.created_at,
+            completed_at=sale.completed_at,
+            total_amount=sale.total_amount,
+            currency=sale.currency,
+            is_test=sale.is_test,
+            items=[
+                cast(dict[str, object], item.model_dump(mode="json"))
+                for item in (
+                    sale.lines
+                    if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                    else sale.items
+                )
+            ],
+            payments=[
+                cast(dict[str, object], payment.model_dump(mode="json"))
+                for payment in sale.payments
+            ],
+            source_payload_hash=envelope.payload_hash,
+            projection_hash=envelope.projection_hash,
+            schema_version=(
+                sale.schema_version
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else 1
+            ),
+            stock_command_id=(
+                sale.stock_command_id
+                if isinstance(sale, PhysicalCheckoutResultV3 | MixedCheckoutResultV4)
+                else None
+            ),
+        )
         await self.repo.mark_inbox(
             inbox,
             status="applied",
@@ -2056,13 +2697,44 @@ class SyncEdgeApplyService:
             projection_checksum=envelope.projection_checksum,
             status="synced",
         )
-        return None
+
+    async def _lock_refund_parents(self, pull: SyncPullResponse, cursor: SyncCursor) -> None:
+        """Serialize branch refund history across separately locked epoch cursors."""
+        parents: set[UUID] = set()
+        scope = pull.tenant_id, pull.branch_id, pull.origin_node_id, pull.writer_epoch
+        for envelope in pull.events:
+            if (
+                envelope.schema_version != 6
+                or envelope.sequence <= cursor.last_sequence
+                or (
+                    envelope.tenant_id,
+                    envelope.branch_id,
+                    envelope.origin_node_id,
+                    envelope.writer_epoch,
+                )
+                != scope
+            ):
+                continue
+            try:
+                result = await self._refund_result(envelope, validate_parent=False)
+            except _EnvelopeError:
+                # Preserve ordered valid prefixes and the normal quarantine path.
+                continue
+            parents.add(result.result.parent_sale_id)
+        if parents:
+            await self.repo.lock_retail_refund_parents(
+                tenant_id=pull.tenant_id,
+                branch_id=pull.branch_id,
+                parent_sale_ids=tuple(sorted(parents)),
+            )
 
     async def apply(self, pull: SyncPullResponse) -> EdgeApplyResult:
         self._edge_node_id = pull.edge_node_id
         cursor, halted = await self._prepare_cursor(pull)
         if halted is not None:
             return halted
+
+        await self._lock_refund_parents(pull, cursor)
 
         applied = 0
         duplicates = 0
@@ -2111,6 +2783,30 @@ class SyncEdgeApplyService:
             "items": row.items,
             "payments": row.payments,
         }
+        if row.schema_version in (3, 4):
+            if row.sale_type != "sale" or row.is_test:
+                raise ValueError("unsupported retail projection lifecycle")
+            del payload["cashier_user_id"], payload["receipt_seq"], payload["items"]
+            payload.update(
+                {
+                    "schema_version": row.schema_version,
+                    "document_kind": (
+                        "physical_checkout" if row.schema_version == 3 else "mixed_checkout"
+                    ),
+                    "stock_command_id": row.stock_command_id,
+                    "cashier_id": row.cashier_user_id,
+                    "receipt_sequence": row.receipt_seq,
+                    "lines": row.items,
+                }
+            )
+            retail_sale: RetailCheckoutResult
+            if row.schema_version == 3:
+                retail_sale = PhysicalCheckoutResultV3.model_validate(payload)
+            else:
+                retail_sale = MixedCheckoutResultV4.model_validate(payload)
+            return cast(dict[str, object], retail_sale.model_dump(mode="json"))
+        if row.schema_version not in (None, 1) or row.stock_command_id is not None:
+            raise ValueError("unsupported sale projection version")
         if row.sale_type == "return":
             payload.update(
                 {
@@ -2125,6 +2821,120 @@ class SyncEdgeApplyService:
             raise ValueError("unsupported sale projection type")
         return cast(dict[str, object], sale.model_dump(mode="json"))
 
+    async def _verified_projection_checksums(
+        self,
+        row: SyncSaleProjection,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> tuple[str, str]:
+        payload = self._projection_payload(row)
+        inbox = await self.repo.get_inbox_event(row.source_event_id)
+        if inbox is None or inbox.status != "applied":
+            raise ValueError("projection has no applied source")
+        envelope = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+        await self._validate_retail_slot(envelope)
+        version = row.schema_version if row.schema_version is not None else 1
+        if (
+            version != envelope.schema_version
+            or row.source_payload_hash != envelope.payload_hash
+            or row.origin_node_id != envelope.origin_node_id
+            or row.writer_epoch != envelope.writer_epoch
+            or row.sequence != envelope.sequence
+        ):
+            raise ValueError("projection metadata differs from its saved source")
+        source: ProjectedSale
+        if envelope.schema_version in (3, 4):
+            source = await self._retail_result(
+                envelope,
+                previous_checksums=(previous_source_checksum, previous_projection_checksum),
+            )
+        else:
+            source = self._validate_event(
+                envelope,
+                previous_source_checksum=previous_source_checksum,
+                previous_projection_checksum=previous_projection_checksum,
+            )
+        if canonical_json_bytes(source.model_dump(mode="json")) != canonical_json_bytes(payload):
+            raise ValueError("projection differs from its saved source")
+        return sale_projection_hash(payload), envelope.stream_checksum
+
+    async def _verified_refund_projection_checksums(
+        self,
+        row: SyncRetailRefundProjection,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> tuple[str, str]:
+        inbox = await self.repo.get_inbox_event(row.source_event_id)
+        if inbox is None or inbox.status != "applied":
+            raise ValueError("Refund projection has no applied source")
+        envelope = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+        await self._validate_retail_slot(envelope)
+        result = await self._refund_result(
+            envelope, previous_checksums=(previous_source_checksum, previous_projection_checksum)
+        )
+        self._assert_refund_projection(row, envelope, result)
+        return canonical_json_hash(row.payload), envelope.stream_checksum
+
+    async def _verified_stock_projection_checksums(
+        self,
+        row: SyncPhysicalStockProjection,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> tuple[str, str]:
+        inbox = await self.repo.get_inbox_event(row.source_event_id)
+        if inbox is None or inbox.status != "applied":
+            raise ValueError("Physical projection has no applied source")
+        envelope = SyncEventEnvelope.model_validate(inbox, from_attributes=True)
+        await self._validate_retail_slot(envelope)
+        change = await self._physical_stock_result(
+            envelope, previous_checksums=(previous_source_checksum, previous_projection_checksum)
+        )
+        if (
+            row.tenant_id != envelope.tenant_id
+            or row.branch_id != envelope.branch_id
+            or row.origin_node_id != envelope.origin_node_id
+            or row.writer_epoch != envelope.writer_epoch
+            or row.sequence != envelope.sequence
+            or row.operation_id != change.operation_id
+            or row.source_id != change.source_id
+            or row.source_payload_hash != envelope.payload_hash
+            or canonical_json_bytes(row.payload)
+            != canonical_json_bytes(change.model_dump(mode="json"))
+        ):
+            raise ValueError("Physical projection differs from its source")
+        return canonical_json_hash(row.payload), envelope.stream_checksum
+
+    async def _verified_read_projection_checksums(
+        self,
+        row: SyncSaleProjection | SyncPhysicalStockProjection | SyncRetailRefundProjection,
+        *,
+        previous_source_checksum: str,
+        previous_projection_checksum: str,
+    ) -> tuple[str, str, UUID]:
+        if isinstance(row, SyncRetailRefundProjection):
+            digest, source = await self._verified_refund_projection_checksums(
+                row,
+                previous_source_checksum=previous_source_checksum,
+                previous_projection_checksum=previous_projection_checksum,
+            )
+            return digest, source, row.source_id
+        if isinstance(row, SyncPhysicalStockProjection):
+            digest, source = await self._verified_stock_projection_checksums(
+                row,
+                previous_source_checksum=previous_source_checksum,
+                previous_projection_checksum=previous_projection_checksum,
+            )
+            return digest, source, row.source_id
+        digest, source = await self._verified_projection_checksums(
+            row,
+            previous_source_checksum=previous_source_checksum,
+            previous_projection_checksum=previous_projection_checksum,
+        )
+        return digest, source, row.sale_id
+
     async def verify_projection(
         self,
         *,
@@ -2133,6 +2943,10 @@ class SyncEdgeApplyService:
         origin_node_id: UUID,
         writer_epoch: int,
     ) -> EdgeApplyResult:
+        if self._edge_node_id is None:
+            self._edge_node_id = await self.repo.get_local_edge_node_id()
+        if self._edge_node_id is None:
+            raise PermissionDeniedError("Edge node scope is required for projection verification")
         cursor = await self.repo.get_cursor(
             tenant_id=tenant_id,
             branch_id=branch_id,
@@ -2142,18 +2956,48 @@ class SyncEdgeApplyService:
         )
         if cursor is None:
             raise NotFoundError("Edge sync cursor not found")
-        rows = await self.repo.list_sale_projections(
+        sale_rows = await self.repo.list_sale_projections(
             tenant_id=tenant_id,
             branch_id=branch_id,
             origin_node_id=origin_node_id,
             writer_epoch=writer_epoch,
             after_sequence=cursor.start_sequence,
         )
+        stock_rows = await self.repo.list_physical_stock_projections(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
+            after_sequence=cursor.start_sequence,
+        )
+        refund_rows = await self.repo.list_retail_refund_projections(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            origin_node_id=origin_node_id,
+            writer_epoch=writer_epoch,
+            after_sequence=cursor.start_sequence,
+        )
+        if len(refund_rows) > 10_000:
+            raise ValueError("Refund projection history bound exceeded")
+        rows: list[
+            SyncSaleProjection | SyncPhysicalStockProjection | SyncRetailRefundProjection
+        ] = sorted([*sale_rows, *stock_rows, *refund_rows], key=lambda row: row.sequence)
         expected_sequence = cursor.start_sequence + 1
         checksum = cursor.start_projection_checksum
+        source_checksum = cursor.start_source_checksum
         valid = True
         for row in rows:
-            projection_hash = sale_projection_hash(self._projection_payload(row))
+            try:
+                projection_hash, next_source_checksum, aggregate_id = (
+                    await self._verified_read_projection_checksums(
+                        row,
+                        previous_source_checksum=source_checksum,
+                        previous_projection_checksum=checksum,
+                    )
+                )
+            except (ValueError, TypeError, OverflowError):
+                valid = False
+                break
             if row.sequence != expected_sequence or row.projection_hash != projection_hash:
                 valid = False
                 break
@@ -2162,11 +3006,16 @@ class SyncEdgeApplyService:
                 origin_node_id=row.origin_node_id,
                 writer_epoch=row.writer_epoch,
                 sequence=row.sequence,
-                sale_id=row.sale_id,
+                sale_id=aggregate_id,
                 projection_hash=projection_hash,
             )
+            source_checksum = next_source_checksum
             expected_sequence += 1
-        if expected_sequence - 1 != cursor.last_sequence or checksum != cursor.projection_checksum:
+        if (
+            expected_sequence - 1 != cursor.last_sequence
+            or checksum != cursor.projection_checksum
+            or source_checksum != cursor.source_checksum
+        ):
             valid = False
         if not valid:
             return await self._stop(

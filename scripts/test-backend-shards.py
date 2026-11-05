@@ -9,7 +9,9 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-verify = runpy.run_path(str(Path(__file__).with_name("verify-backend-shards.py")))["verify"]
+validator = runpy.run_path(str(Path(__file__).with_name("verify-backend-shards.py")))
+verify = validator["verify"]
+collection_mismatch = validator["_collection_mismatch"]
 
 
 class ShardEvidenceTests(unittest.TestCase):
@@ -105,6 +107,55 @@ class ShardEvidenceTests(unittest.TestCase):
         self.shard(2)
         with self.assertRaises(ValueError):
             verify(self.root, 2)
+
+    def test_collection_mismatch_reports_file_counts_without_parameter_values(self) -> None:
+        private_id = "private-customer-value"
+        self.collection = [
+            f"tests/test_a.py::test_internal_name[{private_id}-first]",
+            "tests/test_b.py::test_b",
+        ]
+        self.shard(1)
+        second = self.shard(2)
+        self.change(second, collected=[
+            f"tests/test_a.py::test_internal_name[{private_id}-second]",
+            self.collection[1],
+        ])
+        with self.assertRaises(ValueError) as raised:
+            verify(self.root, 2)
+        message = str(raised.exception)
+        self.assertIn("baseline-count=2, shard-count=2", message)
+        self.assertIn("tests/test_a.py (baseline-only=1, shard-only=1)", message)
+        self.assertNotIn("tests/test_b.py", message)
+        self.assertNotIn(private_id, message)
+        self.assertNotIn("test_internal_name", message)
+        self.assertNotIn("::", message)
+
+    def test_collection_mismatch_distinguishes_missing_and_added_file_counts(self) -> None:
+        message = collection_mismatch(
+            ["tests/isolation/test_a.py::test_one", "tests/isolation/test_a.py::test_two"],
+            ["tests/test_b.py::test_three"],
+        )
+        self.assertIn("baseline-count=2, shard-count=1", message)
+        self.assertIn("tests/isolation/test_a.py (baseline-only=2, shard-only=0)", message)
+        self.assertIn("tests/test_b.py (baseline-only=0, shard-only=1)", message)
+
+    def test_collection_mismatch_redacts_invalid_paths_and_bounds_file_output(self) -> None:
+        invalid = [
+            "tests/test_private[value].py::test_case",
+            "tests/test_private\nvalue.py::test_case",
+            "https://private-value.example/test.py::test_case",
+            "tests/../private-value.py::test_case",
+            "tests/test_" + "a" * 300 + ".py::test_case",
+        ]
+        message = collection_mismatch(invalid, [])
+        self.assertIn("<invalid test path> (baseline-only=5, shard-only=0)", message)
+        self.assertNotIn("private", message)
+        self.assertNotIn("\n", message)
+        bounded = collection_mismatch([f"tests/test_{index:02}.py::test_case" for index in range(23)], [])
+        self.assertEqual(bounded.count("tests/test_"), 20)
+        self.assertIn("3 additional file groups omitted", bounded)
+        self.assertNotIn("tests/test_20.py", bounded)
+        self.assertNotIn("test_case", bounded)
 
     def test_missing_and_invalid_junit_are_rejected(self) -> None:
         path = self.shard(1)
