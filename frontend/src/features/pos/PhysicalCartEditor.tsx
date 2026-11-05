@@ -411,6 +411,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
                 value={catalogId}
                 initialLabel={selectedName}
                 branchId={branchId}
+                showStock={false}
                 clearable
                 onChange={(value, name) => {
                   if (controlsLocked || !active()) return;

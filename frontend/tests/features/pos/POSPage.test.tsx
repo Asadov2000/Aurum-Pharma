@@ -335,7 +335,7 @@ describe("POSPage", () => {
       fireEvent.change(cashInput, { target: { value: invalidAmount } });
       fireEvent.click(screen.getByRole("button", { name: /Открыть смену/i }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(/с точностью до копейки/i);
+      expect(await screen.findByRole("alert")).toHaveTextContent(/с точностью до дирама/i);
       expect(openShift).not.toHaveBeenCalled();
       expect(cashInput).toHaveFocus();
     },
