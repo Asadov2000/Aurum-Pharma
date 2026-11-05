@@ -4,13 +4,13 @@
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-UX-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "local-fix-physical-picker-stock-and-diram-copy",
+  "phase": "pr455-published-awaiting-full-ci",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/unit-sale-picker-copy",
   "base_sha": "dd306b04039e735d41c11ab714d089d4f3497410",
-  "expected_head": "dd306b04039e735d41c11ab714d089d4f3497410",
+  "expected_head": "a9abf9e9c91237f8afeea07acd96f446ba4df8a5",
   "validated_sha": null,
-  "pr": null,
+  "pr": 455,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/unit-sale-picker-copy-2026-11-05/source",
   "cloud_task": "01a150b0-1a9b-75ad-b26c-8cde1f62d062",
   "cloud_host": "durable",
@@ -29,7 +29,7 @@
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "Regression tests, local checks, CI and merge for misleading legacy stock indicator and diram validation wording",
+  "remaining_step": "Wait for full CircleCI, verify exact head and merge without bypass",
   "failure_counters": {},
   "blocker": null,
   "previous_completed": {
@@ -83,34 +83,20 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T11:13:05.724Z",
+  "updated_at": "2026-11-05T11:17:23.477Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
     "clean": true
   },
   "local_validation": {
-    "backend_pure": 20,
-    "targeted_vitest": 103,
-    "mypy": "545 files passed",
+    "targetedTests": 53,
     "typecheck": "passed",
     "lint": "passed",
-    "format": "passed",
-    "production_build": "passed",
-    "pos_gzip_kib": 194.92,
-    "receipt_locale_fix": {
-      "typecheck": "passed",
-      "eslint": "passed",
-      "diff_check": "passed",
-      "independent_qa": "approved",
-      "commit": "8e7675473f87a327e0efec1b6a834e015e18eee3"
-    },
-    "receipt_close_locator": {
-      "lint": "passed",
-      "diff_check": "passed",
-      "reason": "Proactive QA review: header cross and footer button share accessible name; select exact visible footer text",
-      "commit": "da0c3bd3a49877da806542f8e1ee5f6338376f22"
-    }
+    "prettier": "passed",
+    "build": "passed",
+    "posStartupGzipKiB": 194.94,
+    "review": "approved"
   },
   "ci": {
     "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
