@@ -25,6 +25,11 @@ class PhysicalCartQuoteRead(FrozenContract):
     revision_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class PhysicalCartDispensingPreflightRead(FrozenContract):
+    sale_id: UUID
+    requires_prescription: bool = Field(strict=True)
+
+
 PhysicalOptionUnavailableReason = Literal[
     "not_prepared", "catalog_unavailable", "unknown_blister", "price_unavailable"
 ]

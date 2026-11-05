@@ -38,6 +38,7 @@ const calls = vi.hoisted(() => ({
   preparation: vi.fn(),
   drawer: vi.fn(),
   catalog: vi.fn(),
+  preflight: vi.fn(),
   prescription: vi.fn(),
   realCashPanel: false,
 }));
@@ -84,6 +85,9 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 vi.mock("@/features/catalog/api", () => ({
   findByBarcode: calls.barcode,
   getCatalogItem: calls.catalog,
+}));
+vi.mock("@/features/pos/dispensingPreflight", () => ({
+  requiresSalePrescription: calls.preflight,
 }));
 vi.mock("@/features/pos/PrescriptionModal", () => ({
   PrescriptionModal: (props: {
@@ -325,6 +329,7 @@ describe("SaleArea physical cart integration", () => {
     window.localStorage.clear();
     vi.clearAllMocks();
     calls.realCashPanel = false;
+    calls.preflight.mockReset().mockResolvedValue(false);
     calls.shift.mockResolvedValue(shift);
     calls.sale.mockResolvedValue(sale());
     window.localStorage.setItem(
@@ -814,12 +819,7 @@ describe("SaleArea physical cart integration", () => {
   });
   it.each(["physical", "mixed"] as const)("checks Rx before starting %s cash", async (kind) => {
     calls.sale.mockResolvedValue(sale({ items: kind === "mixed" ? [legacyItem] : [] }));
-    calls.catalog.mockImplementation(async (id: string) => ({
-      id,
-      tenant_id: POS_SCOPE.tenantId,
-      is_active: true,
-      dispensing_type: id === physicalItem.catalog_id ? "prescription" : "otc",
-    }));
+    calls.preflight.mockResolvedValue(true);
     calls.prescription.mockResolvedValue({ id: "rx-1" });
     mount();
     await cashPanelCallbacks();
@@ -843,12 +843,7 @@ describe("SaleArea physical cart integration", () => {
     async (kind) => {
       const legacyItems = kind === "mixed" ? [legacyItem] : [];
       calls.sale.mockResolvedValue(sale({ items: legacyItems }));
-      calls.catalog.mockImplementation(async (id: string) => ({
-        id,
-        tenant_id: POS_SCOPE.tenantId,
-        is_active: true,
-        dispensing_type: id === physicalItem.catalog_id ? "prescription" : "otc",
-      }));
+      calls.preflight.mockResolvedValueOnce(true).mockResolvedValue(false);
       const { client } = mount();
       await cashPanelCallbacks();
       let panel = calls.panel.mock.calls.at(-1)?.[0] as {
@@ -880,46 +875,53 @@ describe("SaleArea physical cart integration", () => {
       await act(async () => {
         await expect(panel.beforeStart()).resolves.toBeUndefined();
       });
-      expect(calls.catalog).toHaveBeenCalledWith("otc-catalog");
+      expect(calls.preflight).toHaveBeenCalledWith("sale-1");
+      expect(calls.catalog).not.toHaveBeenCalled();
       expect(calls.prescription).not.toHaveBeenCalled();
       expect(screen.queryByRole("button", { name: "Сохранить тестовый рецепт" })).toBeNull();
     },
   );
 
-  it.each([
-    { is_active: false },
-    { deleted_at: "2026-10-13T00:00:00Z" },
-    { tenant_id: "other-tenant" },
-    { id: "other-catalog" },
-    { dispensing_type: "controlled" },
-  ])("rejects an unavailable physical catalog before cash: %j", async (override) => {
-    calls.catalog.mockImplementation(async (id: string) => ({
-      id,
-      tenant_id: POS_SCOPE.tenantId,
-      is_active: true,
-      dispensing_type: "otc",
-      ...override,
-    }));
+  it("does not start cash when the sale-scoped dispensing check fails", async () => {
+    calls.preflight.mockRejectedValue(new Error("В корзине есть недоступное лекарство"));
     mount();
     await cashPanelCallbacks();
     const panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
     await expect(panel.beforeStart()).rejects.toThrow("В корзине есть недоступное лекарство");
     expect(calls.prescription).not.toHaveBeenCalled();
+    expect(calls.catalog).not.toHaveBeenCalled();
+    expect(calls.checkout).not.toHaveBeenCalled();
   });
 
   it("allows OTC physical cash without saving a prescription", async () => {
-    calls.catalog.mockImplementation(async (id: string) => ({
-      id,
-      tenant_id: POS_SCOPE.tenantId,
-      is_active: true,
-      dispensing_type: "otc",
-    }));
+    calls.catalog.mockRejectedValue(new Error("403: tenant-wide catalog is forbidden"));
     mount();
     await cashPanelCallbacks();
     const panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
     await expect(panel.beforeStart()).resolves.toBeUndefined();
-    expect(calls.catalog).toHaveBeenCalledWith(physicalItem.catalog_id);
+    expect(calls.preflight).toHaveBeenCalledWith("sale-1");
+    expect(calls.catalog).not.toHaveBeenCalled();
     expect(calls.prescription).not.toHaveBeenCalled();
+  });
+
+  it("ignores a dispensing response after the cashier logs out", async () => {
+    let finish: (required: boolean) => void = () => {
+      throw new Error("Preflight has not started");
+    };
+    calls.preflight.mockImplementation(() => new Promise<boolean>((resolve) => (finish = resolve)));
+    mount();
+    await cashPanelCallbacks();
+    const panel = calls.panel.mock.calls.at(-1)?.[0] as { beforeStart: () => Promise<void> };
+    const pending = panel.beforeStart();
+    await waitFor(() => expect(calls.preflight).toHaveBeenCalledTimes(1));
+    const rejected = expect(pending).rejects.toThrow("Сессия кассира завершена");
+    await act(async () => {
+      useAuthStore.getState().clear();
+      finish(true);
+      await rejected;
+    });
+    expect(calls.prescription).not.toHaveBeenCalled();
+    expect(calls.checkout).not.toHaveBeenCalled();
   });
 
   it("opens an empty restored draft editor and returns without creating another sale", async () => {
