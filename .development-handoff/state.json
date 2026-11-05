@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generation": 80,
+  "generation": 81,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "final-head-ci-running-local-qa-evidence-retained",
+  "phase": "cashier-ci-rehearsal-passed-waiting-backend-gate",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
@@ -117,14 +117,15 @@
       "product_failure": false
     },
     "restricted_cashier_receipt_locale": {
-      "count": 2,
+      "count": 0,
       "head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
       "workflow": "529074af-a0fa-4e12-9773-41793329bd2d",
       "job": 4388,
       "step": "online-cash-rehearsal.spec.ts:210 openSavedReceipts",
       "reason": "Test expects 3.00 TJS; existing SaleDetailModal correctly renders ru-RU 3,00 TJS; original and retry fail identically",
-      "status": "Approved test-only correction committed and pushed; full CI running",
-      "product_failure": false
+      "status": "Resolved; final-head CI entire172 browser tests pass including both cashier cases",
+      "product_failure": false,
+      "previous_consecutive_failures": 2
     },
     "local_cashier_refund_response": {
       "count": 1,
@@ -191,7 +192,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T07:31:57.547Z",
+  "updated_at": "2026-11-05T07:40:54.407Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -889,7 +890,16 @@
   "current_ci": {
     "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
     "workflow": "cb92909a-3fba-4225-a2aa-c563f8dda5f9",
-    "status": "running"
+    "status": "six jobs success; backend running; ci-gate blocked",
+    "e2e_passed": 172,
+    "frontend_tests": 3306,
+    "frontend_files": 245,
+    "cashier_cases": {
+      "full_cycle_seconds": 22,
+      "rx_scope_seconds": 6,
+      "passed": 2,
+      "failed": 0
+    }
   },
   "local_shutdown": {
     "requested": true,
@@ -923,5 +933,28 @@
     "artifact": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/stand/e2e-runs/20261105T072146469037Z/sanitized-result.json",
     "shared_database_access": false,
     "live_runtime_changed": false
+  },
+  "current_cashier_ci_rehearsal": {
+    "head": "da0c3bd3a49877da806542f8e1ee5f6338376f22",
+    "job": 4407,
+    "workflow": "cb92909a-3fba-4225-a2aa-c563f8dda5f9",
+    "status": "passed",
+    "role": "actual branch-scoped CASHIER,9template/8effectivepermissions; globalcatalog/users403",
+    "infrastructure": "Disposable real backend/PostgreSQL/Redis/browser stack on CircleCI; no sharedDB",
+    "sales": 3,
+    "sale_total": "43.00",
+    "refunds": 1,
+    "refund_total": "1.00",
+    "writeoff_units": 2,
+    "available_units": 15,
+    "quarantine_units": 1,
+    "closing_cash": "142.00",
+    "closing_difference": "0.00",
+    "receipt_history_passed": true,
+    "no_duplicate_payment_on_history": true,
+    "closed_shift_denies_new_sale": true,
+    "rx_and_scope_and_transport_failure_case_passed": true,
+    "human_acceptance": false,
+    "equipment_acceptance": false
   }
 }
