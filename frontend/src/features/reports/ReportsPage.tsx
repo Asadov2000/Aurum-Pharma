@@ -11,7 +11,7 @@ import { useTenantOperationalSettingsQuery } from "@/features/foundation/queries
 import { getZReportXlsx } from "@/features/pos/api";
 import { downloadBlob } from "@/lib/download";
 import { cn } from "@/lib/utils";
-import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
+import { getAuthIdentityGeneration, useAuthStore } from "@/stores/auth";
 
 import { useReportBranchScope } from "./branchScope";
 import { DEFAULT_REPORT_TIME_ZONE } from "./calendar";
@@ -43,7 +43,7 @@ export function ReportsPage(): JSX.Element {
   const { user } = useAuth();
   const { scopeKey, canView } = useReportBranchScope();
   const canExport = hasPermission(user, "reports.export");
-  const sessionKey = hashKey([user?.id, user?.active_tenant_id, getAuthSessionGeneration()]);
+  const sessionKey = hashKey([user?.id, user?.active_tenant_id, getAuthIdentityGeneration()]);
   const [selection, setSelection] = useState<{
     shift: ShiftHistoryItem;
     sessionKey: string;

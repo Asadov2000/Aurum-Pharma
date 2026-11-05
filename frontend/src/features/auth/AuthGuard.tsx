@@ -4,7 +4,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useMeQuery } from "./meQueries";
 import { isConfirmedAuthFailure } from "./failures";
 import { clearClientSession } from "./session";
-import { getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
+import { getAuthIdentityGeneration, getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
   const { accessToken, user, hydrated, setUser } = useAuthStore();
@@ -35,6 +35,8 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
     );
   }
   if (user === null) return null;
-  // Query observers and page-local data must not survive a change of authority.
-  return <Fragment key={getAuthSessionGeneration()}>{children}</Fragment>;
+  // Reports guard each selection and export against its own branch permission.
+  const generation =
+    pathname === "/reports" ? getAuthIdentityGeneration() : getAuthSessionGeneration();
+  return <Fragment key={generation}>{children}</Fragment>;
 }

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const startEnrollment = vi.fn();
 const verify = vi.fn();
 const authenticated = vi.fn();
-vi.mock("@/features/auth/api", () => ({
+vi.mock("@/features/auth/mfaLoginApi", () => ({
   startMfaEnrollment: (...args: unknown[]) => startEnrollment(...args),
   verifyMfa: (...args: unknown[]) => verify(...args),
   completeMfaEnrollment: vi.fn(),

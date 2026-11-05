@@ -3,7 +3,7 @@ import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { hasPermissionForBranch } from "@/features/auth/branchPermissions";
 import { useAuth } from "@/features/auth/hooks";
 import { type MeResponse } from "@/features/auth/types";
-import { getAuthSessionGeneration } from "@/stores/auth";
+import { getAuthIdentityGeneration } from "@/stores/auth";
 
 import { useReportBranchScope } from "./branchScope";
 import {
@@ -30,7 +30,7 @@ export const reportsKeys = {
 
 export function zReportAccessKey(user: MeResponse | null): string {
   return hashKey([
-    getAuthSessionGeneration(),
+    getAuthIdentityGeneration(),
     user?.id,
     user?.active_tenant_id,
     user?.is_developer,

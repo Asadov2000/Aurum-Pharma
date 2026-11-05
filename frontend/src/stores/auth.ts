@@ -18,6 +18,7 @@ interface AuthState {
 
 const initial = loadTokens();
 let sessionGeneration = 0;
+let identityGeneration = 0;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: initial.access,
@@ -33,6 +34,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   setUser: (user) => {
     const previous = get().user;
+    if (
+      user?.id !== previous?.id ||
+      user?.active_tenant_id !== previous?.active_tenant_id ||
+      user?.home_tenant_id !== previous?.home_tenant_id
+    ) {
+      identityGeneration += 1;
+    }
     if (
       user !== previous &&
       authorizationSnapshotKey(user) !== authorizationSnapshotKey(previous)
@@ -52,6 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   clear: () => {
     sessionGeneration += 1;
+    identityGeneration += 1;
     clearTokens();
     set({ accessToken: null, user: null, hydrated: true });
   },
@@ -59,6 +68,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
 export function getAuthSessionGeneration(): number {
   return sessionGeneration;
+}
+
+export function getAuthIdentityGeneration(): number {
+  return identityGeneration;
 }
 
 export function getAccessToken(): string | null {

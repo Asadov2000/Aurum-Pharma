@@ -5,7 +5,7 @@ import { z } from "zod";
 import { Button, FormError, Input, Label } from "@/components/ui";
 import { describeApiError } from "@/lib/errorMessages";
 
-import { completeMfaEnrollment, recoverMfa, startMfaEnrollment, verifyMfa } from "./api";
+import { completeMfaEnrollment, recoverMfa, startMfaEnrollment, verifyMfa } from "./mfaLoginApi";
 import { type MfaChallengeResponse, type MfaEnrollmentSetup, type TokenPair } from "./types";
 
 import { MfaEnrollmentForm } from "./MfaEnrollmentForm";

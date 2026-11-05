@@ -474,7 +474,9 @@ test("an open cashier tab drops the register after branch access is revoked", as
     await page.bringToFront();
     // Advance the foreground tab's scheduled identity refresh without reloading it.
     await page.clock.fastForward(61_000);
-    await expect(page.getByRole("heading", { name: "Раздел недоступен" })).toBeVisible();
+    await expect(
+      page.getByText(/^Этот раздел не входит в доступы вашего аккаунта\./),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/pos$/);
     await expect(openShift).toHaveCount(0);
     await expect(page.getByText(fixture.register.name, { exact: true })).toHaveCount(0);
