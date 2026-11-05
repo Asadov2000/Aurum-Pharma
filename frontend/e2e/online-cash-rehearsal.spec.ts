@@ -207,7 +207,11 @@ async function openSavedReceipts(
       .click();
     const dialog = page.getByRole("dialog", { name: `Чек № ${receipt.number}`, exact: true });
     await expect(dialog.getByText(medicineName, { exact: true })).toBeVisible();
-    await expect(dialog.getByText(`${receipt.total} TJS`, { exact: true }).first()).toBeVisible();
+    const total = Number(receipt.total).toLocaleString("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    await expect(dialog.getByText(`${total} TJS`, { exact: true }).first()).toBeVisible();
     await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
   }
 }
