@@ -334,7 +334,7 @@ export function ShiftBar({
   );
 }
 
-const CASH_AMOUNT_ERROR = "Введите сумму от 0 до 999 999 999 999,99 с точностью до копейки";
+const CASH_AMOUNT_ERROR = "Введите сумму от 0 до 999 999 999 999,99 с точностью до дирама";
 
 function normalizeCashAmount(value: string): string | null {
   const normalized = value.trim().replace(",", ".");

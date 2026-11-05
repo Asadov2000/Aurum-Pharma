@@ -12,6 +12,7 @@ import {
 import { authenticatePos, POS_SCOPE } from "./posIdentityFixture";
 
 const api = vi.hoisted(() => ({ options: vi.fn(), quote: vi.fn(), put: vi.fn(), remove: vi.fn() }));
+const pickerProps = vi.hoisted(() => vi.fn());
 vi.mock("@/features/pos/physicalCartOptions", () => ({ getPhysicalCartOptions: api.options }));
 vi.mock("@/features/pos/physicalCart", () => ({
   getPhysicalCartQuote: api.quote,
@@ -22,15 +23,22 @@ vi.mock("@/features/catalog/CatalogPicker", () => ({
   CatalogPicker: ({
     id,
     onChange,
+    branchId,
+    showStock,
   }: {
     id: string;
     onChange: (value: string, name: string) => void;
-  }) => (
-    <select id={id} defaultValue="" onChange={(event) => onChange(event.target.value, "Аспирин")}>
-      <option value="">Выберите</option>
-      <option value="10000000-0000-4000-8000-000000000001">Аспирин</option>
-    </select>
-  ),
+    branchId?: string;
+    showStock?: boolean;
+  }) => {
+    pickerProps({ branchId, showStock });
+    return (
+      <select id={id} defaultValue="" onChange={(event) => onChange(event.target.value, "Аспирин")}>
+        <option value="">Выберите</option>
+        <option value="10000000-0000-4000-8000-000000000001">Аспирин</option>
+      </select>
+    );
+  },
 }));
 
 const catalogId = "10000000-0000-4000-8000-000000000001";
@@ -179,6 +187,11 @@ describe("PhysicalCartEditor", () => {
     changed.mockResolvedValue(undefined);
   });
   afterEach(cleanup);
+
+  it("keeps catalog selection branch-scoped while hiding unrelated legacy stock", () => {
+    mount();
+    expect(pickerProps).toHaveBeenLastCalledWith({ branchId: "branch-a", showStock: false });
+  });
 
   it.each([
     ["Упаковка", "pack", "Количество упаковок"],

@@ -20,8 +20,10 @@ interface Props {
   placeholder?: string;
   invalid?: boolean;
   inputClassName?: string;
-  /** When set (POS register's branch), each result shows its available stock. */
+  /** POS register's branch, retained even when stock badges are hidden. */
   branchId?: string;
+  /** Hide legacy stock counts when the caller uses a different inventory ledger. */
+  showStock?: boolean;
   favoriteCatalogIds?: ReadonlySet<string>;
   favoritePendingId?: string | null;
   onFavoriteToggle?: (item: CatalogItem) => void;
@@ -47,6 +49,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     invalid = false,
     inputClassName,
     branchId,
+    showStock = true,
     favoriteCatalogIds,
     favoritePendingId,
     onFavoriteToggle,
@@ -237,7 +240,7 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
                       </span>
                     )}
                   </span>
-                  {branchId && it.stock_available != null && (
+                  {showStock && branchId && it.stock_available != null && (
                     <span
                       className={
                         "shrink-0 font-mono tabular-nums text-xs " +

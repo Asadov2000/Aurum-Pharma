@@ -12,8 +12,12 @@ const items = [
   { id: "c2", brand_name: "Аскорбинка", dosage: "100мг", manufacturer: "X", stock_available: "0" },
 ];
 
+const queryParams = vi.hoisted(() => vi.fn());
 vi.mock("@/features/catalog/pickerQueries", () => ({
-  useCatalogPickerQuery: () => ({ data: { items, total: items.length } }),
+  useCatalogPickerQuery: (params: { branch_id?: string }) => {
+    queryParams(params);
+    return { data: { items, total: items.length } };
+  },
 }));
 
 import { CatalogPicker } from "@/features/catalog/CatalogPicker";
@@ -40,5 +44,32 @@ describe("CatalogPicker — stock badge", () => {
     await screen.findByRole("option", { name: /Аспирин/ });
     expect(screen.queryByText("12 шт")).not.toBeInTheDocument();
     expect(screen.queryByText("нет")).not.toBeInTheDocument();
+  });
+
+  it("hides both legacy stock states without dropping branch scope or selection", async () => {
+    const onChange = vi.fn();
+    render(
+      <CatalogPicker
+        value=""
+        onChange={onChange}
+        branchId="physical-branch"
+        showStock={false}
+        placeholder="Поиск"
+      />,
+    );
+    const input = screen.getByPlaceholderText("Поиск");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "ас" } });
+
+    await screen.findByRole("option", { name: /Аспирин/ });
+    const zeroLegacyStock = screen.getByRole("option", { name: /Аскорбинка/ });
+    expect(screen.queryByText("12 шт")).not.toBeInTheDocument();
+    expect(screen.queryByText("нет")).not.toBeInTheDocument();
+    expect(queryParams).toHaveBeenLastCalledWith(
+      expect.objectContaining({ branch_id: "physical-branch", q: "ас" }),
+    );
+    expect(zeroLegacyStock).toBeEnabled();
+    fireEvent.click(zeroLegacyStock);
+    expect(onChange).toHaveBeenCalledWith("c2", "Аскорбинка");
   });
 });
