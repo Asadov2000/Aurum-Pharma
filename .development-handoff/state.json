@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generation": 77,
+  "generation": 78,
   "work_item_id": "UNIT-ONLINE-CASH-PILOT-01",
   "control_stage_id": "ONLINE-UNIT-SALES-CLOSURE",
   "owner": "local",
-  "phase": "approved-receipt-locale-fix-validation",
+  "phase": "receipt-locale-fixed-ci-running",
   "run_id": "cashier-dispensing-preflight-2026-11-05",
   "branch": "codex/cashier-dispensing-preflight",
   "base_sha": "8068a84e4034ab91f82021939cd3fe4c0c6e7af4",
-  "expected_head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
+  "expected_head": "8e7675473f87a327e0efec1b6a834e015e18eee3",
   "validated_sha": "d7fbfc6c15a3beedab26911629134ea9c348e751",
   "pr": 454,
   "source_path": "C:/Users/Asadov/Desktop/A-Pharma/.codex/cashier-dispensing-preflight-2026-11-05/source",
@@ -29,7 +29,7 @@
     "Current limited CASHIER real UI login, shift open100 and saved3unit/3TJS cart verified; checkout blocked by403 before payment.",
     "No paid sales or stock changes; human/equipment acceptance not performed."
   ],
-  "remaining_step": "After explicit exception apply prepared test-only locale patch, validate and publish same PR454; exact-head full CI success required before main. Resume isolated cashier stand only after guarded source/baseline/revision verification. Human/equipment acceptance remains.",
+  "remaining_step": "Await exact final-head full CI; complete guarded isolated restricted cashier rehearsal; merge only green required gate. Human/equipment acceptance pending.",
   "failure_counters": {
     "optional_early_evidence_reader": {
       "count": 2,
@@ -123,11 +123,11 @@
       "job": 4388,
       "step": "online-cash-rehearsal.spec.ts:210 openSavedReceipts",
       "reason": "Test expects 3.00 TJS; existing SaleDetailModal correctly renders ru-RU 3,00 TJS; original and retry fail identically",
-      "status": "Scoped user exception granted; correct exact localized amount expectation and resume this PR",
+      "status": "Approved test-only correction committed and pushed; full CI running",
       "product_failure": false
     }
   },
-  "blocker": "Test-only receipt amount locale assertion; scoped retry exception requested under AGENTS.md two-failure rule.",
+  "blocker": null,
   "previous_completed": {
     "pr": 451,
     "merged": true,
@@ -179,7 +179,7 @@
     "confirmed_by": "user",
     "at": "2026-10-30T09:53:06.492Z"
   },
-  "updated_at": "2026-11-05T07:09:14.453Z",
+  "updated_at": "2026-11-05T07:10:10.929Z",
   "closes_control_stage": false,
   "runtime_checkout_verified": {
     "head": "b1a88ba78e2048beeca6eed929622da238b8ba2f",
@@ -193,7 +193,14 @@
     "lint": "passed",
     "format": "passed",
     "production_build": "passed",
-    "pos_gzip_kib": 194.92
+    "pos_gzip_kib": 194.92,
+    "receipt_locale_fix": {
+      "typecheck": "passed",
+      "eslint": "passed",
+      "diff_check": "passed",
+      "independent_qa": "approved",
+      "commit": "8e7675473f87a327e0efec1b6a834e015e18eee3"
+    }
   },
   "ci": {
     "head": "d7fbfc6c15a3beedab26911629134ea9c348e751",
@@ -862,14 +869,9 @@
     "test_gap": "Current connected physical E2E OWNER; CASHIER E2E ordinary sale; component test mocks catalog detail success."
   },
   "current_ci": {
-    "head": "b5c31e65ff35be4edbc869ef8ee86b8d642fbd61",
-    "workflow": "529074af-a0fa-4e12-9773-41793329bd2d",
-    "status": "failed",
-    "successful_jobs": 6,
-    "e2e_job": 4388,
-    "browser_passed": 171,
-    "browser_failed": 1,
-    "ci_gate": "not_run"
+    "head": "8e7675473f87a327e0efec1b6a834e015e18eee3",
+    "workflow": "f65f09b4-7d91-4c1e-811a-0b65d1b7f955",
+    "status": "running"
   },
   "local_shutdown": {
     "requested": true,
