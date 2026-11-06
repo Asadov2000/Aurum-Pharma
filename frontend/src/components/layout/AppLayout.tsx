@@ -301,7 +301,12 @@ export function AppLayout({ children }: { children: ReactNode }): JSX.Element {
   }, [navigationOpen]);
 
   return (
-    <div data-ui-version="2026" className="min-h-screen bg-background" style={shellStyle}>
+    <div
+      data-ui-version="2026"
+      data-nav={sidebarPreferences.desktopMode}
+      className="min-h-screen bg-background"
+      style={shellStyle}
+    >
       {sidebarPersistence}
       <a href="#main-content" className="app-shell-skip-link">
         Перейти к содержимому

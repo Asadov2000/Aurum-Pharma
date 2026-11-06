@@ -132,12 +132,12 @@ export function QuickProducts({
                     disabled={busy || unavailable || pendingId !== null}
                     onClick={() => void addProduct(item)}
                     className={cn(
-                      "flex min-h-24 w-full min-w-0 gap-3 rounded-lg border border-border bg-surface p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                      view === "grid" ? "h-full flex-col" : "items-center justify-between",
+                      "flex min-h-24 w-full min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                      view === "grid" && "h-full",
                       touch ? "pr-14" : "pr-11",
                     )}
                   >
-                    <span className="min-w-0 flex-1">
+                    <span className="w-full min-w-0 flex-1">
                       <span className="block break-words text-sm font-semibold leading-5 text-foreground">
                         {item.brand_name}
                       </span>
@@ -161,15 +161,15 @@ export function QuickProducts({
                               : `В наличии: ${formatStock(stock)} шт.`}
                       </span>
                     </span>
-                    <span className={cn("shrink-0", view === "list" && "text-right")}>
-                      <span className="block font-mono text-sm font-semibold tabular-nums text-foreground">
+                    <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+                      <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
                         {item.base_price ? Number(item.base_price).toFixed(2) : "—"}
                       </span>
-                      <span className="block text-[10px] text-foreground-muted">
+                      <span className="text-[10px] text-foreground-muted">
                         {item.currency} · базовая цена
                       </span>
                       {adding ? (
-                        <span role="status" className="block text-xs text-primary">
+                        <span role="status" className="w-full text-xs text-primary">
                           Добавление…
                         </span>
                       ) : null}

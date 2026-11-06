@@ -16,6 +16,7 @@ import { useDevicePreferences } from "@/lib/devicePreferences";
 import { DRAFT_TTL_MIN } from "./draftStorage";
 import { type RegisterSwitchState, SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
+import "./posWorkspace.css";
 
 const PosWorkstationSettings = lazy(async () => {
   const module = await import("./PosWorkstationSettings");
@@ -220,7 +221,7 @@ export function POSPage(): JSX.Element {
   return (
     <div
       className={cn(
-        "space-y-4",
+        "pos-workspace space-y-4",
         registerId &&
           "xl:h-[calc(100dvh-var(--app-header-height)-2.75rem)] xl:min-h-0 xl:space-y-0",
         mode === "touch" ? "pos--touch" : "pos--keyboard",

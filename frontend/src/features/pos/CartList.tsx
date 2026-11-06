@@ -333,7 +333,7 @@ export function CartList({
               data-context-actions={quickActions ? true : undefined}
               tabIndex={quickActions ? 0 : undefined}
               className={cn(
-                "flex flex-col gap-3 px-4",
+                "flex flex-col gap-2 px-4",
                 !stacked && "sm:flex-row sm:items-center",
                 touch ? "py-5" : "py-4",
                 windowed && "pos-cv",
@@ -342,7 +342,7 @@ export function CartList({
               <div className="min-w-0 flex-1">
                 <p
                   className={cn(
-                    "font-medium text-foreground",
+                    "font-semibold text-foreground",
                     embedded ? "break-words" : "truncate",
                     touch && "text-lg",
                   )}
@@ -366,8 +366,8 @@ export function CartList({
           <li key={g.catalogId} className={cn("overflow-hidden bg-surface", windowed && "pos-cv")}>
             <div
               className={cn(
-                "flex gap-3 border-b border-border bg-foreground/[0.02] px-4 py-2",
-                embedded ? "flex-col" : "items-center justify-between",
+                "flex gap-2 border-b border-border px-4 py-2",
+                embedded ? "flex-col" : "items-center justify-between bg-foreground/[0.02]",
               )}
             >
               <p

@@ -21,7 +21,7 @@ export function CompletedReceiptLines({
         <li
           key={line.position}
           className={cn(
-            "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4 sm:grid-cols-[minmax(0,1fr)_8.5rem_5.5rem_2.5rem]",
+            "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4",
             touch ? "py-4 text-base" : "py-3 text-sm",
           )}
         >
@@ -31,14 +31,13 @@ export function CompletedReceiptLines({
               <p className="text-xs text-foreground-muted">{line.quantity_description}</p>
             )}
           </div>
-          <p className="font-mono tabular-nums sm:text-center">
+          <p className="col-start-1 row-start-2 font-mono text-xs tabular-nums text-foreground-muted">
             {line.qty}
             {line.unit_label ? ` ${line.unit_label}` : ""}
           </p>
-          <p className="col-span-2 text-right font-mono tabular-nums sm:col-span-1">
+          <p className="col-start-2 row-start-1 text-right font-mono font-semibold tabular-nums">
             {line.total_price} {currency}
           </p>
-          <span aria-hidden="true" className="hidden sm:block" />
         </li>
       ))}
     </ul>

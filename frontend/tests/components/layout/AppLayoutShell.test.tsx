@@ -595,6 +595,45 @@ describe("AppLayout shell", () => {
     ).toEqual(["/catalog"]);
   });
 
+  it.each(["auto", "expanded", "compact"] as const)(
+    "preserves %s navigation preferences while giving the cashier its own rail",
+    (desktopMode) => {
+      vi.mocked(window.matchMedia).mockReturnValue({
+        ...window.matchMedia("(min-width: 80rem)"),
+        matches: true,
+      });
+      const storageKey = "aurum:sidebar:v1:user-1%3Atenant-1";
+      window.localStorage.setItem(storageKey, JSON.stringify({ desktopMode }));
+      const view = render(
+        <AppLayout>
+          <section>Cashier</section>
+        </AppLayout>,
+      );
+      const shell = view.container.querySelector<HTMLElement>("[data-ui-version]")!;
+      expect(shell.style.getPropertyValue("--app-sidebar-width")).toBe(
+        desktopMode === "compact" ? "4.5rem" : "15rem",
+      );
+      expect(
+        within(screen.getByRole("navigation", { name: "Основная навигация" })).getByRole("link", {
+          name: "Каталог",
+        }),
+      ).toBeInTheDocument();
+      layoutState.pathname = "/catalog";
+      view.rerender(
+        <AppLayout>
+          <section>Catalog</section>
+        </AppLayout>,
+      );
+      expect(shell).toHaveAttribute("data-nav", desktopMode);
+      expect(shell.style.getPropertyValue("--app-sidebar-width")).toBe(
+        desktopMode === "compact" ? "4.5rem" : "15rem",
+      );
+      expect(JSON.parse(window.localStorage.getItem(storageKey) ?? "{}").desktopMode).toBe(
+        desktopMode,
+      );
+    },
+  );
+
   it("applies account menu preferences without opening the settings page", async () => {
     authMock.user.permissions.push("billing.overview.view", "billing.invoice.view");
     layoutState.pathname = "/";

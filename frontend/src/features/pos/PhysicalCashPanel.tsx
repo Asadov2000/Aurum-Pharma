@@ -335,24 +335,31 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     total && tendered && cents(tendered) >= cents(total)
       ? displayMoney(cents(tendered) - cents(total))
       : "—";
+  const changeSummary = (
+    <dl className="rounded-lg bg-primary/5 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <dt className="text-sm font-semibold">Сдача</dt>
+        <dd className="text-xl font-semibold tabular-nums">
+          {change} {change !== "—" && "TJS"}
+        </dd>
+      </div>
+    </dl>
+  );
   return (
     <section
-      className="space-y-4 rounded-lg border border-border bg-surface p-4"
+      className="space-y-4 rounded-[10px] border border-border bg-surface p-4"
       aria-label="Оплата наличными"
     >
       <h3 className="text-base font-semibold">Оплата наличными</h3>
-      <dl className="space-y-2 text-sm">
-        <div className="flex justify-between">
-          <dt>К оплате</dt>
-          <dd className="font-semibold">{total ? `${total} TJS` : "—"}</dd>
-        </div>
-        <div className="flex justify-between">
-          <dt>Сдача</dt>
-          <dd>
-            {change} {change !== "—" && "TJS"}
+      <dl>
+        <div className="space-y-1">
+          <dt className="text-xs text-foreground-muted">К оплате</dt>
+          <dd className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums">
+            {total ? `${total} TJS` : "—"}
           </dd>
         </div>
       </dl>
+      {(finished || pending) && changeSummary}
       {finished ? (
         <p role="status">Продажа завершена. Чек сохранён.</p>
       ) : pending ? (
@@ -390,6 +397,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
           <Input
             id={id}
             inputMode="decimal"
+            className="h-11 rounded-lg text-right text-xl tabular-nums"
             autoComplete="off"
             disabled={busy || !props.canPay || !!initial.error || finished}
             invalid={!!form.formState.errors.received}
@@ -400,9 +408,30 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
               {form.formState.errors.received.message}
             </p>
           )}
+          <div className="grid grid-cols-[1.5fr_repeat(3,1fr)] gap-1">
+            {[null, 10, 50, 100].map((amount) => (
+              <Button
+                key={amount ?? "exact"}
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="min-w-0 px-1"
+                disabled={busy || !props.canPay || !quote || !!initial.error || finished}
+                onClick={() => {
+                  form.setValue("received", String(amount ?? total).replace(".", ","), {
+                    shouldDirty: true,
+                  });
+                  form.clearErrors("received");
+                }}
+              >
+                {amount ?? "Без сдачи"}
+              </Button>
+            ))}
+          </div>
+          {changeSummary}
           <Button
             type="submit"
-            className="w-full"
+            className="h-11 w-full"
             disabled={!props.canPay || !props.online || !quote || quoteLoading || !!initial.error}
             isLoading={busy}
           >

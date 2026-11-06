@@ -328,14 +328,13 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
 
   return (
     <section
-      className="space-y-3 rounded-lg border border-border bg-surface p-3"
+      className="space-y-4 rounded-lg border border-border bg-surface p-3"
       aria-label="Продажа упаковками, блистерами и поштучно"
     >
       <div>
-        <h3 className="font-semibold">Упаковки, блистеры и штуки</h3>
-        <p className="text-sm text-foreground-muted">
-          Выберите, в каком виде покупатель берёт лекарство. Корзина сохраняется на сервере; остатки
-          пока не списываются.
+        <h3 className="text-sm font-semibold">Упаковки, блистеры и штуки</h3>
+        <p className="mt-1 text-xs leading-relaxed text-foreground-muted">
+          Выберите формат продажи. Корзина сохраняется без списания остатков.
         </p>
       </div>
       {items.some((item) => !item.physical_packaging) && (
@@ -343,62 +342,6 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
           В этой корзине есть позиции со старой настройкой. Здесь доступен только просмотр; новые
           форматы добавлять нельзя.
         </p>
-      )}
-      {!!items.length && (
-        <ul className="divide-y divide-border">
-          {items.map((item) => {
-            const line = quote?.quote.lines.find((candidate) => candidate.id === item.id);
-            const prepared = !item.physical_packaging;
-            return (
-              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {nameById[item.catalog_id] ?? "Лекарство из каталога"}
-                  </p>
-                  <p className="text-sm text-foreground-muted">
-                    {formatNames[item.sale_format]} · {item.quantity} ·{" "}
-                    {line ? `${line.net_amount} TJS` : "Не рассчитано"}
-                  </p>
-                  {prepared && (
-                    <p className="text-sm text-warning">
-                      Старая настройка поштучной продажи. Эту строку пока нельзя изменять здесь.
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={controlsLocked || prepared}
-                    onClick={() => {
-                      if (!active()) return;
-                      itemId.current = item.id;
-                      setEditingId(item.id);
-                      setSelectedName(nameById[item.catalog_id] ?? "Лекарство из каталога");
-                      setError(null);
-                      form.reset({
-                        catalogId: item.catalog_id,
-                        format: item.sale_format,
-                        quantity: String(item.quantity),
-                      });
-                      setPickerVersion((value) => value + 1);
-                    }}
-                  >
-                    Изменить
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={controlsLocked || prepared}
-                    onClick={() => void remove(item)}
-                  >
-                    Удалить
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
       )}
       <form onSubmit={(event) => void save(event)} className="space-y-3">
         <fieldset disabled={locked} className="space-y-3">
@@ -422,7 +365,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
               />
             </fieldset>
           </div>
-          <div role="radiogroup" aria-label="Как продавать" className="flex flex-wrap gap-2">
+          <div role="radiogroup" aria-label="Как продавать" className="grid grid-cols-3 gap-1">
             {(["pack", "blister", "unit"] as const).map((value) => {
               const option = options?.options.find((candidate) => candidate.sale_format === value);
               return (
@@ -430,6 +373,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
                   key={value}
                   role="radio"
                   aria-checked={format === value}
+                  className="min-w-0 px-1 text-xs"
                   variant={format === value ? "primary" : "secondary"}
                   disabled={controlsLocked || !option?.configured}
                   onClick={() => {
@@ -449,7 +393,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
             </p>
           )}
           {options?.packaging && (
-            <p className="text-sm text-foreground-muted">
+            <p className="text-xs leading-relaxed text-foreground-muted">
               В упаковке: {options.packaging.units_per_pack} шт.
               {options.packaging.units_per_blister
                 ? ` В блистере: ${options.packaging.units_per_blister} шт.`
@@ -461,8 +405,8 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
               .
             </p>
           )}
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="w-36">
+          <div className="grid gap-2">
+            <div className="min-w-0">
               <Label htmlFor={`${id}-quantity`}>
                 Количество
                 {format === "pack" ? " упаковок" : format === "blister" ? " блистеров" : ", шт."}
@@ -514,6 +458,62 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
           )}
         </fieldset>
       </form>
+      {!!items.length && (
+        <ul className="divide-y divide-border">
+          {items.map((item) => {
+            const line = quote?.quote.lines.find((candidate) => candidate.id === item.id);
+            const prepared = !item.physical_packaging;
+            return (
+              <li key={item.id} className="space-y-2 py-3">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold">
+                    {nameById[item.catalog_id] ?? "Лекарство из каталога"}
+                  </p>
+                  <p className="mt-1 text-xs text-foreground-muted">
+                    {formatNames[item.sale_format]} · {item.quantity} ·{" "}
+                    {line ? `${line.net_amount} TJS` : "Не рассчитано"}
+                  </p>
+                  {prepared && (
+                    <p className="text-sm text-warning">
+                      Старая настройка поштучной продажи. Эту строку пока нельзя изменять здесь.
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={controlsLocked || prepared}
+                    onClick={() => {
+                      if (!active()) return;
+                      itemId.current = item.id;
+                      setEditingId(item.id);
+                      setSelectedName(nameById[item.catalog_id] ?? "Лекарство из каталога");
+                      setError(null);
+                      form.reset({
+                        catalogId: item.catalog_id,
+                        format: item.sale_format,
+                        quantity: String(item.quantity),
+                      });
+                      setPickerVersion((value) => value + 1);
+                    }}
+                  >
+                    Изменить
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={controlsLocked || prepared}
+                    onClick={() => void remove(item)}
+                  >
+                    Удалить
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {unresolved && (
         <div className="space-y-2 text-sm text-warning-foreground">
           <p role="status">
@@ -540,7 +540,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
         </p>
       )}
       {!!items.length && (
-        <p className="text-right font-semibold">
+        <p className="border-t border-border pt-3 text-right font-semibold tabular-nums">
           Итого: {quote ? `${quote.quote.total_amount} TJS` : "Не рассчитано"}
         </p>
       )}

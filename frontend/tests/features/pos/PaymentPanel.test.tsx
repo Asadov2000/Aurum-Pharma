@@ -27,6 +27,73 @@ const baseProps = {
 };
 
 describe("PaymentPanel", () => {
+  it("fills cash shortcuts without starting payment and retains the insufficient-cash guard", () => {
+    const onPayTile = vi.fn();
+    render(<PaymentPanel {...baseProps} mixedPaymentEnabled={false} onPayTile={onPayTile} />);
+    const received = screen.getByRole("textbox", { name: "Получено наличными" });
+
+    for (const amount of [10, 50, 100]) {
+      fireEvent.click(screen.getByRole("button", { name: String(amount), exact: true }));
+      expect(received).toHaveValue(`${amount},00`);
+      expect(onPayTile).not.toHaveBeenCalled();
+      const accept = screen.getByRole("button", { name: "Принять наличные" });
+      if (amount < 59) expect(accept).toBeDisabled();
+      else expect(accept).toBeEnabled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Без сдачи" }));
+    expect(received).toHaveValue("59,00");
+    expect(onPayTile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
+    expect(onPayTile).toHaveBeenCalledWith("cash", "59.00", { cash_received: "59.00" });
+  });
+
+  it("keeps the numeric keypad in touch mode and blocks shortcuts with the cash field", () => {
+    const { rerender } = render(<PaymentPanel {...baseProps} />);
+    expect(screen.queryByRole("button", { name: "Цифра 7" })).not.toBeInTheDocument();
+    rerender(<PaymentPanel {...baseProps} touch />);
+    fireEvent.click(screen.getByRole("button", { name: "Цифра 7" }));
+    expect(screen.getByRole("textbox", { name: "Получено наличными" })).toHaveValue("7");
+    rerender(<PaymentPanel {...baseProps} touch interactionBlocked />);
+    expect(screen.getByRole("button", { name: "Без сдачи" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "100", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Цифра 7" })).toBeDisabled();
+  });
+
+  it("fills exact cash after a noncash payment without duplicating recorded cash", () => {
+    const onPayTile = vi.fn();
+    const payments = [
+      {
+        id: "card",
+        sale_id: "s",
+        operation_id: null,
+        payment_method: "card" as const,
+        amount: "20.00",
+        currency: "TJS",
+      },
+      {
+        id: "cash",
+        sale_id: "s",
+        operation_id: null,
+        payment_method: "cash" as const,
+        amount: "10.00",
+        currency: "TJS",
+      },
+    ];
+    render(
+      <PaymentPanel
+        {...baseProps}
+        totalPaid={30}
+        remaining={29}
+        payments={payments}
+        onPayTile={onPayTile}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Без сдачи" }));
+    expect(screen.getByRole("textbox", { name: "Получено наличными" })).toHaveValue("39,00");
+    fireEvent.click(screen.getByRole("button", { name: "Принять наличные" }));
+    expect(onPayTile).toHaveBeenCalledWith("cash", "29.00", { cash_received: "29.00" });
+  });
+
   it("uses received cash for the applied amount and shows change", () => {
     const onPayTile = vi.fn();
     render(<PaymentPanel {...baseProps} onPayTile={onPayTile} />);
