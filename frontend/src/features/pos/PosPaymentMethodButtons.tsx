@@ -30,12 +30,7 @@ export function PosPaymentMethodButtons<Method extends string>({
           aria-pressed={value === option.value}
           disabled={disabled || option.disabled}
           onClick={() => onChange(option.value)}
-          className={cn(
-            "pos-tile min-h-12 min-w-0 rounded-lg border px-2 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            value === option.value
-              ? "border-primary bg-primary/10 text-primary"
-              : "border-border bg-surface text-foreground hover:bg-primary/5",
-          )}
+          className="pos-tile pos-payment-method"
         >
           {option.label}
         </button>

@@ -333,6 +333,26 @@
 }
 
 @layer components {
+  .aurum-button {
+    @apply relative inline-flex shrink-0 items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast disabled:cursor-not-allowed disabled:shadow-none;
+  }
+
+  .aurum-button-spinner {
+    @apply absolute h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent;
+  }
+
+  .pos-payment-method {
+    @apply min-h-12 min-w-0 rounded-lg border border-border bg-surface px-2 py-2 text-sm font-medium text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .pos-payment-method[aria-pressed="true"] {
+    @apply border-primary bg-primary/10 text-primary;
+  }
+
+  .pos-payment-method[aria-pressed="false"]:hover {
+    @apply bg-primary/5;
+  }
+
   .record-action-menu {
     @apply rounded-[14px] border border-border bg-surface-raised p-[7px] text-foreground shadow-xl;
     animation: record-menu-appear 120ms ease-out;

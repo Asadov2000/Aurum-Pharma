@@ -84,6 +84,44 @@ async function prepare() {
 }
 
 describe("physical payment preparation", () => {
+  it("uses the unified method selection for exact amounts without duplicate controls", async () => {
+    const p = { ...props(), embedded: true, selectedMethod: "qr" as const };
+    const view = render(<PhysicalPaymentPreparationPanel {...p} />);
+    const open = screen.getByRole("button", { name: "Продолжить оплату" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    await waitFor(() => expect(screen.getByLabelText("Через QR, TJS")).toHaveValue("1.99"));
+    expect(
+      screen.queryByRole("group", { name: "Способ электронной оплаты" }),
+    ).not.toBeInTheDocument();
+    view.rerender(<PhysicalPaymentPreparationPanel {...p} selectedMethod="card" />);
+    await waitFor(() => expect(screen.getByLabelText("Картой, TJS")).toHaveValue("1.99"));
+    expect(screen.getByLabelText("Через QR, TJS")).toHaveValue("0");
+    view.rerender(<PhysicalPaymentPreparationPanel {...p} selectedMethod="mixed" />);
+    await waitFor(() => expect(screen.getByLabelText("Наличными, TJS")).toBeVisible());
+    expect(screen.getByLabelText("Картой, TJS")).toHaveValue("1.99");
+    expect(network.save).not.toHaveBeenCalled();
+    expect(network.preview).not.toHaveBeenCalled();
+  });
+
+  it("reports the recovered plan method without replacing its saved allocation", async () => {
+    network.active.mockResolvedValue({ intent: saved, binding: null });
+    const onRecoveryMethodChange = vi.fn();
+    render(
+      <PhysicalPaymentPreparationPanel
+        {...props()}
+        embedded
+        selectedMethod="qr"
+        onRecoveryMethodChange={onRecoveryMethodChange}
+      />,
+    );
+    await waitFor(() => expect(onRecoveryMethodChange).toHaveBeenLastCalledWith("card"));
+    expect(screen.getByRole("button", { name: "Закрепить план" })).toBeEnabled();
+    expect(screen.getByText("Картой, TJS: 1.99")).toBeVisible();
+    expect(network.quote).not.toHaveBeenCalled();
+    expect(network.save).not.toHaveBeenCalled();
+  });
+
   it("selects a whole-amount electronic plan without starting payment", async () => {
     render(<PhysicalPaymentPreparationPanel {...props()} />);
     await openForm();

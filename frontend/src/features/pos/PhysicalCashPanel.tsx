@@ -22,6 +22,7 @@ import { hasCashRecovery } from "./physicalCashRecoveryPresence";
 
 export type CashCheckoutResult = PhysicalCashCheckoutResult | MixedCashCheckoutResult;
 const CashRecoveryActions = lazy(() => import("./CashRecoveryActions"));
+const NumPad = lazy(() => import("./NumPad"));
 const strategies = {
   physical: {
     parse: parsePhysicalCashQuote,
@@ -39,6 +40,8 @@ const strategies = {
 const emptyLegacyItems: SaleItem[] = [];
 
 interface Props {
+  embedded?: boolean;
+  onTotalChange?: (total: string | null) => void;
   saleId: string;
   branchId: string;
   registerId: string;
@@ -112,6 +115,7 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [keypadOpen, setKeypadOpen] = useState(false);
   const id = useId();
   const form = useForm<{ received: string }>({ defaultValues: { received: "" } });
   const received = form.watch("received");
@@ -335,30 +339,40 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
     total && tendered && cents(tendered) >= cents(total)
       ? displayMoney(cents(tendered) - cents(total))
       : "—";
+  const { onTotalChange } = props;
+  useEffect(() => {
+    onTotalChange?.(total ?? null);
+  }, [total, onTotalChange]);
   const changeSummary = (
     <dl className="rounded-lg bg-primary/5 px-3 py-3">
       <div className="flex items-center justify-between gap-3">
         <dt className="text-sm font-semibold">Сдача</dt>
         <dd className="text-xl font-semibold tabular-nums">
-          {change} {change !== "—" && "TJS"}
+          {props.embedded ? change.replace(".", ",") : change} {change !== "—" && "TJS"}
         </dd>
       </div>
     </dl>
   );
   return (
     <section
-      className="space-y-4 rounded-[10px] border border-border bg-surface p-4"
+      className={
+        props.embedded
+          ? "space-y-3"
+          : "space-y-4 rounded-[10px] border border-border bg-surface p-4"
+      }
       aria-label="Оплата наличными"
     >
-      <h3 className="text-base font-semibold">Оплата наличными</h3>
-      <dl>
-        <div className="space-y-1">
-          <dt className="text-xs text-foreground-muted">К оплате</dt>
-          <dd className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums">
-            {total ? `${total} TJS` : "—"}
-          </dd>
-        </div>
-      </dl>
+      {!props.embedded && <h3 className="text-base font-semibold">Оплата наличными</h3>}
+      {!props.embedded && (
+        <dl>
+          <div className="space-y-1">
+            <dt className="text-xs text-foreground-muted">К оплате</dt>
+            <dd className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums">
+              {total ? `${total} TJS` : "—"}
+            </dd>
+          </div>
+        </dl>
+      )}
       {(finished || pending) && changeSummary}
       {finished ? (
         <p role="status">Продажа завершена. Чек сохранён.</p>
@@ -394,22 +408,41 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
           }}
         >
           <Label htmlFor={id}>Получено наличными, TJS</Label>
-          <Input
-            id={id}
-            inputMode="decimal"
-            className="h-11 rounded-lg text-right text-xl tabular-nums"
-            autoComplete="off"
-            disabled={busy || !props.canPay || !!initial.error || finished}
-            invalid={!!form.formState.errors.received}
-            {...form.register("received", { onChange: () => form.clearErrors("received") })}
-          />
+          <div className="flex gap-2">
+            <Input
+              id={id}
+              inputMode="decimal"
+              className="h-11 rounded-lg text-right text-xl tabular-nums"
+              autoComplete="off"
+              disabled={busy || !props.canPay || !!initial.error || finished}
+              invalid={!!form.formState.errors.received}
+              {...form.register("received", { onChange: () => form.clearErrors("received") })}
+            />
+            {props.embedded && (
+              <Button
+                type="button"
+                variant="secondary"
+                aria-label="Ввести полученную сумму на экранной клавиатуре"
+                disabled={busy || !props.canPay || !!initial.error || finished}
+                onClick={() => setKeypadOpen(true)}
+              >
+                123
+              </Button>
+            )}
+          </div>
           {form.formState.errors.received && (
             <p role="alert" className="text-sm text-danger">
               {form.formState.errors.received.message}
             </p>
           )}
-          <div className="grid grid-cols-[1.5fr_repeat(3,1fr)] gap-1">
-            {[null, 10, 50, 100].map((amount) => (
+          <div
+            className={
+              props.embedded
+                ? "grid grid-cols-[1.5fr_1fr_1fr] gap-1"
+                : "grid grid-cols-[1.5fr_repeat(3,1fr)] gap-1"
+            }
+          >
+            {(props.embedded ? [null, 10, 50] : [null, 10, 50, 100]).map((amount) => (
               <Button
                 key={amount ?? "exact"}
                 type="button"
@@ -463,6 +496,22 @@ export function PhysicalCashPanel(props: Props): JSX.Element {
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
+      )}
+      {keypadOpen && (
+        <Suspense fallback={<p role="status">Открываем клавиатуру…</p>}>
+          <NumPad
+            title="Получено наличными, TJS"
+            initial={received.replace(",", ".")}
+            onClose={() => setKeypadOpen(false)}
+            onSubmit={(value) => {
+              if (!busy && props.canPay && !initial.error && !finished) {
+                form.setValue("received", value, { shouldDirty: true });
+                form.clearErrors("received");
+              }
+              setKeypadOpen(false);
+            }}
+          />
+        </Suspense>
       )}
     </section>
   );

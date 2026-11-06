@@ -29,6 +29,23 @@
   @apply mt-auto flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3;
 }
 
+.pos-workspace .pos-selected-product {
+  @apply m-3 space-y-3 border-b border-border pb-4;
+}
+
+.pos-workspace .pos-selected-product h3 {
+  @apply text-base font-semibold;
+}
+
+.pos-workspace .pos-quick-product {
+  min-height: 5.25rem;
+}
+
+.pos-workspace .pos-catalog-filter[aria-pressed="true"],
+.pos-workspace .pos-unit-choice[aria-checked="true"] {
+  @apply border-primary bg-primary/5 text-primary;
+}
+
 @media (min-width: 640px) {
   .pos-workspace .pos-current-receipt {
     min-height: 30rem;

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SaleArea } from "@/features/pos/SaleArea";
 import { draftKey } from "@/features/pos/draftStorage";
@@ -38,6 +39,8 @@ const calls = vi.hoisted(() => ({
   preparation: vi.fn(),
   drawer: vi.fn(),
   catalog: vi.fn(),
+  listCatalog: vi.fn(),
+  options: vi.fn(),
   preflight: vi.fn(),
   prescription: vi.fn(),
   realCashPanel: false,
@@ -85,6 +88,10 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 vi.mock("@/features/catalog/api", () => ({
   findByBarcode: calls.barcode,
   getCatalogItem: calls.catalog,
+  listCatalog: calls.listCatalog,
+}));
+vi.mock("@/features/pos/physicalCartOptions", () => ({
+  getPhysicalCartOptions: calls.options,
 }));
 vi.mock("@/features/pos/dispensingPreflight", () => ({
   requiresSalePrescription: calls.preflight,
@@ -115,6 +122,8 @@ vi.mock("@/features/pos/PhysicalCartEditor", () => ({
     items: PhysicalCartItem[];
     disabled: boolean;
     onChanged: () => Promise<void>;
+    selection?: { catalogId: string } | null;
+    onSelectionCancel?: () => void;
   }) => {
     calls.editor(props);
     return (
@@ -123,6 +132,7 @@ vi.mock("@/features/pos/PhysicalCartEditor", () => ({
         <button disabled={props.disabled} onClick={() => void props.onChanged()}>
           Обновить физическую корзину
         </button>
+        {props.selection && <button onClick={props.onSelectionCancel}>Отменить выбор</button>}
       </section>
     );
   },
@@ -142,10 +152,17 @@ vi.mock("@/features/pos/PhysicalCashPanel", async (original) => {
   };
 });
 vi.mock("@/features/pos/PhysicalPaymentPreparationPanel", () => ({
-  PhysicalPaymentPreparationPanel: (props: {
-    canPrepare: boolean;
-    onBlockedChange: (blocked: boolean) => void;
-  }) => {
+  PhysicalPaymentPreparationPanel: function MockPreparation(
+    props: Parameters<
+      typeof import("@/features/pos/PhysicalPaymentPreparationPanel").PhysicalPaymentPreparationPanel
+    >[0],
+  ) {
+    const { saleId, scope, onBlockedChange, onRecoveryMethodChange } = props;
+    useEffect(() => {
+      const pending = localStorage.getItem(unitPaymentMarkerKey(saleId, scope)) !== null;
+      onBlockedChange(pending);
+      onRecoveryMethodChange?.(pending ? "card" : null);
+    }, [saleId, scope, onBlockedChange, onRecoveryMethodChange]);
     calls.preparation(props);
     return (
       <section aria-label="Подготовка карты и QR">
@@ -173,6 +190,15 @@ const shift: Shift = {
   totals: null,
   currency: "TJS",
   notes: null,
+};
+const selectableProduct = {
+  id: "c-1",
+  tenant_id: "t-1",
+  brand_name: "Аспирин",
+  is_active: true,
+  stock_available: "30",
+  base_price: "25.00",
+  currency: "TJS",
 };
 const physicalItem: PhysicalCartItem = {
   id: "physical-1",
@@ -324,6 +350,15 @@ function mount(mode: "keyboard" | "touch" = "keyboard", options: { canSell?: boo
   return { ...view, client };
 }
 describe("SaleArea physical cart integration", () => {
+  beforeAll(async () => {
+    // These tests exercise payment ownership, not the cold transform of lazy UI modules.
+    await Promise.all([
+      import("@/features/pos/PhysicalPaymentPanels"),
+      import("@/features/pos/TrainingCheckoutPanel"),
+      import("@/features/pos/CompletedReceiptLines"),
+      import("@/features/pos/QuickProducts"),
+    ]);
+  });
   beforeEach(() => {
     authenticatePos();
     window.localStorage.clear();
@@ -332,6 +367,21 @@ describe("SaleArea physical cart integration", () => {
     calls.preflight.mockReset().mockResolvedValue(false);
     calls.shift.mockResolvedValue(shift);
     calls.sale.mockResolvedValue(sale());
+    calls.listCatalog.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+    calls.options.mockReset().mockResolvedValue({
+      state: "physical_options_preview",
+      tenant_id: "t-1",
+      branch_id: "b-1",
+      sale_id: "sale-1",
+      catalog_id: "c-1",
+      packaging: physicalItem.physical_packaging,
+      currency: "TJS",
+      checkout_enabled: false,
+      stock_reserved: false,
+      stock_date: "2026-10-08",
+      stock: { base_units: 30, closed_packs: 1, intact_blisters: 3 },
+      options: [],
+    });
     window.localStorage.setItem(
       draftKey("reg-1", POS_SCOPE),
       JSON.stringify({ saleId: "sale-1", nameById: { "c-1": "Аспирин" }, savedAt: Date.now() }),
@@ -344,6 +394,10 @@ describe("SaleArea physical cart integration", () => {
 
   it("freezes physical editing and cash while a payment plan is bound, then releases both", async () => {
     mount();
+    await cashPanelCallbacks();
+    const card = screen.getByRole("button", { name: "Карта", exact: true });
+    await waitFor(() => expect(card).toBeEnabled());
+    fireEvent.click(card);
     const preparation = await screen.findByRole("region", { name: "Подготовка карты и QR" });
     await waitFor(() =>
       expect(calls.panel).toHaveBeenLastCalledWith(expect.objectContaining({ canPay: true })),
@@ -448,8 +502,14 @@ describe("SaleArea physical cart integration", () => {
       mount(mode);
       await screen.findByRole("region", { name: "Физическая корзина" });
       expect(await screen.findByRole("region", { name: "Оплата наличными" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Наличные" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Карта" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Наличные", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.queryByRole("button", { name: "Принять наличные" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Перейти к оплате картой" }),
+      ).not.toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Быстрая оплата" })).not.toBeInTheDocument();
       for (const key of ["Enter", "F4", "F2"]) fireEvent.keyDown(window, { key });
       expect(screen.getByRole("region", { name: "Физическая корзина" })).toBeInTheDocument();
@@ -461,16 +521,20 @@ describe("SaleArea physical cart integration", () => {
     },
   );
 
-  it("does not scan legacy stock into a restored physical cart", async () => {
+  it("checks a scanned product without writing legacy stock into a restored physical cart", async () => {
+    calls.barcode.mockResolvedValue(selectableProduct);
     mount();
     await screen.findByRole("region", { name: "Физическая корзина" });
     fireEvent(
       window,
       new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "1234567890123" } }),
     );
-    await act(async () => undefined);
-    expect(calls.barcode).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(calls.options).toHaveBeenCalledWith("sale-1", "c-1", expect.any(AbortSignal)),
+    );
+    expect(calls.barcode).toHaveBeenCalledWith("1234567890123", "b-1");
     expect(calls.addItem).not.toHaveBeenCalled();
+    expect(calls.checkout).not.toHaveBeenCalled();
   });
 
   it("locks editing and register switching immediately when cash begins", async () => {
@@ -756,9 +820,7 @@ describe("SaleArea physical cart integration", () => {
     );
     mount();
     await screen.findByRole("region", { name: "Физическая корзина" });
-    expect(
-      screen.getByText("Обычные и поштучные позиции оплачиваются вместе наличными."),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Оплата", exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
     expect(calls.panel).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -767,7 +829,7 @@ describe("SaleArea physical cart integration", () => {
         legacyItems: [expect.objectContaining({ id: "item-1" })],
       }),
     );
-    expect(screen.queryByRole("button", { name: "Увеличить количество" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Увеличить количество" })).toBeEnabled();
     fireEvent.keyDown(window, { key: "F4" });
     expect(calls.checkout).not.toHaveBeenCalled();
     expect(calls.complete).not.toHaveBeenCalled();
@@ -805,31 +867,38 @@ describe("SaleArea physical cart integration", () => {
     );
     expect(localStorage.getItem(mixedCashRecoveryKey("sale-1", POS_SCOPE))).toBe("uncertain-mixed");
   });
-  it.each([
-    ["Упаковки", "pack"],
-    ["Блистеры", "blister"],
-    ["Штуки", "unit"],
-  ] as const)("opens %s directly without making another sale or payment", async (label, format) => {
-    calls.sale.mockResolvedValue(sale({ prepared_cart_items: [], items: [legacyItem] }));
-    mount();
-    const button = await screen.findByRole("button", {
-      name: label,
-    });
-    await waitFor(() => expect(button).toBeEnabled());
-    fireEvent.click(button);
-    await screen.findByRole("region", { name: "Физическая корзина" });
-    expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
-    expect(calls.create).not.toHaveBeenCalled();
-    expect(calls.editor).toHaveBeenLastCalledWith(
-      expect.objectContaining({ initialFormat: format }),
-    );
-    expect(calls.addItem).not.toHaveBeenCalled();
-    expect(calls.addPayment).not.toHaveBeenCalled();
-    expect(calls.checkout).not.toHaveBeenCalled();
-  });
+  it.each(["keyboard", "touch"] as const)(
+    "selects a product before physical editing in %s mode without making a payment",
+    async (mode) => {
+      calls.sale.mockResolvedValue(sale({ prepared_cart_items: [], items: [legacyItem] }));
+      calls.listCatalog.mockResolvedValue({
+        items: [selectableProduct],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      });
+      mount(mode);
+      const button = await screen.findByRole("button", { name: "Выбрать Аспирин" });
+      await waitFor(() => expect(button).toBeEnabled());
+      fireEvent.click(button);
+      await screen.findByRole("region", { name: "Физическая корзина" });
+      expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
+      expect(calls.options).toHaveBeenCalledWith("sale-1", "c-1", expect.any(AbortSignal));
+      expect(calls.create).not.toHaveBeenCalled();
+      expect(calls.editor).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          selection: expect.objectContaining({ catalogId: "c-1", name: "Аспирин" }),
+        }),
+      );
+      expect(calls.catalog).not.toHaveBeenCalled();
+      expect(calls.addItem).not.toHaveBeenCalled();
+      expect(calls.addPayment).not.toHaveBeenCalled();
+      expect(calls.checkout).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["closed shift", "payment started"])(
-    "blocks all format shortcuts for %s",
+    "blocks product selection for %s",
     async (reason) => {
       calls.sale.mockResolvedValue(
         sale({
@@ -837,17 +906,54 @@ describe("SaleArea physical cart integration", () => {
           payments: reason === "payment started" ? completedSale().payments : [],
         }),
       );
+      calls.listCatalog.mockResolvedValue({
+        items: [selectableProduct],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      });
       if (reason === "closed shift") calls.shift.mockResolvedValue(null);
       mount();
-      const formats = await screen.findByRole("group", { name: "Формат продажи" });
-      for (const button of within(formats).getAllByRole("button")) {
-        expect(button).toBeDisabled();
-        fireEvent.click(button);
+      if (reason === "closed shift") {
+        await screen.findByText("Выберите аптеку для просмотра товаров.");
+        expect(screen.queryByRole("button", { name: "Выбрать Аспирин" })).not.toBeInTheDocument();
+      } else {
+        const product = await screen.findByRole("button", { name: "Выбрать Аспирин" });
+        expect(product).toBeDisabled();
+        fireEvent.click(product);
       }
+      expect(calls.options).not.toHaveBeenCalled();
       expect(calls.editor).not.toHaveBeenCalled();
       expect(calls.create).not.toHaveBeenCalled();
     },
   );
+  it("keeps the existing receipt total when a physical product is only selected", async () => {
+    calls.sale.mockResolvedValue(
+      sale({ prepared_cart_items: [], items: [legacyItem], total_amount: "50.00" }),
+    );
+    calls.listCatalog.mockResolvedValue({
+      items: [selectableProduct],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
+    mount();
+    const select = await screen.findByRole("button", { name: "Выбрать Аспирин" });
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.click(select);
+    await screen.findByRole("region", { name: "Физическая корзина" });
+    const cashOwner = calls.panel.mock.calls.at(-1)?.[0] as {
+      onTotalChange: (total: string | null) => void;
+    };
+    act(() => cashOwner.onTotalChange(null));
+    const payment = screen.getByRole("region", { name: "Оплата", exact: true });
+    expect(within(payment).getByText("50,00", { exact: true })).toBeInTheDocument();
+    const receipt = screen.getByRole("region", { name: "Текущий чек", exact: true });
+    expect(receipt.querySelector("footer")).toHaveTextContent("50,00 сомони");
+    expect(calls.addItem).not.toHaveBeenCalled();
+    expect(calls.checkout).not.toHaveBeenCalled();
+  });
+
   it.each(["physical", "mixed"] as const)("checks Rx before starting %s cash", async (kind) => {
     calls.sale.mockResolvedValue(sale({ items: kind === "mixed" ? [legacyItem] : [] }));
     calls.preflight.mockResolvedValue(true);
@@ -955,18 +1061,25 @@ describe("SaleArea physical cart integration", () => {
     expect(calls.checkout).not.toHaveBeenCalled();
   });
 
-  it("opens an empty restored draft editor and returns without creating another sale", async () => {
+  it("cancels product selection in an empty restored draft without creating another sale", async () => {
     calls.sale.mockResolvedValue(sale({ prepared_cart_items: [] }));
+    calls.listCatalog.mockResolvedValue({
+      items: [selectableProduct],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
     mount();
-    const open = await screen.findByRole("button", { name: "Упаковки" });
-    await waitFor(() => expect(open).toBeEnabled());
-    fireEvent.click(open);
+    const select = await screen.findByRole("button", { name: "Выбрать Аспирин" });
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.click(select);
     await screen.findByRole("region", { name: "Физическая корзина" });
-    fireEvent.click(screen.getByRole("button", { name: "Вернуться к обычной продаже" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отменить выбор" }));
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Физическая корзина" })).not.toBeInTheDocument(),
     );
     expect(calls.create).not.toHaveBeenCalled();
+    expect(calls.addItem).not.toHaveBeenCalled();
   });
 
   it.each(["keyboard", "touch"] as const)(
@@ -1004,12 +1117,14 @@ describe("SaleArea physical cart integration", () => {
         },
       ];
       calls.sale.mockResolvedValue(
-        completedSale({ physical_items: lines, prepared_cart_items: [] }),
+        completedSale({ physical_items: lines, prepared_cart_items: [physicalItem] }),
       );
       mount(mode);
       const receipt = await screen.findByRole("list", { name: "Товары завершённого чека" });
       expect(within(receipt).getAllByRole("listitem")).toHaveLength(3);
-      expect(screen.getAllByText("3 товара").length).toBeGreaterThan(0);
+      const currentReceipt = screen.getByRole("region", { name: "Текущий чек № R-1", exact: true });
+      expect(currentReceipt.querySelector("footer")).toHaveTextContent("50,00 сомони");
+      expect(screen.getByText(/Итого · 3 товара/)).toBeInTheDocument();
       for (const line of lines) expect(within(receipt).getByText(line.name)).toBeInTheDocument();
       expect(within(receipt).getByText("2 табл.")).toBeInTheDocument();
       expect(within(receipt).getByText("Блистер по 10 таблеток")).toBeInTheDocument();

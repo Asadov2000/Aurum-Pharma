@@ -5,7 +5,7 @@ import { dockerExec, E2E_POSTGRES_CONTAINER, E2E_POSTGRES_DB } from "./docker";
 import {
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -46,18 +46,17 @@ function cancellationCount(saleId: string): number {
 }
 
 async function addUnits(page: Page, fixture: RehearsalFixture, quantity: number) {
-  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-  await editor.getByLabel("Название лекарства").fill(catalogSearchKey(fixture.medicine.brand_name));
-  await editor.getByRole("option", { name: new RegExp(fixture.medicine.brand_name) }).click();
-  await editor.getByRole("radio", { name: "Поштучно", exact: true }).click();
+  await selectPosProduct(page, fixture.medicine.brand_name);
+  await expect(editor).toBeVisible();
+  await editor.getByRole("radio", { name: /^Штуки / }).click();
   await editor.getByLabel("Количество, шт.", { exact: true }).fill(String(quantity));
   const saved = page.waitForResponse(
     (response) =>
       response.request().method() === "PUT" &&
       /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
   );
-  await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+  await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
   const response = await saved;
   expect(response.ok()).toBe(true);
   return { editor, item: (await response.json()) as { sale_id: string; id: string } };

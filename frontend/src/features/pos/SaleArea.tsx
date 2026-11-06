@@ -56,6 +56,7 @@ import {
 import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
 import { type CashCheckoutResult } from "./PhysicalCashPanel";
 import { type PhysicalSaleFormat } from "./physicalCartOptions";
+import { type PhysicalCartSelection } from "./PhysicalCartEditor";
 import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
@@ -135,6 +136,13 @@ const QuickProducts = lazy(async () => {
   const module = await import("./QuickProducts");
   return { default: module.QuickProducts };
 });
+const SelectedProductEditor = lazy(async () => {
+  const module = await import("./SelectedProductEditor");
+  return { default: module.SelectedProductEditor };
+});
+type SelectedProduct =
+  | { kind: "physical"; item: CatalogItem; selection: PhysicalCartSelection }
+  | { kind: "ordinary"; item: CatalogItem; requestId: string };
 
 const loadNumPad = () => import("./NumPad");
 const loadExternalPaymentEvidenceDialog = async () => {
@@ -529,6 +537,15 @@ function ActiveWorkspace({
       : null,
   );
   const [physicalCartBusy, setPhysicalCartBusy] = useState(physicalEditorFormat !== null);
+  const [selectedProduct, setSelectedProduct] = useState<SelectedProduct | null>(null);
+  const [selectingProduct, setSelectingProduct] = useState(false);
+  const [editingPhysicalProduct, setEditingPhysicalProduct] = useState(false);
+  const [physicalCartTotal, setPhysicalCartTotal] = useState<string | null>(null);
+  const selectedProductRef = useRef<SelectedProduct | null>(null);
+  const selectedAddCommand = useRef<{ requestId: string; operationId: string } | null>(null);
+  const productRequest = useRef<AbortController | null>(null);
+  const selectionGeneration = useRef(0);
+  const productSelectionAllowed = useRef(false);
   const [queuedScans, setQueuedScans] = useState(0);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -552,21 +569,45 @@ function ActiveWorkspace({
   stagedPaymentsRef.current = stagedPayments;
   externalPaymentReviewRef.current = externalPaymentReviewRequired;
 
-  const onPosCommandApplied = useCallback((applied: AppliedPosCommand) => {
-    saleIdRef.current = applied.sale.id;
-    setSaleId(applied.sale.id);
-    setStaleNotice(false);
-    if (
-      applied.command.commandType === "item.add" &&
-      typeof applied.result === "object" &&
-      applied.result !== null &&
-      "requires_prescription_log" in applied.result &&
-      applied.result.requires_prescription_log === true
-    ) {
-      setRequiresRx(true);
-      setPrescriptionOpen(true);
-    }
+  const clearProductSelection = useCallback(() => {
+    selectionGeneration.current += 1;
+    productRequest.current?.abort();
+    productRequest.current = null;
+    selectedProductRef.current = null;
+    selectedAddCommand.current = null;
+    setSelectedProduct(null);
+    setSelectingProduct(false);
+    setPhysicalEditorFormat(null);
+    searchRef.current?.focus();
   }, []);
+
+  const onPosCommandApplied = useCallback(
+    (applied: AppliedPosCommand) => {
+      saleIdRef.current = applied.sale.id;
+      setSaleId(applied.sale.id);
+      setStaleNotice(false);
+      const selection = selectedProductRef.current;
+      if (
+        applied.command.commandType === "item.add" &&
+        selection?.kind === "ordinary" &&
+        selection.item.id === applied.command.catalogId &&
+        selectedAddCommand.current?.requestId === selection.requestId &&
+        selectedAddCommand.current.operationId === applied.command.operationId
+      )
+        clearProductSelection();
+      if (
+        applied.command.commandType === "item.add" &&
+        typeof applied.result === "object" &&
+        applied.result !== null &&
+        "requires_prescription_log" in applied.result &&
+        applied.result.requires_prescription_log === true
+      ) {
+        setRequiresRx(true);
+        setPrescriptionOpen(true);
+      }
+    },
+    [clearProductSelection],
+  );
   const posCommand = usePosCommandResilience({
     registerId,
     scope: storageScope,
@@ -656,8 +697,18 @@ function ActiveWorkspace({
           (!mixedPaymentEnabled &&
             (stagedPayments.length > 1 || stagedTotal + 0.001 < totalDue)))));
   const cartMutationPending =
-    !hasOpenShift || posCommand.blocked || physicalCartBusy || physicalOperationsBlocked || !online;
+    selectedProduct !== null ||
+    selectingProduct ||
+    editingPhysicalProduct ||
+    !hasOpenShift ||
+    posCommand.blocked ||
+    physicalCartBusy ||
+    physicalOperationsBlocked ||
+    !online;
   const unitPaymentReady =
+    !selectedProduct &&
+    !selectingProduct &&
+    !editingPhysicalProduct &&
     hasOpenShift &&
     isDraft &&
     preparedItems.length > 0 &&
@@ -691,10 +742,18 @@ function ActiveWorkspace({
     pendingPayment !== null ||
     (saleId !== null && sale === null);
   const physicalEditorBlocked = saleEditingBlocked || physicalCartBusy || !branchId;
+  productSelectionAllowed.current =
+    !physicalEditorBlocked &&
+    !editingPhysicalProduct &&
+    !saleQuery.isError &&
+    !saleQuery.isPlaceholderData;
   const scannerHardwareBlocked =
+    selectedProduct !== null ||
+    selectingProduct ||
+    editingPhysicalProduct ||
+    physicalCartBusy ||
     !hasOpenShift ||
     physicalOperationsBlocked ||
-    physicalCartActive ||
     !online ||
     completeSale.isPending ||
     checkoutSale.isPending ||
@@ -705,6 +764,9 @@ function ActiveWorkspace({
     pendingPayment !== null;
   const scanInputBlocked = scannerHardwareBlocked || posCommand.blocked;
   const shiftCloseBlocked =
+    selectedProduct !== null ||
+    selectingProduct ||
+    editingPhysicalProduct ||
     physicalOperationsBlocked ||
     physicalCartBusy ||
     !online ||
@@ -728,6 +790,9 @@ function ActiveWorkspace({
         stagedPayments.length > 0 ||
         prescription !== null));
   const registerSwitchBlocked =
+    selectedProduct !== null ||
+    selectingProduct ||
+    editingPhysicalProduct ||
     physicalOperationsBlocked ||
     physicalCartBusy ||
     !online ||
@@ -854,6 +919,8 @@ function ActiveWorkspace({
   );
 
   const preparePhysicalCash = async (): Promise<void> => {
+    if (selectedProductRef.current || productRequest.current || editingPhysicalProduct)
+      throw new Error("Сначала добавьте выбранный товар в чек или отмените выбор.");
     if (!sessionIsActive() || !saleId || saleIdRef.current !== saleId)
       throw new Error("Сессия кассира завершена.");
     const { requiresSalePrescription } = await import("./dispensingPreflight");
@@ -1189,7 +1256,7 @@ function ActiveWorkspace({
     flashTimer.current = window.setTimeout(() => setFlash(null), 600);
   };
 
-  // Lazily create a draft on the first add so we never leave empty drafts.
+  // A draft supplies the authorised branch/tenant context for product options.
   const ensureSaleId = useCallback(async (): Promise<string | null> => {
     if (saleIdRef.current) return saleIdRef.current;
     const outcome = await posCommand.begin({
@@ -1200,18 +1267,65 @@ function ActiveWorkspace({
     return outcome.applied?.sale.id ?? null;
   }, [posCommand, registerId]);
 
-  const openPhysicalEditor = async (format: PhysicalSaleFormat | null): Promise<void> => {
-    if (physicalEditorBlocked || !sessionIsActive()) return;
-    if (format === null) {
-      setPhysicalEditorFormat(null);
-      return;
-    }
+  useEffect(
+    () => () => {
+      selectionGeneration.current += 1;
+      productRequest.current?.abort();
+    },
+    [],
+  );
+
+  const selectProduct = async (item: CatalogItem): Promise<boolean> => {
+    if (!productSelectionAllowed.current || !branchId || !sessionIsActive()) return false;
+    selectionGeneration.current += 1;
+    productRequest.current?.abort();
+    const controller = new AbortController();
+    productRequest.current = controller;
+    setSelectingProduct(true);
+    setTopError(null);
     try {
       const id = await ensureSaleId();
-      if (id && sessionIsActive() && writableRef.current) setPhysicalEditorFormat(format);
+      if (!id || controller.signal.aborted || !sessionIsActive() || !writableRef.current)
+        return false;
+      const { resolveCashierProduct } = await import("./resolveCashierProduct");
+      const resolved = await resolveCashierProduct(id, branchId, item, controller.signal);
+      if (
+        controller.signal.aborted ||
+        !sessionIsActive() ||
+        !writableRef.current ||
+        !productSelectionAllowed.current
+      )
+        return false;
+      const requestId = crypto.randomUUID();
+      const selection: SelectedProduct =
+        resolved.kind === "physical"
+          ? {
+              kind: "physical",
+              item,
+              selection: {
+                catalogId: item.id,
+                name: item.brand_name,
+                requestId,
+                options: resolved.options,
+              },
+            }
+          : { kind: "ordinary", item, requestId };
+      selectedProductRef.current = selection;
+      setSelectedProduct(selection);
+      setPhysicalEditorFormat(resolved.kind === "physical" ? "pack" : null);
+      setNameById((current) => ({ ...current, [item.id]: item.brand_name }));
+      return true;
     } catch (error: unknown) {
-      if (sessionIsActive())
-        setTopError(describeApiError(error, "Не удалось открыть поштучную корзину"));
+      if (!controller.signal.aborted && sessionIsActive())
+        setTopError(
+          describeApiError(error, "Не удалось проверить выбранный товар. Попробуйте ещё раз."),
+        );
+      return false;
+    } finally {
+      if (productRequest.current === controller) {
+        productRequest.current = null;
+        if (sessionIsActive()) setSelectingProduct(false);
+      }
     }
   };
 
@@ -1221,14 +1335,14 @@ function ActiveWorkspace({
     qty: number,
     fromScanner = false,
   ): Promise<boolean> => {
-    if (physicalCartActive || (fromScanner ? scannerHardwareBlocked : saleEditingBlocked))
+    if (physicalCartBusy || (fromScanner ? scannerHardwareBlocked : saleEditingBlocked))
       return false;
     setTopError(null);
     try {
       const id = await ensureSaleId();
       if (!id) return false;
       if (name) setNameById((m) => ({ ...m, [catalogId]: name }));
-      const outcome = await posCommand.begin({
+      const commandRun = posCommand.begin({
         commandType: "item.add",
         registerId,
         saleId: id,
@@ -1236,6 +1350,23 @@ function ActiveWorkspace({
         qty: String(qty),
         expiredSaleConfirmed: false,
       });
+      // begin persists the command before its first await. Keep the exact ID so
+      // a later reconciliation closes this editor without permitting a second add.
+      const pending = loadPendingPosCommand(registerId, storageScope);
+      const selection = selectedProductRef.current;
+      if (
+        selection?.kind === "ordinary" &&
+        selection.item.id === catalogId &&
+        pending?.commandType === "item.add" &&
+        pending.saleId === id &&
+        pending.catalogId === catalogId &&
+        pending.qty === String(qty)
+      )
+        selectedAddCommand.current = {
+          requestId: selection.requestId,
+          operationId: pending.operationId,
+        };
+      const outcome = await commandRun;
       if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
       if (!outcome.applied) return false;
       searchRef.current?.focus();
@@ -1246,7 +1377,8 @@ function ActiveWorkspace({
     }
   };
 
-  const onScan = async (code: string) => {
+  const onScan = async (code: string, generation: number) => {
+    if (generation !== selectionGeneration.current || !sessionIsActive()) return;
     setTopError(null);
     if (!branchId) {
       doFlash("danger");
@@ -1255,7 +1387,12 @@ function ActiveWorkspace({
     }
     try {
       const item = await findByBarcode(code, branchId);
-      const added = await onAdd(item.id, item.brand_name, 1, true);
+      if (generation !== selectionGeneration.current || !sessionIsActive()) return;
+      if (selectedProductRef.current || productRequest.current) {
+        setTopError("Сначала добавьте выбранный товар в чек или отмените выбор.");
+        return;
+      }
+      const added = await selectProduct(item);
       if (!added) {
         doFlash("danger");
         return;
@@ -1263,6 +1400,7 @@ function ActiveWorkspace({
       doFlash("success");
       if (soundOn) beep();
     } catch (err) {
+      if (generation !== selectionGeneration.current || !sessionIsActive()) return;
       doFlash("danger");
       if (isAxiosError(err) && err.response?.status === 404) {
         setTopError(`Штрихкод ${code} не найден`);
@@ -1273,17 +1411,24 @@ function ActiveWorkspace({
   };
 
   const enqueueScan = (code: string) => {
+    const generation = selectionGeneration.current;
     setQueuedScans((count) => count + 1);
     scanQueueRef.current = scanQueueRef.current
       .then(
-        () => onScan(code),
-        () => onScan(code),
+        () => onScan(code, generation),
+        () => onScan(code, generation),
       )
       .finally(() => setQueuedScans((count) => Math.max(0, count - 1)));
   };
 
   const onQtyChange = async (itemId: string, qty: number) => {
-    if (physicalCartActive) return;
+    if (
+      physicalCartBusy ||
+      selectingProduct ||
+      selectedProductRef.current ||
+      editingPhysicalProduct
+    )
+      return;
     if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
       return;
     setTopError(null);
@@ -1302,7 +1447,13 @@ function ActiveWorkspace({
   };
 
   const onDelete = async (itemId: string) => {
-    if (physicalCartActive) return;
+    if (
+      physicalCartBusy ||
+      selectingProduct ||
+      selectedProductRef.current ||
+      editingPhysicalProduct
+    )
+      return;
     if (!saleId || !isDraft || saleEditingBlocked || !items.some((item) => item.id === itemId))
       return;
     try {
@@ -1323,7 +1474,15 @@ function ActiveWorkspace({
     amount: string,
     metadata?: PaymentMetadata,
   ) => {
-    if (physicalCartActive || !saleId || !sessionIsActive() || !writableRef.current) return;
+    if (
+      selectedProductRef.current ||
+      productRequest.current ||
+      physicalCartActive ||
+      !saleId ||
+      !sessionIsActive() ||
+      !writableRef.current
+    )
+      return;
     const amt = Number(amount);
     if (!(amt > 0)) return;
     const normalizedAmount = amt.toFixed(2);
@@ -1537,11 +1696,11 @@ function ActiveWorkspace({
       void payLegacy(method, amount, metadata);
       return;
     }
-    stagePayment(method, amount, metadata);
+    return stagePayment(method, amount, metadata);
   };
 
   const submitPayment = (method: PaymentMethod, amount: string, metadata?: PaymentMetadata) => {
-    if (!writableRef.current) return;
+    if (selectedProductRef.current || productRequest.current || !writableRef.current) return;
     if (method === "card" || method === "qr") {
       if (recordedPayments.length > 0 || pendingPayment !== null) {
         setTopError(
@@ -1552,11 +1711,17 @@ function ActiveWorkspace({
       void prepareExternalPayment(method, amount);
       return;
     }
-    applyPayment(method, amount, metadata);
+    return applyPayment(method, amount, metadata);
   };
 
   const prepareExternalPayment = async (method: "card" | "qr", amount: string) => {
-    if (physicalCartActive || !writableRef.current) return;
+    if (
+      selectedProductRef.current ||
+      productRequest.current ||
+      physicalCartActive ||
+      !writableRef.current
+    )
+      return;
     void loadExternalPaymentEvidenceDialog();
     if (!saleId || !sessionIsActive() || externalPaymentConfirmationRef.current !== null) return;
     const normalizedAmount = normalizePositiveMoney(amount);
@@ -1807,7 +1972,7 @@ function ActiveWorkspace({
       const requested = Number(requestedAmount);
       const amount = method === "cash" ? Math.min(requested, remaining) : requested;
       if (Number.isFinite(amount) && amount > 0) {
-        submitPayment(method, amount.toFixed(2), metadata);
+        return submitPayment(method, amount.toFixed(2), metadata);
       }
       return;
     }
@@ -1815,11 +1980,11 @@ function ActiveWorkspace({
       setNumpad({ kind: "payment", method, initial: remaining.toFixed(2) });
       return;
     }
-    submitPayment(method, remaining.toFixed(2));
+    return submitPayment(method, remaining.toFixed(2));
   };
 
   const completeLegacySale = async () => {
-    if (physicalCartActive) return;
+    if (selectedProductRef.current || productRequest.current || physicalCartActive) return;
     if (!sessionIsActive() || !writableRef.current) return;
     if (!saleId || completingRef.current || completeSale.isPending) return;
     if (pendingPayment || addPayment.isPending) {
@@ -1912,7 +2077,13 @@ function ActiveWorkspace({
   };
 
   const onComplete = async () => {
-    if (physicalCartActive || !writableRef.current) return;
+    if (
+      selectedProductRef.current ||
+      productRequest.current ||
+      physicalCartActive ||
+      !writableRef.current
+    )
+      return;
     if (!saleId || !sale || completingRef.current || !sessionIsActive()) return;
     if (cartMutationPending) {
       setTopError("Дождитесь завершения изменения товаров в чеке.");
@@ -2064,6 +2235,31 @@ function ActiveWorkspace({
 
   const startNewSale = (): boolean => {
     if (
+      completingRef.current ||
+      completeSale.isPending ||
+      checkoutSale.isPending ||
+      checkoutReconciling ||
+      addPayment.isPending ||
+      pendingPayment ||
+      pendingCheckout ||
+      completionUncertain ||
+      checkoutUncertain ||
+      (sale?.status === "draft" &&
+        (recordedPayments.length > 0 || stagedPaymentsRef.current.length > 0))
+    ) {
+      setTopError("Сначала подтвердите результат текущей оплаты и завершите чек.");
+      return false;
+    }
+    if (
+      physicalCartBusy ||
+      editingPhysicalProduct ||
+      selectingProduct ||
+      (saleId && loadPhysicalCartRecovery(saleId, storageScope))
+    ) {
+      setTopError("Сначала завершите изменение товара и проверьте его сохранение.");
+      return false;
+    }
+    if (
       physicalCashBlockedRef.current ||
       physicalPreparationBlockedRef.current ||
       trainingBlockedRef.current ||
@@ -2104,6 +2300,7 @@ function ActiveWorkspace({
       clearPaymentAttemptOperation(saleId);
     }
     saleIdRef.current = null;
+    clearProductSelection();
     setSaleId(null);
     setNameById({});
     setRequiresRx(false);
@@ -2121,8 +2318,8 @@ function ActiveWorkspace({
   };
 
   const onNewSale = (): boolean => {
-    if (physicalCartActive) {
-      setTopError("Сначала удалите позиции из поштучной корзины и закройте её редактор.");
+    if (physicalCartBusy || editingPhysicalProduct || selectingProduct) {
+      setTopError("Сначала завершите изменение товара и проверьте его сохранение.");
       return false;
     }
     if (
@@ -2152,7 +2349,7 @@ function ActiveWorkspace({
       );
       return false;
     }
-    if (isDraft && items.length > 0) {
+    if (isDraft && receiptItemCount > 0) {
       setDiscardConfirmOpen(true);
       return false;
     }
@@ -2160,7 +2357,14 @@ function ActiveWorkspace({
   };
 
   const onQtyTap = (itemId: string) => {
-    if (physicalCartActive) return;
+    if (
+      physicalCartBusy ||
+      selectingProduct ||
+      selectedProductRef.current ||
+      editingPhysicalProduct ||
+      saleEditingBlocked
+    )
+      return;
     const it = items.find((i) => i.id === itemId);
     if (!it) return;
     setNumpad({ kind: "qty", itemId, initial: String(Number(it.qty)) });
@@ -2349,12 +2553,15 @@ function ActiveWorkspace({
 
         {isDraft && (
           <fieldset
-            disabled={saleEditingBlocked || physicalCartActive}
+            disabled={
+              saleEditingBlocked || physicalCartBusy || selectingProduct || editingPhysicalProduct
+            }
             className="min-w-0 shrink-0 border-0 p-0"
           >
             <SearchBar
               ref={searchRef}
               onAdd={onAdd}
+              onSelect={selectProduct}
               busy={posCommand.blocked}
               scanner={scanInputBlocked ? "off" : queuedScans > 0 ? "scanning" : "ready"}
               queuedScans={queuedScans}
@@ -2385,7 +2592,16 @@ function ActiveWorkspace({
               <QuickProducts
                 branchId={branchId ?? undefined}
                 onAdd={onAdd}
-                busy={!isDraft || saleEditingBlocked || physicalCartActive || posCommand.blocked}
+                onSelect={selectProduct}
+                selectedCatalogId={selectedProduct?.item.id}
+                busy={
+                  !isDraft ||
+                  saleEditingBlocked ||
+                  physicalCartBusy ||
+                  selectingProduct ||
+                  editingPhysicalProduct ||
+                  posCommand.blocked
+                }
                 touch={touch}
               />
             </Suspense>
@@ -2408,12 +2624,25 @@ function ActiveWorkspace({
                     </span>
                   ) : null}
                 </h2>
-                <p className="text-xs text-foreground-muted">
-                  {receiptItemCount === 0
-                    ? "Нет товаров"
-                    : `${receiptItemCount} ${productCountLabel(receiptItemCount)}`}
-                </p>
               </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-foreground-muted hover:text-danger"
+                disabled={
+                  !isDraft ||
+                  receiptItemCount === 0 ||
+                  saleEditingBlocked ||
+                  physicalCartBusy ||
+                  selectingProduct ||
+                  editingPhysicalProduct
+                }
+                onClick={onNewSale}
+              >
+                <ClearReceiptIcon />
+                Очистить чек
+              </Button>
               {requiresRx && !prescription ? (
                 <Button
                   variant="secondary"
@@ -2426,47 +2655,59 @@ function ActiveWorkspace({
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {completedReceiptLines.length > 0 ? (
-                <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
-                  <CompletedReceiptLines
-                    lines={completedReceiptLines}
-                    currency={currency}
-                    touch={touch}
+              {selectingProduct && (
+                <p role="status" className="p-3 text-sm">
+                  Проверяем варианты продажи…
+                </p>
+              )}
+              {isDraft && selectedProduct?.kind === "ordinary" && (
+                <Suspense fallback={<p role="status">Загрузка товара…</p>}>
+                  <SelectedProductEditor
+                    key={selectedProduct.requestId}
+                    item={selectedProduct.item}
+                    disabled={
+                      saleEditingBlocked ||
+                      physicalCartBusy ||
+                      selectingProduct ||
+                      editingPhysicalProduct
+                    }
+                    onCancel={clearProductSelection}
+                    onAdd={async (quantity) => {
+                      if (selectedProductRef.current !== selectedProduct) return false;
+                      const accepted = await onAdd(
+                        selectedProduct.item.id,
+                        selectedProduct.item.brand_name,
+                        quantity,
+                      );
+                      if (
+                        accepted &&
+                        selectedProductRef.current === selectedProduct &&
+                        sessionIsActive()
+                      )
+                        clearProductSelection();
+                      return accepted;
+                    }}
                   />
                 </Suspense>
-              ) : (
-                (!physicalCartActive || items.length > 0) && (
-                  <CartList
-                    items={items}
-                    nameById={nameById}
-                    currency={currency}
-                    editable={isDraft && !saleEditingBlocked && !physicalCartActive}
-                    onQtyChange={(id, q) => void onQtyChange(id, q)}
-                    onDelete={(id) => void onDelete(id)}
-                    onQtyTap={touch ? onQtyTap : undefined}
-                    touch={touch}
-                    busy={posCommand.blocked}
-                    embedded
-                    quickActions={quickActions}
-                    actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
-                  />
-                )
               )}
-
               {isDraft && physicalCartActive && saleId && branchId && (
                 <div className="p-3">
-                  {items.length > 0 && (
-                    <p className="mb-3 text-sm text-warning-foreground">
-                      Обычные и поштучные позиции оплачиваются вместе наличными.
-                    </p>
-                  )}
                   <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
                     <PhysicalCartEditor
                       key={saleId}
                       initialFormat={physicalEditorFormat ?? undefined}
+                      selection={
+                        selectedProduct?.kind === "physical" ? selectedProduct.selection : null
+                      }
+                      onSelectionCancel={clearProductSelection}
+                      onSelectionSaved={clearProductSelection}
+                      onEditingChange={setEditingPhysicalProduct}
                       saleId={saleId}
                       branchId={branchId}
                       items={preparedItems}
+                      legacyItems={items}
+                      onTotalChange={setPhysicalCartTotal}
+                      hideTotal
                       initialRecovery={loadPhysicalCartRecovery(saleId, storageScope)}
                       onRecoveryChange={(operation) => {
                         if (!sessionIsActive()) throw new Error("Сессия кассира завершена");
@@ -2480,6 +2721,8 @@ function ActiveWorkspace({
                       }}
                       disabled={
                         saleEditingBlocked ||
+                        selectedProduct?.kind === "ordinary" ||
+                        selectingProduct ||
                         !isDraft ||
                         saleQuery.isError ||
                         saleQuery.isPlaceholderData
@@ -2495,35 +2738,45 @@ function ActiveWorkspace({
                   </Suspense>
                 </div>
               )}
+              {selectedProduct && receiptItemCount === 0 ? (
+                <div className="space-y-2 border-t border-border px-4 py-8 text-center">
+                  <p className="text-sm font-semibold">Позиция ещё не добавлена</p>
+                  <p className="text-sm text-foreground-muted">Проверьте единицу и количество.</p>
+                </div>
+              ) : completedReceiptLines.length > 0 ? (
+                <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
+                  <CompletedReceiptLines
+                    lines={completedReceiptLines}
+                    currency={currency}
+                    touch={touch}
+                  />
+                </Suspense>
+              ) : (
+                (!physicalCartActive || items.length > 0) && (
+                  <CartList
+                    items={items}
+                    nameById={nameById}
+                    currency={currency}
+                    editable={
+                      isDraft &&
+                      !saleEditingBlocked &&
+                      !physicalCartBusy &&
+                      !selectingProduct &&
+                      !selectedProduct &&
+                      !editingPhysicalProduct
+                    }
+                    onQtyChange={(id, q) => void onQtyChange(id, q)}
+                    onDelete={(id) => void onDelete(id)}
+                    onQtyTap={touch ? onQtyTap : undefined}
+                    touch={touch}
+                    busy={posCommand.blocked}
+                    embedded
+                    quickActions={quickActions}
+                    actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
+                  />
+                )
+              )}
             </div>
-            {isDraft && preparedItems.length === 0 && (
-              <div
-                role="group"
-                aria-label="Формат продажи"
-                className={cn("shrink-0 p-3", !physicalCartActive && "grid grid-cols-3 gap-1")}
-              >
-                {(physicalCartActive
-                  ? ([[null, "Вернуться к обычной продаже"]] as const)
-                  : ([
-                      ["pack", "Упаковки"],
-                      ["blister", "Блистеры"],
-                      ["unit", "Штуки"],
-                    ] as const)
-                ).map(([format, label]) => (
-                  <Button
-                    key={format ?? "legacy"}
-                    type="button"
-                    variant="secondary"
-                    className="min-w-0 px-2"
-                    disabled={physicalEditorBlocked}
-                    onClick={() => void openPhysicalEditor(format)}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            )}
-
             {topError ? (
               <div className="flex flex-wrap items-center gap-2 border-t border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger-foreground">
                 <p>{topError}</p>
@@ -2548,31 +2801,20 @@ function ActiveWorkspace({
             ) : null}
 
             <footer>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="text-foreground-muted hover:text-danger"
-                disabled={
-                  !isDraft || items.length === 0 || saleEditingBlocked || physicalCartActive
-                }
-                onClick={onNewSale}
-              >
-                <ClearReceiptIcon />
-                Очистить чек
-              </Button>
-              <div className="ml-auto flex items-baseline gap-4">
+              <div className="flex w-full items-baseline justify-between gap-4">
                 <span className="text-xs text-foreground-muted">
-                  {receiptItemCount} {productCountLabel(receiptItemCount)}
+                  Итого · {receiptItemCount} {productCountLabel(receiptItemCount)}
                 </span>
-                {!physicalCartActive && (
-                  <strong className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">
-                    {totalDue.toFixed(2)}{" "}
-                    <span className="font-sans text-xs font-semibold text-foreground-secondary">
-                      {currency}
-                    </span>
-                  </strong>
-                )}
+                <strong className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">
+                  {isDraft && preparedItems.length > 0
+                    ? receiptItemCount === 0 && !physicalOperationsBlocked
+                      ? "0,00"
+                      : (physicalCartTotal?.replace(".", ",") ?? "—")
+                    : totalDue.toFixed(2).replace(".", ",")}{" "}
+                  <span className="font-sans text-xs font-semibold text-foreground-secondary">
+                    {currency === "TJS" ? "сомони" : currency}
+                  </span>
+                </strong>
               </div>
             </footer>
           </section>
@@ -2613,6 +2855,13 @@ function ActiveWorkspace({
                   ) : (
                     <>
                       <PhysicalPaymentPanels
+                        displayTotal={
+                          physicalOperationsBlocked
+                            ? undefined
+                            : preparedItems.length === 0
+                              ? totalDue.toFixed(2)
+                              : physicalCartTotal
+                        }
                         key={`${saleId}:${cashKind}`}
                         paymentMethods={paymentMethods}
                         mixedPaymentEnabled={mixedPaymentEnabled}
@@ -2644,6 +2893,7 @@ function ActiveWorkspace({
                 </Suspense>
               ) : (
                 <PaymentPanel
+                  key={saleId ?? "new-sale"}
                   totalDue={totalDue}
                   totalPaid={totalPaid}
                   remaining={remaining}
@@ -2661,6 +2911,8 @@ function ActiveWorkspace({
                   paymentSettingsLoading={paymentSettingsLoading}
                   paymentSettingsUnavailable={paymentSettingsUnavailable}
                   interactionBlocked={
+                    selectingProduct ||
+                    selectedProduct !== null ||
                     cartMutationPending ||
                     createPaymentAttempt.isPending ||
                     confirmPaymentAttempt.isPending ||
@@ -2668,6 +2920,8 @@ function ActiveWorkspace({
                     externalPaymentReviewRequired
                   }
                   completionBlocked={
+                    selectingProduct ||
+                    selectedProduct !== null ||
                     cartMutationPending ||
                     stagedPaymentConflict ||
                     externalPaymentReviewRequired ||

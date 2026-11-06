@@ -10,6 +10,34 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 import { SearchBar } from "@/features/pos/SearchBar";
 
 describe("SearchBar — keyboard focus flow", () => {
+  it("selects catalog metadata without adding or showing a second quantity control", async () => {
+    const onAdd = vi.fn();
+    const onSelect = vi.fn().mockResolvedValue(true);
+    render(<SearchBar onAdd={onAdd} onSelect={onSelect} />);
+    const input = screen.getByRole("combobox", { name: "Товар" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Аспирин/ }));
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(items[0]));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Количество")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Добавить", exact: true })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Товар" })).toHaveValue(""));
+  });
+
+  it("keeps the selected search text when selection is rejected", async () => {
+    const onSelect = vi.fn().mockResolvedValue(false);
+    render(<SearchBar onAdd={vi.fn()} onSelect={onSelect} />);
+    const input = screen.getByRole("combobox", { name: "Товар" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "Асп" } });
+    await screen.findByRole("option", { name: /Аспирин/ });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(items[0]));
+    expect(input).toHaveValue("Аспирин");
+  });
+
   it("moves focus to the quantity field after a product is picked", async () => {
     render(<SearchBar onAdd={vi.fn()} />);
     const input = screen.getByRole("combobox", { name: "Товар" });

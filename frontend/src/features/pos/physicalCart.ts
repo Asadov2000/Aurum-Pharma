@@ -25,6 +25,8 @@ export interface PhysicalCartItemPut {
 
 export interface PhysicalCartQuoteLine {
   inventory_kind: "legacy_pack" | "prepared_unit" | "physical_unit";
+  // Present on prepared/physical lines; absent on legacy pack lines.
+  sale_format?: PhysicalSaleFormat;
   id: string;
   catalog_id: string;
   position: number;

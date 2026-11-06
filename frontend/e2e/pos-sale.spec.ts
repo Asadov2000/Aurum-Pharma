@@ -85,11 +85,13 @@ test.describe("POS sale (owner)", () => {
 
     const quickProducts = page.getByRole("region", { name: "Быстрый выбор" });
     const currentReceipt = page.getByRole("region", { name: "Текущий чек" });
-    const paymentPanel = page.getByRole("region", { name: "К оплате" });
+    const paymentPanel = page.getByRole("region", { name: "Оплата", exact: true });
     await expect(quickProducts).toBeVisible();
     await expect(currentReceipt).toBeVisible();
     await expect(paymentPanel).toBeVisible();
-    await expect(paymentPanel.getByRole("button", { name: "Завершить продажу" })).toBeVisible();
+    // Inspect the payment controls on a real unpaid draft, then clear it before scanner checks.
+    await addPosItemToCart(page, { brandName: item.brand_name, qty: "1", expectedCartItems: 1 });
+    await expect(paymentPanel.getByRole("button", { name: "Принять наличные" })).toBeVisible();
 
     for (const [theme, density, mode] of [
       ["Светлая", "Обычно", "Клавиши"],
@@ -123,7 +125,7 @@ test.describe("POS sale (owner)", () => {
                 document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
             }));
             const completeBox = await paymentPanel
-              .getByRole("button", { name: "Завершить продажу", exact: true })
+              .getByRole("button", { name: "Принять наличные", exact: true })
               .boundingBox();
             const cashInputFits = await paymentPanel
               .getByRole("textbox", { name: "Получено наличными", exact: true })
@@ -177,15 +179,27 @@ test.describe("POS sale (owner)", () => {
       });
     }
 
+    await currentReceipt.getByRole("button", { name: "Очистить чек", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "Начать новую продажу" })
+      .getByRole("button", { name: "Очистить чек", exact: true })
+      .click();
+    await expect(page.getByTestId("cart-item")).toHaveCount(0);
+
     const productSearch = page.getByRole("combobox", { name: "Товар" });
     await productSearch.fill(item.brand_name);
-    await page.getByRole("button", { name: `Добавить ${item.brand_name} в избранное` }).click();
+    await page
+      .getByRole("listbox")
+      .getByRole("button", { name: `Добавить ${item.brand_name} в избранное` })
+      .click();
+    await quickProducts.getByRole("button", { name: "Избранное", exact: true }).click();
     await expect(quickProducts.getByText(item.brand_name)).toBeVisible();
 
     await page.reload();
     await page.getByLabel(/^Касса$/).selectOption({ label: register.name });
     await expect(page.locator('[data-barcode-sink="true"]')).toBeAttached();
     const restoredQuickProducts = page.getByRole("region", { name: "Быстрый выбор" });
+    await restoredQuickProducts.getByRole("button", { name: "Избранное", exact: true }).click();
     await expect(restoredQuickProducts.getByText(item.brand_name)).toBeVisible();
     await restoredQuickProducts
       .getByRole("button", { name: `Убрать ${item.brand_name} из избранного` })
@@ -205,6 +219,10 @@ test.describe("POS sale (owner)", () => {
     }, ` ${barcode} `);
 
     await barcodeLookup;
+    const selectedProduct = page.getByRole("region", { name: "Добавление выбранного товара" });
+    await expect(selectedProduct).toBeVisible();
+    await expect(page.getByTestId("cart-item")).toHaveCount(0);
+    await selectedProduct.getByRole("button", { name: "Добавить в чек", exact: true }).click();
     await expect(page.getByTestId("cart-item")).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByTestId("cart-item").getByText(item.brand_name)).toBeVisible();
     await expect
@@ -262,6 +280,10 @@ test.describe("POS sale (owner)", () => {
     }, barcode);
 
     await physicalBarcodeLookup;
+    await expect(selectedProduct).toBeVisible();
+    await expect(page.getByTestId("cart-item")).toHaveCount(1);
+    expect(itemOperationId).toBeUndefined();
+    await selectedProduct.getByRole("button", { name: "Добавить в чек", exact: true }).click();
     await expect(
       page.getByText("Команда не подтверждена. Проверьте связь и повторите."),
     ).toBeVisible();
@@ -278,7 +300,7 @@ test.describe("POS sale (owner)", () => {
       page.getByText("Команда не подтверждена. Проверьте связь и повторите."),
     ).toHaveCount(0);
     expect(recoveredOperationId).toBe(itemOperationId);
-    await expect(page.getByText("Оплачено 0.00", { exact: false })).toBeVisible();
+    await expect(page.getByText("Оплачено 0,00", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: /Сбросить расчёт/i })).toHaveCount(0);
 
     await page.unroute("**/api/v1/sales/*/items");
@@ -379,9 +401,6 @@ test.describe("POS sale (owner)", () => {
       );
       await page.getByRole("button", { name: "Карта", exact: true }).click();
       await page.getByRole("button", { name: "Перейти к оплате картой" }).click();
-      const amountDialog = page.getByRole("dialog", { name: "Сумма оплаты" });
-      await expect(amountDialog).toBeVisible();
-      await amountDialog.getByRole("button", { name: "ОК" }).click();
       const createdAttempt = (await (await createAttemptResponse).json()) as {
         id: string;
         status: string;
@@ -414,7 +433,7 @@ test.describe("POS sale (owner)", () => {
       expect(((await confirmedAttemptResponse.json()) as { status: string }).status).toBe(
         "confirmed",
       );
-      await expect(page.getByText("Оплачено 24.00", { exact: false })).toBeVisible();
+      await expect(page.getByText("Оплачено 24,00", { exact: false })).toBeVisible();
 
       const checkoutRequest = page.waitForRequest(
         (request) =>
@@ -759,8 +778,10 @@ test.describe("POS sale (owner)", () => {
     });
 
     // Draft and checkout must both charge 10 + 20 = 30 TJS.
-    await expect(page.getByText(/К оплате/)).toBeVisible();
-    await expect(page.getByText("30.00", { exact: false }).first()).toBeVisible();
+    await expect(page.getByRole("region", { name: "Оплата", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Оплата", exact: true }).getByText("30,00", { exact: true }),
+    ).toBeVisible();
 
     // The tender is staged only in memory. Commit the complete sale command,
     // then lose both its HTTP response and the first recovery lookup. The POS
