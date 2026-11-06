@@ -1,0 +1,23 @@
+import { type MeResponse } from "./types";
+
+const presentationFields = ["email", "full_name", "last_login_at", "tenant_name", "reason"];
+
+function canonicalAuthorityValue(key: string, value: unknown): unknown {
+  if (presentationFields.includes(key)) return undefined;
+  // All arrays in MeResponse contain strings (permissions, branches, capabilities).
+  if (Array.isArray(value)) return [...new Set(value as unknown[])].sort();
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, record[key]]),
+    );
+  }
+  return value;
+}
+
+/** Compare authority, not presentation fields or the order of server results. */
+export function authorizationSnapshotKey(user: MeResponse | null): string {
+  return JSON.stringify(user, canonicalAuthorityValue);
+}

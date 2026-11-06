@@ -1,5 +1,5 @@
 import { fetchMe } from "@/features/auth/api";
-import { meQueryKey } from "@/features/auth/queries";
+import { meQueryKey } from "@/features/auth/meQueries";
 import { clearClientSupportContext } from "@/features/auth/session";
 import { type MeResponse } from "@/features/auth/types";
 import { queryClient } from "@/lib/query";

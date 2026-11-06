@@ -1,18 +1,15 @@
-import { useEffect, type ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 
-import { useMeQuery } from "./queries";
+import { useMeQuery } from "./meQueries";
 import { isConfirmedAuthFailure } from "./failures";
 import { clearClientSession } from "./session";
-import { useAuthStore } from "@/stores/auth";
+import { getAuthIdentityGeneration, getAuthSessionGeneration, useAuthStore } from "@/stores/auth";
 
 export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | null {
-  const accessToken = useAuthStore((s) => s.accessToken);
-  const user = useAuthStore((s) => s.user);
-  const hydrated = useAuthStore((s) => s.hydrated);
-  const setUser = useAuthStore((s) => s.setUser);
+  const { accessToken, user, hydrated, setUser } = useAuthStore();
   const navigate = useNavigate();
-  const location = useRouterState({ select: (s) => s.location });
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   const { data, error, isLoading } = useMeQuery();
 
@@ -21,17 +18,13 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
   }, [data, setUser]);
 
   useEffect(() => {
-    if (hydrated && accessToken === null) {
-      navigate({ to: "/login", search: { from: location.pathname } });
-    }
-  }, [hydrated, accessToken, navigate, location.pathname]);
-
-  useEffect(() => {
-    if (error && isConfirmedAuthFailure(error)) {
+    if (isConfirmedAuthFailure(error)) {
       clearClientSession();
-      navigate({ to: "/login", search: { from: location.pathname } });
+    } else if (!hydrated || accessToken !== null) {
+      return;
     }
-  }, [error, navigate, location.pathname]);
+    navigate({ to: "/login", search: { from: pathname } });
+  }, [error, hydrated, accessToken, navigate, pathname]);
 
   if (!hydrated || accessToken === null) return null;
   if (isLoading && user === null) {
@@ -42,5 +35,8 @@ export function AuthGuard({ children }: { children: ReactNode }): JSX.Element | 
     );
   }
   if (user === null) return null;
-  return <>{children}</>;
+  // Reports guard each selection and export against its own branch permission.
+  const generation =
+    pathname === "/reports" ? getAuthIdentityGeneration() : getAuthSessionGeneration();
+  return <Fragment key={generation}>{children}</Fragment>;
 }

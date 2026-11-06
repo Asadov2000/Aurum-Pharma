@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { revokeActiveSession, revokeOtherSessions } from "./api";
 import { activeSessionsQueryKey } from "./queries";
+import { revokeActiveSession, revokeOtherSessions } from "./sessionApi";
 
 export function useRevokeActiveSession() {
   const queryClient = useQueryClient();

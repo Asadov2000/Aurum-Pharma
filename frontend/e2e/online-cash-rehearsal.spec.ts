@@ -452,6 +452,54 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
   }
 });
 
+test("an open cashier tab drops the register after branch access is revoked", async ({ page }) => {
+  test.setTimeout(90_000);
+  clearLoginRateLimit(OWNER.email);
+  const anonymous = await request.newContext();
+  const tokens = await apiLogin(anonymous, OWNER);
+  const owner = await apiContext(tokens.access_token);
+  let cashier: Awaited<ReturnType<typeof createScopedRehearsalCashier>> | undefined;
+  try {
+    const fixture = await seedRehearsal(owner);
+    cashier = await createScopedRehearsalCashier(owner, fixture);
+    await page.clock.install();
+    await loginInBrowser(page, cashier.credentials);
+    await page.goto("/pos");
+    const register = page.getByLabel(/^Касса$/);
+    const openShift = page.getByRole("button", { name: "Открыть смену", exact: true });
+    await expect(register).toHaveValue(fixture.register.name);
+    await expect(openShift).toBeEnabled();
+
+    await cashier.revokeAccess();
+    await page.bringToFront();
+    // Advance the foreground tab's scheduled identity refresh without reloading it.
+    await page.clock.fastForward(61_000);
+    await expect(
+      page.getByText(/^Этот раздел не входит в доступы вашего аккаунта\./),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/pos$/);
+    await expect(openShift).toHaveCount(0);
+    await expect(page.getByText(fixture.register.name, { exact: true })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page
+          .locator("main input")
+          .evaluateAll(
+            (inputs, name) => inputs.some((input) => (input as HTMLInputElement).value === name),
+            fixture.register.name,
+          ),
+      )
+      .toBe(false);
+  } finally {
+    try {
+      await cashier?.cleanup();
+    } finally {
+      await owner.dispose();
+      await anonymous.dispose();
+    }
+  }
+});
+
 test("scoped dispensing preflight preserves Rx, owner and branch checks and fails closed before payment", async ({
   page,
 }) => {

@@ -33,15 +33,18 @@ vi.mock("@/features/auth/identityApi", () => ({
 }));
 
 vi.mock("@/features/auth/api", () => ({
-  completeMfaEnrollment: (...args: unknown[]) => completeMfaEnrollment(...args),
   fetchMe: (...args: unknown[]) => fetchMe(...args),
-  recoverMfa: (...args: unknown[]) => recoverMfa(...args),
   requestLoginCode: (...args: unknown[]) => requestLoginCode(...args),
-  startMfaEnrollment: (...args: unknown[]) => startMfaEnrollment(...args),
-  verifyMfa: (...args: unknown[]) => verifyMfa(...args),
   verifyLoginCode: (...args: unknown[]) => verifyLoginCode(...args),
   logoutRequest: vi.fn(),
   refreshTokensRequest: vi.fn(),
+}));
+
+vi.mock("@/features/auth/mfaLoginApi", () => ({
+  completeMfaEnrollment: (...args: unknown[]) => completeMfaEnrollment(...args),
+  recoverMfa: (...args: unknown[]) => recoverMfa(...args),
+  startMfaEnrollment: (...args: unknown[]) => startMfaEnrollment(...args),
+  verifyMfa: (...args: unknown[]) => verifyMfa(...args),
 }));
 
 import { LoginPage } from "@/features/auth/LoginPage";

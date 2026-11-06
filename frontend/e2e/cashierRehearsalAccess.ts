@@ -57,15 +57,23 @@ export async function createScopedRehearsalCashier(
   const assignment = (await invited.json()) as { id: string; user_id: string };
   const login = await request.newContext();
   let cashierApi: APIRequestContext | undefined;
-  const cleanup = async () => {
+  const revokeAssignment = async () => {
     // This account and assignment belong only to this fixture. Never revoke the
     // seeded CASHIER's assignments, which another E2E may have prepared.
     const revoked = await ownerApi.delete(
       `users/${assignment.user_id}/assignments/${assignment.id}`,
     );
     expect(revoked.ok()).toBe(true);
-    await cashierApi?.dispose();
-    await login.dispose();
+  };
+  let revocation: Promise<void> | undefined;
+  const revokeAccess = () => (revocation ??= revokeAssignment());
+  const cleanup = async () => {
+    try {
+      await revokeAccess();
+    } finally {
+      await cashierApi?.dispose();
+      await login.dispose();
+    }
   };
   try {
     const tokens = await apiLogin(login, credentials);
@@ -104,7 +112,15 @@ export async function createScopedRehearsalCashier(
     expect(await hidden.json()).toEqual([]);
     expect((await cashierApi.get("users")).status()).toBe(403);
     expect((await cashierApi.get(`catalog/${fixture.medicine.id}`)).status()).toBe(403);
-    return { api: cashierApi, credentials, userId: me.id, hiddenBranch, hiddenRegister, cleanup };
+    return {
+      api: cashierApi,
+      credentials,
+      userId: me.id,
+      hiddenBranch,
+      hiddenRegister,
+      revokeAccess,
+      cleanup,
+    };
   } catch (error) {
     await cleanup();
     throw error;

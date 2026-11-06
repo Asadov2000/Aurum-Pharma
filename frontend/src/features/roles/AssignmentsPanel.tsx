@@ -54,7 +54,7 @@ type ResolvedAssignment = {
 };
 const EMPTY_ASSIGNMENT_FORM: FormValues = {
   role_id: "",
-  scope_mode: "tenant",
+  scope_mode: "branches",
   branch_ids: [],
   password_required: false,
   replace_all: false,
