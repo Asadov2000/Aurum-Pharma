@@ -38,6 +38,12 @@ function packageNameFromModuleId(id: string): string | undefined {
 
 function splitRuntimeDependencies(id: string): string | undefined {
   const normalizedId = id.replaceAll("\\", "/");
+  // Payment buttons are shared by the POS route and lazy checkout forms.
+  // Keep the small control out of the route chunk to preserve its entry
+  // and avoid making those forms import the entire POS workspace.
+  if (/\/src\/features\/pos\/PosPaymentMethodButtons\.tsx$/.test(normalizedId)) {
+    return "ui-controls";
+  }
   // Recovery is shared by the eager draft reader and lazy payment panel.
   // Keep those small primitives with the existing lazy controls, so the panel
   // cannot absorb POSPage's route entry or add a POS startup request.

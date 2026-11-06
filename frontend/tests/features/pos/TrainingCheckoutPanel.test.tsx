@@ -70,6 +70,49 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("cashier TEST checkout", () => {
+  it("uses the configured electronic method instead of a disabled cash default", async () => {
+    const p = { ...props(), paymentMethods: ["qr"], mixedPaymentEnabled: false };
+    render(<TrainingCheckoutPanel {...p} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Рассчитать учебный чек" }));
+    const qr = await screen.findByRole("button", { name: "QR-код", exact: true });
+    expect(qr).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Наличные", exact: true })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Смешанная", exact: true }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Учебный QR, TJS")).toHaveValue("0.32");
+    expect(screen.getByLabelText("Учебные наличные, TJS")).toHaveValue("0.00");
+    expect(m.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить учебную продажу" }));
+    await waitFor(() => expect(m.start).toHaveBeenCalled());
+    expect(m.start.mock.calls[0]?.[1]).toMatchObject({
+      simulated_payments: [{ method: "qr", amount: "0.32" }],
+      cash_tendered: "0.00",
+    });
+  });
+
+  it("keeps split amounts until an explicit whole-method selection and blocks after access loss", async () => {
+    const p = props();
+    const view = render(<TrainingCheckoutPanel {...p} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Рассчитать учебный чек" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Смешанная", exact: true }));
+    fireEvent.change(screen.getByLabelText("Учебные наличные, TJS"), { target: { value: "0.10" } });
+    fireEvent.change(screen.getByLabelText("Учебная карта, TJS"), { target: { value: "0.22" } });
+    fireEvent.click(screen.getByRole("button", { name: "Смешанная", exact: true }));
+    expect(screen.getByLabelText("Учебные наличные, TJS")).toHaveValue("0.10");
+    expect(screen.getByLabelText("Учебная карта, TJS")).toHaveValue("0.22");
+    fireEvent.click(screen.getByRole("button", { name: "Карта", exact: true }));
+    expect(screen.getByLabelText("Учебная карта, TJS")).toHaveValue("0.32");
+    expect(screen.getByLabelText("Учебные наличные, TJS")).toHaveValue("0.00");
+    view.rerender(<TrainingCheckoutPanel {...p} canStart={false} />);
+    expect(screen.getByRole("button", { name: "Наличные", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Карта", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(m.start).not.toHaveBeenCalled();
+  });
+
   it("calculates and completes only an explicitly simulated training request", async () => {
     const p = props();
     render(<TrainingCheckoutPanel {...p} />);

@@ -50,6 +50,27 @@ vi.mock("@/features/foundation/api", () => ({
   deleteRegister: vi.fn(),
 }));
 
+vi.mock("@/features/settings/api", () => ({
+  getUserPreferences: vi.fn().mockResolvedValue({
+    theme: "system",
+    density: "auto",
+    contrast: "standard",
+    reduce_motion: false,
+    accent: "teal",
+    workspace: {
+      desktop_mode: "auto",
+      hidden_routes: [],
+      favorite_routes: [],
+      route_order: [],
+      start_route: "/dashboard",
+    },
+    quick_actions: {},
+    version: 1,
+    updated_at: "2026-11-06T00:00:00Z",
+  }),
+  updateUserPreferences: vi.fn(),
+}));
+
 vi.mock("@/features/catalog/pickerQueries", () => ({
   useCatalogPickerQuery: () => ({ data: undefined }),
 }));

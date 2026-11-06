@@ -19,6 +19,18 @@ import {
   uniqueName,
 } from "./helpers";
 
+async function selectCashierMode(page: Page, mode: string): Promise<void> {
+  await page.getByRole("button", { name: "Настройки рабочего места", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Настройки рабочего места", exact: true });
+  const choice = settings
+    .getByRole("group", { name: "Режим кассы", exact: true })
+    .getByRole("button", { name: mode, exact: true });
+  await choice.click();
+  await expect(choice).toHaveAttribute("aria-pressed", "true");
+  await settings.getByRole("button", { name: "Готово", exact: true }).click();
+  await expect(settings).toBeHidden();
+}
+
 // Most important e2e flow: open shift → make a sale → FEFO splits across
 // two batches → stage cash payment → atomic checkout → check that /batches
 // reflects the consumed quantities.
@@ -90,10 +102,7 @@ test.describe("POS sale (owner)", () => {
         await appearance.getByRole("button", { name: label, exact: true }).click();
       }
       await page.keyboard.press("Escape");
-      await page
-        .getByRole("group", { name: "Режим кассы", exact: true })
-        .getByRole("button", { name: mode, exact: true })
-        .click();
+      await selectCashierMode(page, mode);
 
       await expect
         .poll(
@@ -116,6 +125,24 @@ test.describe("POS sale (owner)", () => {
             const completeBox = await paymentPanel
               .getByRole("button", { name: "Завершить продажу", exact: true })
               .boundingBox();
+            const cashInputFits = await paymentPanel
+              .getByRole("textbox", { name: "Получено наличными", exact: true })
+              .evaluate((input) => {
+                const box = input.getBoundingClientRect();
+                let scrollport = input.parentElement;
+                while (scrollport && getComputedStyle(scrollport).overflowY !== "auto") {
+                  scrollport = scrollport.parentElement;
+                }
+                const bounds = scrollport?.getBoundingClientRect();
+                return (
+                  box.height >= 40 &&
+                  bounds !== undefined &&
+                  box.top >= Math.max(0, bounds.top) &&
+                  box.bottom <= Math.min(window.innerHeight, bounds.bottom) &&
+                  box.left >= Math.max(0, bounds.left) &&
+                  box.right <= Math.min(window.innerWidth, bounds.right)
+                );
+              });
 
             return {
               columnsDoNotOverlap:
@@ -130,6 +157,7 @@ test.describe("POS sale (owner)", () => {
                 paymentBox.y + paymentBox.height <= 768,
               paymentActionsFitViewport:
                 completeBox !== null && completeBox.y + completeBox.height <= 768,
+              cashInputFits,
             };
           },
           { message: "POS workspace should settle inside the 1366x768 viewport" },
@@ -140,6 +168,7 @@ test.describe("POS sale (owner)", () => {
           documentFitsViewport: { horizontally: true, vertically: true },
           panelsFitViewport: true,
           paymentActionsFitViewport: true,
+          cashInputFits: true,
         });
       await page.screenshot({
         path: testInfo.outputPath(

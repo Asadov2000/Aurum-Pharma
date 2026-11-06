@@ -336,9 +336,7 @@ export function SaleArea({
       ) : (
         <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
           {workstationControls ? (
-            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
-              {workstationControls}
-            </div>
+            <div className="flex min-w-0 items-center lg:flex-1">{workstationControls}</div>
           ) : null}
           <Suspense fallback={<div role="status">Загрузка смены…</div>}>
             <ShiftBar
@@ -384,9 +382,7 @@ function RegisterWorkspaceGate({
   return (
     <div className="grid min-w-0 gap-3 xl:grid-cols-[auto_minmax(0,1fr)]">
       {workstationControls ? (
-        <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
-          {workstationControls}
-        </div>
+        <div className="flex min-w-0 items-center lg:flex-1">{workstationControls}</div>
       ) : null}
       <div
         role="status"
@@ -2276,9 +2272,9 @@ function ActiveWorkspace({
       )}
 
       <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-2 xl:space-y-0">
-        <div className="grid min-w-0 shrink-0 gap-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 shrink-0 flex-col gap-3 rounded-lg border border-border bg-surface px-3 py-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
           {workstationControls ? (
-            <div className="flex min-w-0 items-center rounded-lg border border-border bg-surface px-3 py-2">
+            <div className="flex min-w-0 items-center lg:w-80 lg:shrink-0">
               {workstationControls}
             </div>
           ) : null}
@@ -2291,6 +2287,7 @@ function ActiveWorkspace({
               canExportReport={canExportReports}
               closeBlocked={shiftCloseBlocked}
               online={online}
+              embedded
             />
           </Suspense>
         </div>
@@ -2545,7 +2542,7 @@ function ActiveWorkspace({
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="text-danger hover:text-danger"
+                className="text-foreground-muted hover:text-danger"
                 disabled={
                   !isDraft || items.length === 0 || saleEditingBlocked || physicalCartActive
                 }

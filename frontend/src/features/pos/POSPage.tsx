@@ -2,16 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import { ContextHelpPortal } from "@/components/layout/ContextHelpPortal";
 
-import {
-  Button,
-  Input,
-  Label,
-  PageHeader,
-  Select,
-  Skeleton,
-  Switch,
-  TableEmpty,
-} from "@/components/ui";
+import { Button, Input, Label, PageHeader, Select, Skeleton, TableEmpty } from "@/components/ui";
 import { useAuth } from "@/features/auth/hooks";
 import { hasPermission, hasPermissionForBranch } from "@/features/auth/permissions";
 import { normalizePosPaymentMethods } from "@/features/foundation/paymentSettings";
@@ -26,9 +17,9 @@ import { DRAFT_TTL_MIN } from "./draftStorage";
 import { type RegisterSwitchState, SaleArea } from "./SaleArea";
 import { usePosMode } from "./usePosMode";
 
-const ModeToggle = lazy(async () => {
-  const module = await import("./ModeToggle");
-  return { default: module.ModeToggle };
+const PosWorkstationSettings = lazy(async () => {
+  const module = await import("./PosWorkstationSettings");
+  return { default: module.PosWorkstationSettings };
 });
 
 const RegisterSwitchNotice = lazy(async () => {
@@ -63,6 +54,7 @@ export function POSPage(): JSX.Element {
     return devicePreferences.lastRegisterId ?? "";
   });
   const soundOn = devicePreferences.scannerSound;
+  const [workstationSettingsOpen, setWorkstationSettingsOpen] = useState<boolean | null>(null);
   const [registerSwitchState, setRegisterSwitchState] = useState<RegisterSwitchState>({
     blocked: Boolean(registerId),
     hasDraft: false,
@@ -164,12 +156,12 @@ export function POSPage(): JSX.Element {
     selectedRegister?.branch_id,
   );
   const workstationControls = (
-    <div className="flex w-full max-w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
+    <div className="flex w-full max-w-full flex-wrap items-center gap-2 sm:gap-3">
       {registers.isLoading ? (
         <Skeleton className="h-9 w-full sm:w-52" />
       ) : registerList && (registerList.length > 0 || registerId) ? (
-        <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-none">
-          <Label htmlFor="register" className="mb-0 shrink-0 text-foreground-muted">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+          <Label htmlFor="register" className="sr-only">
             Касса
           </Label>
           {onlyRegister?.id === registerId ? (
@@ -210,24 +202,18 @@ export function POSPage(): JSX.Element {
           )}
         </div>
       ) : null}
-      <div className="w-full sm:w-auto">
-        <Suspense
-          fallback={
-            <div
-              aria-hidden="true"
-              className={cn("w-full sm:w-56", mode === "touch" ? "h-12" : "h-9")}
-            />
-          }
-        >
-          <ModeToggle pref={pref} setPref={setPref} touch={mode === "touch"} />
-        </Suspense>
-      </div>
-      <Switch
-        label="Звук сканера"
-        checked={soundOn}
-        className={cn("w-full sm:w-auto", mode === "touch" && "min-h-12")}
-        onChange={(event) => toggleSound(event.target.checked)}
-      />
+      <Button
+        type="button"
+        variant="ghost"
+        size={mode === "touch" ? "lg" : "sm"}
+        className="ml-auto shrink-0"
+        aria-label="Настройки рабочего места"
+        aria-haspopup="dialog"
+        aria-expanded={workstationSettingsOpen === true}
+        onClick={() => setWorkstationSettingsOpen(true)}
+      >
+        Настройки
+      </Button>
     </div>
   );
 
@@ -241,6 +227,19 @@ export function POSPage(): JSX.Element {
       )}
     >
       <ContextHelpPortal pathname="/pos" />
+      {workstationSettingsOpen !== null && (
+        <Suspense fallback={null}>
+          <PosWorkstationSettings
+            open={workstationSettingsOpen}
+            onClose={() => setWorkstationSettingsOpen(false)}
+            pref={pref}
+            setPref={setPref}
+            touch={mode === "touch"}
+            soundOn={soundOn}
+            onSoundChange={toggleSound}
+          />
+        </Suspense>
+      )}
       {!registerId ? (
         <PageHeader title="Касса" compact actions={workstationControls} />
       ) : (

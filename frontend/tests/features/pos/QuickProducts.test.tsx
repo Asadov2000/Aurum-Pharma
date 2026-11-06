@@ -93,11 +93,11 @@ describe("QuickProducts", () => {
 
     const grid = screen.getByRole("button", { name: "Показать товары плиткой" });
     const list = screen.getByRole("button", { name: "Показать товары списком" });
-    expect(grid).toHaveAttribute("aria-pressed", "true");
-
-    fireEvent.click(list);
     expect(list).toHaveAttribute("aria-pressed", "true");
-    expect(grid).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(grid);
+    expect(grid).toHaveAttribute("aria-pressed", "true");
+    expect(list).toHaveAttribute("aria-pressed", "false");
   });
 
   it("removes only the selected personal favorite", async () => {

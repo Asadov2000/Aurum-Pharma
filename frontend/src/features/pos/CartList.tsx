@@ -323,10 +323,9 @@ export function CartList({
         const first = g.items[0];
         if (!first) return null;
 
-        // Touch controls need the full receipt width once a row has both delete
-        // and a menu. Keep its name above the existing mobile controls grid.
+        // The embedded receipt needs its full width for product details and controls.
         if (g.items.length === 1) {
-          const stacked = Boolean(touch && quickActions);
+          const stacked = embedded || Boolean(touch && quickActions);
           return (
             <li
               key={g.catalogId}
@@ -341,7 +340,13 @@ export function CartList({
               )}
             >
               <div className="min-w-0 flex-1">
-                <p className={cn("truncate font-medium text-foreground", touch && "text-lg")}>
+                <p
+                  className={cn(
+                    "font-medium text-foreground",
+                    embedded ? "break-words" : "truncate",
+                    touch && "text-lg",
+                  )}
+                >
                   {g.name}
                 </p>
                 <p className="text-xs text-foreground-muted">
@@ -359,8 +364,19 @@ export function CartList({
         const groupTotal = g.items.reduce((s, it) => s + Number(it.total_price), 0);
         return (
           <li key={g.catalogId} className={cn("overflow-hidden bg-surface", windowed && "pos-cv")}>
-            <div className="flex items-center justify-between gap-3 border-b border-border bg-foreground/[0.02] px-4 py-2">
-              <p className={cn("truncate font-medium text-foreground", touch && "text-lg")}>
+            <div
+              className={cn(
+                "flex gap-3 border-b border-border bg-foreground/[0.02] px-4 py-2",
+                embedded ? "flex-col" : "items-center justify-between",
+              )}
+            >
+              <p
+                className={cn(
+                  "font-medium text-foreground",
+                  embedded ? "break-words" : "truncate",
+                  touch && "text-lg",
+                )}
+              >
                 {g.name}
               </p>
               <p className="shrink-0 text-xs text-foreground-muted">
@@ -378,7 +394,8 @@ export function CartList({
                   data-context-actions={quickActions ? true : undefined}
                   tabIndex={quickActions ? 0 : undefined}
                   className={cn(
-                    "flex flex-col gap-3 px-4 sm:flex-row sm:items-center",
+                    "flex flex-col gap-3 px-4",
+                    !embedded && "sm:flex-row sm:items-center",
                     touch ? "py-3" : "py-2.5",
                   )}
                 >
@@ -388,7 +405,7 @@ export function CartList({
                       {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
-                  {lineControls(it, g.name, `Партия ${idx + 1}`)}
+                  {lineControls(it, g.name, `Партия ${idx + 1}`, embedded)}
                 </div>
               ))}
             </div>

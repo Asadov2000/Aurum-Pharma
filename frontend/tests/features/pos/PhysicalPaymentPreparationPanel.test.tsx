@@ -84,6 +84,49 @@ async function prepare() {
 }
 
 describe("physical payment preparation", () => {
+  it("selects a whole-amount electronic plan without starting payment", async () => {
+    render(<PhysicalPaymentPreparationPanel {...props()} />);
+    await openForm();
+    fireEvent.click(screen.getByRole("button", { name: "QR-код", exact: true }));
+    expect(screen.getByRole("button", { name: "QR-код", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Через QR, TJS")).toHaveValue("1.99");
+    expect(screen.getByLabelText("Картой, TJS")).toHaveValue("0");
+    expect(network.preview).not.toHaveBeenCalled();
+    expect(network.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Смешанная", exact: true }));
+    expect(screen.getByLabelText("Через QR, TJS")).toHaveValue("1.99");
+    expect(screen.getByLabelText("Наличными, TJS")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Подготовить оплату" }));
+    await waitFor(() => expect(network.preview).toHaveBeenCalled());
+    expect(network.preview.mock.calls[0]?.[0]).toMatchObject({
+      payments: [{ method: "qr", amount: "1.99" }],
+      cash_tendered: null,
+    });
+  });
+
+  it("limits plan buttons to configured methods and keeps amounts when access is lost", async () => {
+    const p = { ...props(), paymentMethods: ["qr"] as ["qr"], mixedPaymentEnabled: false };
+    const view = render(<PhysicalPaymentPreparationPanel {...p} />);
+    const open = screen.getByRole("button", { name: "Подготовка карты/QR" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const qr = await screen.findByRole("button", { name: "QR-код", exact: true });
+    expect(qr).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Карта", exact: true })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Смешанная", exact: true }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Через QR, TJS"), { target: { value: "1.50" } });
+    view.rerender(<PhysicalPaymentPreparationPanel {...p} canPrepare={false} />);
+    expect(qr).toBeDisabled();
+    expect(screen.getByLabelText("Через QR, TJS")).toHaveValue("1.50");
+    expect(network.preview).not.toHaveBeenCalled();
+    expect(network.save).not.toHaveBeenCalled();
+  });
+
   it("checks an alternative active binding read-only while retaining an unknown local marker", async () => {
     const { webcrypto } = await import("node:crypto");
     vi.stubGlobal("crypto", webcrypto);
@@ -212,7 +255,15 @@ describe("physical payment preparation", () => {
     render(<PhysicalPaymentPreparationPanel {...props()} />);
     await screen.findByText(/Результат сохранения пока неизвестен/);
     expect(network.save).toHaveBeenCalledTimes(1);
-    fireEvent.change(screen.getByLabelText("Картой, TJS"), { target: { value: "1.99" } });
+    expect(screen.getByRole("textbox", { name: "Наличными, TJS" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Через QR, TJS" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Получено наличными, TJS" })).toBeVisible();
+    const card = screen.getByRole("textbox", { name: "Картой, TJS" });
+    expect(card).toBeVisible();
+    expect(card).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Карта", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Смешанная", exact: true })).toBeDisabled();
+    fireEvent.change(card, { target: { value: "1.99" } });
     fireEvent.click(screen.getByRole("button", { name: "Подготовить оплату" }));
     await waitFor(() => expect(network.save).toHaveBeenCalledTimes(2));
     expect(network.save).toHaveBeenLastCalledWith(id(9), plan, scope);

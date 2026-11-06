@@ -14,6 +14,8 @@ import { getAuthSessionGeneration } from "@/stores/auth";
 
 import { type PosStorageScope } from "./posStorageScope";
 import { type PaymentMethod } from "./types";
+import { PosPaymentMethodButtons } from "./PosPaymentMethodButtons";
+import { paymentMethodLabel } from "./labels";
 import {
   getActiveUnitPayment,
   getUnitPaymentIntent,
@@ -76,6 +78,7 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   const [financialBarrier, setFinancialBarrier] = useState(true);
   const [busy, setBusy] = useState(true);
   const [opened, setOpened] = useState(false);
+  const [allocationMode, setAllocationMode] = useState<PaymentMethod | "mixed" | null>(null);
   const [marker, setMarker] = useState<string | null>(null);
   const [intent, setIntent] = useState<SavedUnitPaymentIntent | null>(null);
   const currentIntent = useRef(intent);
@@ -226,6 +229,7 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       setTotal(quote.quote.total_amount);
       const method = latest.current.paymentMethods.includes("card") ? "card" : "qr";
       form.reset({ ...emptyForm, [method]: quote.quote.total_amount });
+      setAllocationMode(method);
       setOpened(true);
     });
 
@@ -335,8 +339,25 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       await recover(check);
     });
   const disabled = busy || !props.online;
+  const allocationOptions = (["card", "qr"] as const)
+    .filter((method) => props.paymentMethods.includes(method))
+    .map((method) => ({
+      value: method as PaymentMethod | "mixed",
+      label: paymentMethodLabel[method],
+    }));
+  if (props.mixedPaymentEnabled && props.paymentMethods.length > 1)
+    allocationOptions.push({ value: "mixed", label: "Смешанная" });
+  const selectAllocation = (method: PaymentMethod | "mixed") => {
+    if (disabled || !props.canPrepare || marker || intent || !total) return;
+    if (!allocationOptions.some((option) => option.value === method)) return;
+    if (method !== "mixed") form.reset({ ...emptyForm, [method]: total });
+    setAllocationMode(method);
+  };
   return (
-    <section aria-label="Подготовка электронной оплаты" className="space-y-3 rounded-lg border p-3">
+    <section
+      aria-label="Подготовка электронной оплаты"
+      className="space-y-3 rounded-lg border border-border bg-surface p-4"
+    >
       <p className="text-sm">
         {props.onElectronicCompleted
           ? "Подготовка плана не принимает деньги. Подтверждение оператора выполняется отдельно."
@@ -361,7 +382,19 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       {opened && !intent && (
         <form onSubmit={prepare} className="space-y-2">
           {total && <p>Итого: {total} TJS</p>}
-          {!props.mixedPaymentEnabled && <p>Разрешён только один способ оплаты.</p>}
+          <PosPaymentMethodButtons
+            label="Способ электронной оплаты"
+            options={allocationOptions}
+            value={allocationMode}
+            onChange={selectAllocation}
+            disabled={disabled || !props.canPrepare || !!marker}
+          />
+          <p className="text-xs text-foreground-muted">
+            Карта или QR заполняет всю сумму и заменяет введённое распределение.
+            {props.mixedPaymentEnabled
+              ? " В смешанной оплате укажите суммы частей; прежние значения сохраняются."
+              : " Разрешён только один способ оплаты."}
+          </p>
           {(["cash", "card", "qr"] as const)
             .filter(
               (method) =>
@@ -369,7 +402,12 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
                 (method !== "cash" || props.mixedPaymentEnabled),
             )
             .map((method) => (
-              <div key={method}>
+              <div
+                key={method}
+                hidden={
+                  allocationMode !== null && allocationMode !== "mixed" && allocationMode !== method
+                }
+              >
                 <Label htmlFor={`${id}-${method}`}>{labels[method]}</Label>
                 <Input
                   id={`${id}-${method}`}
@@ -380,7 +418,7 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
               </div>
             ))}
           {props.paymentMethods.includes("cash") && props.mixedPaymentEnabled && (
-            <div>
+            <div hidden={allocationMode !== null && allocationMode !== "mixed"}>
               <Label htmlFor={`${id}-tendered`}>Получено наличными, TJS</Label>
               <Input
                 id={`${id}-tendered`}
