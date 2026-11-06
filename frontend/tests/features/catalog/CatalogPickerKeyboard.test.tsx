@@ -45,7 +45,7 @@ describe("CatalogPicker — keyboard selection", () => {
     await screen.findByRole("option", { name: /Аспирин/ });
 
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onChange).toHaveBeenCalledWith("c1", "Аспирин");
+    expect(onChange).toHaveBeenCalledWith("c1", "Аспирин", defaultItems[0]);
   });
 
   it("moves the highlight with ArrowDown and selects it on Enter", async () => {
@@ -58,7 +58,7 @@ describe("CatalogPicker — keyboard selection", () => {
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onChange).toHaveBeenCalledWith("c2", "Парацетамол");
+    expect(onChange).toHaveBeenCalledWith("c2", "Парацетамол", defaultItems[1]);
   });
 
   it("does not select on a plain digit — digits are plain input (e.g. dosage)", async () => {
