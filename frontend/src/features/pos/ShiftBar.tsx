@@ -12,6 +12,7 @@ import {
   TableEmpty,
   Textarea,
 } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { downloadBlob } from "@/lib/download";
 import { describeApiError } from "@/lib/errorMessages";
 
@@ -27,6 +28,7 @@ export function ShiftBar({
   canExportReport = false,
   closeBlocked = false,
   online = true,
+  embedded = false,
 }: {
   registerId: string;
   mode?: PosMode;
@@ -35,6 +37,7 @@ export function ShiftBar({
   canExportReport?: boolean;
   closeBlocked?: boolean;
   online?: boolean;
+  embedded?: boolean;
 }): JSX.Element {
   const shiftQuery = useCurrentShiftQuery(registerId);
   const queryClient = useQueryClient();
@@ -240,7 +243,13 @@ export function ShiftBar({
   return (
     <>
       {/* Slim status strip — compact so it doesn't crowd the selling area. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm xl:gap-x-2 xl:px-3 xl:py-2 xl:text-xs 2xl:flex-nowrap 2xl:gap-y-0">
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-sm xl:gap-x-2 xl:text-xs 2xl:flex-nowrap 2xl:gap-y-0",
+          !embedded && "rounded-lg border border-border bg-surface px-4 py-2.5 xl:px-3 xl:py-2",
+          embedded && "flex-1",
+        )}
+      >
         <Badge tone="success">Смена открыта</Badge>
         <span className="shrink-0 whitespace-nowrap text-foreground-muted" title={openedTime}>
           С {openedTime}

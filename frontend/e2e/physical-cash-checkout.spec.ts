@@ -555,6 +555,10 @@ for (const kind of ["physical", "mixed"] as const) {
           exact: true,
         });
         await preparation.getByRole("button", { name: "Подготовка карты/QR", exact: true }).click();
+        await preparation
+          .getByRole("group", { name: "Способ электронной оплаты", exact: true })
+          .getByRole("button", { name: "Смешанная", exact: true })
+          .click();
         for (const [method, label] of [
           ["cash", "Наличными, TJS"],
           ["card", "Картой, TJS"],

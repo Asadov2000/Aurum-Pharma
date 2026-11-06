@@ -9,25 +9,6 @@ import { usePosFavoritesQuery, useRemovePosFavorite } from "./queries";
 
 type QuickView = "grid" | "list";
 
-const productAccents = [
-  {
-    shell: "border-primary/20 bg-primary/5 text-primary",
-    stripe: "bg-primary/60",
-  },
-  {
-    shell: "border-info/20 bg-info-subtle text-info",
-    stripe: "bg-info/60",
-  },
-  {
-    shell: "border-warning/20 bg-warning-subtle text-warning",
-    stripe: "bg-warning/60",
-  },
-  {
-    shell: "border-success/20 bg-success-subtle text-success-foreground",
-    stripe: "bg-success/60",
-  },
-] as const;
-
 export function QuickProducts({
   branchId,
   onAdd,
@@ -39,7 +20,7 @@ export function QuickProducts({
   busy?: boolean;
   touch?: boolean;
 }): JSX.Element {
-  const [view, setView] = useState<QuickView>("grid");
+  const [view, setView] = useState<QuickView>("list");
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const favorites = usePosFavoritesQuery(branchId);
@@ -89,7 +70,8 @@ export function QuickProducts({
             title="Плитка"
             onClick={() => setView("grid")}
             className={cn(
-              "grid h-8 w-8 place-items-center rounded text-foreground-muted transition-colors duration-fast",
+              "grid place-items-center rounded text-foreground-muted transition-colors duration-fast",
+              touch ? "h-12 w-12" : "h-9 w-9",
               view === "grid" && "bg-surface text-primary shadow-sm",
             )}
           >
@@ -102,7 +84,8 @@ export function QuickProducts({
             title="Список"
             onClick={() => setView("list")}
             className={cn(
-              "grid h-8 w-8 place-items-center rounded text-foreground-muted transition-colors duration-fast",
+              "grid place-items-center rounded text-foreground-muted transition-colors duration-fast",
+              touch ? "h-12 w-12" : "h-9 w-9",
               view === "list" && "bg-surface text-primary shadow-sm",
             )}
           >
@@ -134,103 +117,77 @@ export function QuickProducts({
             </Button>
           </div>
         ) : products.length ? (
-          <div className="grid grid-cols-1 gap-2">
-            {products.map((item, index) => {
-              const accent = productAccents[index % productAccents.length] ?? productAccents[0];
+          <div className={cn("grid gap-2", view === "grid" ? "grid-cols-2" : "grid-cols-1")}>
+            {products.map((item) => {
               const stock = item.stock_available == null ? null : Number(item.stock_available);
               const unavailable = !item.is_active || (stock !== null && stock <= 0);
               const adding = pendingId === item.id;
 
               return (
-                <article
-                  key={item.id}
-                  className="relative flex min-w-0 flex-col overflow-hidden rounded-md border border-border bg-surface"
-                >
+                <article key={item.id} className="relative min-w-0">
+                  <button
+                    type="button"
+                    aria-label={`Добавить ${item.brand_name}`}
+                    aria-busy={adding}
+                    disabled={busy || unavailable || pendingId !== null}
+                    onClick={() => void addProduct(item)}
+                    className={cn(
+                      "flex min-h-24 w-full min-w-0 gap-3 rounded-lg border border-border bg-surface p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                      view === "grid" ? "h-full flex-col" : "items-center justify-between",
+                      touch ? "pr-14" : "pr-11",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words text-sm font-semibold leading-5 text-foreground">
+                        {item.brand_name}
+                      </span>
+                      <span className="mt-1 block break-words text-xs text-foreground-muted">
+                        {[item.dosage, item.pack_size].filter(Boolean).join(" · ") ||
+                          item.form ||
+                          "Лекарственный товар"}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-1 block text-xs",
+                          unavailable ? "text-danger" : "text-foreground-muted",
+                        )}
+                      >
+                        {!item.is_active
+                          ? "Снят с продажи"
+                          : stock === null
+                            ? "Остаток не указан"
+                            : unavailable
+                              ? "Нет в наличии"
+                              : `В наличии: ${formatStock(stock)} шт.`}
+                      </span>
+                    </span>
+                    <span className={cn("shrink-0", view === "list" && "text-right")}>
+                      <span className="block font-mono text-sm font-semibold tabular-nums text-foreground">
+                        {item.base_price ? Number(item.base_price).toFixed(2) : "—"}
+                      </span>
+                      <span className="block text-[10px] text-foreground-muted">
+                        {item.currency} · базовая цена
+                      </span>
+                      {adding ? (
+                        <span role="status" className="block text-xs text-primary">
+                          Добавление…
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     aria-label={`Убрать ${item.brand_name} из избранного`}
                     title="Убрать из избранного"
                     disabled={removeFavorite.isPending}
                     onClick={() => void removeProduct(item)}
-                    className="absolute right-1.5 top-1.5 z-10 grid h-9 w-9 place-items-center rounded-md text-warning hover:bg-warning-subtle disabled:opacity-50"
+                    className={cn(
+                      "absolute right-1 top-1 grid place-items-center rounded-md text-primary hover:bg-primary/10 disabled:opacity-50",
+                      touch ? "h-12 w-12" : "h-9 w-9",
+                    )}
                   >
                     <StarIcon />
                   </button>
-                  <div
-                    className={cn(
-                      "grid min-w-0 gap-3 p-3 pr-11",
-                      view === "grid"
-                        ? "grid-cols-[2.75rem_minmax(0,1fr)]"
-                        : "grid-cols-[2rem_minmax(0,1fr)] gap-2 py-2.5",
-                    )}
-                  >
-                    <div
-                      aria-hidden="true"
-                      className={cn(
-                        "relative my-auto flex shrink-0 items-center justify-center overflow-hidden rounded border",
-                        view === "grid" ? "h-[60px] w-11" : "h-11 w-8",
-                        accent.shell,
-                      )}
-                    >
-                      <span className={cn("absolute inset-y-0 right-0 w-1", accent.stripe)} />
-                      <span className="max-w-full break-words px-1.5 text-center text-[8px] font-bold leading-tight">
-                        {shortProductName(item.brand_name)}
-                      </span>
-                    </div>
-
-                    <div className="flex min-w-0 flex-col">
-                      <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">
-                        {item.brand_name}
-                      </h3>
-                      <p className="mt-0.5 truncate text-xs text-foreground-muted">
-                        {[item.dosage, item.pack_size].filter(Boolean).join(" · ") ||
-                          item.form ||
-                          "Лекарственный товар"}
-                      </p>
-                      <p
-                        className={cn(
-                          "mt-1 text-xs font-medium",
-                          unavailable ? "text-danger" : "text-success-foreground",
-                        )}
-                      >
-                        {!item.is_active
-                          ? "Снят с продажи"
-                          : stock === null
-                            ? "В наличии"
-                            : unavailable
-                              ? "Нет в наличии"
-                              : `В наличии: ${formatStock(stock)} шт.`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 border-t border-border bg-background px-3 py-1.5">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-medium text-foreground-muted">Базовая цена</p>
-                      <p className="font-mono text-sm font-bold tabular-nums text-foreground">
-                        {item.base_price ? Number(item.base_price).toFixed(2) : "—"}{" "}
-                        <span className="font-sans text-[10px] font-semibold text-foreground-secondary">
-                          {item.currency}
-                        </span>
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className={cn(
-                        "shrink-0 text-primary hover:bg-primary/5",
-                        touch && "min-h-12",
-                      )}
-                      aria-label={`Добавить ${item.brand_name}`}
-                      isLoading={adding}
-                      disabled={busy || unavailable}
-                      onClick={() => void addProduct(item)}
-                    >
-                      <CartIcon />
-                      Добавить
-                    </Button>
-                  </div>
                 </article>
               );
             })}
@@ -252,12 +209,6 @@ export function QuickProducts({
       </div>
     </section>
   );
-}
-
-function shortProductName(value: string): string {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "AP";
-  return words.slice(0, 2).join(" ").slice(0, 16);
 }
 
 function formatStock(value: number): string {
@@ -286,26 +237,6 @@ function ListIcon(): JSX.Element {
     >
       <path d="M9 6h11M9 12h11M9 18h11" />
       <path d="M4 6h.01M4 12h.01M4 18h.01" />
-    </svg>
-  );
-}
-
-function CartIcon(): JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20.5 8H6" />
-      <circle cx="10" cy="20" r="1" />
-      <circle cx="18" cy="20" r="1" />
     </svg>
   );
 }

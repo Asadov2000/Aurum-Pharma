@@ -4,6 +4,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 import { paymentMethodLabel, paymentMethodOptions } from "./labels";
+import { PosPaymentMethodButtons } from "./PosPaymentMethodButtons";
 import {
   type Payment,
   type PaymentMetadata,
@@ -209,9 +210,9 @@ export function PaymentPanel({
   return (
     <section
       aria-labelledby="payment-panel-title"
-      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border border-t-[3px] border-t-primary bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
+      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
     >
-      <header className={cn("border-b border-border px-3 py-2", touch && "px-4 py-3")}>
+      <header className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex flex-col gap-2">
           <div className="min-w-0">
             <h2
@@ -220,12 +221,7 @@ export function PaymentPanel({
             >
               К оплате
             </h2>
-            <p
-              className={cn(
-                "mt-1 font-mono text-3xl font-bold tabular-nums text-foreground",
-                touch && "text-4xl",
-              )}
-            >
+            <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-foreground">
               {totalDue.toFixed(2)}{" "}
               <span className="font-sans text-sm font-semibold text-foreground-secondary">
                 {currency}
@@ -270,21 +266,18 @@ export function PaymentPanel({
                 : "Загрузка способов оплаты…"}
             </div>
           ) : (
-            <div
-              className="grid gap-1.5 border-b border-border p-2"
-              style={{
-                gridTemplateColumns: `repeat(${Math.max(1, paymentMethods.length)}, minmax(0, 1fr))`,
-              }}
-            >
-              {paymentMethodOptions
-                .filter((method) => paymentMethods.includes(method))
-                .map((method) => (
-                  <button
-                    key={method}
-                    type="button"
-                    aria-pressed={selectedMethod === method}
-                    onClick={() => chooseMethod(method)}
-                    disabled={
+            <div className="shrink-0 space-y-2 border-b border-border p-3">
+              <p className="text-xs font-semibold text-foreground-secondary">Способ оплаты</p>
+              <PosPaymentMethodButtons
+                className="xl:grid-cols-3"
+                value={selectedMethod}
+                onChange={chooseMethod}
+                options={paymentMethodOptions
+                  .filter((method) => paymentMethods.includes(method))
+                  .map((method) => ({
+                    value: method,
+                    label: paymentMethodLabel[method],
+                    disabled:
                       settled ||
                       payingMethod !== null ||
                       totalDue <= 0 ||
@@ -292,21 +285,9 @@ export function PaymentPanel({
                       completing ||
                       completionUncertain ||
                       (lockedMethod !== null && lockedMethod !== method) ||
-                      (pendingPaymentMethod !== null && pendingPaymentMethod !== method)
-                    }
-                    className={cn(
-                      "pos-tile flex min-h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-md border border-border px-1 text-xs font-semibold text-foreground transition-colors duration-fast 2xl:flex-row 2xl:gap-2 2xl:px-2 2xl:text-sm",
-                      touch && "min-h-14 text-base",
-                      selectedMethod === method
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "bg-surface hover:bg-primary/5",
-                      "disabled:cursor-not-allowed disabled:opacity-50",
-                    )}
-                  >
-                    <PaymentMethodIcon method={method} active={selectedMethod === method} />
-                    <span className="whitespace-nowrap">{paymentMethodLabel[method]}</span>
-                  </button>
-                ))}
+                      (pendingPaymentMethod !== null && pendingPaymentMethod !== method),
+                  }))}
+              />
             </div>
           )}
 
@@ -349,7 +330,7 @@ export function PaymentPanel({
               <>
                 <label
                   htmlFor="cash-received"
-                  className="mb-1 flex items-center justify-between gap-3 text-sm font-medium text-foreground-secondary"
+                  className="mb-1 flex shrink-0 items-center justify-between gap-3 text-sm font-medium text-foreground-secondary"
                 >
                   <span>Получено</span>
                   <span className="text-xs font-semibold text-foreground-muted">{currency}</span>
@@ -369,12 +350,12 @@ export function PaymentPanel({
                     }
                   }}
                   className={cn(
-                    "h-10 w-full rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground focus:border-ring",
+                    "h-10 w-full shrink-0 rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground focus:border-ring",
                     touch && "h-12 text-2xl",
                   )}
                 />
 
-                <div className="mt-2 grid flex-1 grid-cols-4 gap-1 bg-surface">
+                <div className="mt-2 grid shrink-0 grid-cols-4 gap-1 bg-surface">
                   {cashKeys.map((key) => (
                     <button
                       key={key}
@@ -397,7 +378,7 @@ export function PaymentPanel({
 
                 <div
                   className={cn(
-                    "mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border px-3",
+                    "mt-2 flex min-h-11 shrink-0 items-center justify-between gap-3 rounded-md border px-3",
                     touch && "min-h-12",
                     cashTenderInsufficient
                       ? "border-warning/40 bg-warning-subtle text-warning-foreground"
@@ -415,7 +396,6 @@ export function PaymentPanel({
               </>
             ) : (
               <div className="flex min-h-56 flex-1 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-background px-6 text-center">
-                <PaymentMethodIcon method={selectedMethod} active />
                 <div>
                   <p className="font-semibold text-foreground">
                     {paymentMethodLabel[selectedMethod]}
@@ -465,7 +445,12 @@ export function PaymentPanel({
             ) : null}
           </div>
 
-          <footer className={cn("space-y-1 border-t border-border p-2", touch && "space-y-2 p-3")}>
+          <footer
+            className={cn(
+              "shrink-0 space-y-1 border-t border-border p-2",
+              touch && "space-y-2",
+            )}
+          >
             {!paymentSettingsBlocked && !settled && !overpaid ? (
               <Button
                 size="xl"
@@ -473,7 +458,6 @@ export function PaymentPanel({
                 onClick={submitSelectedPayment}
                 disabled={paymentActionDisabled}
               >
-                <PaymentMethodIcon method={selectedMethod} active />
                 {paymentActionLabel(selectedMethod)}
               </Button>
             ) : null}
@@ -606,49 +590,6 @@ function cashKeyText(key: CashKey): string {
   if (key === "backspace") return "⌫";
   if (key === "clear") return "C";
   return key;
-}
-
-function PaymentMethodIcon({
-  method,
-  active,
-}: {
-  method: PaymentMethod;
-  active: boolean;
-}): JSX.Element {
-  const colorClass = active ? "text-current" : "text-primary";
-
-  if (method === "qr") {
-    return (
-      <svg
-        aria-hidden="true"
-        width="21"
-        height="21"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={colorClass}
-      >
-        <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" />
-        <path d="M15 14h1v1h-1zM19 14h1v3h-1zM14 18h3v2h-3zM19 19h1v1h-1z" />
-      </svg>
-    );
-  }
-
-  return (
-    <span
-      className={cn("relative block h-4 w-7 rounded-sm border-2 border-current", colorClass)}
-      aria-hidden="true"
-    >
-      {method === "cash" ? (
-        <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-      ) : (
-        <span className="absolute inset-x-0 top-1 h-0.5 bg-current" />
-      )}
-    </span>
-  );
 }
 
 function isCurrentPaymentMethod(method: PaymentMethodRead): method is PaymentMethod {

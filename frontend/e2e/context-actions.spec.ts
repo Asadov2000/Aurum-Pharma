@@ -1,4 +1,4 @@
-import { request, test } from "@playwright/test";
+import { request, test, type Page } from "@playwright/test";
 
 import {
   addPosItemToCart,
@@ -18,6 +18,18 @@ import {
   seedSupplier,
   uniqueName,
 } from "./helpers";
+
+async function selectCashierMode(page: Page, mode: string): Promise<void> {
+  await page.getByRole("button", { name: "Настройки рабочего места", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Настройки рабочего места", exact: true });
+  const choice = settings
+    .getByRole("group", { name: "Режим кассы", exact: true })
+    .getByRole("button", { name: mode, exact: true });
+  await choice.click();
+  await expect(choice).toHaveAttribute("aria-pressed", "true");
+  await settings.getByRole("button", { name: "Готово", exact: true }).click();
+  await expect(settings).toBeHidden();
+}
 
 test("cart menus target a single FEFO line and become read-only after payment", async ({
   page,
@@ -88,10 +100,7 @@ test("cart menus target a single FEFO line and become read-only after payment", 
     .click();
   await page.keyboard.press("Escape");
   for (const mode of ["Сенсор", "Клавиши"]) {
-    await page
-      .getByRole("group", { name: "Режим кассы", exact: true })
-      .getByRole("button", { name: mode, exact: true })
-      .click();
+    await selectCashierMode(page, mode);
     await expect(second.getByText(batchB, { exact: false })).toBeVisible();
     await expect
       .poll(() => second.evaluate((row) => row.scrollWidth <= row.clientWidth + 1))
@@ -178,10 +187,7 @@ test("cart menus target a single FEFO line and become read-only after payment", 
   await expect(first.getByRole("button", { name: "Количество", exact: true })).toHaveText("1");
   await expect(second.getByRole("button", { name: "Количество", exact: true })).toHaveText("1");
   for (const mode of ["Сенсор", "Клавиши"]) {
-    await page
-      .getByRole("group", { name: "Режим кассы", exact: true })
-      .getByRole("button", { name: mode, exact: true })
-      .click();
+    await selectCashierMode(page, mode);
     const productGroup = page.getByRole("listitem").filter({ has: second });
     await expect(productGroup.getByText(item.brand_name, { exact: true })).toBeVisible();
     await expect(second.getByText(batchB, { exact: false })).toBeVisible();

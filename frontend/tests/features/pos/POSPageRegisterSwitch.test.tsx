@@ -10,6 +10,15 @@ const saleControl = vi.hoisted(() => ({
   renderedRegisterIds: [] as string[],
 }));
 const listRegisters = vi.fn();
+vi.mock("@/features/settings/usePreferenceAutosave", () => ({
+  usePreferenceAutosave: () => ({
+    preferences: { data: undefined, error: null },
+    hasPending: false,
+    error: null,
+    enqueue: vi.fn(),
+    retry: vi.fn(),
+  }),
+}));
 
 vi.mock("@/features/foundation/api", () => ({
   listRegisters: (...args: unknown[]) => listRegisters(...args),
@@ -149,6 +158,28 @@ function requestRegister(register: Register) {
 }
 
 describe("POSPage register switch recovery", () => {
+  it("opens device settings without replacing a blocked workspace or its draft", async () => {
+    saveDevicePreferences(DEVICE_SCOPE, {
+      ...defaultDevicePreferences(),
+      lastRegisterId: REGISTER_A.id,
+    });
+    saleControl.blocked = true;
+    saleControl.hasDraft = true;
+    await renderPage();
+    expect(screen.getByLabelText("Касса")).toBeDisabled();
+    expect(screen.queryByRole("group", { name: "Режим кассы" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Настройки рабочего места" }));
+    await screen.findByRole("dialog", { name: "Настройки рабочего места" });
+    fireEvent.click(screen.getByRole("button", { name: "Сенсор" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Звук сканера" }));
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Касса")).toBeDisabled();
+    await expectRegister(REGISTER_A);
+    expect(loadDevicePreferences(DEVICE_SCOPE).scannerSound).toBe(true);
+    expect(saleControl.renderedRegisterIds.every((id) => id === REGISTER_A.id)).toBe(true);
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     useAuthStore.getState().setUser({

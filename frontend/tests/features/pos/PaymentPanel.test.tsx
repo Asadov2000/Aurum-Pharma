@@ -82,7 +82,12 @@ describe("PaymentPanel", () => {
     const onPayTile = vi.fn();
     render(<PaymentPanel {...baseProps} onPayTile={onPayTile} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Карта" }));
+    const card = screen.getByRole("button", { name: "Карта" });
+    expect(card.matches(".pos-tile:not(:disabled)")).toBe(true);
+    card.focus();
+    expect(card).toHaveFocus();
+    fireEvent.click(card);
+    expect(card).toHaveAttribute("aria-pressed", "true");
     expect(onPayTile).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Перейти к оплате картой" }));

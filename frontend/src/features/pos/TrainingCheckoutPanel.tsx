@@ -3,7 +3,9 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button, Input, Label } from "@/components/ui";
 import { cashCheckoutContracts } from "./physicalCashCheckout";
-import { type SaleDetails } from "./types";
+import { type SaleDetails, type PaymentMethod } from "./types";
+import { PosPaymentMethodButtons } from "./PosPaymentMethodButtons";
+import { paymentMethodLabel } from "./labels";
 import { type PosStorageScope } from "./posStorageScope";
 import { hasTrainingCheckout } from "./trainingCheckoutPresence";
 import {
@@ -50,6 +52,7 @@ export function TrainingCheckoutPanel(props: Props): JSX.Element {
   const [quote, setQuote] = useState<{ quote: TrainingQuote; revision_hash: string } | null>(null);
   const [result, setResult] = useState<TrainingCheckoutResult | null>(null),
     [notFound, setNotFound] = useState(false);
+  const [allocationMode, setAllocationMode] = useState<PaymentMethod | "mixed" | null>(null);
   const [error, setError] = useState<string | null>(null),
     [accepted, setAccepted] = useState(false);
   const running = useRef(false),
@@ -149,12 +152,16 @@ export function TrainingCheckoutPanel(props: Props): JSX.Element {
       const value = await getTrainingQuote(context());
       if (!current()) return;
       setQuote(value);
+      const method = (["cash", "card", "qr"] as const).find((item) =>
+        live.current.paymentMethods.includes(item),
+      );
       form.reset({
-        cash: value.quote.total_amount,
-        card: "0.00",
-        qr: "0.00",
-        tendered: value.quote.total_amount,
+        cash: method === "cash" ? value.quote.total_amount : "0.00",
+        card: method === "card" ? value.quote.total_amount : "0.00",
+        qr: method === "qr" ? value.quote.total_amount : "0.00",
+        tendered: method === "cash" ? value.quote.total_amount : "0.00",
       });
+      setAllocationMode(method ?? null);
     });
   const submit = form.handleSubmit((values) =>
     run(async () => {
@@ -184,6 +191,26 @@ export function TrainingCheckoutPanel(props: Props): JSX.Element {
       if (current()) await accept(value);
     }),
   );
+  const allocationOptions = (["cash", "card", "qr"] as const)
+    .filter((method) => props.paymentMethods.includes(method))
+    .map((method) => ({
+      value: method as PaymentMethod | "mixed",
+      label: paymentMethodLabel[method],
+    }));
+  if (props.mixedPaymentEnabled && allocationOptions.length > 1)
+    allocationOptions.push({ value: "mixed", label: "Смешанная" });
+  const selectAllocation = (method: PaymentMethod | "mixed") => {
+    if (busy || pending || !props.canStart || !quote || !current()) return;
+    if (!allocationOptions.some((option) => option.value === method)) return;
+    if (method !== "mixed")
+      form.reset({
+        cash: method === "cash" ? quote.quote.total_amount : "0.00",
+        card: method === "card" ? quote.quote.total_amount : "0.00",
+        qr: method === "qr" ? quote.quote.total_amount : "0.00",
+        tendered: method === "cash" ? quote.quote.total_amount : "0.00",
+      });
+    setAllocationMode(method);
+  };
   return (
     <section
       role="region"
@@ -253,6 +280,18 @@ export function TrainingCheckoutPanel(props: Props): JSX.Element {
           {quote && (
             <form onSubmit={submit} className="space-y-2">
               <p>Учебная сумма: {quote.quote.total_amount} TJS</p>
+              <PosPaymentMethodButtons
+                label="Способ учебной оплаты"
+                options={allocationOptions}
+                value={allocationMode}
+                onChange={selectAllocation}
+                disabled={busy || pending || !props.canStart}
+              />
+              <p className="text-xs text-foreground-muted">
+                Одиночный способ заполняет всю сумму и заменяет введённое распределение.
+                {props.mixedPaymentEnabled &&
+                  " Смешанная оплата сохраняет суммы для редактирования."}
+              </p>
               {(
                 [
                   ["cash", "Учебные наличные, TJS"],
@@ -261,7 +300,16 @@ export function TrainingCheckoutPanel(props: Props): JSX.Element {
                   ["tendered", "Учебно получено наличными, TJS"],
                 ] as const
               ).map(([name, label]) => (
-                <div key={name}>
+                <div
+                  key={name}
+                  hidden={
+                    name === "tendered"
+                      ? !props.paymentMethods.includes("cash") ||
+                        (allocationMode !== "cash" && allocationMode !== "mixed")
+                      : !props.paymentMethods.includes(name) ||
+                        (allocationMode !== "mixed" && allocationMode !== name)
+                  }
+                >
                   <Label htmlFor={`training-${name}`}>{label}</Label>
                   <Input
                     id={`training-${name}`}
