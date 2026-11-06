@@ -84,7 +84,7 @@ async function receivePhysicalStock(api: APIRequestContext, branchId: string, ca
 }
 
 async function addPhysicalFormats(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
   await expect(editor).toBeVisible();
   let saleId = "";

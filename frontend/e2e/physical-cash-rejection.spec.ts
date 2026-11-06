@@ -46,7 +46,7 @@ function cancellationCount(saleId: string): number {
 }
 
 async function addUnits(page: Page, fixture: RehearsalFixture, quantity: number) {
-  await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
   await editor.getByLabel("Название лекарства").fill(catalogSearchKey(fixture.medicine.brand_name));
   await editor.getByRole("option", { name: new RegExp(fixture.medicine.brand_name) }).click();

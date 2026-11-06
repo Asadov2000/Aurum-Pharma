@@ -62,7 +62,7 @@ test("persists pack, blister and unit draft rows without enabling payment", asyn
         financialWrites.push(path);
       }
     });
-    await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+    await page.getByRole("button", { name: "Упаковки" }).click();
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
     await expect(editor).toBeVisible();
     let saleId = "";

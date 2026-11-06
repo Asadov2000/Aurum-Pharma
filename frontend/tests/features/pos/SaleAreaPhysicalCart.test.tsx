@@ -805,18 +805,49 @@ describe("SaleArea physical cart integration", () => {
     );
     expect(localStorage.getItem(mixedCashRecoveryKey("sale-1", POS_SCOPE))).toBe("uncertain-mixed");
   });
-  it("opens the physical editor after legacy lines without making a second sale", async () => {
+  it.each([
+    ["Упаковки", "pack"],
+    ["Блистеры", "blister"],
+    ["Штуки", "unit"],
+  ] as const)("opens %s directly without making another sale or payment", async (label, format) => {
     calls.sale.mockResolvedValue(sale({ prepared_cart_items: [], items: [legacyItem] }));
     mount();
     const button = await screen.findByRole("button", {
-      name: "Выбрать упаковку, блистер или штуки",
+      name: label,
     });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await screen.findByRole("region", { name: "Физическая корзина" });
     expect(screen.getByRole("button", { name: "Обновить физическую корзину" })).toBeEnabled();
     expect(calls.create).not.toHaveBeenCalled();
+    expect(calls.editor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialFormat: format }),
+    );
+    expect(calls.addItem).not.toHaveBeenCalled();
+    expect(calls.addPayment).not.toHaveBeenCalled();
+    expect(calls.checkout).not.toHaveBeenCalled();
   });
+
+  it.each(["closed shift", "payment started"])(
+    "blocks all format shortcuts for %s",
+    async (reason) => {
+      calls.sale.mockResolvedValue(
+        sale({
+          prepared_cart_items: [],
+          payments: reason === "payment started" ? completedSale().payments : [],
+        }),
+      );
+      if (reason === "closed shift") calls.shift.mockResolvedValue(null);
+      mount();
+      const formats = await screen.findByRole("group", { name: "Формат продажи" });
+      for (const button of within(formats).getAllByRole("button")) {
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+      }
+      expect(calls.editor).not.toHaveBeenCalled();
+      expect(calls.create).not.toHaveBeenCalled();
+    },
+  );
   it.each(["physical", "mixed"] as const)("checks Rx before starting %s cash", async (kind) => {
     calls.sale.mockResolvedValue(sale({ items: kind === "mixed" ? [legacyItem] : [] }));
     calls.preflight.mockResolvedValue(true);
@@ -927,7 +958,7 @@ describe("SaleArea physical cart integration", () => {
   it("opens an empty restored draft editor and returns without creating another sale", async () => {
     calls.sale.mockResolvedValue(sale({ prepared_cart_items: [] }));
     mount();
-    const open = await screen.findByRole("button", { name: "Выбрать упаковку, блистер или штуки" });
+    const open = await screen.findByRole("button", { name: "Упаковки" });
     await waitFor(() => expect(open).toBeEnabled());
     fireEvent.click(open);
     await screen.findByRole("region", { name: "Физическая корзина" });

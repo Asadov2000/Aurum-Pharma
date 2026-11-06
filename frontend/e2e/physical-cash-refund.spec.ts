@@ -92,7 +92,7 @@ test("recovers mixed cash sale and refund after response loss and closing their 
       expectedCartItems: 1,
     });
     // The physical editor must remain reachable after adding an ordinary pack.
-    await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+    await page.getByRole("button", { name: "Упаковки" }).click();
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
     await editor.getByLabel("Название лекарства").fill(catalogSearchKey(physical.brand_name));
     await editor.getByRole("option", { name: new RegExp(physical.brand_name) }).click();
@@ -628,7 +628,7 @@ async function receivePhysicalStock(api: APIRequestContext, branchId: string, ca
 }
 
 async function addPhysicalFormats(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
   await expect(editor).toBeVisible();
   let saleId = "";
