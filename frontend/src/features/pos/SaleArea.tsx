@@ -2290,8 +2290,8 @@ function ActiveWorkspace({
         />
       )}
 
-      <div className="pos-sale-workspace space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-3 xl:space-y-0">
-        <div className="pos-workstation-strip flex min-w-0 shrink-0 flex-col gap-3 px-1 py-1 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+      <div className="pos-sale-workspace">
+        <div className="pos-workstation-strip">
           {workstationControls ? (
             <div className="flex min-w-0 items-center lg:w-80 lg:shrink-0">
               {workstationControls}
@@ -2368,8 +2368,8 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="pos-selling-columns grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_minmax(0,0.85fr)] xl:grid-rows-[minmax(0,1fr)]">
-          <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
+        <div className="pos-selling-columns">
+          <div>
             <Suspense
               fallback={
                 <section
@@ -2577,10 +2577,7 @@ function ActiveWorkspace({
             </footer>
           </section>
 
-          <div
-            ref={paymentPanelRef}
-            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
-          >
+          <div ref={paymentPanelRef}>
             <div className="space-y-3 xl:h-full xl:min-h-0 xl:overflow-y-auto">
               {(physicalCartActive || physicalOperationsBlocked || trainingActive) &&
               saleId &&
