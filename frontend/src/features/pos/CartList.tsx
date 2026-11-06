@@ -240,7 +240,10 @@ export function CartList({
   ): ReactNode => (
     <div
       className={cn(
-        "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
+        "w-full min-w-0 items-center gap-2",
+        embedded
+          ? "col-span-2 flex flex-wrap justify-between"
+          : "grid grid-cols-[minmax(0,1fr)_auto]",
         !stacked && "sm:flex sm:w-auto sm:justify-end sm:gap-1",
       )}
       data-testid="cart-line-controls"
@@ -259,14 +262,16 @@ export function CartList({
         )}
       </div>
 
-      <div
-        className={cn(
-          "min-w-0 text-left font-mono font-semibold tabular-nums text-foreground sm:w-24 sm:text-right",
-          touch && "text-lg",
-        )}
-      >
-        {Number(it.total_price).toFixed(2)}
-      </div>
+      {!embedded && (
+        <div
+          className={cn(
+            "min-w-0 text-left font-mono font-semibold tabular-nums text-foreground sm:w-24 sm:text-right",
+            touch && "text-lg",
+          )}
+        >
+          {Number(it.total_price).toFixed(2)}
+        </div>
+      )}
 
       {(editable || quickActions) && (
         <div
@@ -333,7 +338,8 @@ export function CartList({
               data-context-actions={quickActions ? true : undefined}
               tabIndex={quickActions ? 0 : undefined}
               className={cn(
-                "flex flex-col gap-2 px-4",
+                "gap-2 px-4",
+                embedded ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex flex-col",
                 !stacked && "sm:flex-row sm:items-center",
                 touch ? "py-5" : "py-4",
                 windowed && "pos-cv",
@@ -354,6 +360,16 @@ export function CartList({
                 </p>
                 <BatchExpiry item={first} />
               </div>
+              {embedded && (
+                <p
+                  className={cn(
+                    "text-right font-mono font-semibold tabular-nums text-foreground",
+                    touch && "text-lg",
+                  )}
+                >
+                  {Number(first.total_price).toFixed(2).replace(".", ",")}
+                </p>
+              )}
               {lineControls(first, g.name, undefined, stacked)}
             </li>
           );
@@ -366,23 +382,26 @@ export function CartList({
           <li key={g.catalogId} className={cn("overflow-hidden bg-surface", windowed && "pos-cv")}>
             <div
               className={cn(
-                "flex gap-2 border-b border-border px-4 py-2",
-                embedded ? "flex-col" : "items-center justify-between bg-foreground/[0.02]",
+                "gap-2 border-b border-border px-4 py-2",
+                embedded
+                  ? "grid grid-cols-[minmax(0,1fr)_auto] items-start"
+                  : "flex items-center justify-between bg-foreground/[0.02]",
               )}
             >
               <p
                 className={cn(
                   "font-medium text-foreground",
-                  embedded ? "break-words" : "truncate",
+                  embedded ? "min-w-0 break-words" : "truncate",
                   touch && "text-lg",
                 )}
               >
                 {g.name}
               </p>
-              <p className="shrink-0 text-xs text-foreground-muted">
+              <p className={cn("shrink-0 text-xs text-foreground-muted", embedded && "text-right")}>
                 {groupQty} шт ·{" "}
                 <span className="font-mono tabular-nums text-foreground-secondary">
-                  {groupTotal.toFixed(2)} {currency}
+                  {embedded ? groupTotal.toFixed(2).replace(".", ",") : groupTotal.toFixed(2)}{" "}
+                  {currency}
                 </span>
               </p>
             </div>
@@ -394,7 +413,8 @@ export function CartList({
                   data-context-actions={quickActions ? true : undefined}
                   tabIndex={quickActions ? 0 : undefined}
                   className={cn(
-                    "flex flex-col gap-3 px-4",
+                    "gap-3 px-4",
+                    embedded ? "grid grid-cols-[minmax(0,1fr)_auto]" : "flex flex-col",
                     !embedded && "sm:flex-row sm:items-center",
                     touch ? "py-3" : "py-2.5",
                   )}
@@ -405,6 +425,16 @@ export function CartList({
                       {Number(it.unit_price).toFixed(2)} {currency} / шт
                     </p>
                   </div>
+                  {embedded && (
+                    <p
+                      className={cn(
+                        "text-right font-mono font-semibold tabular-nums text-foreground",
+                        touch && "text-lg",
+                      )}
+                    >
+                      {Number(it.total_price).toFixed(2).replace(".", ",")}
+                    </p>
+                  )}
                   {lineControls(it, g.name, `Партия ${idx + 1}`, embedded)}
                 </div>
               ))}
