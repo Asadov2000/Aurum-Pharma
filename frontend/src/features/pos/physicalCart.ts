@@ -30,7 +30,8 @@ export interface PhysicalCartQuoteLine {
   id: string;
   catalog_id: string;
   position: number;
-  quantity: number;
+  // Legacy pack quantities are JSON decimals; physical/prepared quantities are integers.
+  quantity: number | string;
   original_retail_unit_price: string;
   gross_amount: string;
   discount_amount: string;

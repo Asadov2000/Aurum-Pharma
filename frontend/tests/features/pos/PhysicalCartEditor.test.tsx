@@ -928,6 +928,59 @@ describe("PhysicalCartEditor", () => {
     },
   );
 
+  it.each([
+    ["1.000", true],
+    ["1.001", false],
+    ["1e0", false],
+    ["1.0000", false],
+    [1, false],
+  ] as const)(
+    "validates the server mixed-quote quantity %s without floating conversion",
+    async (quantity, valid) => {
+      const legacy = {
+        id: "legacy-a",
+        sale_id: "sale-a",
+        catalog_id: "legacy-catalog",
+        qty: "1.000",
+      };
+      const response = quote();
+      response.quote.total_amount = "11.00";
+      response.quote.lines[0] = {
+        ...response.quote.lines[0],
+        sale_format: "unit",
+        original_retail_unit_price: "0.50",
+        gross_amount: "1.00",
+        net_amount: "1.00",
+      };
+      response.quote.lines.push({
+        inventory_kind: "legacy_pack",
+        id: legacy.id,
+        catalog_id: legacy.catalog_id,
+        position: 2,
+        quantity,
+        original_retail_unit_price: "10.00",
+        gross_amount: "10.00",
+        discount_amount: "0.00",
+        net_amount: "10.00",
+      });
+      api.quote.mockResolvedValue(response);
+      const totalChanged = vi.fn();
+      mount([item({ sale_format: "unit" })], false, undefined, {
+        selection: null,
+        legacyItems: [legacy],
+        onTotalChange: totalChanged,
+      });
+      if (valid) {
+        await waitFor(() => expect(totalChanged).toHaveBeenLastCalledWith("11.00"));
+        expect(screen.getByText("Итого: 11,00 сомони", { exact: true })).toBeInTheDocument();
+        expect(screen.queryByText(/Не удалось рассчитать корзину/)).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось рассчитать корзину");
+        expect(totalChanged.mock.calls.every(([total]) => total === null)).toBe(true);
+      }
+    },
+  );
+
   it("refreshes a mixed quote when only legacy quantity changes and clears the published total while loading", async () => {
     const legacy = {
       id: "legacy-a",
@@ -942,13 +995,13 @@ describe("PhysicalCartEditor", () => {
       inventory_kind: "legacy_pack",
       id: legacy.id,
       catalog_id: legacy.catalog_id,
-      quantity: 1.5,
+      quantity: "1.500",
       gross_amount: "3.00",
       net_amount: "3.00",
     });
     const updated = structuredClone(response);
     updated.quote.total_amount = "24.00";
-    updated.quote.lines[1].quantity = 2;
+    updated.quote.lines[1].quantity = "2.000";
     updated.quote.lines[1].net_amount = "4.00";
     const pending = deferred<PhysicalCartQuote>();
     api.quote.mockResolvedValueOnce(response).mockReturnValueOnce(pending.promise);
@@ -980,7 +1033,7 @@ describe("PhysicalCartEditor", () => {
       inventory_kind: "legacy_pack",
       id: legacy.id,
       catalog_id: legacy.catalog_id,
-      quantity: 1,
+      quantity: "1.000",
     });
     api.quote.mockResolvedValue(response);
     const totalChanged = vi.fn();

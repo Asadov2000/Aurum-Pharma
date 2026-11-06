@@ -369,7 +369,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
     const confirmation = refused.request().postDataJSON() as { operation_id: string };
     expect(rehearsalFacts(fixture)).toEqual(afterWriteoff);
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeDisabled();
+    await expect(editor.getByRole("button", { name: "Убрать", exact: true })).toBeDisabled();
     await page.reload();
     const cancellation = page.waitForResponse(
       (response) =>
@@ -381,7 +381,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
     const cancelled = await cancellation;
     expect(cancelled.ok()).toBe(true);
     expect(((await cancelled.json()) as { state: string }).state).toBe("cancelled");
-    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeEnabled();
+    await expect(editor.getByRole("button", { name: "Убрать", exact: true })).toBeEnabled();
     const terminal = await cashier.api.get(
       `sales/${oversized.sale_id}/physical-cash/operations/${confirmation.operation_id}`,
     );
@@ -400,7 +400,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
         new URL(response.url()).pathname ===
           `/api/v1/sales/${oversized.sale_id}/physical-cart/items/${oversized.id}`,
     );
-    await editor.getByRole("button", { name: "Удалить", exact: true }).click();
+    await editor.getByRole("button", { name: "Убрать", exact: true }).click();
     expect((await removed).ok()).toBe(true);
     await expect(editor.getByRole("listitem")).toHaveCount(0);
     if (await editor.count()) {

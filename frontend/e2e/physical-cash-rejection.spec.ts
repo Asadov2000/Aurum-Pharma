@@ -147,7 +147,7 @@ test("cashier safely cancels a stock-refused cash intent, edits the cart and com
     expect(oldRequest.sale_id === item.sale_id).toBe(true);
     expect(rehearsalFacts(fixture)).toEqual(initial);
     await expect(editor.getByRole("button", { name: "Изменить", exact: true })).toBeDisabled();
-    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeDisabled();
+    await expect(editor.getByRole("button", { name: "Убрать", exact: true })).toBeDisabled();
     const prefix = `sales/${item.sale_id}/physical-cash`;
     const statusBefore = await api.get(`${prefix}/operations/${oldRequest.operation_id}`);
     expect(statusBefore.ok()).toBe(true);

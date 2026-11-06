@@ -779,9 +779,12 @@ test.describe("POS sale (owner)", () => {
 
     // Draft and checkout must both charge 10 + 20 = 30 TJS.
     await expect(page.getByRole("region", { name: "Оплата", exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("region", { name: "Оплата", exact: true }).getByText("30,00", { exact: true }),
-    ).toBeVisible();
+    const paymentTotal = page
+      .getByRole("region", { name: "Оплата", exact: true })
+      .locator("header > p")
+      .filter({ hasText: /^30,00$/ });
+    await expect(paymentTotal).toHaveText("30,00");
+    await expect(paymentTotal).toBeVisible();
 
     // The tender is staged only in memory. Commit the complete sale command,
     // then lose both its HTTP response and the first recovery lookup. The POS

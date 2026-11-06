@@ -190,3 +190,9 @@
     content: url("/brand/v12-8/mark-white.svg");
   }
 }
+
+@media (min-width: 80rem) {
+  .pos-workspace .pos-workstation-strip > div:first-child {
+    width: 22rem;
+  }
+}

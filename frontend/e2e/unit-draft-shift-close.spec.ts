@@ -168,12 +168,9 @@ for (const mixed of [false, true]) {
         await assertDenied();
       }
 
-      await editor.getByRole("button", { name: "Удалить", exact: true }).click();
+      await editor.getByRole("button", { name: "Убрать", exact: true }).click();
       await expect(editor.getByRole("listitem")).toHaveCount(0);
-      // An editor opened explicitly in this session stays open when emptied.
-      // After reload it is shown only because rows exist, so deleting the last
-      // row already returns the mixed-to-pure case to the ordinary sale view.
-      if (!mixed) await page.getByRole("button", { name: "Вернуться к обычной продаже" }).click();
+      // Removing the last prepared row closes the physical editor automatically.
       await expect(editor).toHaveCount(0);
       const empty = await readDraft(api, saleId);
       expect(empty.items).toEqual([]);

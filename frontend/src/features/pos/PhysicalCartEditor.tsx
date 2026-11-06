@@ -79,6 +79,14 @@ const selectionFormatNames: Record<PhysicalSaleFormat, string> = {
   pack: "Упаковки",
 };
 
+function canonicalLegacyQuantity(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{1,11}(\.\d{1,3})?$/.test(value)) return null;
+  const [whole = "0", fraction = ""] = value.split(".");
+  const padded = fraction.padEnd(3, "0");
+  if (BigInt(whole + padded) === 0n) return null;
+  return `${BigInt(whole).toString()}.${padded}`;
+}
+
 function matchesRowOptions(
   snapshot: PhysicalCartOptions | null | undefined,
   item: PhysicalCartItem,
@@ -411,7 +419,9 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
                   (line) =>
                     line.id === item.id &&
                     line.catalog_id === item.catalog_id &&
-                    line.quantity === Number(item.qty),
+                    typeof line.quantity === "string" &&
+                    canonicalLegacyQuantity(line.quantity) !== null &&
+                    canonicalLegacyQuantity(line.quantity) === canonicalLegacyQuantity(item.qty),
                 ),
             ));
         if (
