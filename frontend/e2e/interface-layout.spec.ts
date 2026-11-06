@@ -144,10 +144,14 @@ test.describe("Interface layout", () => {
     await page.goto("/pos");
 
     const desktopNavigation = page.getByRole("navigation", { name: "Основная навигация" });
+    await expect(page.locator("[data-nav]")).toHaveAttribute("data-nav", "auto");
+    await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
+    await expect(page.locator(".pos-workspace")).toBeVisible();
     const navigationBounds = await desktopNavigation.boundingBox();
     expect(navigationBounds).not.toBeNull();
-    expect(navigationBounds!.width).toBeGreaterThanOrEqual(236);
-    expect(navigationBounds!.width).toBeLessThanOrEqual(244);
+    // Automatic navigation reserves room for the familiar cashier columns.
+    expect(navigationBounds!.width).toBeGreaterThanOrEqual(108);
+    expect(navigationBounds!.width).toBeLessThanOrEqual(116);
     await expect(desktopNavigation.getByRole("link", { name: "Касса" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
 
@@ -172,8 +176,26 @@ test.describe("Interface layout", () => {
       )
       .toBe(true);
     await desktopNavigation.screenshot({
-      path: testInfo.outputPath("sidebar-selected-expanded.png"),
+      path: testInfo.outputPath("sidebar-selected-cashier-auto.png"),
     });
+
+    // POS styles must not keep the automatic menu narrow on another route.
+    await desktopNavigation.getByRole("link", { name: "Каталог", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Каталог", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".pos-workspace")).toHaveCount(0);
+    const catalogBounds = await desktopNavigation.boundingBox();
+    expect(catalogBounds).not.toBeNull();
+    expect(catalogBounds!.width).toBeGreaterThanOrEqual(236);
+    expect(catalogBounds!.width).toBeLessThanOrEqual(244);
+    await desktopNavigation.getByRole("link", { name: "Касса", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Касса", exact: true })).toBeVisible();
+    await expect(page.locator(".pos-workspace")).toBeVisible();
+    const restoredBounds = await desktopNavigation.boundingBox();
+    expect(restoredBounds).not.toBeNull();
+    expect(restoredBounds!.width).toBeGreaterThanOrEqual(108);
+    expect(restoredBounds!.width).toBeLessThanOrEqual(116);
 
     await page.getByRole("button", { name: "Свернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "compact");
@@ -187,6 +209,11 @@ test.describe("Interface layout", () => {
 
     await page.getByRole("button", { name: "Развернуть боковую панель" }).click();
     await expect(desktopNavigation).toHaveAttribute("data-sidebar-mode", "expanded");
+    // An explicit user choice must retain the full-width navigation.
+    const expandedBounds = await desktopNavigation.boundingBox();
+    expect(expandedBounds).not.toBeNull();
+    expect(expandedBounds!.width).toBeGreaterThanOrEqual(236);
+    expect(expandedBounds!.width).toBeLessThanOrEqual(244);
 
     await page.getByRole("button", { name: "Настроить боковую панель" }).click();
     const settingsDialog = page.getByRole("dialog", { name: "Настроить меню" });
