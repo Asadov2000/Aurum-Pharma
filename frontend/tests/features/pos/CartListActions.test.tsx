@@ -57,54 +57,61 @@ describe("CartList — row actions", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps standalone rows and their existing controls without context menus", () => {
-    render(<CartList {...props} />);
-    const row = screen.getByTestId("cart-item");
-    expect(row).not.toHaveAttribute("data-context-actions");
-    expect(row).not.toHaveAttribute("tabindex");
-    expect(within(row).queryByRole("button", { name: /^Действия / })).not.toBeInTheDocument();
-    expect(fireEvent.contextMenu(row)).toBe(true);
-    fireEvent.click(within(row).getByRole("button", { name: "Увеличить количество" }));
-    expect(onQtyChange).toHaveBeenCalledWith("item-a", 3);
-    fireEvent.click(within(row).getByRole("button", { name: "Удалить Аспирин" }));
-    expect(onDelete).toHaveBeenCalledWith("item-a");
-  });
+  it.each([false, true])(
+    "keeps existing row controls without context menus (embedded=%s)",
+    (embedded) => {
+      render(<CartList {...props} embedded={embedded} />);
+      const row = screen.getByTestId("cart-item");
+      expect(row).not.toHaveAttribute("data-context-actions");
+      expect(row).not.toHaveAttribute("tabindex");
+      expect(within(row).queryByRole("button", { name: /^Действия / })).not.toBeInTheDocument();
+      expect(fireEvent.contextMenu(row)).toBe(true);
+      fireEvent.click(within(row).getByRole("button", { name: "Увеличить количество" }));
+      expect(onQtyChange).toHaveBeenCalledWith("item-a", 3);
+      fireEvent.click(within(row).getByRole("button", { name: "Удалить Аспирин" }));
+      expect(onDelete).toHaveBeenCalledWith("item-a");
+    },
+  );
 
-  it("targets the exact FEFO batch row and never adds a menu to its product header", async () => {
-    render(
-      <CartList
-        {...props}
-        items={[
-          makeItem(),
-          makeItem({ id: "item-b", batch_id: "batch-b", batch_number: "B-B", qty: "4" }),
-        ]}
-        quickActions={preferences()}
-      />,
-    );
-    const rows = screen.getAllByTestId("cart-item");
-    expect(rows).toHaveLength(2);
-    const header = screen.getByText("Аспирин").parentElement!;
-    expect(header).not.toHaveAttribute("data-context-actions");
-    expect(within(header).queryByRole("button", { name: /^Действия / })).not.toBeInTheDocument();
-    expect(fireEvent.contextMenu(header)).toBe(true);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(fireEvent.contextMenu(rows[1], { clientX: 100, clientY: 100 })).toBe(false);
-    expect(screen.getByRole("menu")).toHaveTextContent("Партия B-B · до 01.01.2027");
-    expect(onQtyChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Увеличить количество" }));
-    expect(onQtyChange).toHaveBeenCalledExactlyOnceWith("item-b", 5);
-    open(rows[1]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Скопировать номер партии" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("B-B"));
-    open(rows[1]);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Скопировать название" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Аспирин"));
-    open(rows[1]);
-    const remove = screen.getByRole("menuitem", { name: "Удалить из чека" });
-    expect(remove).toHaveClass("text-danger");
-    fireEvent.click(remove);
-    expect(onDelete).toHaveBeenCalledExactlyOnceWith("item-b");
-  });
+  it.each([false, true])(
+    "targets the exact FEFO batch row without a header menu (embedded=%s)",
+    async (embedded) => {
+      render(
+        <CartList
+          {...props}
+          embedded={embedded}
+          items={[
+            makeItem(),
+            makeItem({ id: "item-b", batch_id: "batch-b", batch_number: "B-B", qty: "4" }),
+          ]}
+          quickActions={preferences()}
+        />,
+      );
+      const rows = screen.getAllByTestId("cart-item");
+      expect(rows).toHaveLength(2);
+      const header = screen.getByText("Аспирин").parentElement!;
+      expect(header).not.toHaveAttribute("data-context-actions");
+      expect(within(header).queryByRole("button", { name: /^Действия / })).not.toBeInTheDocument();
+      expect(fireEvent.contextMenu(header)).toBe(true);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(fireEvent.contextMenu(rows[1], { clientX: 100, clientY: 100 })).toBe(false);
+      expect(screen.getByRole("menu")).toHaveTextContent("Партия B-B · до 01.01.2027");
+      expect(onQtyChange).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("menuitem", { name: "Увеличить количество" }));
+      expect(onQtyChange).toHaveBeenCalledExactlyOnceWith("item-b", 5);
+      open(rows[1]);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Скопировать номер партии" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith("B-B"));
+      open(rows[1]);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Скопировать название" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith("Аспирин"));
+      open(rows[1]);
+      const remove = screen.getByRole("menuitem", { name: "Удалить из чека" });
+      expect(remove).toHaveClass("text-danger");
+      fireEvent.click(remove);
+      expect(onDelete).toHaveBeenCalledExactlyOnceWith("item-b");
+    },
+  );
 
   it("matches the existing stepper for fractional quantities and hides decrease at one", () => {
     const fractional = { ...props, items: [makeItem({ qty: "1.5" })] };
