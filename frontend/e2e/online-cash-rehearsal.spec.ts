@@ -31,7 +31,7 @@ async function addFormat(
 ) {
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
   if (!(await editor.count())) {
-    await page.getByRole("button", { name: "Выбрать упаковку, блистер или штуки" }).click();
+    await page.getByRole("button", { name: "Упаковки" }).click();
   }
   await expect(editor).toBeVisible();
   await editor.getByLabel("Название лекарства").fill(catalogSearchKey(medicineName));

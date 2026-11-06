@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PhysicalCartEditor } from "@/features/pos/PhysicalCartEditor";
 import { type PhysicalCartItem, type PhysicalCartQuote } from "@/features/pos/physicalCart";
-import { type PhysicalCartOptions } from "@/features/pos/physicalCartOptions";
+import {
+  type PhysicalCartOptions,
+  type PhysicalSaleFormat,
+} from "@/features/pos/physicalCartOptions";
 import {
   clearPhysicalCartRecovery,
   loadPhysicalCartRecovery,
@@ -147,7 +150,11 @@ describe("PhysicalCartEditor", () => {
   const changed = vi.fn<() => Promise<void>>();
   const busy = vi.fn<(value: boolean) => void>();
   const nameChanged = vi.fn<(id: string, name: string) => void>();
-  function mount(items: PhysicalCartItem[] = [], disabled = false) {
+  function mount(
+    items: PhysicalCartItem[] = [],
+    disabled = false,
+    initialFormat?: PhysicalSaleFormat,
+  ) {
     return render(
       <PhysicalCartEditor
         saleId="sale-a"
@@ -157,6 +164,7 @@ describe("PhysicalCartEditor", () => {
         disabled={disabled}
         sessionIsActive={() => active}
         initialRecovery={loadPhysicalCartRecovery("sale-a", POS_SCOPE)}
+        initialFormat={initialFormat}
         onRecoveryChange={(operation) => {
           if (!active) return;
           if (operation) savePhysicalCartRecovery("sale-a", POS_SCOPE, operation);
@@ -191,6 +199,102 @@ describe("PhysicalCartEditor", () => {
   it("keeps catalog selection branch-scoped while hiding unrelated legacy stock", () => {
     mount();
     expect(pickerProps).toHaveBeenLastCalledWith({ branchId: "branch-a", showStock: false });
+  });
+
+  it.each([
+    ["pack", "Упаковка", "Количество упаковок", 1],
+    ["blister", "Блистер", "Количество блистеров", 2],
+    ["unit", "Поштучно", "Количество, шт.", 10],
+  ] as const)(
+    "opens %s directly with the server step and retains it for the next entry",
+    async (format, name, label, step) => {
+      const response = options();
+      response.options.find((option) => option.sale_format === format)!.quantity_step = step;
+      api.options.mockResolvedValue(response);
+      mount([], false, format);
+      expect(screen.getByRole("radio", { name })).toHaveAttribute("aria-checked", "true");
+      await select();
+      expect(screen.getByLabelText(label)).toHaveValue(step);
+      expect(api.put).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Добавить в корзину" }));
+      await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+      expect(api.put).toHaveBeenCalledWith(
+        "sale-a",
+        expect.any(String),
+        expect.objectContaining({
+          sale_format: format,
+          quantity: step,
+        }),
+      );
+      await waitFor(() => expect(screen.getByLabelText(label)).toHaveValue(1));
+      expect(screen.getByRole("radio", { name })).toHaveAttribute("aria-checked", "true");
+    },
+  );
+
+  it.each(["1", "20"])(
+    "keeps manually entered quantity %s when server options arrive",
+    async (quantity) => {
+      const pending = deferred<PhysicalCartOptions>();
+      const response = options();
+      response.options[2].quantity_step = 10;
+      api.options.mockReturnValueOnce(pending.promise);
+      mount([], false, "unit");
+      fireEvent.change(screen.getByLabelText("Название лекарства"), {
+        target: { value: catalogId },
+      });
+      const input = screen.getByLabelText("Количество, шт.");
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.change(input, { target: { value: quantity } });
+      await act(async () => pending.resolve(response));
+      expect(input).toHaveValue(Number(quantity));
+      expect(screen.getByRole("radio", { name: "Поштучно" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(api.put).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not replace an unavailable initial blister choice with a configured pack", async () => {
+    const response = options();
+    response.options[1] = {
+      sale_format: "blister",
+      configured: false,
+      quantity_step: null,
+      retail_unit_price: null,
+      unavailable_reason: "unknown_blister",
+    };
+    api.options.mockResolvedValue(response);
+    mount([], false, "blister");
+    await select();
+    expect(screen.getByRole("radio", { name: "Блистер" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Блистер" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Добавить в корзину" })).toBeDisabled();
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("preserves recovered format and quantity ahead of the initial entry choice", async () => {
+    const payload = {
+      catalog_id: catalogId,
+      sale_format: "blister" as const,
+      quantity: 7,
+      position: 1,
+      discount_amount: "0.00",
+    };
+    savePhysicalCartRecovery("sale-a", POS_SCOPE, {
+      kind: "save",
+      itemId: item().id,
+      name: "Аспирин",
+      payload,
+    });
+    mount([], false, "unit");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Повторить сохранение" })).toBeEnabled(),
+    );
+    expect(screen.getByRole("radio", { name: "Блистер" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByLabelText("Количество блистеров")).toHaveValue(7);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить сохранение" }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("sale-a", item().id, payload));
   });
 
   it.each([
@@ -369,9 +473,11 @@ describe("PhysicalCartEditor", () => {
   });
 
   it("updates the restored line identity and preserves its discount and position", async () => {
-    mount([item({ position: 4, discount_amount: "2.00" })]);
+    mount([item({ position: 4, discount_amount: "2.00" })], false, "unit");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await waitFor(() => expect(screen.getByRole("radio", { name: "Блистер" })).toBeEnabled());
+    expect(screen.getByRole("radio", { name: "Блистер" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByLabelText("Количество блистеров")).toHaveValue(2);
     fireEvent.change(screen.getByLabelText("Количество блистеров"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить строку" }));
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());

@@ -1,3 +1,85 @@
+.pos-workspace .pos-sale-workspace {
+  @apply space-y-3;
+}
+
+.pos-workspace .pos-workstation-strip {
+  @apply flex min-w-0 shrink-0 flex-col gap-3 px-1 py-1;
+}
+
+.pos-workspace .pos-selling-columns {
+  @apply grid min-w-0 grid-cols-1 gap-3;
+}
+
+.pos-workspace .pos-selling-columns > div {
+  @apply min-w-0;
+}
+
+.pos-workspace .pos-selling-columns > div:last-child {
+  @apply scroll-mt-20 pb-20;
+}
+
+/* Keep static receipt presentation out of the cashier JavaScript bundle. */
+.pos-workspace .pos-current-receipt {
+  @apply flex min-w-0 flex-col overflow-hidden border border-border bg-surface;
+  min-height: 26rem;
+  border-radius: 10px;
+}
+
+.pos-workspace .pos-current-receipt > footer {
+  @apply mt-auto flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3;
+}
+
+@media (min-width: 640px) {
+  .pos-workspace .pos-current-receipt {
+    min-height: 30rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .pos-workspace .pos-workstation-strip {
+    @apply flex-row flex-wrap items-center justify-between;
+  }
+
+  .pos-workspace .pos-selling-columns {
+    @apply grid-cols-12;
+  }
+
+  .pos-workspace .pos-selling-columns > div:first-child {
+    @apply col-span-5;
+  }
+
+  .pos-workspace .pos-selling-columns > div:last-child {
+    @apply col-span-12 pb-0;
+  }
+
+  .pos-workspace .pos-current-receipt {
+    grid-column: span 7 / span 7;
+  }
+}
+
+@media (min-width: 1280px) {
+  .pos-workspace .pos-sale-workspace {
+    @apply flex h-full min-h-0 flex-col gap-3 space-y-0;
+  }
+
+  .pos-workspace .pos-selling-columns {
+    @apply min-h-0 flex-1;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr) minmax(0, 0.85fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .pos-workspace .pos-selling-columns > div:first-child,
+  .pos-workspace .pos-selling-columns > div:last-child {
+    @apply col-auto min-h-0;
+  }
+
+  .pos-workspace .pos-current-receipt {
+    grid-column: auto;
+    height: 100%;
+    min-height: 0;
+  }
+}
+
 /* The cashier's own presentation; all money/access behavior stays in its components. */
 .pos-workspace {
   --radius: 0.625rem;
@@ -23,6 +105,7 @@
 }
 
 .pos-workspace .pos-current-receipt > header {
+  @apply flex min-h-[3.75rem] shrink-0 items-center justify-between gap-3 px-4 py-3;
   padding-bottom: 0.5rem;
 }
 

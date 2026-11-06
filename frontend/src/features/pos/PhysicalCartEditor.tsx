@@ -30,6 +30,7 @@ interface Props {
   onChanged: () => Promise<void>;
   onNameChange?: (catalogId: string, name: string) => void;
   initialRecovery?: PhysicalCartRecovery | null;
+  initialFormat?: PhysicalSaleFormat;
   onRecoveryChange?: (operation: PhysicalCartRecovery | null) => void;
   onBusyChange: (busy: boolean) => void;
 }
@@ -63,6 +64,8 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
   const mounted = useRef(false);
   const ownerBusyChange = useRef(props.onBusyChange);
   const writing = useRef(false);
+  const entryFormat = useRef(props.initialFormat ?? "pack");
+  const quantityEntered = useRef(false);
   const [initialRecovery] = useState(() => props.initialRecovery ?? null);
   const recovery = useRef<PhysicalCartRecovery | null>(initialRecovery);
   const [unresolved, setUnresolved] = useState(initialRecovery !== null);
@@ -89,7 +92,7 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
             format: initialRecovery.payload.sale_format,
             quantity: String(initialRecovery.payload.quantity),
           }
-        : defaults,
+        : { ...defaults, format: entryFormat.current },
   });
   const catalogId = form.watch("catalogId");
   const format = form.watch("format");
@@ -131,6 +134,18 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
           return;
         }
         setOptions(result);
+        const option = result.options.find(
+          (candidate) => candidate.sale_format === form.getValues("format"),
+        );
+        if (
+          !itemId.current &&
+          !recovery.current &&
+          !quantityEntered.current &&
+          option?.configured &&
+          option.quantity_step
+        ) {
+          form.setValue("quantity", String(option.quantity_step));
+        }
       })
       .catch(() => {
         if (!cancelled && active())
@@ -174,7 +189,8 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
     setEditingId(null);
     setSelectedName("");
     setOptions(null);
-    form.reset(defaults);
+    quantityEntered.current = false;
+    form.reset({ ...defaults, format: entryFormat.current });
     setPickerVersion((value) => value + 1);
   };
   const startWrite = (): boolean => {
@@ -418,7 +434,11 @@ export function PhysicalCartEditor(props: Props): JSX.Element {
                 min={selectedOption?.quantity_step ?? 1}
                 step={selectedOption?.quantity_step ?? 1}
                 max={1_000_000}
-                {...form.register("quantity")}
+                {...form.register("quantity", {
+                  onChange: () => {
+                    quantityEntered.current = true;
+                  },
+                })}
               />
             </div>
             <Button

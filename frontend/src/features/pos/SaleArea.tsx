@@ -55,6 +55,7 @@ import {
 } from "./physicalCashRecoveryPresence";
 import { type ElectronicCheckoutResult } from "./unitElectronicCheckout";
 import { type CashCheckoutResult } from "./PhysicalCashPanel";
+import { type PhysicalSaleFormat } from "./physicalCartOptions";
 import { hasUnitPaymentPreparation } from "./unitPaymentPreparationPresence";
 import { capturePosSessionGuard, type PosStorageScope } from "./posStorageScope";
 import {
@@ -522,10 +523,12 @@ function ActiveWorkspace({
   const [externalPaymentConfirmation, setExternalPaymentConfirmation] =
     useState<ExternalPaymentConfirmation | null>(null);
   const [paymentPanelVisible, setPaymentPanelVisible] = useState(false);
-  const [physicalEditorOpen, setPhysicalEditorOpen] = useState(
-    () => init.saleId !== null && loadPhysicalCartRecovery(init.saleId, storageScope) !== null,
+  const [physicalEditorFormat, setPhysicalEditorFormat] = useState<PhysicalSaleFormat | null>(() =>
+    init.saleId !== null && loadPhysicalCartRecovery(init.saleId, storageScope) !== null
+      ? "pack"
+      : null,
   );
-  const [physicalCartBusy, setPhysicalCartBusy] = useState(physicalEditorOpen);
+  const [physicalCartBusy, setPhysicalCartBusy] = useState(physicalEditorFormat !== null);
   const [queuedScans, setQueuedScans] = useState(0);
   const [favoriteError, setFavoriteError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -624,7 +627,7 @@ function ActiveWorkspace({
           (items.length > 0 && preparedItems.length > 0)
         ? "mixed"
         : "physical";
-  const physicalCartActive = isDraft && (physicalEditorOpen || preparedItems.length > 0);
+  const physicalCartActive = isDraft && (physicalEditorFormat !== null || preparedItems.length > 0);
   const trainingActive = sale?.is_test === true && (physicalCartActive || trainingBlocked);
   const receiptItemCount =
     completedReceiptLines.length > 0
@@ -687,6 +690,7 @@ function ActiveWorkspace({
     pendingCheckout !== null ||
     pendingPayment !== null ||
     (saleId !== null && sale === null);
+  const physicalEditorBlocked = saleEditingBlocked || physicalCartBusy || !branchId;
   const scannerHardwareBlocked =
     !hasOpenShift ||
     physicalOperationsBlocked ||
@@ -907,7 +911,7 @@ function ActiveWorkspace({
         throw new Error("Не удалось подтвердить сохранённый электронный чек. Повторите проверку.");
       if (!persistCompletedReceipt(result.sale_id)) return false;
       void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
-      setPhysicalEditorOpen(false);
+      setPhysicalEditorFormat(null);
       setPrescription(null);
       setRequiresRx(false);
       return true;
@@ -934,7 +938,7 @@ function ActiveWorkspace({
       )
         return false;
       if (!persistCompletedReceipt(result.sale_id)) return false;
-      setPhysicalEditorOpen(false);
+      setPhysicalEditorFormat(null);
       setPrescription(null);
       setRequiresRx(false);
       return true;
@@ -994,7 +998,7 @@ function ActiveWorkspace({
         openedDrawerOperationRef.current = result.operation_id;
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory", "batches"] });
-      setPhysicalEditorOpen(false);
+      setPhysicalEditorFormat(null);
       setPrescription(null);
       setRequiresRx(false);
       return true;
@@ -1195,6 +1199,21 @@ function ActiveWorkspace({
     if (outcome.rejectedError !== undefined) throw outcome.rejectedError;
     return outcome.applied?.sale.id ?? null;
   }, [posCommand, registerId]);
+
+  const openPhysicalEditor = async (format: PhysicalSaleFormat | null): Promise<void> => {
+    if (physicalEditorBlocked || !sessionIsActive()) return;
+    if (format === null) {
+      setPhysicalEditorFormat(null);
+      return;
+    }
+    try {
+      const id = await ensureSaleId();
+      if (id && sessionIsActive() && writableRef.current) setPhysicalEditorFormat(format);
+    } catch (error: unknown) {
+      if (sessionIsActive())
+        setTopError(describeApiError(error, "Не удалось открыть поштучную корзину"));
+    }
+  };
 
   const onAdd = async (
     catalogId: string,
@@ -2271,8 +2290,8 @@ function ActiveWorkspace({
         />
       )}
 
-      <div className="pos-sale-workspace space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-3 xl:space-y-0">
-        <div className="pos-workstation-strip flex min-w-0 shrink-0 flex-col gap-3 px-1 py-1 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+      <div className="pos-sale-workspace">
+        <div className="pos-workstation-strip">
           {workstationControls ? (
             <div className="flex min-w-0 items-center lg:w-80 lg:shrink-0">
               {workstationControls}
@@ -2349,8 +2368,8 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="pos-selling-columns grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_minmax(0,0.85fr)] xl:grid-rows-[minmax(0,1fr)]">
-          <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
+        <div className="pos-selling-columns">
+          <div>
             <Suspense
               fallback={
                 <section
@@ -2374,12 +2393,9 @@ function ActiveWorkspace({
 
           <section
             aria-labelledby="current-receipt-title"
-            className={cn(
-              "pos-current-receipt flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface sm:min-h-[30rem] lg:col-span-7 xl:col-auto xl:h-full xl:min-h-0",
-              isDraft && totalDue > 0 && "mb-20 xl:mb-0",
-            )}
+            className={cn("pos-current-receipt", isDraft && totalDue > 0 && "mb-20 xl:mb-0")}
           >
-            <header className="flex min-h-[3.75rem] shrink-0 items-center justify-between gap-3 px-4 py-3">
+            <header>
               <div className="min-w-0">
                 <h2
                   id="current-receipt-title"
@@ -2447,6 +2463,7 @@ function ActiveWorkspace({
                   <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
                     <PhysicalCartEditor
                       key={saleId}
+                      initialFormat={physicalEditorFormat ?? undefined}
                       saleId={saleId}
                       branchId={branchId}
                       items={preparedItems}
@@ -2480,32 +2497,30 @@ function ActiveWorkspace({
               )}
             </div>
             {isDraft && preparedItems.length === 0 && (
-              <div className="shrink-0 p-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={saleEditingBlocked || physicalCartBusy}
-                  onClick={() => {
-                    if (physicalCartActive) {
-                      setPhysicalEditorOpen(false);
-                      return;
-                    }
-                    void ensureSaleId()
-                      .then((id) => {
-                        if (id && sessionIsActive()) setPhysicalEditorOpen(true);
-                      })
-                      .catch((error: unknown) => {
-                        if (sessionIsActive())
-                          setTopError(
-                            describeApiError(error, "Не удалось открыть поштучную корзину"),
-                          );
-                      });
-                  }}
-                >
-                  {physicalCartActive
-                    ? "Вернуться к обычной продаже"
-                    : "Выбрать упаковку, блистер или штуки"}
-                </Button>
+              <div
+                role="group"
+                aria-label="Формат продажи"
+                className={cn("shrink-0 p-3", !physicalCartActive && "grid grid-cols-3 gap-1")}
+              >
+                {(physicalCartActive
+                  ? ([[null, "Вернуться к обычной продаже"]] as const)
+                  : ([
+                      ["pack", "Упаковки"],
+                      ["blister", "Блистеры"],
+                      ["unit", "Штуки"],
+                    ] as const)
+                ).map(([format, label]) => (
+                  <Button
+                    key={format ?? "legacy"}
+                    type="button"
+                    variant="secondary"
+                    className="min-w-0 px-2"
+                    disabled={physicalEditorBlocked}
+                    onClick={() => void openPhysicalEditor(format)}
+                  >
+                    {label}
+                  </Button>
+                ))}
               </div>
             )}
 
@@ -2532,7 +2547,7 @@ function ActiveWorkspace({
               </div>
             ) : null}
 
-            <footer className="mt-auto flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+            <footer>
               <Button
                 type="button"
                 size="sm"
@@ -2562,10 +2577,7 @@ function ActiveWorkspace({
             </footer>
           </section>
 
-          <div
-            ref={paymentPanelRef}
-            className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
-          >
+          <div ref={paymentPanelRef}>
             <div className="space-y-3 xl:h-full xl:min-h-0 xl:overflow-y-auto">
               {(physicalCartActive || physicalOperationsBlocked || trainingActive) &&
               saleId &&
