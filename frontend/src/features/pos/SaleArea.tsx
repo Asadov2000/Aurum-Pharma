@@ -2271,8 +2271,8 @@ function ActiveWorkspace({
         />
       )}
 
-      <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-2 xl:space-y-0">
-        <div className="flex min-w-0 shrink-0 flex-col gap-3 rounded-lg border border-border bg-surface px-3 py-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
+      <div className="pos-sale-workspace space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-3 xl:space-y-0">
+        <div className="pos-workstation-strip flex min-w-0 shrink-0 flex-col gap-3 px-1 py-1 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
           {workstationControls ? (
             <div className="flex min-w-0 items-center lg:w-80 lg:shrink-0">
               {workstationControls}
@@ -2349,7 +2349,7 @@ function ActiveWorkspace({
           </fieldset>
         )}
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(16rem,0.95fr)_minmax(22rem,1.15fr)_minmax(18rem,0.85fr)] xl:grid-rows-[minmax(0,1fr)] xl:gap-3">
+        <div className="pos-selling-columns grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-12 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_minmax(0,0.85fr)] xl:grid-rows-[minmax(0,1fr)]">
           <div className="min-w-0 lg:col-span-5 xl:col-auto xl:min-h-0">
             <Suspense
               fallback={
@@ -2375,15 +2375,15 @@ function ActiveWorkspace({
           <section
             aria-labelledby="current-receipt-title"
             className={cn(
-              "flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] lg:col-span-7 xl:col-auto xl:h-full xl:min-h-0",
+              "pos-current-receipt flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface sm:min-h-[30rem] lg:col-span-7 xl:col-auto xl:h-full xl:min-h-0",
               isDraft && totalDue > 0 && "mb-20 xl:mb-0",
             )}
           >
-            <header className="flex min-h-[3.75rem] items-center justify-between gap-3 border-b border-border px-4">
+            <header className="flex min-h-[3.75rem] shrink-0 items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <h2
                   id="current-receipt-title"
-                  className="truncate text-base font-semibold text-foreground"
+                  className="truncate text-[17px] font-semibold tracking-tight text-foreground"
                 >
                   Текущий чек
                   {sale?.receipt_number ? (
@@ -2409,83 +2409,78 @@ function ActiveWorkspace({
               ) : null}
             </header>
 
-            <div className="hidden grid-cols-[minmax(0,1fr)_8.5rem_5.5rem_2.5rem] gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium text-foreground-muted sm:grid">
-              <span>Товар</span>
-              <span className="text-center">Количество</span>
-              <span className="text-right">Сумма</span>
-              <span aria-hidden="true" />
-            </div>
-
-            {completedReceiptLines.length > 0 ? (
-              <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
-                <CompletedReceiptLines
-                  lines={completedReceiptLines}
-                  currency={currency}
-                  touch={touch}
-                />
-              </Suspense>
-            ) : (
-              (!physicalCartActive || items.length > 0) && (
-                <CartList
-                  items={items}
-                  nameById={nameById}
-                  currency={currency}
-                  editable={isDraft && !saleEditingBlocked && !physicalCartActive}
-                  onQtyChange={(id, q) => void onQtyChange(id, q)}
-                  onDelete={(id) => void onDelete(id)}
-                  onQtyTap={touch ? onQtyTap : undefined}
-                  touch={touch}
-                  busy={posCommand.blocked}
-                  embedded
-                  quickActions={quickActions}
-                  actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
-                />
-              )
-            )}
-
-            {isDraft && physicalCartActive && saleId && branchId && (
-              <div className="min-h-0 overflow-y-auto p-3">
-                {items.length > 0 && (
-                  <p className="mb-3 text-sm text-warning-foreground">
-                    Обычные и поштучные позиции оплачиваются вместе наличными.
-                  </p>
-                )}
-                <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
-                  <PhysicalCartEditor
-                    key={saleId}
-                    saleId={saleId}
-                    branchId={branchId}
-                    items={preparedItems}
-                    initialRecovery={loadPhysicalCartRecovery(saleId, storageScope)}
-                    onRecoveryChange={(operation) => {
-                      if (!sessionIsActive()) throw new Error("Сессия кассира завершена");
-                      if (operation) savePhysicalCartRecovery(saleId, storageScope, operation);
-                      else clearPhysicalCartRecovery(saleId, storageScope);
-                    }}
-                    nameById={nameById}
-                    onNameChange={(catalogId, name) => {
-                      if (sessionIsActive())
-                        setNameById((current) => ({ ...current, [catalogId]: name }));
-                    }}
-                    disabled={
-                      saleEditingBlocked ||
-                      !isDraft ||
-                      saleQuery.isError ||
-                      saleQuery.isPlaceholderData
-                    }
-                    sessionIsActive={sessionIsActive}
-                    onChanged={async () => {
-                      if (sessionIsActive()) await refetchSale({ throwOnError: true });
-                    }}
-                    onBusyChange={(busy) => {
-                      if (sessionIsActive()) setPhysicalCartBusy(busy);
-                    }}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {completedReceiptLines.length > 0 ? (
+                <Suspense fallback={<p role="status">Загрузка товаров завершённого чека…</p>}>
+                  <CompletedReceiptLines
+                    lines={completedReceiptLines}
+                    currency={currency}
+                    touch={touch}
                   />
                 </Suspense>
-              </div>
-            )}
+              ) : (
+                (!physicalCartActive || items.length > 0) && (
+                  <CartList
+                    items={items}
+                    nameById={nameById}
+                    currency={currency}
+                    editable={isDraft && !saleEditingBlocked && !physicalCartActive}
+                    onQtyChange={(id, q) => void onQtyChange(id, q)}
+                    onDelete={(id) => void onDelete(id)}
+                    onQtyTap={touch ? onQtyTap : undefined}
+                    touch={touch}
+                    busy={posCommand.blocked}
+                    embedded
+                    quickActions={quickActions}
+                    actionsDisabled={saleQuery.isError || saleQuery.isPlaceholderData}
+                  />
+                )
+              )}
+
+              {isDraft && physicalCartActive && saleId && branchId && (
+                <div className="p-3">
+                  {items.length > 0 && (
+                    <p className="mb-3 text-sm text-warning-foreground">
+                      Обычные и поштучные позиции оплачиваются вместе наличными.
+                    </p>
+                  )}
+                  <Suspense fallback={<p role="status">Загрузка корзины…</p>}>
+                    <PhysicalCartEditor
+                      key={saleId}
+                      saleId={saleId}
+                      branchId={branchId}
+                      items={preparedItems}
+                      initialRecovery={loadPhysicalCartRecovery(saleId, storageScope)}
+                      onRecoveryChange={(operation) => {
+                        if (!sessionIsActive()) throw new Error("Сессия кассира завершена");
+                        if (operation) savePhysicalCartRecovery(saleId, storageScope, operation);
+                        else clearPhysicalCartRecovery(saleId, storageScope);
+                      }}
+                      nameById={nameById}
+                      onNameChange={(catalogId, name) => {
+                        if (sessionIsActive())
+                          setNameById((current) => ({ ...current, [catalogId]: name }));
+                      }}
+                      disabled={
+                        saleEditingBlocked ||
+                        !isDraft ||
+                        saleQuery.isError ||
+                        saleQuery.isPlaceholderData
+                      }
+                      sessionIsActive={sessionIsActive}
+                      onChanged={async () => {
+                        if (sessionIsActive()) await refetchSale({ throwOnError: true });
+                      }}
+                      onBusyChange={(busy) => {
+                        if (sessionIsActive()) setPhysicalCartBusy(busy);
+                      }}
+                    />
+                  </Suspense>
+                </div>
+              )}
+            </div>
             {isDraft && preparedItems.length === 0 && (
-              <div className="p-3">
+              <div className="shrink-0 p-3">
                 <Button
                   type="button"
                   variant="secondary"
@@ -2537,7 +2532,7 @@ function ActiveWorkspace({
               </div>
             ) : null}
 
-            <footer className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border bg-background px-3 py-2">
+            <footer className="mt-auto flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
               <Button
                 type="button"
                 size="sm"
@@ -2556,7 +2551,7 @@ function ActiveWorkspace({
                   {receiptItemCount} {productCountLabel(receiptItemCount)}
                 </span>
                 {!physicalCartActive && (
-                  <strong className="font-mono text-xl tabular-nums text-primary">
+                  <strong className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">
                     {totalDue.toFixed(2)}{" "}
                     <span className="font-sans text-xs font-semibold text-foreground-secondary">
                       {currency}
@@ -2571,7 +2566,7 @@ function ActiveWorkspace({
             ref={paymentPanelRef}
             className="min-w-0 scroll-mt-20 pb-20 lg:col-span-12 lg:pb-0 xl:col-auto xl:min-h-0"
           >
-            <div className="xl:h-full xl:min-h-0">
+            <div className="space-y-3 xl:h-full xl:min-h-0 xl:overflow-y-auto">
               {(physicalCartActive || physicalOperationsBlocked || trainingActive) &&
               saleId &&
               (branchId || sale?.branch_id) ? (

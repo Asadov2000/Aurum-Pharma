@@ -356,9 +356,9 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   return (
     <section
       aria-label="Подготовка электронной оплаты"
-      className="space-y-3 rounded-lg border border-border bg-surface p-4"
+      className="space-y-3 rounded-[10px] border border-border bg-surface p-4"
     >
-      <p className="text-sm">
+      <p className="text-xs leading-5 text-foreground-muted">
         {props.onElectronicCompleted
           ? "Подготовка плана не принимает деньги. Подтверждение оператора выполняется отдельно."
           : "Деньги не приняты. Электронная оплата ещё недоступна."}
@@ -369,6 +369,8 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       {!opened && !intent && (
         <Button
           type="button"
+          variant="secondary"
+          className="h-11 w-full"
           disabled={
             disabled ||
             !props.canPrepare ||

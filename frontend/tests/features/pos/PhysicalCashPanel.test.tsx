@@ -251,6 +251,33 @@ describe("PhysicalCashPanel", () => {
     expect(completed).toHaveBeenCalledWith(result, true);
     expect(completed.mock.invocationCallOrder[0]).toBeLessThan(api.ack.mock.invocationCallOrder[0]);
   });
+  it("fills cash shortcuts through the form without submitting until explicitly confirmed", async () => {
+    render(<PhysicalCashPanel {...props()} />);
+    await fill();
+    for (const amount of [10, 50, 100]) {
+      fireEvent.click(screen.getByRole("button", { name: String(amount), exact: true }));
+      expect(screen.getByLabelText("Получено наличными, TJS")).toHaveValue(String(amount));
+      expect(api.run).not.toHaveBeenCalled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Без сдачи" }));
+    expect(screen.getByLabelText("Получено наличными, TJS")).toHaveValue("3,75");
+    expect(api.run).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Завершить продажу" }));
+    await waitFor(() =>
+      expect(api.run).toHaveBeenCalledWith(
+        saleId,
+        scope,
+        expect.objectContaining({ expected_total_amount: "3.75", cash_tendered: "3.75" }),
+      ),
+    );
+  });
+
+  it("does not expose active cash shortcuts when payment access is blocked", () => {
+    render(<PhysicalCashPanel {...props()} canPay={false} />);
+    expect(screen.getByRole("button", { name: "Без сдачи" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "100", exact: true })).toBeDisabled();
+    expect(api.run).not.toHaveBeenCalled();
+  });
   it("locks immediately and prevents a double click from creating a second operation", async () => {
     const waiting = deferred<PhysicalCashCheckoutResult>();
     api.run.mockReturnValue(waiting.promise);

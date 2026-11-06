@@ -207,12 +207,20 @@ export function PaymentPanel({
     setCashInputPristine(false);
   };
 
+  const enterCash = (value: string) => {
+    const next = value.replace(".", ",");
+    if (/^\d{0,12}(?:,\d{0,2})?$/.test(next)) {
+      setCashReceived(next);
+      setCashInputPristine(false);
+    }
+  };
+
   return (
     <section
       aria-labelledby="payment-panel-title"
-      className="flex min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface sm:min-h-[30rem] xl:h-full xl:min-h-0"
+      className="flex min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface xl:h-full xl:min-h-0"
     >
-      <header className="shrink-0 border-b border-border px-3 py-2">
+      <header className="shrink-0 px-4 pb-2 pt-4">
         <div className="flex flex-col gap-2">
           <div className="min-w-0">
             <h2
@@ -221,7 +229,7 @@ export function PaymentPanel({
             >
               К оплате
             </h2>
-            <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-foreground">
+            <p className="mt-2 text-[32px] font-semibold leading-tight tracking-tight tabular-nums text-foreground">
               {totalDue.toFixed(2)}{" "}
               <span className="font-sans text-sm font-semibold text-foreground-secondary">
                 {currency}
@@ -266,7 +274,7 @@ export function PaymentPanel({
                 : "Загрузка способов оплаты…"}
             </div>
           ) : (
-            <div className="shrink-0 space-y-2 border-b border-border p-3">
+            <div className="shrink-0 space-y-2 px-4 py-3">
               <p className="text-xs font-semibold text-foreground-secondary">Способ оплаты</p>
               <PosPaymentMethodButtons
                 className="xl:grid-cols-3"
@@ -291,7 +299,7 @@ export function PaymentPanel({
             </div>
           )}
 
-          <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto p-2", touch && "p-3")}>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4">
             {!mixedPaymentEnabled && paymentMethods.length > 1 ? (
               <p className="mb-3 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-foreground-muted">
                 Смешанная оплата отключена. Весь чек оплачивается одним способом.
@@ -342,54 +350,66 @@ export function PaymentPanel({
                   value={cashReceived}
                   aria-label="Получено наличными"
                   disabled={interactionBlocked || completing || completionUncertain}
-                  onChange={(event) => {
-                    const next = event.target.value.replace(".", ",");
-                    if (/^\d{0,12}(?:,\d{0,2})?$/.test(next)) {
-                      setCashReceived(next);
-                      setCashInputPristine(false);
-                    }
-                  }}
+                  onChange={(event) => enterCash(event.target.value)}
                   className={cn(
-                    "h-10 w-full shrink-0 rounded-md border border-input bg-surface px-3 text-right font-mono text-xl tabular-nums text-foreground focus:border-ring",
+                    "h-11 w-full shrink-0 rounded-lg border border-input bg-surface px-3 text-right text-xl tabular-nums text-foreground focus:border-ring",
                     touch && "h-12 text-2xl",
                   )}
                 />
 
-                <div className="mt-2 grid shrink-0 grid-cols-4 gap-1 bg-surface">
-                  {cashKeys.map((key) => (
-                    <button
-                      key={key}
+                <div className="mt-2 grid shrink-0 grid-cols-[1.5fr_repeat(3,1fr)] gap-1">
+                  {[null, 10, 50, 100].map((amount) => (
+                    <Button
+                      key={amount ?? "exact"}
                       type="button"
-                      aria-label={cashKeyLabel(key)}
-                      onClick={() => pressCashKey(key)}
+                      size="sm"
+                      variant="secondary"
+                      className="min-w-0 px-1"
                       disabled={interactionBlocked || completing || completionUncertain}
-                      className={cn(
-                        "min-h-9 rounded border border-border bg-background text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
-                        touch && "min-h-11 text-xl",
-                        (key === "+50" || key === "+100" || key === "backspace") &&
-                          "bg-primary/5 text-primary",
-                        key === "clear" && "text-danger",
-                      )}
+                      onClick={() => enterCash(formatCashInput(amount ?? cashDue))}
                     >
-                      {cashKeyText(key)}
-                    </button>
+                      {amount ?? "Без сдачи"}
+                    </Button>
                   ))}
                 </div>
 
+                {touch && (
+                  <div className="mt-2 grid shrink-0 grid-cols-4 gap-1 bg-surface">
+                    {cashKeys.map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-label={cashKeyLabel(key)}
+                        onClick={() => pressCashKey(key)}
+                        disabled={interactionBlocked || completing || completionUncertain}
+                        className={cn(
+                          "min-h-9 rounded border border-border bg-background text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
+                          touch && "min-h-11 text-xl",
+                          (key === "+50" || key === "+100" || key === "backspace") &&
+                            "bg-primary/5 text-primary",
+                          key === "clear" && "text-danger",
+                        )}
+                      >
+                        {cashKeyText(key)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div
                   className={cn(
-                    "mt-2 flex min-h-11 shrink-0 items-center justify-between gap-3 rounded-md border px-3",
+                    "mt-3 flex min-h-12 shrink-0 items-center justify-between gap-3 rounded-lg px-3",
                     touch && "min-h-12",
                     cashTenderInsufficient
-                      ? "border-warning/40 bg-warning-subtle text-warning-foreground"
-                      : "border-success/35 bg-success-subtle text-success-foreground",
+                      ? "bg-warning-subtle text-warning-foreground"
+                      : "bg-primary/5 text-foreground",
                   )}
                   aria-live="polite"
                 >
                   <span className="text-sm font-semibold">
                     {cashTenderInsufficient ? "Недостаточно" : "Сдача"}
                   </span>
-                  <strong className="font-mono text-2xl tabular-nums">
+                  <strong className="text-xl font-semibold tabular-nums">
                     {change.toFixed(2)} <span className="font-sans text-sm">{currency}</span>
                   </strong>
                 </div>
@@ -445,12 +465,7 @@ export function PaymentPanel({
             ) : null}
           </div>
 
-          <footer
-            className={cn(
-              "shrink-0 space-y-1 border-t border-border p-2",
-              touch && "space-y-2",
-            )}
-          >
+          <footer className={cn("shrink-0 space-y-2 px-4 pb-4", touch && "space-y-2")}>
             {!paymentSettingsBlocked && !settled && !overpaid ? (
               <Button
                 size="xl"

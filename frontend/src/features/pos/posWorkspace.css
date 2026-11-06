@@ -1,0 +1,92 @@
+/* The cashier's own presentation; all money/access behavior stays in its components. */
+.pos-workspace {
+  --radius: 0.625rem;
+}
+
+.pos-workspace h2 {
+  letter-spacing: -0.015em;
+}
+
+.pos-workspace .pos-workstation-strip > div:first-child {
+  max-width: 22rem;
+}
+
+.pos-workspace .pos-current-receipt > header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 1rem;
+}
+
+.pos-workspace .pos-current-receipt > header > div > p {
+  margin-left: auto;
+}
+
+.pos-workspace .pos-current-receipt > header {
+  padding-bottom: 0.5rem;
+}
+
+/* In automatic navigation mode, reserve room for the three cashier columns.
+   Explicit expanded/compact user preferences are never changed. */
+@media (min-width: 80rem) {
+  [data-nav="auto"]:has(.pos-workspace) {
+    /* Override only the automatic shell width while this route is mounted. */
+    --app-sidebar-width: 7rem !important;
+  }
+
+  [data-nav="auto"]:has(.pos-workspace) nav[data-sidebar-mode="expanded"] a {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 3.5rem;
+    padding: 0.625rem 0.25rem;
+    font-size: 0.75rem;
+    text-align: center;
+  }
+
+  [data-nav="auto"]:has(.pos-workspace) nav[data-sidebar-mode="expanded"] a span {
+    max-width: 100%;
+  }
+
+  [data-nav="auto"]:has(.pos-workspace)
+    nav[data-sidebar-mode="expanded"]
+    [data-testid="sidebar-footer"]
+    button {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 3.5rem;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.6875rem;
+  }
+
+  [data-nav="auto"]:has(.pos-workspace) .app-header-brand {
+    padding-inline: 0.75rem;
+  }
+}
+
+@media (min-width: 80rem) {
+  .pos-workspace .pos-selling-columns {
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 39.99rem) {
+  .pos-workspace .pos-workstation-strip > div:first-child {
+    max-width: none;
+    width: 100%;
+  }
+}
+
+@media (min-width: 80rem) {
+  [data-nav="auto"]:has(.pos-workspace) .app-header-brand .brand-mark {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  [data-nav="auto"]:has(.pos-workspace) .app-header-brand .brand-mark-color {
+    content: url("/brand/v12-8/mark-color.svg");
+  }
+  [data-nav="auto"]:has(.pos-workspace) .app-header-brand .brand-mark-white {
+    content: url("/brand/v12-8/mark-white.svg");
+  }
+}
