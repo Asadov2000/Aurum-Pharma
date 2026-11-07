@@ -5,6 +5,49 @@ import { dispatchDesktopBarcodeScan } from "@/lib/desktopBridge";
 import { BarcodeListener } from "@/features/pos/BarcodeListener";
 
 describe("BarcodeListener", () => {
+  it("preserves product search focus and text when capture becomes enabled", () => {
+    const onScan = vi.fn();
+    const searchKeyDown = vi.fn();
+    const view = (enabled: boolean) => (
+      <>
+        <BarcodeListener enabled={enabled} onScan={onScan} />
+        <input id="pos-product-search" aria-label="Товар" onKeyDown={searchKeyDown} />
+      </>
+    );
+    const { getByRole, rerender } = render(view(false));
+    const search = getByRole("textbox", { name: "Товар" });
+    search.focus();
+    fireEvent.change(search, { target: { value: "Поиск следующего товара" } });
+
+    rerender(view(true));
+
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("Поиск следующего товара");
+    let timestamp = 0;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => (timestamp += 10));
+    try {
+      for (const key of "4600123456789") fireEvent.keyDown(search, { key });
+      expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+    } finally {
+      now.mockRestore();
+    }
+    expect(onScan).toHaveBeenCalledTimes(1);
+    expect(onScan).toHaveBeenCalledWith("4600123456789");
+    expect(searchKeyDown).not.toHaveBeenCalledWith(expect.objectContaining({ key: "Enter" }));
+    expect(search).toHaveFocus();
+  });
+
+  it("focuses the scanner sink when enabled with no active control", () => {
+    const onScan = vi.fn();
+    const { container, rerender } = render(<BarcodeListener enabled={false} onScan={onScan} />);
+    expect(document.activeElement).toBe(document.body);
+
+    rerender(<BarcodeListener enabled onScan={onScan} />);
+
+    expect(container.querySelector("[data-barcode-sink]")).toHaveFocus();
+    expect(onScan).not.toHaveBeenCalled();
+  });
+
   it("forwards desktop barcode scan events while enabled", () => {
     const onScan = vi.fn();
     render(<BarcodeListener enabled onScan={onScan} />);

@@ -41,7 +41,14 @@ export function BarcodeListener({
 
   useEffect(() => {
     if (!enabled) return;
-    sinkRef.current?.focus();
+    // Re-enabling capture must not interrupt a cashier already using a control.
+    if (
+      !document.activeElement?.closest(
+        'input,textarea,select,button,a,[role="dialog"],[contenteditable="true"]',
+      )
+    ) {
+      sinkRef.current?.focus();
+    }
 
     const onKey = (e: KeyboardEvent) => {
       const el = document.activeElement;
