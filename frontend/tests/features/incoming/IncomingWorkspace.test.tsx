@@ -69,6 +69,7 @@ function callbacks() {
   };
 }
 const flags = {
+  isDesktopLayout: false,
   draftsPending: false,
   draftsError: false,
   canEdit: true,
@@ -78,26 +79,31 @@ const flags = {
 };
 
 describe("IncomingWorkspace", () => {
-  it("keeps unfinished rows out of the authoritative document total and opens the same draft", () => {
-    const handlers = callbacks();
-    render(
-      <IncomingWorkspace
-        {...flags}
-        {...handlers}
-        document={document}
-        drafts={[draft]}
-        draftsBlockAccept
-      />,
-    );
-    expect(screen.getByText("12,00 TJS")).toBeInTheDocument();
-    expect(screen.getAllByText("Проверьте значение").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Требуют внимания · 1" }));
-    expect(screen.queryByText("Готовый товар")).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "Продолжить", exact: true })[0]!);
-    expect(handlers.onContinueDraft).toHaveBeenCalledWith(draft);
-    expect(screen.getByRole("button", { name: "Принять на склад" })).toBeDisabled();
-    expect(handlers.onAccept).not.toHaveBeenCalled();
-  });
+  it.each([true, false])(
+    "keeps a single row per item and the authoritative total (desktop=%s)",
+    (isDesktopLayout) => {
+      const handlers = callbacks();
+      render(
+        <IncomingWorkspace
+          {...flags}
+          isDesktopLayout={isDesktopLayout}
+          {...handlers}
+          document={document}
+          drafts={[draft]}
+          draftsBlockAccept
+        />,
+      );
+      expect(screen.getByText("12,00 TJS")).toBeInTheDocument();
+      expect(screen.getAllByText("Строка поставщика")).toHaveLength(1);
+      expect(screen.getAllByText("Проверьте значение").length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole("button", { name: "Требуют внимания · 1" }));
+      expect(screen.queryByText("Готовый товар")).not.toBeInTheDocument();
+      fireEvent.click(screen.getAllByRole("button", { name: "Продолжить", exact: true })[0]!);
+      expect(handlers.onContinueDraft).toHaveBeenCalledWith(draft);
+      expect(screen.getByRole("button", { name: "Принять на склад" })).toBeDisabled();
+      expect(handlers.onAccept).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not reconstruct restricted purchase prices or infer a loss", () => {
     const redacted = {

@@ -535,6 +535,7 @@ export function IncomingDetailPage(): JSX.Element {
             </p>
           )}
           <IncomingWorkspace
+            isDesktopLayout={isDesktopLayout}
             document={doc}
             drafts={drafts.data ?? []}
             draftsPending={drafts.isPending || drafts.isFetching}

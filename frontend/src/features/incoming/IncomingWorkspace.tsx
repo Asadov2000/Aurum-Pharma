@@ -7,6 +7,7 @@ import { statusLabel, statusTone } from "./labels";
 import { type IncomingDocumentWithItems, type IncomingDraftRow, type IncomingItem } from "./types";
 
 interface IncomingWorkspaceProps {
+  isDesktopLayout: boolean;
   document: IncomingDocumentWithItems;
   drafts: IncomingDraftRow[];
   draftsPending: boolean;
@@ -153,10 +154,12 @@ export function IncomingWorkspace(props: IncomingWorkspaceProps): JSX.Element {
           </h2>
           {editable && (
             <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-              <Button variant="secondary" onClick={props.onImport}>
+              <Button className="min-h-11" variant="secondary" onClick={props.onImport}>
                 Загрузить накладную
               </Button>
-              <Button onClick={props.onAdd}>Добавить позицию</Button>
+              <Button className="min-h-11" onClick={props.onAdd}>
+                Добавить позицию
+              </Button>
             </div>
           )}
         </div>
@@ -205,82 +208,81 @@ export function IncomingWorkspace(props: IncomingWorkspaceProps): JSX.Element {
                 : "Здесь появятся товары накладной."}
             </p>
           </div>
-        ) : (
-          <>
-            <div className="hidden overflow-x-auto rounded-xl border border-border bg-surface lg:block">
-              <table className="w-full text-left text-sm">
-                <caption className="sr-only">Позиции приёмки</caption>
-                <thead className="border-b border-border bg-surface-subtle text-xs text-foreground-muted">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Товар
-                    </th>
+        ) : props.isDesktopLayout ? (
+          <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+            <table className="w-full text-left text-sm">
+              <caption className="sr-only">Позиции приёмки</caption>
+              <thead className="border-b border-border bg-surface-subtle text-xs text-foreground-muted">
+                <tr>
+                  <th scope="col" className="px-4 py-3 font-medium">
+                    Товар
+                  </th>
+                  <th scope="col" className="px-3 py-3 font-medium">
+                    Партия / срок
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right font-medium">
+                    Количество
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right font-medium">
+                    Закупка / ед.
+                  </th>
+                  <th scope="col" className="px-3 py-3 text-right font-medium">
+                    Продажа / ед.
+                  </th>
+                  {editable && (
                     <th scope="col" className="px-3 py-3 font-medium">
-                      Партия / срок
+                      Действия
                     </th>
-                    <th scope="col" className="px-3 py-3 text-right font-medium">
-                      Количество
-                    </th>
-                    <th scope="col" className="px-3 py-3 text-right font-medium">
-                      Закупка / ед.
-                    </th>
-                    <th scope="col" className="px-3 py-3 text-right font-medium">
-                      Продажа / ед.
-                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {visibleRows.map((row) => (
+                  <tr key={row.key} className={row.pending ? "bg-warning-subtle/30" : undefined}>
+                    <td className="min-w-52 max-w-sm px-4 py-4">
+                      <RowIdentity row={row} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <p className="break-words">{row.batch || "Без номера"}</p>
+                      <p className="mt-1 whitespace-nowrap text-xs text-foreground-muted">
+                        до {formatDate(row.expiry)}
+                      </p>
+                    </td>
+                    <td className="px-3 py-4 text-right tabular-nums">
+                      {formatNumber(row.quantity)}
+                    </td>
+                    <td className="px-3 py-4 text-right tabular-nums">
+                      {formatMoney(row.purchase, row.currency)}
+                    </td>
+                    <td className="px-3 py-4 text-right tabular-nums">
+                      {formatMoney(row.sale, row.currency)}
+                    </td>
                     {editable && (
-                      <th scope="col" className="px-3 py-3 font-medium">
-                        Действия
-                      </th>
+                      <td className="px-3 py-4">
+                        <RowActions row={row} />
+                      </td>
                     )}
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {visibleRows.map((row) => (
-                    <tr key={row.key} className={row.pending ? "bg-warning-subtle/30" : undefined}>
-                      <td className="min-w-52 max-w-sm px-4 py-4">
-                        <RowIdentity row={row} />
-                      </td>
-                      <td className="px-3 py-4">
-                        <p className="break-words">{row.batch || "Без номера"}</p>
-                        <p className="mt-1 whitespace-nowrap text-xs text-foreground-muted">
-                          до {formatDate(row.expiry)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-4 text-right tabular-nums">
-                        {formatNumber(row.quantity)}
-                      </td>
-                      <td className="px-3 py-4 text-right tabular-nums">
-                        {formatMoney(row.purchase, row.currency)}
-                      </td>
-                      <td className="px-3 py-4 text-right tabular-nums">
-                        {formatMoney(row.sale, row.currency)}
-                      </td>
-                      {editable && (
-                        <td className="px-3 py-4">
-                          <RowActions row={row} />
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface lg:hidden">
-              {visibleRows.map((row) => (
-                <article key={row.key} aria-label={row.name} className="space-y-4 p-4">
-                  <RowIdentity row={row} />
-                  <dl className="grid grid-cols-2 gap-3">
-                    <Detail label="Номер партии" value={row.batch || "Без номера"} />
-                    <Detail label="Срок годности" value={formatDate(row.expiry)} />
-                    <Detail label="Количество" value={formatNumber(row.quantity)} />
-                    <Detail label="Закупка / ед." value={formatMoney(row.purchase, row.currency)} />
-                    <Detail label="Продажа / ед." value={formatMoney(row.sale, row.currency)} />
-                  </dl>
-                  {editable && <RowActions row={row} />}
-                </article>
-              ))}
-            </div>
-          </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+            {visibleRows.map((row) => (
+              <article key={row.key} aria-label={row.name} className="space-y-4 p-4">
+                <RowIdentity row={row} />
+                <dl className="grid grid-cols-2 gap-3">
+                  <Detail label="Номер партии" value={row.batch || "Без номера"} />
+                  <Detail label="Срок годности" value={formatDate(row.expiry)} />
+                  <Detail label="Количество" value={formatNumber(row.quantity)} />
+                  <Detail label="Закупка / ед." value={formatMoney(row.purchase, row.currency)} />
+                  <Detail label="Продажа / ед." value={formatMoney(row.sale, row.currency)} />
+                </dl>
+                {editable && <RowActions row={row} />}
+              </article>
+            ))}
+          </div>
         )}
         {isDraft && (
           <p className="text-xs text-foreground-muted">
