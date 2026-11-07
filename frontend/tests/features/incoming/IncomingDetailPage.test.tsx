@@ -80,6 +80,9 @@ import { type MeResponse } from "@/features/auth/types";
 
 import { IncomingDetailPage } from "@/features/incoming/IncomingDetailPage";
 
+const LAYOUT_KEY = "aurum:incoming-detail-layout:v1";
+const ACCEPT_KEY = `aurum:incoming-accept:v1:${encodeURIComponent(JSON.stringify(["tenant-1", "user-1", "doc-1"]))}`;
+
 const DOC = {
   id: "doc-1",
   tenant_id: "tenant-1",
@@ -133,6 +136,7 @@ function renderPage(): QueryClient {
 describe("IncomingDetailPage", () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem(LAYOUT_KEY, "classic");
     useAuthStore.getState().setUser({ id: "user-1", active_tenant_id: "tenant-1" } as MeResponse);
     permissions = ["incoming.view", "incoming.create", "incoming.finalize"];
     permissionScopes = {
@@ -156,6 +160,138 @@ describe("IncomingDetailPage", () => {
     proceedNavigation.mockClear();
     navigationBlocked = false;
     getIncoming.mockResolvedValue(DOC);
+  });
+
+  it("switches between workspace and classic without changing the document", async () => {
+    localStorage.removeItem(LAYOUT_KEY);
+    renderPage();
+    await screen.findByRole("button", { name: "Прежний интерфейс" });
+
+    for (const label of ["Прежний интерфейс", "Новый интерфейс"]) {
+      expect(screen.getByText("Приёмка № ПР-1042")).toBeInTheDocument();
+      expect(screen.getAllByText("Парацетамол 500 мг").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("120,00 TJS").length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole("button", { name: label }));
+    }
+
+    expect(screen.getByRole("button", { name: "Прежний интерфейс" })).toBeInTheDocument();
+    expect(screen.getByText("Приёмка № ПР-1042")).toBeInTheDocument();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+    expect(rejectIncoming).not.toHaveBeenCalled();
+    expect(deleteIncomingItem).not.toHaveBeenCalled();
+    expect(deleteIncomingDraftRow).not.toHaveBeenCalled();
+    expect(saveIncomingDraftRow).not.toHaveBeenCalled();
+    expect(importIncomingInvoice).not.toHaveBeenCalled();
+    expect(localStorage.getItem(ACCEPT_KEY)).toBeNull();
+  });
+
+  it("restores each selected layout after reopening the same document", async () => {
+    localStorage.removeItem(LAYOUT_KEY);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Прежний интерфейс" }));
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe("classic");
+    cleanup();
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Новый интерфейс" }));
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe("workspace");
+    cleanup();
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Прежний интерфейс" })).toBeEnabled();
+    expect(screen.getByText("Приёмка № ПР-1042")).toBeInTheDocument();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+    expect(saveIncomingDraftRow).not.toHaveBeenCalled();
+  });
+
+  it("blocks layout changes while a form is open and preserves input after cancelling close", async () => {
+    localStorage.setItem(LAYOUT_KEY, "workspace");
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить позицию" }));
+    const toggle = screen.getByRole("button", { name: "Прежний интерфейс" });
+    expect(toggle).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Количество единиц"), { target: { value: "12," } });
+    await waitFor(() => expect(blockNavigation.mock.lastCall?.[0].enableBeforeUnload).toBe(true));
+    fireEvent.click(toggle);
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe("workspace");
+    fireEvent.click(screen.getByText("Закрыть"));
+    const confirmation = screen.getByRole("dialog", { name: "Закрыть без сохранения?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Отмена" }));
+    expect(screen.getByLabelText("Количество единиц")).toHaveValue("12,");
+    expect(toggle).toBeDisabled();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted document read-only in both layouts", async () => {
+    getIncoming.mockResolvedValue({ ...DOC, status: "accepted", stock_mode: "legacy_pack" });
+    localStorage.setItem(LAYOUT_KEY, "workspace");
+    renderPage();
+    await screen.findByRole("button", { name: "Прежний интерфейс" });
+    for (const label of ["Прежний интерфейс", "Новый интерфейс"]) {
+      expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: label }));
+    }
+    expect(acceptIncoming).not.toHaveBeenCalled();
+    expect(rejectIncoming).not.toHaveBeenCalled();
+  });
+
+  it("keeps workspace acceptance blocked while draft rows load or fail", async () => {
+    let failRows: (error: Error) => void = () => undefined;
+    listIncomingDraftRows.mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          failRows = reject;
+        }),
+    );
+    localStorage.setItem(LAYOUT_KEY, "workspace");
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Принять на склад" })).toBeDisabled();
+    await act(async () => {
+      failRows(new Error("offline"));
+    });
+    expect(await screen.findByText(/Не удалось проверить черновые позиции/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Принять на склад" })).toBeDisabled();
+    expect(screen.queryByText("Незавершённых позиций нет")).not.toBeInTheDocument();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pending physical receipt intact and prevents layout changes", async () => {
+    const savedIntent = JSON.stringify({
+      stock_mode: "physical_unit_v2",
+      expected_revision: "a".repeat(64),
+    });
+    localStorage.setItem(ACCEPT_KEY, savedIntent);
+    localStorage.setItem(LAYOUT_KEY, "workspace");
+    renderPage();
+    await screen.findByRole("button", { name: "Проверить результат приёмки" });
+    const toggle = screen.getByRole("button", { name: "Прежний интерфейс" });
+    expect(toggle).toBeDisabled();
+    fireEvent.click(toggle);
+    expect(localStorage.getItem(LAYOUT_KEY)).toBe("workspace");
+    expect(localStorage.getItem(ACCEPT_KEY)).toBe(savedIntent);
+    expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+    expect(acceptIncoming).not.toHaveBeenCalled();
+  });
+
+  it("preserves branch permissions when switching from workspace to classic", async () => {
+    permissionScopes = {
+      "incoming.view": ["branch-1"],
+      "incoming.create": ["branch-2"],
+      "incoming.finalize": ["branch-2"],
+    };
+    localStorage.setItem(LAYOUT_KEY, "workspace");
+    renderPage();
+    await screen.findByRole("button", { name: "Прежний интерфейс" });
+    for (const label of ["Прежний интерфейс", "Новый интерфейс"]) {
+      expect(screen.queryByRole("button", { name: "Добавить позицию" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Изменить реквизиты" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Принять на склад" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Отклонить" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: label }));
+    }
+    expect(acceptIncoming).not.toHaveBeenCalled();
+    expect(rejectIncoming).not.toHaveBeenCalled();
   });
 
   it("shows reference names, product details and control totals", async () => {
@@ -480,7 +616,7 @@ describe("IncomingDetailPage", () => {
         expected_revision: revision,
       }),
     );
-    await waitFor(() => expect(localStorage.length).toBe(0));
+    await waitFor(() => expect(localStorage.getItem(ACCEPT_KEY)).toBeNull());
   });
 
   it("keeps the original physical revision after an unknown result and reload", async () => {
@@ -556,7 +692,7 @@ describe("IncomingDetailPage", () => {
       resolveRows([]);
     });
     expect(acceptIncoming).not.toHaveBeenCalled();
-    expect(localStorage.length).toBe(0);
+    expect(localStorage.getItem(ACCEPT_KEY)).toBeNull();
   });
 
   it("disables physical receiving without a complete physical preparation", async () => {
@@ -582,12 +718,12 @@ describe("IncomingDetailPage", () => {
       }),
     );
     await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(1));
-    expect(localStorage.length).toBe(1);
+    expect(localStorage.getItem(ACCEPT_KEY)).not.toBeNull();
     await act(async () => {
       useAuthStore.getState().clear();
       finish({ ...DOC, status: "accepted", stock_mode: "legacy_pack" });
     });
-    expect(localStorage.length).toBe(1);
+    expect(localStorage.getItem(ACCEPT_KEY)).not.toBeNull();
     expect(
       screen.queryByText("Товары приняты на склад. Документ теперь доступен только для просмотра."),
     ).not.toBeInTheDocument();
@@ -646,7 +782,7 @@ describe("IncomingDetailPage", () => {
     await waitFor(() =>
       expect(within(dialog).getByLabelText("Упаковки, блистеры и поштучно")).toBeEnabled(),
     );
-    expect(localStorage.length).toBe(0);
+    expect(localStorage.getItem(ACCEPT_KEY)).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Принять на склад" }));
     await waitFor(() => expect(acceptIncoming).toHaveBeenCalledTimes(2));
     expect(acceptIncoming.mock.calls[0]).toEqual([

@@ -29,6 +29,8 @@ import { cn } from "@/lib/utils";
 import { AddItemForm } from "./AddItemForm";
 import { deleteIncomingDraftRow } from "./api";
 import { IncomingAcceptDialog } from "./IncomingAcceptDialog";
+import { IncomingWorkspace } from "./IncomingWorkspace";
+import { useIncomingDetailLayout } from "./useIncomingDetailLayout";
 import { InvoiceImportForm } from "./InvoiceImportForm";
 import { pharmacyCalendarDate } from "./calendar";
 import { statusLabel, statusTone } from "./labels";
@@ -64,6 +66,7 @@ export function IncomingDetailPage(): JSX.Element {
   const [acceptBlocked, setAcceptBlocked] = useState(false);
   const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
   const [deleteItemError, setDeleteItemError] = useState<string | null>(null);
+  const [layout, changeLayout] = useIncomingDetailLayout();
   const isDesktopLayout = useMediaQuery("(min-width: 768px)");
   const doc = incoming.data;
   const drafts = useIncomingDraftRowsQuery(id, doc?.status === "draft");
@@ -118,6 +121,17 @@ export function IncomingDetailPage(): JSX.Element {
     drafts.isError ||
     !drafts.data ||
     drafts.data.length > 0;
+  const layoutLocked =
+    adding ||
+    editingItem !== null ||
+    editingDocument ||
+    importingInvoice ||
+    invoiceImportBusy ||
+    formDirty ||
+    acceptBlocked ||
+    docAction !== null ||
+    deletingDraft !== null ||
+    pendingDeleteItemId !== null;
 
   const onReject = async () => {
     if (!canFinalize || acceptBlocked || reject.isPending) return;
@@ -169,236 +183,277 @@ export function IncomingDetailPage(): JSX.Element {
   return (
     <div className="space-y-5">
       <ContextHelpPortal pathname="/incoming/detail" />
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <BackToIncoming />
-        <Badge tone={statusTone[doc.status]}>{statusLabel[doc.status]}</Badge>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-foreground-muted">
+          {layout === "workspace" ? "Новый вид приёмки" : "Прежний вид приёмки"}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={layoutLocked}
+          title={
+            layoutLocked
+              ? "Сначала завершите открытую операцию. Введённые данные сохраняются в форме."
+              : "Меняется только вид экрана. Документ и товары останутся прежними."
+          }
+          onClick={() => {
+            if (!layoutLocked) changeLayout(layout === "workspace" ? "classic" : "workspace");
+          }}
+        >
+          {layout === "workspace" ? "Прежний интерфейс" : "Новый интерфейс"}
+        </Button>
       </div>
-
-      <PageHeader
-        title={title}
-        description={`${supplierName} · ${branchName}`}
-        meta={formatCalendarDate(doc.document_date)}
-        actions={
-          canEdit && isDraft ? (
-            <Button variant="secondary" onClick={() => setEditingDocument(true)}>
-              Изменить реквизиты
-            </Button>
-          ) : undefined
-        }
-      />
-
-      {incoming.isError && (
-        <div
-          role="alert"
-          className="space-y-2 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm"
-        >
-          <p>
-            Не удалось обновить документ. Показана последняя загруженная версия; ввод в открытой
-            форме сохранён.
-          </p>
-          <Button
-            variant="secondary"
-            size="sm"
-            isLoading={incoming.isFetching}
-            onClick={() => void incoming.refetch()}
-          >
-            Повторить обновление
-          </Button>
-        </div>
-      )}
-
-      <section
-        aria-label="Сводка прихода"
-        className="overflow-hidden rounded-lg border border-border bg-surface"
-      >
-        <dl className="grid grid-cols-2 gap-px bg-border lg:grid-cols-4">
-          <SummaryField label="Позиций" value={doc.items.length.toLocaleString("ru-RU")} />
-          <SummaryField label="Количество" value={formatQuantity(summary.quantity)} />
-          <SummaryField
-            label="Закупочная сумма"
-            value={formatMoney(doc.total_amount, doc.currency)}
-            emphasis
-          />
-          <SummaryField
-            label="Потенциал продаж"
-            value={formatMoney(summary.saleTotal, doc.currency)}
-            note={
-              summary.margin === null
-                ? "Себестоимость скрыта"
-                : summary.margin >= 0
-                  ? `Наценка ${formatMoney(summary.margin, doc.currency)}`
-                  : `Убыток ${formatMoney(Math.abs(summary.margin), doc.currency)}`
-            }
-            tone={summary.margin !== null && summary.margin < 0 ? "danger" : "default"}
-          />
-        </dl>
-        {(doc.notes || summary.expiredCount > 0 || summary.lossItemCount > 0) && (
-          <div className="grid gap-3 border-t border-border px-4 py-3 sm:grid-cols-2 sm:px-5">
-            {doc.notes && (
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground-muted">Комментарий</p>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground-secondary">
-                  {doc.notes}
-                </p>
-              </div>
-            )}
-            {(summary.expiredCount > 0 || summary.lossItemCount > 0) && (
-              <div
-                role="status"
-                className="rounded-md border border-warning/30 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
-              >
-                {summary.expiredCount > 0 && (
-                  <p>{summary.expiredCount} поз. с истёкшим сроком годности</p>
-                )}
-                {summary.lossItemCount > 0 && (
-                  <p>{summary.lossItemCount} поз. с ценой продажи ниже закупочной</p>
-                )}
-              </div>
-            )}
+      {layout === "classic" ? (
+        <>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+            <BackToIncoming />
+            <Badge tone={statusTone[doc.status]}>{statusLabel[doc.status]}</Badge>
           </div>
-        )}
-      </section>
 
-      {topError && (
-        <div
-          role="alert"
-          className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
-        >
-          {topError}
-        </div>
-      )}
-      {actionMessage && (
-        <div
-          role="status"
-          className="rounded-lg border border-success/30 bg-success-subtle px-4 py-3 text-sm text-success-foreground"
-        >
-          {actionMessage}
-        </div>
-      )}
+          <PageHeader
+            title={title}
+            description={`${supplierName} · ${branchName}`}
+            meta={formatCalendarDate(doc.document_date)}
+            actions={
+              canEdit && isDraft ? (
+                <Button variant="secondary" onClick={() => setEditingDocument(true)}>
+                  Изменить реквизиты
+                </Button>
+              ) : undefined
+            }
+          />
 
-      {isDraft && (
-        <section
-          aria-label="Незавершённые позиции"
-          className="space-y-3 rounded-lg border border-border bg-surface p-4"
-        >
-          <h2 className="font-semibold">Незавершённые позиции</h2>
-          <p className="text-sm text-foreground-muted">
-            Сохранённый ввод можно продолжить на другом устройстве. В суммы и остатки он ещё не
-            включён.
-          </p>
-          {drafts.isError ? (
-            <div role="alert" className="space-y-2 text-sm text-danger">
-              <p>Не удалось проверить черновые позиции. Принятие прихода временно недоступно.</p>
-              <Button variant="secondary" size="sm" onClick={() => void drafts.refetch()}>
-                Повторить проверку
+          {incoming.isError && (
+            <div
+              role="alert"
+              className="space-y-2 rounded-lg border border-warning/30 bg-warning-subtle p-3 text-sm"
+            >
+              <p>
+                Не удалось обновить документ. Показана последняя загруженная версия; ввод в открытой
+                форме сохранён.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                isLoading={incoming.isFetching}
+                onClick={() => void incoming.refetch()}
+              >
+                Повторить обновление
               </Button>
             </div>
-          ) : drafts.isPending ? (
-            <p role="status">Загрузка черновых позиций…</p>
-          ) : drafts.data?.length === 0 ? (
-            <p className="text-sm text-foreground-muted">Незавершённых позиций нет</p>
-          ) : (
-            drafts.data?.map((row) => (
-              <article
-                key={row.id}
-                className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3"
-              >
-                <div className="min-w-0">
-                  <h3 className="break-words text-sm font-medium">
-                    {row.catalog_name || row.fields.source_name || "Товар ещё не выбран"}
-                  </h3>
-                  {!row.catalog_name && row.fields.source_name && (
-                    <p className="text-xs text-foreground-muted">
-                      Из накладной · товар не сопоставлен
+          )}
+
+          <section
+            aria-label="Сводка прихода"
+            className="overflow-hidden rounded-lg border border-border bg-surface"
+          >
+            <dl className="grid grid-cols-2 gap-px bg-border lg:grid-cols-4">
+              <SummaryField label="Позиций" value={doc.items.length.toLocaleString("ru-RU")} />
+              <SummaryField label="Количество" value={formatQuantity(summary.quantity)} />
+              <SummaryField
+                label="Закупочная сумма"
+                value={formatMoney(doc.total_amount, doc.currency)}
+                emphasis
+              />
+              <SummaryField
+                label="Потенциал продаж"
+                value={formatMoney(summary.saleTotal, doc.currency)}
+                note={
+                  summary.margin === null
+                    ? "Себестоимость скрыта"
+                    : summary.margin >= 0
+                      ? `Наценка ${formatMoney(summary.margin, doc.currency)}`
+                      : `Убыток ${formatMoney(Math.abs(summary.margin), doc.currency)}`
+                }
+                tone={summary.margin !== null && summary.margin < 0 ? "danger" : "default"}
+              />
+            </dl>
+            {(doc.notes || summary.expiredCount > 0 || summary.lossItemCount > 0) && (
+              <div className="grid gap-3 border-t border-border px-4 py-3 sm:grid-cols-2 sm:px-5">
+                {doc.notes && (
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground-muted">Комментарий</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground-secondary">
+                      {doc.notes}
                     </p>
-                  )}
-                  <p className="break-words text-sm text-foreground-muted">
-                    Количество: {row.fields.qty || "не указано"}
-                  </p>
-                </div>
-                {canEdit && (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="min-h-11"
-                      onClick={() => {
-                        setActiveDraft(row);
-                        setAdding(true);
-                      }}
-                    >
-                      Продолжить
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-11"
-                      onClick={() => {
-                        setDeletingDraft(row);
-                        setDraftDeleteError(null);
-                      }}
-                    >
-                      Удалить
-                    </Button>
                   </div>
                 )}
-              </article>
-            ))
-          )}
-        </section>
-      )}
+                {(summary.expiredCount > 0 || summary.lossItemCount > 0) && (
+                  <div
+                    role="status"
+                    className="rounded-md border border-warning/30 bg-warning-subtle px-3 py-2 text-sm text-warning-foreground"
+                  >
+                    {summary.expiredCount > 0 && (
+                      <p>{summary.expiredCount} поз. с истёкшим сроком годности</p>
+                    )}
+                    {summary.lossItemCount > 0 && (
+                      <p>{summary.lossItemCount} поз. с ценой продажи ниже закупочной</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
-      <section aria-labelledby="incoming-items-heading" className="space-y-3">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 id="incoming-items-heading" className="text-base font-semibold text-foreground">
-              Позиции документа
-            </h2>
-            <p className="mt-0.5 text-xs text-foreground-muted">
-              Партии появятся на складе только после принятия прихода.
-            </p>
-          </div>
-          {canEdit && isDraft && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="min-h-11"
-                variant="secondary"
-                onClick={() => setImportingInvoice(true)}
-              >
-                Загрузить накладную
-              </Button>
-              <Button className="min-h-11" onClick={() => setAdding(true)}>
-                Добавить позицию
-              </Button>
+          {topError && (
+            <div
+              role="alert"
+              className="rounded-lg border border-danger/30 bg-danger-subtle px-4 py-3 text-sm text-danger-foreground"
+            >
+              {topError}
             </div>
           )}
-        </div>
+          {actionMessage && (
+            <div
+              role="status"
+              className="rounded-lg border border-success/30 bg-success-subtle px-4 py-3 text-sm text-success-foreground"
+            >
+              {actionMessage}
+            </div>
+          )}
 
-        {doc.items.length === 0 ? (
-          <TableEmpty title="Документ пока пуст">
-            Добавьте товары, проверьте цены и сроки годности перед принятием.
-          </TableEmpty>
-        ) : isDesktopLayout ? (
-          <div>
-            <Table className="min-w-[860px] table-fixed">
-              <THead>
-                <TR>
-                  <TH className="w-[27%]">Товар</TH>
-                  <TH className="w-[18%]">Партия и срок</TH>
-                  <TH className="w-[11%] text-right">Кол-во</TH>
-                  <TH className="w-[13%] text-right">Закупка</TH>
-                  <TH className="w-[13%] text-right">Продажа</TH>
-                  <TH className="w-[13%] text-right">Сумма</TH>
-                  {canEdit && isDraft && (
-                    <TH className="w-[5%] text-right">
-                      <span className="sr-only">Действия</span>
-                    </TH>
-                  )}
-                </TR>
-              </THead>
-              <TBody>
+          {isDraft && (
+            <section
+              aria-label="Незавершённые позиции"
+              className="space-y-3 rounded-lg border border-border bg-surface p-4"
+            >
+              <h2 className="font-semibold">Незавершённые позиции</h2>
+              <p className="text-sm text-foreground-muted">
+                Сохранённый ввод можно продолжить на другом устройстве. В суммы и остатки он ещё не
+                включён.
+              </p>
+              {drafts.isError ? (
+                <div role="alert" className="space-y-2 text-sm text-danger">
+                  <p>
+                    Не удалось проверить черновые позиции. Принятие прихода временно недоступно.
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={() => void drafts.refetch()}>
+                    Повторить проверку
+                  </Button>
+                </div>
+              ) : drafts.isPending ? (
+                <p role="status">Загрузка черновых позиций…</p>
+              ) : drafts.data?.length === 0 ? (
+                <p className="text-sm text-foreground-muted">Незавершённых позиций нет</p>
+              ) : (
+                drafts.data?.map((row) => (
+                  <article
+                    key={row.id}
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3"
+                  >
+                    <div className="min-w-0">
+                      <h3 className="break-words text-sm font-medium">
+                        {row.catalog_name || row.fields.source_name || "Товар ещё не выбран"}
+                      </h3>
+                      {!row.catalog_name && row.fields.source_name && (
+                        <p className="text-xs text-foreground-muted">
+                          Из накладной · товар не сопоставлен
+                        </p>
+                      )}
+                      <p className="break-words text-sm text-foreground-muted">
+                        Количество: {row.fields.qty || "не указано"}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="min-h-11"
+                          onClick={() => {
+                            setActiveDraft(row);
+                            setAdding(true);
+                          }}
+                        >
+                          Продолжить
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="min-h-11"
+                          onClick={() => {
+                            setDeletingDraft(row);
+                            setDraftDeleteError(null);
+                          }}
+                        >
+                          Удалить
+                        </Button>
+                      </div>
+                    )}
+                  </article>
+                ))
+              )}
+            </section>
+          )}
+
+          <section aria-labelledby="incoming-items-heading" className="space-y-3">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 id="incoming-items-heading" className="text-base font-semibold text-foreground">
+                  Позиции документа
+                </h2>
+                <p className="mt-0.5 text-xs text-foreground-muted">
+                  Партии появятся на складе только после принятия прихода.
+                </p>
+              </div>
+              {canEdit && isDraft && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    className="min-h-11"
+                    variant="secondary"
+                    onClick={() => setImportingInvoice(true)}
+                  >
+                    Загрузить накладную
+                  </Button>
+                  <Button className="min-h-11" onClick={() => setAdding(true)}>
+                    Добавить позицию
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {doc.items.length === 0 ? (
+              <TableEmpty title="Документ пока пуст">
+                Добавьте товары, проверьте цены и сроки годности перед принятием.
+              </TableEmpty>
+            ) : isDesktopLayout ? (
+              <div>
+                <Table className="min-w-[860px] table-fixed">
+                  <THead>
+                    <TR>
+                      <TH className="w-[27%]">Товар</TH>
+                      <TH className="w-[18%]">Партия и срок</TH>
+                      <TH className="w-[11%] text-right">Кол-во</TH>
+                      <TH className="w-[13%] text-right">Закупка</TH>
+                      <TH className="w-[13%] text-right">Продажа</TH>
+                      <TH className="w-[13%] text-right">Сумма</TH>
+                      {canEdit && isDraft && (
+                        <TH className="w-[5%] text-right">
+                          <span className="sr-only">Действия</span>
+                        </TH>
+                      )}
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {doc.items.map((item) => (
+                      <IncomingItemRow
+                        key={item.id}
+                        item={item}
+                        canEdit={canEdit && isDraft}
+                        onEdit={() => setEditingItem(item)}
+                        onDelete={() => {
+                          setDeleteItemError(null);
+                          setPendingDeleteItemId(item.id);
+                        }}
+                      />
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="divide-y divide-border rounded-lg border border-border bg-surface">
                 {doc.items.map((item) => (
-                  <IncomingItemRow
+                  <IncomingItemCard
                     key={item.id}
                     item={item}
                     canEdit={canEdit && isDraft}
@@ -409,59 +464,106 @@ export function IncomingDetailPage(): JSX.Element {
                     }}
                   />
                 ))}
-              </TBody>
-            </Table>
-          </div>
-        ) : (
-          <div className="divide-y divide-border rounded-lg border border-border bg-surface">
-            {doc.items.map((item) => (
-              <IncomingItemCard
-                key={item.id}
-                item={item}
-                canEdit={canEdit && isDraft}
-                onEdit={() => setEditingItem(item)}
-                onDelete={() => {
-                  setDeleteItemError(null);
-                  setPendingDeleteItemId(item.id);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+              </div>
+            )}
+          </section>
 
-      {canFinalize && isDraft && (
-        <div className="sticky bottom-2 z-sticky flex flex-col gap-3 rounded-lg border border-border bg-surface-raised px-3 py-3 shadow-lg sm:static sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:shadow-none">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">Черновик не меняет остатки</p>
-            <p className="text-xs text-foreground-muted">
-              Перед принятием проверьте {doc.items.length} поз. на сумму{" "}
-              {formatMoney(doc.total_amount, doc.currency)}.
+          {canFinalize && isDraft && (
+            <div className="sticky bottom-2 z-sticky flex flex-col gap-3 rounded-lg border border-border bg-surface-raised px-3 py-3 shadow-lg sm:static sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:shadow-none">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Черновик не меняет остатки</p>
+                <p className="text-xs text-foreground-muted">
+                  Перед принятием проверьте {doc.items.length} поз. на сумму{" "}
+                  {formatMoney(doc.total_amount, doc.currency)}.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                <Button
+                  variant="secondary"
+                  disabled={acceptBlocked}
+                  onClick={() => setDocAction("reject")}
+                >
+                  Отклонить
+                </Button>
+                <Button
+                  disabled={doc.items.length === 0 || draftsBlockAccept}
+                  title={
+                    draftsBlockAccept
+                      ? "Сначала проверьте и завершите незавершённые позиции"
+                      : doc.items.length === 0
+                        ? "Сначала добавьте хотя бы одну позицию"
+                        : undefined
+                  }
+                  onClick={() => setDocAction("accept")}
+                >
+                  Принять на склад
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <BackToIncoming />
+          {incoming.isError && (
+            <div
+              role="alert"
+              className="rounded-lg bg-warning-subtle p-3 text-sm text-warning-foreground"
+            >
+              <p>Не удалось обновить документ. Показана последняя загруженная версия.</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                isLoading={incoming.isFetching}
+                onClick={() => void incoming.refetch()}
+              >
+                Повторить обновление
+              </Button>
+            </div>
+          )}
+          {topError && (
+            <p role="alert" className="text-sm text-danger">
+              {topError}
             </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-            <Button
-              variant="secondary"
-              disabled={acceptBlocked}
-              onClick={() => setDocAction("reject")}
+          )}
+          {actionMessage && (
+            <p
+              role="status"
+              className="rounded-lg bg-success-subtle p-3 text-sm text-success-foreground"
             >
-              Отклонить
-            </Button>
-            <Button
-              disabled={doc.items.length === 0 || draftsBlockAccept}
-              title={
-                draftsBlockAccept
-                  ? "Сначала проверьте и завершите незавершённые позиции"
-                  : doc.items.length === 0
-                    ? "Сначала добавьте хотя бы одну позицию"
-                    : undefined
-              }
-              onClick={() => setDocAction("accept")}
-            >
-              Принять на склад
-            </Button>
-          </div>
-        </div>
+              {actionMessage}
+            </p>
+          )}
+          <IncomingWorkspace
+            document={doc}
+            drafts={drafts.data ?? []}
+            draftsPending={drafts.isPending || drafts.isFetching}
+            draftsError={drafts.isError}
+            canEdit={canEdit}
+            canFinalize={canFinalize}
+            acceptBlocked={acceptBlocked}
+            draftsBlockAccept={draftsBlockAccept}
+            onEditDocument={() => setEditingDocument(true)}
+            onImport={() => setImportingInvoice(true)}
+            onAdd={() => setAdding(true)}
+            onEditItem={setEditingItem}
+            onDeleteItem={(item) => {
+              setDeleteItemError(null);
+              setPendingDeleteItemId(item.id);
+            }}
+            onContinueDraft={(row) => {
+              setActiveDraft(row);
+              setAdding(true);
+            }}
+            onDeleteDraft={(row) => {
+              setDeletingDraft(row);
+              setDraftDeleteError(null);
+            }}
+            onRetryDrafts={() => void drafts.refetch()}
+            onAccept={() => setDocAction("accept")}
+            onReject={() => setDocAction("reject")}
+          />
+        </>
       )}
 
       {canEdit && (
