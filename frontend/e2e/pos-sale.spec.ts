@@ -269,17 +269,25 @@ test.describe("POS sale (owner)", () => {
     });
     await page.locator('[data-barcode-sink="true"]').focus();
     await page.evaluate((code) => {
+      const sink = document.querySelector<HTMLInputElement>('[data-barcode-sink="true"]');
+      if (!(sink instanceof HTMLInputElement) || document.activeElement !== sink) {
+        throw new Error("The physical scanner must target its focused input");
+      }
+      // A hardware scanner targets the focused input. Dispatching at window
+      // changes listener ordering after the scanner is re-enabled after an add.
       for (const key of code) {
-        window.dispatchEvent(
+        sink.dispatchEvent(
           new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
         );
       }
-      window.dispatchEvent(
+      sink.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
       );
     }, barcode);
 
     await physicalBarcodeLookup;
+    await expect(paymentPanel.getByText("Оплачено 0,00", { exact: false })).toBeVisible();
+    await expect(paymentPanel.getByRole("button", { name: /Завершить продажу/ })).toHaveCount(0);
     await expect(selectedProduct).toBeVisible();
     await expect(page.getByTestId("cart-item")).toHaveCount(1);
     expect(itemOperationId).toBeUndefined();
