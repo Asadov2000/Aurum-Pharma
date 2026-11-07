@@ -311,7 +311,7 @@ export function IncomingWorkspace(props: IncomingWorkspaceProps): JSX.Element {
                   ? "Сначала добавьте хотя бы одну позицию."
                   : "Перед принятием сверьте данные с накладной и упаковками."}
             </p>
-            <div className="flex w-full gap-2 sm:w-auto">
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <Button variant="secondary" disabled={props.acceptBlocked} onClick={props.onReject}>
                 Отклонить
               </Button>
