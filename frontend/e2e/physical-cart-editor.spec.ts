@@ -3,7 +3,7 @@ import { request, test } from "@playwright/test";
 import {
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -62,17 +62,15 @@ test("persists pack, blister and unit draft rows without enabling payment", asyn
         financialWrites.push(path);
       }
     });
-    await page.getByRole("button", { name: "Упаковки" }).click();
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-    await expect(editor).toBeVisible();
     let saleId = "";
     for (const [format, label, quantity] of [
-      ["Поштучно", "Количество, шт.", "2"],
-      ["Блистер", "Количество блистеров", "1"],
-      ["Упаковка", "Количество упаковок", "1"],
+      [/^Штуки /, "Количество, шт.", "2"],
+      [/^Блистеры /, "Количество блистеров", "1"],
+      [/^Упаковки /, "Количество упаковок", "1"],
     ] as const) {
-      await editor.getByLabel("Название лекарства").fill(catalogSearchKey(medicine.brand_name));
-      await editor.getByRole("option", { name: new RegExp(medicine.brand_name) }).click();
+      await selectPosProduct(page, medicine.brand_name);
+      await expect(editor).toBeVisible();
       await editor.getByRole("radio", { name: format, exact: true }).click();
       await editor.getByLabel(label, { exact: true }).fill(quantity);
       const response = page.waitForResponse(
@@ -80,11 +78,11 @@ test("persists pack, blister and unit draft rows without enabling payment", asyn
           result.request().method() === "PUT" &&
           /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(result.url()).pathname),
       );
-      await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+      await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
       const saved = await response;
       expect(saved.ok()).toBe(true);
       saleId = ((await saved.json()) as { sale_id: string }).sale_id;
-      await expect(editor.getByLabel("Название лекарства")).toHaveValue("");
+      await expect(page.getByRole("combobox", { name: "Товар", exact: true })).toHaveValue("");
     }
     await expect(editor.getByRole("listitem")).toHaveCount(3);
     const read = await api.get(`sales/${saleId}`);
@@ -103,7 +101,9 @@ test("persists pack, blister and unit draft rows without enabling payment", asyn
     await expect(editor).toBeVisible();
     await expect(editor.getByRole("listitem")).toHaveCount(3);
     await expect(editor.getByText(medicine.brand_name, { exact: true })).toHaveCount(3);
-    await expect(page.getByRole("region", { name: "К оплате", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Принять наличные", exact: true })).toHaveCount(
+      0,
+    );
     await expect(page.getByRole("region", { name: "Оплата наличными" })).toBeVisible();
     await page.keyboard.press("F4");
     await page.keyboard.press("Enter");

@@ -58,21 +58,10 @@ export const Button = /* @__PURE__ */ forwardRef<HTMLButtonElement, ButtonProps>
       aria-busy={isLoading || undefined}
       aria-label={isLoading ? loadingLabel : ariaLabel}
       // Focus ring is provided globally by :focus-visible (see index.css).
-      className={cn(
-        "relative inline-flex shrink-0 items-center justify-center gap-2 rounded-md font-semibold transition-colors duration-fast",
-        "disabled:cursor-not-allowed disabled:shadow-none",
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
-      )}
+      className={cn("aurum-button", variantClasses[variant], sizeClasses[size], className)}
       {...rest}
     >
-      {isLoading && (
-        <span
-          aria-hidden="true"
-          className="absolute h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-        />
-      )}
+      {isLoading && <span aria-hidden="true" className="aurum-button-spinner" />}
       <span
         aria-hidden={isLoading || undefined}
         data-label={mirrorLabelInCss ? textLabel : undefined}

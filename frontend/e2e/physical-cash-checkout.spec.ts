@@ -9,7 +9,7 @@ import {
   addPosItemToCart,
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -84,17 +84,15 @@ async function receivePhysicalStock(api: APIRequestContext, branchId: string, ca
 }
 
 async function addPhysicalFormats(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-  await expect(editor).toBeVisible();
   let saleId = "";
   for (const [format, label, quantity] of [
-    ["Поштучно", "Количество, шт.", "2"],
-    ["Блистер", "Количество блистеров", "1"],
-    ["Упаковка", "Количество упаковок", "1"],
+    [/^Штуки /, "Количество, шт.", "2"],
+    [/^Блистеры /, "Количество блистеров", "1"],
+    [/^Упаковки /, "Количество упаковок", "1"],
   ] as const) {
-    await editor.getByLabel("Название лекарства").fill(catalogSearchKey(name));
-    await editor.getByRole("option", { name: new RegExp(name) }).click();
+    await selectPosProduct(page, name);
+    await expect(editor).toBeVisible();
     await editor.getByRole("radio", { name: format, exact: true }).click();
     await editor.getByLabel(label, { exact: true }).fill(quantity);
     const saved = page.waitForResponse(
@@ -102,11 +100,11 @@ async function addPhysicalFormats(page: Page, name: string): Promise<string> {
         response.request().method() === "PUT" &&
         /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
     );
-    await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+    await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
     const response = await saved;
     expect(response.ok()).toBe(true);
     saleId = ((await response.json()) as { sale_id: string }).sale_id;
-    await expect(editor.getByLabel("Название лекарства")).toHaveValue("");
+    await expect(page.getByRole("combobox", { name: "Товар", exact: true })).toHaveValue("");
   }
   await expect(editor.getByRole("listitem")).toHaveCount(3);
   return saleId;
@@ -186,9 +184,13 @@ for (const { loseResponse, requiresPrescription } of [
         await expect(page.getByText("Смена открыта")).toBeVisible();
         const saleId = await addPhysicalFormats(page, medicine.brand_name);
         const panel = page.getByRole("region", { name: "Оплата наличными", exact: true });
-        await expect(panel.getByText("16.00 TJS", { exact: true })).toBeVisible();
+        await expect(
+          page
+            .getByRole("region", { name: "Оплата", exact: true })
+            .getByText("16,00", { exact: true }),
+        ).toBeVisible();
         await panel.getByLabel("Получено наличными, TJS").fill("20");
-        await expect(panel.getByText("4.00 TJS", { exact: true })).toBeVisible();
+        await expect(panel.getByText("4,00 TJS", { exact: true })).toBeVisible();
         if (requiresPrescription) {
           const paymentRequests: string[] = [];
           page.on("request", (outgoing) => {
@@ -363,7 +365,9 @@ test("recovers card preparation after a lost binding response and cancels withou
     });
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
     const cash = page.getByRole("region", { name: "Оплата наличными", exact: true });
-    await preparation.getByRole("button", { name: "Подготовка карты/QR", exact: true }).click();
+    const payment = page.getByRole("region", { name: "Оплата", exact: true });
+    await payment.getByRole("button", { name: "Карта", exact: true }).click();
+    await preparation.getByRole("button", { name: "Продолжить оплату", exact: true }).click();
     await expect(preparation.getByLabel("Картой, TJS", { exact: true })).toHaveValue("16.00");
     await preparation.getByRole("button", { name: "Подготовить оплату", exact: true }).click();
     await expect(
@@ -384,9 +388,7 @@ test("recovers card preparation after a lost binding response and cancels withou
     await expect(
       editor.getByRole("button", { name: "Изменить", exact: true }).first(),
     ).toBeDisabled();
-    await expect(
-      cash.getByRole("button", { name: "Завершить продажу", exact: true }),
-    ).toBeDisabled();
+    await expect(payment.getByRole("button", { name: "Наличные", exact: true })).toBeDisabled();
     expect(preparationFacts(saleId, medicine.id)).toBe(before);
     await page.unroute(bindingPath);
     const recovered = page.waitForResponse(
@@ -411,9 +413,7 @@ test("recovers card preparation after a lost binding response and cancels withou
     await expect(
       editor.getByRole("button", { name: "Изменить", exact: true }).first(),
     ).toBeDisabled();
-    await expect(
-      cash.getByRole("button", { name: "Завершить продажу", exact: true }),
-    ).toBeDisabled();
+    await expect(payment.getByRole("button", { name: "Наличные", exact: true })).toBeDisabled();
     const cancelled = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -425,6 +425,7 @@ test("recovers card preparation after a lost binding response and cancels withou
     await expect(
       editor.getByRole("button", { name: "Изменить", exact: true }).first(),
     ).toBeEnabled();
+    await payment.getByRole("button", { name: "Наличные", exact: true }).click();
     await expect(
       cash.getByRole("button", { name: "Завершить продажу", exact: true }),
     ).toBeEnabled();
@@ -554,11 +555,11 @@ for (const kind of ["physical", "mixed"] as const) {
           name: "Подготовка электронной оплаты",
           exact: true,
         });
-        await preparation.getByRole("button", { name: "Подготовка карты/QR", exact: true }).click();
-        await preparation
-          .getByRole("group", { name: "Способ электронной оплаты", exact: true })
+        await page
+          .getByRole("region", { name: "Оплата", exact: true })
           .getByRole("button", { name: "Смешанная", exact: true })
           .click();
+        await preparation.getByRole("button", { name: "Продолжить оплату", exact: true }).click();
         for (const [method, label] of [
           ["cash", "Наличными, TJS"],
           ["card", "Картой, TJS"],

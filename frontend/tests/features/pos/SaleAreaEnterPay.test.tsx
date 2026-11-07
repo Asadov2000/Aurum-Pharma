@@ -28,6 +28,7 @@ const getCheckoutResult = vi.fn();
 const createSale = vi.fn();
 const getPosCommandResult = vi.fn();
 const findByBarcode = vi.fn();
+const getPhysicalCartOptions = vi.fn();
 const addSaleItem = vi.fn();
 const getPosFavorites = vi.fn();
 const createPaymentAttempt = vi.fn();
@@ -74,6 +75,10 @@ vi.mock("@/features/catalog/pickerQueries", () => ({
 
 vi.mock("@/features/catalog/api", () => ({
   findByBarcode: (...args: unknown[]) => findByBarcode(...args),
+  listCatalog: vi.fn(async () => ({ items: [], total: 0, page: 1, page_size: 20 })),
+}));
+vi.mock("@/features/pos/physicalCartOptions", () => ({
+  getPhysicalCartOptions: (...args: unknown[]) => getPhysicalCartOptions(...args),
 }));
 
 vi.mock("@/lib/desktopRuntime", () => ({
@@ -239,6 +244,7 @@ function renderArea(
   canReconcileExternalPayment: boolean = true,
   cardTerminalId?: string,
   initialAccess: { registerAvailable?: boolean; canSell?: boolean } = {},
+  onRegisterSwitchStateChange?: (state: { blocked: boolean; hasDraft: boolean }) => void,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -256,6 +262,7 @@ function renderArea(
         registerId={REG}
         registerAvailable={access.registerAvailable}
         canSell={access.canSell}
+        onRegisterSwitchStateChange={onRegisterSwitchStateChange}
         mode="keyboard"
         soundOn={false}
         draftTtlMin={30}
@@ -302,7 +309,12 @@ async function stageCashPayment(): Promise<void> {
 }
 
 function beginExternalPayment(method: "Карта" | "QR-код"): void {
-  fireEvent.click(screen.getByRole("button", { name: method }));
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Способ оплаты" })).getByRole("button", {
+      name: method === "QR-код" ? "QR" : method,
+      exact: true,
+    }),
+  );
   fireEvent.click(
     screen.getByRole("button", {
       name: method === "Карта" ? "Перейти к оплате картой" : "Перейти к оплате по QR",
@@ -357,6 +369,28 @@ describe("SaleArea atomic checkout", () => {
     createSale.mockReset();
     getPosCommandResult.mockReset();
     findByBarcode.mockReset();
+    getPhysicalCartOptions.mockReset().mockImplementation((saleId: string, catalogId: string) =>
+      Promise.resolve({
+        state: "physical_options_preview",
+        tenant_id: SALE.tenant_id,
+        branch_id: SALE.branch_id,
+        sale_id: saleId,
+        catalog_id: catalogId,
+        packaging: null,
+        currency: "TJS",
+        checkout_enabled: false,
+        stock_reserved: false,
+        stock_date: "2026-10-08",
+        stock: { base_units: 0, closed_packs: 0, intact_blisters: null },
+        options: ["pack", "blister", "unit"].map((sale_format) => ({
+          sale_format,
+          configured: false,
+          quantity_step: null,
+          retail_unit_price: null,
+          unavailable_reason: "not_prepared",
+        })),
+      }),
+    );
     addSaleItem.mockReset();
     getPosFavorites.mockReset();
     createPaymentAttempt.mockReset();
@@ -589,11 +623,21 @@ describe("SaleArea atomic checkout", () => {
 
     renderArea();
     await screen.findByText(/Остаток/);
-    beginExternalPayment("Карта");
-    const cardPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
-    fireEvent.click(within(cardPad).getByRole("button", { name: "2" }));
-    fireEvent.click(within(cardPad).getByRole("button", { name: "0" }));
-    fireEvent.click(within(cardPad).getByRole("button", { name: "ОК" }));
+    fireEvent.click(screen.getByRole("button", { name: "Смешанная", exact: true }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Первая часть оплаты" })).getByRole("button", {
+        name: "Карта",
+        exact: true,
+      }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Остаток оплаты" })).getByRole("button", {
+        name: "QR",
+        exact: true,
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Сумма первой части, TJS"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Перейти к оплате картой", exact: true }));
     const cardConfirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты картой",
     });
@@ -611,9 +655,7 @@ describe("SaleArea atomic checkout", () => {
       screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
     ).not.toBeInTheDocument();
 
-    beginExternalPayment("QR-код");
-    const qrPad = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
-    fireEvent.click(within(qrPad).getByRole("button", { name: "ОК" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перейти к оплате по QR", exact: true }));
     const qrConfirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты QR",
     });
@@ -765,11 +807,6 @@ describe("SaleArea atomic checkout", () => {
 
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
-    fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
-      ).getByRole("button", { name: "ОК" }),
-    );
 
     const confirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты картой",
@@ -810,11 +847,6 @@ describe("SaleArea atomic checkout", () => {
 
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
-    fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
-      ).getByRole("button", { name: "ОК" }),
-    );
 
     const confirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты картой",
@@ -971,11 +1003,6 @@ describe("SaleArea atomic checkout", () => {
     renderArea(true, "TERM-CONFIGURED");
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
-    fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
-      ).getByRole("button", { name: "ОК" }),
-    );
     const confirmation = await screen.findByRole("dialog", { name: "Сверка оплаты картой" });
     expect(within(confirmation).getByLabelText("Терминал")).toHaveValue("TERM-CONFIGURED");
     fireEvent.change(within(confirmation).getByLabelText("Номер операции/документа"), {
@@ -1014,11 +1041,6 @@ describe("SaleArea atomic checkout", () => {
     const { rerenderPaymentSettings } = renderArea();
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
-    fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
-      ).getByRole("button", { name: "ОК" }),
-    );
     const confirmation = await screen.findByRole("dialog", { name: "Сверка оплаты картой" });
 
     rerenderPaymentSettings(["cash"], false);
@@ -1073,11 +1095,18 @@ describe("SaleArea atomic checkout", () => {
     const scannerSink = document.querySelector<HTMLInputElement>('[data-barcode-sink="true"]');
     expect(scannerSink).not.toBeNull();
     scannerSink?.focus();
-    for (const key of "1234567890123") {
-      fireEvent.keyDown(window, { key });
+    let scanTime = 100;
+    const scanClock = vi.spyOn(performance, "now").mockImplementation(() => scanTime);
+    try {
+      for (const key of "1234567890123") {
+        scanTime += 5;
+        fireEvent.keyDown(window, { key });
+      }
+      fireEvent.keyDown(window, { key: "Enter" });
+    } finally {
+      scanClock.mockRestore();
     }
-    fireEvent.keyDown(window, { key: "Enter" });
-
+    await waitFor(() => expect(findByBarcode).toHaveBeenCalledWith("1234567890123", "b-1"));
     await screen.findByText(/Штрихкод 1234567890123 не найден/i);
     expect(
       screen.queryByRole("button", { name: /Удалить введённую оплату/i }),
@@ -1085,47 +1114,56 @@ describe("SaleArea atomic checkout", () => {
     expect(requestDesktopCashDrawerOpen).not.toHaveBeenCalled();
   });
 
-  it("queues rapid scans instead of dropping the second barcode", async () => {
-    let resolveFirstAdd: (value: unknown) => void = () => undefined;
+  it("requires explicit addition after a scan and keeps a second scan from replacing the selected product", async () => {
     seedDraftSale(SALE.id);
     getSale.mockResolvedValue(SALE);
     findByBarcode.mockImplementation((code: string) =>
-      Promise.resolve({ id: `catalog-${code}`, brand_name: `Товар ${code}` }),
+      Promise.resolve({
+        id: `catalog-${code}`,
+        brand_name: `Товар ${code}`,
+        tenant_id: SALE.tenant_id,
+        is_active: true,
+        base_price: "50.00",
+        currency: "TJS",
+      }),
     );
-    addSaleItem
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirstAdd = resolve;
-          }),
-      )
-      .mockResolvedValue({
-        items: [{ ...SALE.items[0], id: "scan-item-2", catalog_id: "catalog-4600000000002" }],
-        requires_prescription_log: false,
-      });
-    renderArea();
-    await screen.findByText(/Остаток/);
-
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000001" } }),
-      );
-    });
-    await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(1));
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000002" } }),
-      );
-    });
-
-    expect(addSaleItem).toHaveBeenCalledTimes(1);
-    act(() =>
-      resolveFirstAdd({
-        items: [{ ...SALE.items[0], id: "scan-item-1", catalog_id: "catalog-4600000000001" }],
+    addSaleItem.mockImplementation((_saleId: string, catalogId: string) =>
+      Promise.resolve({
+        items: [{ ...SALE.items[0], id: `scan-${catalogId}`, catalog_id: catalogId }],
         requires_prescription_log: false,
       }),
     );
-
+    const registerSwitch = vi.fn();
+    renderArea(true, undefined, {}, registerSwitch);
+    await screen.findByText(/Остаток/);
+    const scan = (code: string) =>
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code } }),
+        );
+      });
+    scan("4600000000001");
+    const selected = await screen.findByRole("region", { name: "Добавление выбранного товара" });
+    expect(within(selected).getByText("Товар 4600000000001")).toBeInTheDocument();
+    expect(addSaleItem).not.toHaveBeenCalled();
+    expect(checkoutSale).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Принять наличные" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Завершить продажу" })).not.toBeInTheDocument();
+    expect(registerSwitch).toHaveBeenLastCalledWith(expect.objectContaining({ blocked: true }));
+    scan("4600000000002");
+    expect(within(selected).getByText("Товар 4600000000001")).toBeInTheDocument();
+    expect(addSaleItem).not.toHaveBeenCalled();
+    fireEvent.click(within(selected).getByRole("button", { name: "Добавить в чек" }));
+    await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Добавление выбранного товара" }),
+      ).not.toBeInTheDocument(),
+    );
+    scan("4600000000002");
+    const next = await screen.findByRole("region", { name: "Добавление выбранного товара" });
+    expect(within(next).getByText("Товар 4600000000002")).toBeInTheDocument();
+    fireEvent.click(within(next).getByRole("button", { name: "Добавить в чек" }));
     await waitFor(() => expect(addSaleItem).toHaveBeenCalledTimes(2));
     expect(addSaleItem.mock.calls.map((call) => call[1])).toEqual([
       "catalog-4600000000001",
@@ -1137,6 +1175,106 @@ describe("SaleArea atomic checkout", () => {
       expect.stringMatching(UUID_PATTERN),
     ]);
     expect(operationIds[0]).not.toBe(operationIds[1]);
+  });
+
+  it("discards a late barcode lookup after the cashier clears the receipt", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    const product = {
+      id: "late-catalog",
+      brand_name: "Поздний товар",
+      tenant_id: SALE.tenant_id,
+      is_active: true,
+    };
+    let finishLookup: (value: typeof product) => void = () => undefined;
+    findByBarcode.mockImplementation(
+      () =>
+        new Promise<typeof product>((resolve) => {
+          finishLookup = resolve;
+        }),
+    );
+    renderArea();
+    await screen.findByText(/Остаток/);
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000001" } }),
+      ),
+    );
+    await waitFor(() => expect(findByBarcode).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(window, { key: "F2" });
+    const confirmation = screen.getByRole("dialog", { name: "Начать новую продажу" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Очистить чек" }));
+    await waitFor(() => expect(window.localStorage.getItem(draftKey(REG, POS_SCOPE))).toBeNull());
+    await act(async () => finishLookup(product));
+    expect(
+      screen.queryByRole("region", { name: "Добавление выбранного товара" }),
+    ).not.toBeInTheDocument();
+    expect(getPhysicalCartOptions).not.toHaveBeenCalled();
+    expect(createSale).not.toHaveBeenCalled();
+    expect(addSaleItem).not.toHaveBeenCalled();
+    expect(checkoutSale).not.toHaveBeenCalled();
+  });
+
+  it("closes the selected editor after an uncertain add is reconciled without repeating the mutation", async () => {
+    seedDraftSale(SALE.id);
+    getSale.mockResolvedValue(SALE);
+    const product = {
+      id: "retry-catalog",
+      brand_name: "Товар для сверки",
+      tenant_id: SALE.tenant_id,
+      is_active: true,
+      base_price: "50.00",
+      currency: "TJS",
+    };
+    findByBarcode.mockResolvedValue(product);
+    addSaleItem.mockRejectedValue(new Error("Response lost"));
+    getPosCommandResult.mockRejectedValue(new Error("Reconciliation unavailable"));
+    renderArea();
+    await screen.findByTestId("cart-item");
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("aurum-desktop-barcode-scanned", { detail: { code: "4600000000001" } }),
+      ),
+    );
+    const selected = await screen.findByRole("region", { name: "Добавление выбранного товара" });
+    fireEvent.click(within(selected).getByRole("button", { name: "Добавить в чек" }));
+    await screen.findByText("Команда не подтверждена. Проверьте связь и повторите.");
+    expect(addSaleItem).toHaveBeenCalledTimes(1);
+    const command = loadPendingPosCommand(REG, POS_SCOPE);
+    expect(command).toMatchObject({ commandType: "item.add", catalogId: product.id });
+    const addedItem = {
+      ...SALE.items[0],
+      id: "recovered-item",
+      catalog_id: product.id,
+      position: 2,
+    };
+    getSale.mockResolvedValue({
+      ...SALE,
+      items: [...SALE.items, addedItem],
+      total_amount: "100.00",
+    });
+    getPosCommandResult.mockResolvedValue({
+      operation_id: command!.operationId,
+      sale_id: SALE.id,
+      created_at: SALE.created_at,
+      result: {
+        command_type: "item.add",
+        item_add: { items: [addedItem], requires_prescription_log: false },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Повторить", exact: true }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Добавление выбранного товара" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByTestId("cart-item")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Принять наличные" })).toBeEnabled();
+    expect(loadPendingPosCommand(REG, POS_SCOPE)).toBeNull();
+    expect(addSaleItem).toHaveBeenCalledTimes(1);
+    expect(addSaleItem.mock.calls[0]?.[3]).toBe(command!.operationId);
+    expect(getPosCommandResult).toHaveBeenLastCalledWith(command!.operationId);
+    expect(checkoutSale).not.toHaveBeenCalled();
   });
 
   it("hides the mobile payment shortcut when the payment panel is visible", async () => {
@@ -1353,8 +1491,14 @@ describe("SaleArea atomic checkout", () => {
     getSale.mockResolvedValue(SALE);
     const view = renderArea();
     await screen.findByText(/Остаток/);
-    beginExternalPayment("Карта");
-    const dialog = await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ввести полученную сумму на экранной клавиатуре" }),
+    );
+    const dialog = await screen.findByRole(
+      "dialog",
+      { name: "Получено наличными" },
+      LAZY_NUMPAD_WAIT,
+    );
     view.rerenderAccess({ registerAvailable: false, canSell: false });
     fireEvent.click(within(dialog).getByRole("button", { name: "ОК" }));
     expect(createPaymentAttempt).not.toHaveBeenCalled();
@@ -1484,11 +1628,6 @@ describe("SaleArea atomic checkout", () => {
     renderArea();
     await screen.findByText(/Остаток/);
     beginExternalPayment("Карта");
-    fireEvent.click(
-      within(
-        await screen.findByRole("dialog", { name: "Сумма оплаты" }, LAZY_NUMPAD_WAIT),
-      ).getByRole("button", { name: "ОК" }),
-    );
     const confirmation = await screen.findByRole("dialog", {
       name: "Сверка оплаты картой",
     });

@@ -5,7 +5,7 @@ import {
   addPosItemToCart,
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -118,21 +118,19 @@ for (const mixed of [false, true]) {
           qty: "1",
           expectedCartItems: 1,
         });
-
-      await page.getByRole("button", { name: "Упаковки" }).click();
       const editor = page.getByRole("region", {
         name: "Продажа упаковками, блистерами и поштучно",
       });
-      await editor.getByLabel("Название лекарства").fill(catalogSearchKey(medicine.brand_name));
-      await editor.getByRole("option", { name: new RegExp(medicine.brand_name) }).click();
-      await editor.getByRole("radio", { name: "Поштучно", exact: true }).click();
+      await selectPosProduct(page, medicine.brand_name);
+      await expect(editor).toBeVisible();
+      await editor.getByRole("radio", { name: /^Штуки / }).click();
       await editor.getByLabel("Количество, шт.", { exact: true }).fill("2");
       const saved = page.waitForResponse(
         (response) =>
           response.request().method() === "PUT" &&
           /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
       );
-      await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+      await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
       const written = await saved;
       expect(written.ok()).toBe(true);
       const saleId = ((await written.json()) as { sale_id: string }).sale_id;
@@ -170,12 +168,9 @@ for (const mixed of [false, true]) {
         await assertDenied();
       }
 
-      await editor.getByRole("button", { name: "Удалить", exact: true }).click();
+      await editor.getByRole("button", { name: "Убрать", exact: true }).click();
       await expect(editor.getByRole("listitem")).toHaveCount(0);
-      // An editor opened explicitly in this session stays open when emptied.
-      // After reload it is shown only because rows exist, so deleting the last
-      // row already returns the mixed-to-pure case to the ordinary sale view.
-      if (!mixed) await page.getByRole("button", { name: "Вернуться к обычной продаже" }).click();
+      // Removing the last prepared row closes the physical editor automatically.
       await expect(editor).toHaveCount(0);
       const empty = await readDraft(api, saleId);
       expect(empty.items).toEqual([]);

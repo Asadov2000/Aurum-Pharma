@@ -308,6 +308,24 @@ export async function selectActionMenuItem(
   await menu.getByRole("menuitem", { name: itemLabel, exact: true }).click();
 }
 
+export async function selectPosProduct(
+  page: Page,
+  brandName: string,
+  searchKey?: string,
+): Promise<void> {
+  const picker = page.getByRole("combobox", { name: "Товар", exact: true });
+  await picker.fill(searchKey ?? catalogSearchKey(brandName));
+  const option = page.getByRole("option", { name: new RegExp(escapeRegex(brandName)) });
+  await expect(option).toBeVisible({ timeout: 15_000 });
+  const options = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      /\/physical-cart\/options\//.test(new URL(response.url()).pathname),
+  );
+  await option.click();
+  expect((await options).ok()).toBe(true);
+}
+
 export async function addPosItemToCart(
   page: Page,
   args: {
@@ -317,15 +335,11 @@ export async function addPosItemToCart(
     searchKey?: string;
   },
 ): Promise<void> {
-  const picker = page.getByRole("combobox", { name: "Товар" });
-  await picker.fill(args.searchKey ?? catalogSearchKey(args.brandName));
-  const option = page.getByRole("option", {
-    name: new RegExp(escapeRegex(args.brandName)),
-  });
-  await expect(option).toBeVisible({ timeout: 15_000 });
-  await option.click();
-  await page.getByRole("textbox", { name: "Количество" }).fill(args.qty);
-  await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  await selectPosProduct(page, args.brandName, args.searchKey);
+  const editor = page.getByRole("region", { name: "Добавление выбранного товара" });
+  await expect(editor).toBeVisible();
+  await editor.getByRole("textbox", { name: "Количество" }).fill(args.qty);
+  await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
   await expect(page.getByTestId("cart-item")).toHaveCount(args.expectedCartItems, {
     timeout: 30_000,
   });
@@ -336,7 +350,7 @@ export async function payPosSaleCash(page: Page, expectedPaidAmount: string): Pr
   await expect(cashPayment).toBeEnabled({ timeout: 30_000 });
   await cashPayment.click();
   await expect(
-    page.getByText(new RegExp(`Оплачено ${escapeRegex(expectedPaidAmount)}`)),
+    page.getByText(new RegExp(`Оплачено ${escapeRegex(expectedPaidAmount.replace(".", ","))}`)),
   ).toBeVisible();
 }
 

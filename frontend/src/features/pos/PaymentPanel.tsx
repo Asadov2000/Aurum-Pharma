@@ -1,636 +1,127 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense } from "react";
 
-import { Button } from "@/components/ui";
-import { cn } from "@/lib/utils";
-
-import { paymentMethodLabel, paymentMethodOptions } from "./labels";
 import { PosPaymentMethodButtons } from "./PosPaymentMethodButtons";
-import {
-  type Payment,
-  type PaymentMetadata,
-  type PaymentMethod,
-  type PaymentMethodRead,
-} from "./types";
+import { type PaymentEntryFormProps } from "./PaymentEntryForm";
 
-const cashKeys = [
-  "7",
-  "8",
-  "9",
-  "backspace",
-  "4",
-  "5",
-  "6",
-  "+50",
-  "1",
-  "2",
-  "3",
-  "+100",
-  ",",
-  "0",
-  "00",
-  "clear",
-] as const;
+const PaymentEntryForm = lazy(() =>
+  import("./PaymentEntryForm").then((module) => ({ default: module.PaymentEntryForm })),
+);
 
-type CashKey = (typeof cashKeys)[number];
-type PaymentDisplay = Payment & { metadata?: PaymentMetadata };
-
-/**
- * Right-column payment workspace. Payment recording stays in SaleArea; this
- * component presents the amount, tender methods, cash received and change.
- */
-export function PaymentPanel({
-  totalDue,
-  totalPaid,
-  remaining,
-  currency,
-  payments,
-  isDraft,
-  completing,
-  completionUncertain,
-  payingMethod,
-  pendingPaymentMethod,
-  paymentMethods,
-  mixedPaymentEnabled,
-  paymentSettingsLoading,
-  paymentSettingsUnavailable,
-  interactionBlocked,
-  completionBlocked,
-  onPayTile,
-  onRetryPendingPayment,
-  onClearPayments,
-  onComplete,
-  completedReceiptNumber,
-  onPrint,
-  onNewSale,
-  newSaleHint,
-  touch,
-  completeHint,
-}: {
-  totalDue: number;
-  totalPaid: number;
-  remaining: number;
-  currency: string;
-  payments: PaymentDisplay[];
-  isDraft: boolean;
-  completing: boolean;
-  completionUncertain: boolean;
-  payingMethod: PaymentMethodRead | null;
-  pendingPaymentMethod: PaymentMethodRead | null;
-  paymentMethods: PaymentMethod[];
-  mixedPaymentEnabled: boolean;
-  paymentSettingsLoading: boolean;
-  paymentSettingsUnavailable: boolean;
-  interactionBlocked: boolean;
-  completionBlocked: boolean;
-  onPayTile: (method: PaymentMethod, amount?: string, metadata?: PaymentMetadata) => void;
-  onRetryPendingPayment?: () => void;
-  onClearPayments?: () => void;
-  onComplete: () => void;
-  completedReceiptNumber: string | null;
-  onPrint?: () => void;
-  onNewSale?: () => void;
-  newSaleHint?: string;
-  touch?: boolean;
-  completeHint?: string;
-}): JSX.Element {
-  const [activeMethod, setActiveMethod] = useState<PaymentMethod>(
-    () => paymentMethods[0] ?? "cash",
-  );
-  const [cashReceived, setCashReceived] = useState("");
-  const [cashInputPristine, setCashInputPristine] = useState(true);
-  const paymentMethodsKey = paymentMethods.join("|");
-  const paymentSettingsBlocked =
-    paymentSettingsLoading || paymentSettingsUnavailable || paymentMethods.length === 0;
-  const recordedMethod = payments[0]?.payment_method;
-  const lockedMethod =
-    !mixedPaymentEnabled &&
-    recordedMethod !== undefined &&
-    isCurrentPaymentMethod(recordedMethod) &&
-    paymentMethods.includes(recordedMethod)
-      ? recordedMethod
-      : null;
-  const fallbackMethod = lockedMethod ?? paymentMethods[0] ?? "cash";
-  const selectedMethod =
-    paymentMethods.includes(activeMethod) &&
-    (lockedMethod === null || activeMethod === lockedMethod)
-      ? activeMethod
-      : fallbackMethod;
-  const settled = Math.abs(remaining) <= 0.001;
-  const overpaid = remaining < -0.001;
-  const cashReceivedNumber = parseCash(cashReceived);
-  const nonCashPaid = payments.reduce(
-    (sum, payment) => (payment.payment_method === "cash" ? sum : sum + Number(payment.amount)),
-    0,
-  );
-  const cashPaid = payments.reduce(
-    (sum, payment) => (payment.payment_method === "cash" ? sum + Number(payment.amount) : sum),
-    0,
-  );
-  const cashTendered = payments.reduce((sum, payment) => sum + cashTenderedFor(payment), 0);
-  const cashDue = Math.max(0, totalDue - nonCashPaid);
-  const change = Math.max(0, cashReceivedNumber - cashDue);
-  const availableCash = Math.max(0, cashReceivedNumber - cashPaid);
-  const cashTenderInsufficient =
-    isDraft && selectedMethod === "cash" && remaining > 0.001 && availableCash + 0.001 < remaining;
-  const pendingMethodVisible =
-    pendingPaymentMethod !== null &&
-    isCurrentPaymentMethod(pendingPaymentMethod) &&
-    paymentMethods.includes(pendingPaymentMethod);
-  const paymentActionDisabled =
-    settled ||
-    overpaid ||
-    payingMethod !== null ||
-    totalDue <= 0 ||
-    paymentSettingsBlocked ||
-    interactionBlocked ||
-    completing ||
-    completionUncertain ||
-    pendingPaymentMethod !== null ||
-    (selectedMethod === "cash" &&
-      (availableCash <= 0.001 || (!mixedPaymentEnabled && cashTenderInsufficient)));
-  const completionGuidance = getCompletionGuidance({
-    remaining,
-    currency,
-    settled,
-    overpaid,
-    pendingPaymentMethod,
-    interactionBlocked,
-    completionBlocked,
-  });
-
-  useEffect(() => {
-    setActiveMethod((current) =>
-      paymentMethods.includes(current) && (lockedMethod === null || current === lockedMethod)
-        ? current
-        : fallbackMethod,
+/** Empty receipts need no form runtime. Every existing financial state loads its owner immediately. */
+export function PaymentPanel(props: PaymentEntryFormProps): JSX.Element {
+  const hasFinancialState =
+    props.totalDue !== 0 ||
+    props.totalPaid !== 0 ||
+    props.remaining !== 0 ||
+    props.payments.length > 0 ||
+    props.pendingPaymentMethod !== null ||
+    props.payingMethod !== null ||
+    props.completionUncertain ||
+    props.completing ||
+    !props.isDraft ||
+    props.completedReceiptNumber !== null;
+  if (hasFinancialState)
+    return (
+      <Suspense
+        fallback={
+          <section
+            aria-label="Оплата"
+            className="rounded-[10px] border border-border bg-surface p-4"
+          >
+            <p role="status">Загружаем оплату и проверку сохранённого результата…</p>
+          </section>
+        }
+      >
+        <PaymentEntryForm {...props} />
+      </Suspense>
     );
-  }, [fallbackMethod, lockedMethod, paymentMethods, paymentMethodsKey]);
 
-  useEffect(() => {
-    if (!isDraft || totalDue <= 0) return;
-    if (payments.length === 0) {
-      setCashReceived(formatCashInput(totalDue));
-      setCashInputPristine(true);
-      return;
-    }
-    if (cashTendered > 0) {
-      setCashReceived(formatCashInput(cashTendered));
-      setCashInputPristine(true);
-      return;
-    }
-    setCashReceived(formatCashInput(cashDue));
-    setCashInputPristine(true);
-  }, [cashDue, cashTendered, isDraft, payments.length, totalDue]);
-
-  const chooseMethod = (method: PaymentMethod) => {
-    setActiveMethod(method);
-  };
-
-  const submitSelectedPayment = () => {
-    if (paymentSettingsBlocked || paymentActionDisabled) return;
-    const method = selectedMethod;
-    const tendered = availableCash;
-    const amount = method === "cash" ? Math.min(tendered, remaining) : Math.max(0, remaining);
-    if (!mixedPaymentEnabled && method === "cash" && amount + 0.001 < remaining) return;
-    if (amount <= 0) return;
-    if (method === "cash") {
-      onPayTile(method, amount.toFixed(2), { cash_received: tendered.toFixed(2) });
-      return;
-    }
-    onPayTile(method);
-  };
-
-  const pressCashKey = (key: CashKey) => {
-    setCashReceived((current) =>
-      applyCashKey(cashInputPristine && isDigitKey(key) ? "" : current, key),
-    );
-    setCashInputPristine(false);
-  };
-
-  const enterCash = (value: string) => {
-    const next = value.replace(".", ",");
-    if (/^\d{0,12}(?:,\d{0,2})?$/.test(next)) {
-      setCashReceived(next);
-      setCashInputPristine(false);
-    }
-  };
-
+  const labels = { cash: "Наличные", card: "Карта", qr: "QR", mixed: "Смешанная" };
+  const options = (["cash", "card", "qr", "mixed"] as const)
+    .filter((method) =>
+      method === "mixed"
+        ? props.mixedPaymentEnabled && props.paymentMethods.length > 1
+        : props.paymentMethods.includes(method),
+    )
+    .map((value) => ({ value, label: labels[value] }));
+  const selected = props.paymentMethods.includes("cash")
+    ? "cash"
+    : (props.paymentMethods[0] ?? null);
+  const settingsReady = !props.paymentSettingsLoading && !props.paymentSettingsUnavailable;
   return (
     <section
-      aria-labelledby="payment-panel-title"
-      className="flex min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface xl:h-full xl:min-h-0"
+      aria-label="Оплата"
+      className="space-y-3 rounded-[10px] border border-border bg-surface p-4"
     >
-      <header className="shrink-0 px-4 pb-2 pt-4">
-        <div className="flex flex-col gap-2">
-          <div className="min-w-0">
-            <h2
-              id="payment-panel-title"
-              className="text-sm font-semibold text-foreground-secondary"
-            >
-              К оплате
-            </h2>
-            <p className="mt-2 text-[32px] font-semibold leading-tight tracking-tight tabular-nums text-foreground">
-              {totalDue.toFixed(2)}{" "}
-              <span className="font-sans text-sm font-semibold text-foreground-secondary">
-                {currency}
-              </span>
-            </p>
-            {totalDue > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                <span className="text-foreground-muted">
-                  Оплачено{" "}
-                  <span className="font-mono font-semibold tabular-nums text-foreground">
-                    {totalPaid.toFixed(2)}
-                  </span>
-                </span>
-                <span
-                  className={cn(settled ? "text-success-foreground" : "text-warning-foreground")}
-                >
-                  {overpaid ? "Переплата" : "Остаток"}{" "}
-                  <span className="font-mono font-semibold tabular-nums">
-                    {Math.abs(remaining).toFixed(2)}
-                  </span>
-                </span>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </header>
-
-      {isDraft ? (
+      <h2 className="text-base font-semibold">Оплата</h2>
+      <div>
+        <p className="text-[32px] font-semibold leading-tight tracking-tight tabular-nums">0,00</p>
+        <p className="mt-1 text-xs text-foreground-muted">
+          {props.currency === "TJS" ? "сомони" : props.currency} к оплате
+        </p>
+      </div>
+      {settingsReady ? (
+        <PosPaymentMethodButtons
+          options={options}
+          value={selected}
+          onChange={() => undefined}
+          disabled
+        />
+      ) : (
+        <p
+          role={props.paymentSettingsUnavailable ? "alert" : "status"}
+          className="text-sm text-foreground-muted"
+        >
+          {props.paymentSettingsUnavailable
+            ? "Способы оплаты временно недоступны"
+            : "Загрузка способов оплаты…"}
+        </p>
+      )}
+      {settingsReady && props.paymentMethods.includes("cash") && (
         <>
-          {paymentSettingsBlocked ? (
-            <div
-              className={cn(
-                "flex min-h-14 items-center border-b border-border px-4 text-sm",
-                paymentSettingsUnavailable
-                  ? "bg-warning-subtle text-warning-foreground"
-                  : "text-foreground-muted",
-              )}
-              role={paymentSettingsUnavailable ? "alert" : "status"}
-            >
-              {paymentSettingsUnavailable
-                ? "Способы оплаты временно недоступны"
-                : "Загрузка способов оплаты…"}
-            </div>
-          ) : (
-            <div className="shrink-0 space-y-2 px-4 py-3">
-              <p className="text-xs font-semibold text-foreground-secondary">Способ оплаты</p>
-              <PosPaymentMethodButtons
-                className="xl:grid-cols-3"
-                value={selectedMethod}
-                onChange={chooseMethod}
-                options={paymentMethodOptions
-                  .filter((method) => paymentMethods.includes(method))
-                  .map((method) => ({
-                    value: method,
-                    label: paymentMethodLabel[method],
-                    disabled:
-                      settled ||
-                      payingMethod !== null ||
-                      totalDue <= 0 ||
-                      interactionBlocked ||
-                      completing ||
-                      completionUncertain ||
-                      (lockedMethod !== null && lockedMethod !== method) ||
-                      (pendingPaymentMethod !== null && pendingPaymentMethod !== method),
-                  }))}
-              />
-            </div>
-          )}
-
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4">
-            {!mixedPaymentEnabled && paymentMethods.length > 1 ? (
-              <p className="mb-3 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-foreground-muted">
-                Смешанная оплата отключена. Весь чек оплачивается одним способом.
-              </p>
-            ) : null}
-
-            {pendingPaymentMethod !== null && !pendingMethodVisible ? (
-              <div className="mb-3 rounded-md border border-warning/40 bg-warning-subtle p-3 text-sm text-warning-foreground">
-                <p>
-                  Восстанавливается ранее начатая оплата:{" "}
-                  <strong>{paymentMethodLabel[pendingPaymentMethod]}</strong>.
-                </p>
-                {onRetryPendingPayment ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="mt-2"
-                    onClick={onRetryPendingPayment}
-                  >
-                    Повторить сохранённую операцию
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-
-            {paymentSettingsBlocked ? (
-              <div className="flex min-h-56 flex-1 items-center justify-center rounded-md border border-dashed border-border bg-background px-6 text-center">
-                <p className="max-w-xs text-sm leading-6 text-foreground-muted">
-                  {paymentSettingsUnavailable
-                    ? "Новые платежи заблокированы до восстановления связи с сервером настроек."
-                    : "Ожидаем подтверждённые настройки аптеки перед приёмом оплаты."}
-                </p>
-              </div>
-            ) : selectedMethod === "cash" ? (
-              <>
-                <label
-                  htmlFor="cash-received"
-                  className="mb-1 flex shrink-0 items-center justify-between gap-3 text-sm font-medium text-foreground-secondary"
-                >
-                  <span>Получено</span>
-                  <span className="text-xs font-semibold text-foreground-muted">{currency}</span>
-                </label>
-                <input
-                  id="cash-received"
-                  type="text"
-                  inputMode="decimal"
-                  value={cashReceived}
-                  aria-label="Получено наличными"
-                  disabled={interactionBlocked || completing || completionUncertain}
-                  onChange={(event) => enterCash(event.target.value)}
-                  className={cn(
-                    "h-11 w-full shrink-0 rounded-lg border border-input bg-surface px-3 text-right text-xl tabular-nums text-foreground focus:border-ring",
-                    touch && "h-12 text-2xl",
-                  )}
-                />
-
-                <div className="mt-2 grid shrink-0 grid-cols-[1.5fr_repeat(3,1fr)] gap-1">
-                  {[null, 10, 50, 100].map((amount) => (
-                    <Button
-                      key={amount ?? "exact"}
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      className="min-w-0 px-1"
-                      disabled={interactionBlocked || completing || completionUncertain}
-                      onClick={() => enterCash(formatCashInput(amount ?? cashDue))}
-                    >
-                      {amount ?? "Без сдачи"}
-                    </Button>
-                  ))}
-                </div>
-
-                {touch && (
-                  <div className="mt-2 grid shrink-0 grid-cols-4 gap-1 bg-surface">
-                    {cashKeys.map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-label={cashKeyLabel(key)}
-                        onClick={() => pressCashKey(key)}
-                        disabled={interactionBlocked || completing || completionUncertain}
-                        className={cn(
-                          "min-h-9 rounded border border-border bg-background text-base font-medium text-foreground transition-colors duration-fast hover:bg-primary/5 active:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50",
-                          touch && "min-h-11 text-xl",
-                          (key === "+50" || key === "+100" || key === "backspace") &&
-                            "bg-primary/5 text-primary",
-                          key === "clear" && "text-danger",
-                        )}
-                      >
-                        {cashKeyText(key)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div
-                  className={cn(
-                    "mt-3 flex min-h-12 shrink-0 items-center justify-between gap-3 rounded-lg px-3",
-                    touch && "min-h-12",
-                    cashTenderInsufficient
-                      ? "bg-warning-subtle text-warning-foreground"
-                      : "bg-primary/5 text-foreground",
-                  )}
-                  aria-live="polite"
-                >
-                  <span className="text-sm font-semibold">
-                    {cashTenderInsufficient ? "Недостаточно" : "Сдача"}
-                  </span>
-                  <strong className="text-xl font-semibold tabular-nums">
-                    {change.toFixed(2)} <span className="font-sans text-sm">{currency}</span>
-                  </strong>
-                </div>
-              </>
-            ) : (
-              <div className="flex min-h-56 flex-1 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-background px-6 text-center">
-                <div>
-                  <p className="font-semibold text-foreground">
-                    {paymentMethodLabel[selectedMethod]}
-                  </p>
-                  <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
-                    {Math.max(0, remaining).toFixed(2)}{" "}
-                    <span className="font-sans text-sm">{currency}</span>
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {payments.length > 0 ? (
-              <div className="mt-3 space-y-2">
-                <ul className="max-h-28 divide-y divide-border overflow-y-auto border-y border-border text-sm">
-                  {payments.map((payment) => (
-                    <li
-                      key={payment.id}
-                      className="flex items-center justify-between gap-3 px-2 py-2"
-                    >
-                      <span className="truncate text-foreground-secondary">
-                        {paymentMethodLabel[payment.payment_method]}
-                      </span>
-                      <span className="shrink-0 font-mono tabular-nums text-foreground">
-                        {Number(payment.amount).toFixed(2)} {payment.currency}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {onClearPayments ? (
-                  <div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={onClearPayments}
-                      title="Товары останутся в чеке. Операция банковского терминала или QR-сервиса не отменяется."
-                    >
-                      Удалить введённую оплату
-                    </Button>
-                    <p className="mt-1 px-2 text-xs text-foreground-muted">
-                      Товары останутся в чеке; операция внешнего терминала не отменяется.
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+          <label htmlFor="empty-cash-received" className="block text-sm font-medium">
+            Получено наличными, {props.currency}
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="empty-cash-received"
+              aria-label="Получено наличными"
+              disabled
+              readOnly
+              value=""
+              placeholder="0,00"
+              className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-surface px-3 text-right text-xl"
+            />
+            <button type="button" disabled className="rounded-lg border border-border px-3">
+              123
+            </button>
           </div>
-
-          <footer className={cn("shrink-0 space-y-2 px-4 pb-4", touch && "space-y-2")}>
-            {!paymentSettingsBlocked && !settled && !overpaid ? (
-              <Button
-                size="xl"
-                className={cn("h-11 w-full", touch && "h-12")}
-                onClick={submitSelectedPayment}
-                disabled={paymentActionDisabled}
+          <div className="grid grid-cols-[1.5fr_1fr_1fr] gap-1">
+            {["Без сдачи", "10", "50"].map((label) => (
+              <button
+                type="button"
+                key={label}
+                disabled
+                className="h-9 rounded-lg border border-border text-sm text-foreground-muted"
               >
-                {paymentActionLabel(selectedMethod)}
-              </Button>
-            ) : null}
-            {isDraft && completionGuidance ? (
-              <p
-                id="completion-guidance"
-                className="px-1 text-xs text-foreground-muted"
-                aria-live="polite"
-              >
-                {completionGuidance}
-              </p>
-            ) : null}
-            <Button
-              size="xl"
-              variant="success"
-              className={cn("h-11 w-full", touch && "h-12")}
-              onClick={onComplete}
-              isLoading={completing}
-              disabled={
-                !settled ||
-                overpaid ||
-                pendingPaymentMethod !== null ||
-                interactionBlocked ||
-                completionBlocked
-              }
-              title={completionGuidance ?? completeHint}
-              aria-describedby={completionGuidance ? "completion-guidance" : undefined}
-            >
-              <CheckIcon />
-              Завершить продажу
-            </Button>
-          </footer>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex min-h-12 items-center justify-between gap-3 rounded-lg bg-primary/5 px-3">
+            <span className="text-sm font-semibold">Сдача</span>
+            <strong className="text-xl tabular-nums">—</strong>
+          </div>
         </>
-      ) : null}
-
-      {!isDraft && completedReceiptNumber ? (
-        <div className="m-3 space-y-3 rounded-lg border border-success/40 bg-success-subtle p-4 text-center">
-          <p className="font-medium text-success-foreground">
-            Чек № {completedReceiptNumber} оформлен
-          </p>
-          {onPrint ? (
-            <Button size="xl" variant="secondary" className="w-full" onClick={onPrint}>
-              Печать чека
-            </Button>
-          ) : null}
-          {onNewSale ? (
-            <Button size="xl" className="w-full" onClick={onNewSale} title={newSaleHint}>
-              + Новая продажа
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      )}
+      <p className="text-xs text-foreground-muted">Добавьте товар в чек.</p>
+      <button
+        type="button"
+        disabled
+        className="h-11 w-full rounded-lg bg-primary/40 text-sm font-semibold text-primary-foreground"
+      >
+        Завершить продажу
+      </button>
     </section>
-  );
-}
-
-function getCompletionGuidance({
-  remaining,
-  currency,
-  settled,
-  overpaid,
-  pendingPaymentMethod,
-  interactionBlocked,
-  completionBlocked,
-}: {
-  remaining: number;
-  currency: string;
-  settled: boolean;
-  overpaid: boolean;
-  pendingPaymentMethod: PaymentMethodRead | null;
-  interactionBlocked: boolean;
-  completionBlocked: boolean;
-}): string | null {
-  if (pendingPaymentMethod !== null) return "Сначала проверьте ранее начатую оплату.";
-  if (overpaid) return "Уберите переплату, затем завершите продажу.";
-  if (!settled)
-    return `Сначала примите оставшиеся ${Math.max(0, remaining).toFixed(2)} ${currency}.`;
-  if (interactionBlocked || completionBlocked) {
-    return "Дождитесь завершения текущей операции оплаты.";
-  }
-  return null;
-}
-
-function parseCash(value: string): number {
-  const parsed = Number(value.replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatCashInput(value: number): string {
-  return value.toFixed(2).replace(".", ",");
-}
-
-function cashTenderedFor(payment: PaymentDisplay): number {
-  if (payment.payment_method !== "cash") return 0;
-  const allocated = Number(payment.amount);
-  const received = Number(payment.metadata?.cash_received);
-  return Number.isFinite(received) && received >= allocated ? received : allocated;
-}
-
-function isDigitKey(key: CashKey): boolean {
-  return /^\d+$/.test(key);
-}
-
-function applyCashKey(current: string, key: CashKey): string {
-  if (key === "clear") return "";
-  if (key === "backspace") return current.slice(0, -1);
-  if (key === "+50" || key === "+100") {
-    const next = parseCash(current) + Number(key.slice(1));
-    return next <= 999_999_999_999.99 ? formatCashInput(next) : current;
-  }
-  if (key === ",") {
-    if (current.includes(",")) return current;
-    return `${current || "0"},`;
-  }
-
-  const next = `${current}${key}`;
-  const normalized = next.replace(/^0+(?=\d)/, "");
-  return /^\d{0,12}(?:,\d{0,2})?$/.test(normalized) ? normalized : current;
-}
-
-function cashKeyLabel(key: CashKey): string {
-  if (key === "backspace") return "Удалить последнюю цифру";
-  if (key === "clear") return "Очистить полученную сумму";
-  if (key === ",") return "Десятичная запятая";
-  if (key.startsWith("+")) return `Добавить ${key.slice(1)}`;
-  return `Цифра ${key}`;
-}
-
-function cashKeyText(key: CashKey): string {
-  if (key === "backspace") return "⌫";
-  if (key === "clear") return "C";
-  return key;
-}
-
-function isCurrentPaymentMethod(method: PaymentMethodRead): method is PaymentMethod {
-  return method === "cash" || method === "card" || method === "qr";
-}
-
-function paymentActionLabel(method: PaymentMethod): string {
-  if (method === "cash") return "Принять наличные";
-  if (method === "card") return "Перейти к оплате картой";
-  return "Перейти к оплате по QR";
-}
-
-function CheckIcon(): JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m5 12 4 4L19 6" />
-    </svg>
   );
 }

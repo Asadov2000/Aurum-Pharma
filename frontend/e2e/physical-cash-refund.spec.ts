@@ -10,7 +10,7 @@ import {
   addPosItemToCart,
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -92,23 +92,24 @@ test("recovers mixed cash sale and refund after response loss and closing their 
       expectedCartItems: 1,
     });
     // The physical editor must remain reachable after adding an ordinary pack.
-    await page.getByRole("button", { name: "Упаковки" }).click();
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-    await editor.getByLabel("Название лекарства").fill(catalogSearchKey(physical.brand_name));
-    await editor.getByRole("option", { name: new RegExp(physical.brand_name) }).click();
-    await editor.getByRole("radio", { name: "Поштучно", exact: true }).click();
+    await selectPosProduct(page, physical.brand_name);
+    await expect(editor).toBeVisible();
+    await editor.getByRole("radio", { name: /^Штуки / }).click();
     await editor.getByLabel("Количество, шт.", { exact: true }).fill("2");
     const added = page.waitForResponse(
       (response) =>
         response.request().method() === "PUT" &&
         /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
     );
-    await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+    await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
     const addedResponse = await added;
     expect(addedResponse.ok()).toBe(true);
     const { sale_id: saleId } = (await addedResponse.json()) as { sale_id: string };
     const cash = page.getByRole("region", { name: "Оплата наличными", exact: true });
-    await expect(cash.getByText("11.00 TJS", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Оплата", exact: true }).getByText("11,00", { exact: true }),
+    ).toBeVisible();
     await cash.getByLabel("Получено наличными, TJS").fill("20");
 
     const submitted: string[] = [];
@@ -628,17 +629,15 @@ async function receivePhysicalStock(api: APIRequestContext, branchId: string, ca
 }
 
 async function addPhysicalFormats(page: Page, name: string): Promise<string> {
-  await page.getByRole("button", { name: "Упаковки" }).click();
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-  await expect(editor).toBeVisible();
   let saleId = "";
   for (const [format, label, quantity] of [
-    ["Поштучно", "Количество, шт.", "2"],
-    ["Блистер", "Количество блистеров", "1"],
-    ["Упаковка", "Количество упаковок", "1"],
+    [/^Штуки /, "Количество, шт.", "2"],
+    [/^Блистеры /, "Количество блистеров", "1"],
+    [/^Упаковки /, "Количество упаковок", "1"],
   ] as const) {
-    await editor.getByLabel("Название лекарства").fill(catalogSearchKey(name));
-    await editor.getByRole("option", { name: new RegExp(name) }).click();
+    await selectPosProduct(page, name);
+    await expect(editor).toBeVisible();
     await editor.getByRole("radio", { name: format, exact: true }).click();
     await editor.getByLabel(label, { exact: true }).fill(quantity);
     const saved = page.waitForResponse(
@@ -646,11 +645,11 @@ async function addPhysicalFormats(page: Page, name: string): Promise<string> {
         response.request().method() === "PUT" &&
         /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
     );
-    await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+    await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
     const response = await saved;
     expect(response.ok()).toBe(true);
     saleId = ((await response.json()) as { sale_id: string }).sale_id;
-    await expect(editor.getByLabel("Название лекарства")).toHaveValue("");
+    await expect(page.getByRole("combobox", { name: "Товар", exact: true })).toHaveValue("");
   }
   await expect(editor.getByRole("listitem")).toHaveCount(3);
   return saleId;

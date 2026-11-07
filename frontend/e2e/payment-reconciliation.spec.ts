@@ -54,10 +54,6 @@ test.describe("Payment reconciliation queue", () => {
 
       await page.getByRole("button", { name: "Карта", exact: true }).click();
       await page.getByRole("button", { name: "Перейти к оплате картой" }).click();
-      await page
-        .getByRole("dialog", { name: "Сумма оплаты" })
-        .getByRole("button", { name: "ОК" })
-        .click();
       await expect(page.getByRole("dialog", { name: "Сверка оплаты картой" })).toBeVisible();
 
       await page.goto("/payment-reconciliation");
@@ -87,7 +83,7 @@ test.describe("Payment reconciliation queue", () => {
 
       await page.goto("/pos");
       await expect(page.getByLabel(/^Касса$/)).toHaveValue(register.id);
-      await expect(page.getByText("Оплачено 31.00", { exact: false })).toBeVisible({
+      await expect(page.getByText("Оплачено 31,00", { exact: false })).toBeVisible({
         timeout: 15_000,
       });
       await completePosSale(page);

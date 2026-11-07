@@ -9,7 +9,7 @@ import { type CatalogItem } from "./types";
 interface Props {
   id?: string;
   value: string;
-  onChange: (catalogId: string, brandName: string) => void;
+  onChange: (catalogId: string, brandName: string, item?: CatalogItem) => void;
   onSearchChange?: (text: string) => void;
   /** Optional initial label shown when `value` is preset (e.g. from URL state). */
   initialLabel?: string;
@@ -118,8 +118,8 @@ export const CatalogPicker = forwardRef<HTMLInputElement, Props>(function Catalo
     onChange("", "");
   };
 
-  const choose = (it: { id: string; brand_name: string }) => {
-    onChange(it.id, it.brand_name);
+  const choose = (it: CatalogItem) => {
+    onChange(it.id, it.brand_name, it);
     setText(it.brand_name);
     setOpen(false);
   };

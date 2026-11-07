@@ -25,10 +25,13 @@ export interface PhysicalCartItemPut {
 
 export interface PhysicalCartQuoteLine {
   inventory_kind: "legacy_pack" | "prepared_unit" | "physical_unit";
+  // Present on prepared/physical lines; absent on legacy pack lines.
+  sale_format?: PhysicalSaleFormat;
   id: string;
   catalog_id: string;
   position: number;
-  quantity: number;
+  // Legacy pack quantities are JSON decimals; physical/prepared quantities are integers.
+  quantity: number | string;
   original_retail_unit_price: string;
   gross_amount: string;
   discount_amount: string;

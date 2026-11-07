@@ -106,8 +106,8 @@ test.describe("POS payment settings (owner)", () => {
       await page.getByRole("button", { name: "Открыть смену" }).click();
       await expect(page.getByText("Смена открыта")).toBeVisible();
 
-      const paymentPanel = page.getByRole("region", { name: "К оплате" });
-      await expect(paymentPanel.getByRole("button", { name: "QR-код", exact: true })).toBeVisible();
+      const paymentPanel = page.getByRole("region", { name: "Оплата", exact: true });
+      await expect(paymentPanel.getByRole("button", { name: "QR", exact: true })).toBeVisible();
       await expect(paymentPanel.getByRole("button", { name: "Наличные", exact: true })).toHaveCount(
         0,
       );

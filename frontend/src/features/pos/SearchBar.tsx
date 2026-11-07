@@ -29,6 +29,7 @@ export const SearchBar = forwardRef<
     favoritePendingId?: string | null;
     favoriteError?: string | null;
     onFavoriteToggle?: (item: CatalogItem) => void;
+    onSelect?: (item: CatalogItem) => Promise<boolean>;
   }
 >(function SearchBar(
   {
@@ -42,6 +43,7 @@ export const SearchBar = forwardRef<
     favoritePendingId,
     favoriteError,
     onFavoriteToggle,
+    onSelect,
   },
   ref,
 ) {
@@ -78,25 +80,43 @@ export const SearchBar = forwardRef<
   };
 
   return (
-    <div className="relative grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-2 rounded-lg border border-border bg-surface p-1 focus-within:border-primary sm:grid-cols-[minmax(0,1fr)_4rem_auto]">
-      <div className="relative col-span-2 min-w-0 sm:col-span-1">
+    <div
+      className={cn(
+        "relative grid items-center gap-2 rounded-lg border border-border bg-surface p-1 focus-within:border-primary",
+        onSelect
+          ? "grid-cols-1"
+          : "grid-cols-[4rem_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_4rem_auto]",
+      )}
+    >
+      <div className={cn("relative min-w-0", !onSelect && "col-span-2 sm:col-span-1")}>
         <Label htmlFor="pos-product-search" className="sr-only">
           Товар
         </Label>
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-foreground"
+          className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-foreground [&>svg]:h-5 [&>svg]:w-5"
         >
           <SearchIcon />
         </span>
         <CatalogPicker
+          showStock={!onSelect}
           key={pickerKey}
           id="pos-product-search"
           ref={ref}
           value={catalogId}
-          onChange={(id, brand) => {
+          onChange={(id, brand, item) => {
             setCatalogId(id);
             setName(brand);
+            if (onSelect && item) {
+              void onSelect(item).then((accepted) => {
+                if (accepted) {
+                  setCatalogId("");
+                  setName("");
+                  setPickerKey((key) => key + 1);
+                }
+              });
+              return;
+            }
             // Picking a product jumps straight to the quantity field, so the
             // cashier goes name → choose → number → Enter without the mouse.
             if (id) {
@@ -111,8 +131,8 @@ export const SearchBar = forwardRef<
           favoritePendingId={favoritePendingId}
           onFavoriteToggle={onFavoriteToggle}
           inputClassName={cn(
-            "h-12 border-transparent bg-transparent pl-12 text-lg shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent sm:text-xl",
-            touch && "h-14 text-xl",
+            "h-10 border-transparent bg-transparent pl-10 text-sm shadow-none hover:border-transparent focus:border-transparent focus:bg-transparent",
+            touch && "h-12 text-base",
           )}
         />
         {scanner !== "off" ? (
@@ -131,54 +151,54 @@ export const SearchBar = forwardRef<
           </>
         ) : null}
       </div>
-      <input
-        ref={qtyRef}
-        type="text"
-        inputMode="numeric"
-        value={qty}
-        onChange={(e) => {
-          setQty(e.target.value);
-          if (qtyError) setQtyError(null);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        aria-label="Количество"
-        aria-invalid={qtyError ? "true" : undefined}
-        aria-describedby={qtyError ? "pos-quantity-error" : undefined}
-        className={cn(
-          "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
-          touch ? "h-14 w-16 text-xl" : "h-12 w-16 text-lg",
-        )}
-      />
-      <Button
-        onClick={() => void submit()}
-        isLoading={busy}
-        disabled={!catalogId}
-        size="xl"
-        className={cn("h-12 w-full min-w-28 sm:w-auto", touch && "h-14")}
-      >
-        Добавить
-      </Button>
+      {!onSelect && (
+        <>
+          <input
+            ref={qtyRef}
+            type="text"
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => {
+              setQty(e.target.value);
+              if (qtyError) setQtyError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            aria-label="Количество"
+            aria-invalid={qtyError ? "true" : undefined}
+            aria-describedby={qtyError ? "pos-quantity-error" : undefined}
+            className={cn(
+              "rounded-md border border-input bg-surface px-2 text-center font-mono text-foreground",
+              touch ? "h-14 w-16 text-xl" : "h-12 w-16 text-lg",
+            )}
+          />
+          <Button
+            onClick={() => void submit()}
+            isLoading={busy}
+            disabled={!catalogId}
+            size="xl"
+            className={cn("h-12 w-full min-w-28 sm:w-auto", touch && "h-14")}
+          >
+            Добавить
+          </Button>
+        </>
+      )}
       {scanner === "scanning" && queuedScans > 0 ? (
-        <p className="col-span-2 px-2 text-xs font-medium text-info sm:col-span-3" role="status">
+        <p className="col-span-full px-2 text-xs font-medium text-info" role="status">
           Добавляется: {queuedScans}
         </p>
       ) : null}
       {qtyError ? (
-        <p
-          id="pos-quantity-error"
-          className="col-span-2 px-2 text-xs text-danger sm:col-span-3"
-          role="alert"
-        >
+        <p id="pos-quantity-error" className="col-span-full px-2 text-xs text-danger" role="alert">
           {qtyError}
         </p>
       ) : null}
       {favoriteError ? (
-        <p className="col-span-2 px-2 text-xs text-danger sm:col-span-3" role="alert">
+        <p className="col-span-full px-2 text-xs text-danger" role="alert">
           {favoriteError}
         </p>
       ) : null}

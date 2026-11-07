@@ -5,11 +5,22 @@ import { type CatalogItem } from "@/features/catalog/types";
 import { QuickProducts } from "@/features/pos/QuickProducts";
 
 const usePosFavoritesQuery = vi.fn();
+const useCatalogQuery = vi.fn();
+const addFavorite = vi.fn();
 const removeFavorite = vi.fn();
 const refetchFavorites = vi.fn();
+const refetchCatalog = vi.fn();
+
+vi.mock("@/features/catalog/queries", () => ({
+  useCatalogQuery: (...args: unknown[]) => useCatalogQuery(...args),
+}));
 
 vi.mock("@/features/pos/queries", () => ({
   usePosFavoritesQuery: (...args: unknown[]) => usePosFavoritesQuery(...args),
+  useAddPosFavorite: () => ({
+    isPending: false,
+    mutateAsync: (...args: unknown[]) => addFavorite(...args),
+  }),
   useRemovePosFavorite: () => ({
     isPending: false,
     mutateAsync: (...args: unknown[]) => removeFavorite(...args),
@@ -61,6 +72,17 @@ const products: CatalogItem[] = [
 
 describe("QuickProducts", () => {
   beforeEach(() => {
+    useCatalogQuery.mockReset();
+    useCatalogQuery.mockReturnValue({
+      data: { items: products, total: products.length, page: 1, page_size: 20 },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      isPlaceholderData: false,
+      refetch: refetchCatalog,
+    });
+    addFavorite.mockReset();
+    addFavorite.mockResolvedValue(undefined);
     removeFavorite.mockReset();
     removeFavorite.mockResolvedValue(undefined);
     refetchFavorites.mockReset();
@@ -78,14 +100,14 @@ describe("QuickProducts", () => {
     });
   });
 
-  it("adds an available product and blocks an unavailable one", async () => {
+  it("selects an available product and blocks an unavailable one", async () => {
     const onAdd = vi.fn().mockResolvedValue(true);
     render(<QuickProducts branchId="branch-1" onAdd={onAdd} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить Парацетамол 500 мг" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать Парацетамол 500 мг" }));
     await waitFor(() => expect(onAdd).toHaveBeenCalledWith("product-1", "Парацетамол 500 мг", 1));
 
-    expect(screen.getByRole("button", { name: "Добавить Амоксициллин 250 мг" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Выбрать Амоксициллин 250 мг" })).toBeDisabled();
   });
 
   it("switches between the grid and list presentations", () => {
@@ -120,8 +142,11 @@ describe("QuickProducts", () => {
 
     render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Избранное", exact: true }));
     expect(screen.getByText("Избранных товаров пока нет")).toBeInTheDocument();
-    expect(screen.getByText(/Найдите товар в строке поиска и нажмите звезду/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Найдите товар в строке поиска или во вкладке «Все»/i),
+    ).toBeInTheDocument();
   });
 
   it("lets the cashier retry after favorites fail to load", () => {
@@ -133,8 +158,118 @@ describe("QuickProducts", () => {
     });
 
     render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Избранное", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
 
     expect(refetchFavorites).toHaveBeenCalledTimes(1);
+  });
+
+  it("scopes all products to the branch and never fetches an unscoped catalog", () => {
+    const { rerender } = render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+    expect(useCatalogQuery).toHaveBeenLastCalledWith(
+      { branch_id: "branch-1", lifecycle: "active", page: 1, page_size: 20 },
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Избранное", exact: true }));
+    expect(useCatalogQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ branch_id: "branch-1" }),
+      false,
+    );
+    rerender(<QuickProducts onAdd={vi.fn()} />);
+    expect(useCatalogQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ branch_id: undefined }),
+      false,
+    );
+    expect(screen.getByText("Выберите аптеку для просмотра товаров.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Выбрать Парацетамол 500 мг" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("paginates a bounded catalog and resets the page when the branch changes", () => {
+    useCatalogQuery.mockReturnValue({ data: { items: products, total: 41 }, isFetching: false });
+    const { rerender } = render(<QuickProducts branchId="branch-1" onAdd={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Назад" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(useCatalogQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, page_size: 20 }),
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(screen.getByRole("button", { name: "Далее" })).toBeDisabled();
+    rerender(<QuickProducts branchId="branch-2" onAdd={vi.fn()} />);
+    expect(useCatalogQuery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ branch_id: "branch-2", page: 1 }),
+      true,
+    );
+  });
+
+  it("hides placeholder products while the next branch or page is loading", () => {
+    useCatalogQuery.mockReturnValue({
+      data: { items: products, total: 41 },
+      isPlaceholderData: true,
+      isFetching: true,
+    });
+    render(<QuickProducts branchId="branch-2" onAdd={vi.fn()} />);
+    expect(
+      screen.queryByRole("button", { name: "Выбрать Парацетамол 500 мг" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("highlights the selected product, keeps accounting units and blocks selection while busy", () => {
+    render(
+      <QuickProducts branchId="branch-1" selectedCatalogId="product-1" onAdd={vi.fn()} busy />,
+    );
+    const selected = screen.getByRole("button", { name: "Выбрать Парацетамол 500 мг" });
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(selected).toBeDisabled();
+    expect(screen.getByText("Остаток: 148 учётных ед.")).toBeInTheDocument();
+    expect(screen.getAllByText("TJS · базовая цена")).toHaveLength(2);
+  });
+
+  it("adds a catalog product to favorites without selecting it", async () => {
+    usePosFavoritesQuery.mockReturnValue({ data: [], isLoading: false, error: null });
+    const onAdd = vi.fn();
+    render(<QuickProducts branchId="branch-1" onAdd={onAdd} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Добавить Парацетамол 500 мг в избранное" }),
+    );
+    await waitFor(() => expect(addFavorite).toHaveBeenCalledWith("product-1"));
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("passes safe catalog metadata to the selection handler without adding to the receipt", async () => {
+    const onAdd = vi.fn();
+    const onSelect = vi.fn().mockResolvedValue(undefined);
+    render(<QuickProducts branchId="branch-1" onAdd={onAdd} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать Парацетамол 500 мг" }));
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(products[0]));
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it("checks physical options even when accounting stock is zero but keeps archived products blocked", async () => {
+    const physical = {
+      ...products[1],
+      unit_sale_preparation: {
+        version: 1,
+        state: "prepared",
+        unit: "capsule",
+        units_per_pack: 20,
+        dispense_step: 1,
+        unit_price: "0.64",
+      },
+    };
+    const archived = { ...products[0], deleted_at: "2026-11-06T00:00:00Z" };
+    useCatalogQuery.mockReturnValue({ data: { items: [physical, archived], total: 2 } });
+    const onSelect = vi.fn().mockResolvedValue(true);
+    const onAdd = vi.fn();
+    render(<QuickProducts branchId="branch-1" onAdd={onAdd} onSelect={onSelect} />);
+    const product = screen.getByRole("button", { name: "Выбрать Амоксициллин 250 мг" });
+    expect(product).toBeEnabled();
+    expect(screen.getByText("Остаток проверяется при выборе")).toBeInTheDocument();
+    fireEvent.click(product);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith(physical));
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Выбрать Парацетамол 500 мг" })).toBeDisabled();
   });
 });

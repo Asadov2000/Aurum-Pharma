@@ -4,7 +4,7 @@ import { createScopedRehearsalCashier } from "./cashierRehearsalAccess";
 import {
   apiContext,
   apiLogin,
-  catalogSearchKey,
+  selectPosProduct,
   clearLoginRateLimit,
   expect,
   loginInBrowser,
@@ -30,16 +30,12 @@ async function addFormat(
   quantity: number,
 ) {
   const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-  if (!(await editor.count())) {
-    await page.getByRole("button", { name: "Упаковки" }).click();
-  }
+  await selectPosProduct(page, medicineName);
   await expect(editor).toBeVisible();
-  await editor.getByLabel("Название лекарства").fill(catalogSearchKey(medicineName));
-  await editor.getByRole("option", { name: new RegExp(medicineName) }).click();
   const formats = {
-    unit: ["Поштучно", "Количество, шт."],
-    blister: ["Блистер", "Количество блистеров"],
-    pack: ["Упаковка", "Количество упаковок"],
+    unit: [/^Штуки /, "Количество, шт."],
+    blister: [/^Блистеры /, "Количество блистеров"],
+    pack: [/^Упаковки /, "Количество упаковок"],
   } as const;
   const [label, field] = formats[format];
   await editor.getByRole("radio", { name: label, exact: true }).click();
@@ -49,7 +45,7 @@ async function addFormat(
       response.request().method() === "PUT" &&
       /\/sales\/[^/]+\/physical-cart\/items\/[^/]+$/.test(new URL(response.url()).pathname),
   );
-  await editor.getByRole("button", { name: "Добавить в корзину", exact: true }).click();
+  await editor.getByRole("button", { name: "Добавить в чек", exact: true }).click();
   const response = await saved;
   expect(response.ok()).toBe(true);
   await expect(editor.getByRole("listitem")).toHaveCount(1);
@@ -65,7 +61,11 @@ async function sellFormat(
 ) {
   const draft = await addFormat(page, medicineName, format, quantity);
   const payment = page.getByRole("region", { name: "Оплата наличными", exact: true });
-  await expect(payment.getByText(`${total} TJS`, { exact: true }).first()).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Оплата", exact: true })
+      .getByText(total.replace(".", ","), { exact: true }),
+  ).toBeVisible();
   await payment.getByLabel("Получено наличными, TJS").fill(total);
   const finished = page.waitForResponse(
     (response) =>
@@ -369,7 +369,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
     const confirmation = refused.request().postDataJSON() as { operation_id: string };
     expect(rehearsalFacts(fixture)).toEqual(afterWriteoff);
     const editor = page.getByRole("region", { name: "Продажа упаковками, блистерами и поштучно" });
-    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeDisabled();
+    await expect(editor.getByRole("button", { name: "Убрать", exact: true })).toBeDisabled();
     await page.reload();
     const cancellation = page.waitForResponse(
       (response) =>
@@ -381,7 +381,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
     const cancelled = await cancellation;
     expect(cancelled.ok()).toBe(true);
     expect(((await cancelled.json()) as { state: string }).state).toBe("cancelled");
-    await expect(editor.getByRole("button", { name: "Удалить", exact: true })).toBeEnabled();
+    await expect(editor.getByRole("button", { name: "Убрать", exact: true })).toBeEnabled();
     const terminal = await cashier.api.get(
       `sales/${oversized.sale_id}/physical-cash/operations/${confirmation.operation_id}`,
     );
@@ -400,7 +400,7 @@ test("branch-scoped cashier conserves 60 units and closes three sales, one refun
         new URL(response.url()).pathname ===
           `/api/v1/sales/${oversized.sale_id}/physical-cart/items/${oversized.id}`,
     );
-    await editor.getByRole("button", { name: "Удалить", exact: true }).click();
+    await editor.getByRole("button", { name: "Убрать", exact: true }).click();
     expect((await removed).ok()).toBe(true);
     await expect(editor.getByRole("listitem")).toHaveCount(0);
     if (await editor.count()) {

@@ -260,7 +260,7 @@ export function ShiftBar({
             {Number(shift.opening_cash).toFixed(2)} {shift.currency}
           </span>
         </span>
-        {canClose && closeBlocked && (
+        {!embedded && canClose && closeBlocked && (
           <span className="text-xs text-warning-foreground">
             Завершите или очистите текущий чек перед закрытием смены.
           </span>

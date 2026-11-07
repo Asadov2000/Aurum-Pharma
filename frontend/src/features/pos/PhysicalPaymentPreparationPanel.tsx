@@ -36,6 +36,10 @@ import {
 } from "./unitPaymentPreparationStorage";
 
 interface Props {
+  embedded?: boolean;
+  selectedMethod?: "card" | "qr" | "mixed";
+  onRecoveryMethodChange?: (method: "card" | "qr" | "mixed" | null) => void;
+  onTotalChange?: (total: string | null) => void;
   saleId: string;
   branchId?: string;
   registerId?: string;
@@ -94,6 +98,42 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   useEffect(() => {
     onBlockedChange(blocked);
   }, [blocked, onBlockedChange]);
+  const { onRecoveryMethodChange, onTotalChange, selectedMethod } = props;
+  useEffect(() => {
+    const payments = intent?.plan.request.payments;
+    const method = payments?.[0]?.method;
+    onRecoveryMethodChange?.(
+      payments && payments.length > 1
+        ? "mixed"
+        : method === "card" || method === "qr"
+          ? method
+          : null,
+    );
+  }, [intent, onRecoveryMethodChange]);
+  useEffect(() => {
+    onTotalChange?.(total);
+  }, [total, onTotalChange]);
+  useEffect(() => {
+    if (!selectedMethod || selectedMethod === allocationMode || !total || busy || marker || intent)
+      return;
+    if (selectedMethod === "mixed") {
+      if (!props.mixedPaymentEnabled || props.paymentMethods.length < 2) return;
+    } else {
+      if (!props.paymentMethods.includes(selectedMethod)) return;
+      form.reset({ ...emptyForm, [selectedMethod]: total });
+    }
+    setAllocationMode(selectedMethod);
+  }, [
+    selectedMethod,
+    allocationMode,
+    total,
+    busy,
+    marker,
+    intent,
+    props.mixedPaymentEnabled,
+    props.paymentMethods,
+    form,
+  ]);
 
   const run = useCallback(async (action: (check: () => void) => Promise<void>) => {
     if (running.current || !mounted.current) return;
@@ -227,9 +267,15 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       const quote = await getUnitPaymentQuote(latest.current.saleId, latest.current.scope);
       check();
       setTotal(quote.quote.total_amount);
-      const method = latest.current.paymentMethods.includes("card") ? "card" : "qr";
+      const preferred = latest.current.selectedMethod;
+      const method =
+        preferred && preferred !== "mixed" && latest.current.paymentMethods.includes(preferred)
+          ? preferred
+          : latest.current.paymentMethods.includes("card")
+            ? "card"
+            : "qr";
       form.reset({ ...emptyForm, [method]: quote.quote.total_amount });
-      setAllocationMode(method);
+      setAllocationMode(preferred === "mixed" ? "mixed" : method);
       setOpened(true);
     });
 
@@ -356,11 +402,15 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
   return (
     <section
       aria-label="Подготовка электронной оплаты"
-      className="space-y-3 rounded-[10px] border border-border bg-surface p-4"
+      className={
+        props.embedded
+          ? "space-y-3"
+          : "space-y-3 rounded-[10px] border border-border bg-surface p-4"
+      }
     >
       <p className="text-xs leading-5 text-foreground-muted">
         {props.onElectronicCompleted
-          ? "Подготовка плана не принимает деньги. Подтверждение оператора выполняется отдельно."
+          ? "Карта и QR подтверждаются оператором по чеку терминала."
           : "Деньги не приняты. Электронная оплата ещё недоступна."}
       </p>
       {error && <p role="alert">{error}</p>}
@@ -378,25 +428,29 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
           }
           onClick={open}
         >
-          Подготовка карты/QR
+          {props.embedded ? "Продолжить оплату" : "Подготовка карты/QR"}
         </Button>
       )}
       {opened && !intent && (
         <form onSubmit={prepare} className="space-y-2">
-          {total && <p>Итого: {total} TJS</p>}
-          <PosPaymentMethodButtons
-            label="Способ электронной оплаты"
-            options={allocationOptions}
-            value={allocationMode}
-            onChange={selectAllocation}
-            disabled={disabled || !props.canPrepare || !!marker}
-          />
-          <p className="text-xs text-foreground-muted">
-            Карта или QR заполняет всю сумму и заменяет введённое распределение.
-            {props.mixedPaymentEnabled
-              ? " В смешанной оплате укажите суммы частей; прежние значения сохраняются."
-              : " Разрешён только один способ оплаты."}
-          </p>
+          {total && !props.embedded && <p>Итого: {total} TJS</p>}
+          {!props.embedded && (
+            <PosPaymentMethodButtons
+              label="Способ электронной оплаты"
+              options={allocationOptions}
+              value={allocationMode}
+              onChange={selectAllocation}
+              disabled={disabled || !props.canPrepare || !!marker}
+            />
+          )}
+          {!props.embedded && (
+            <p className="text-xs text-foreground-muted">
+              Карта или QR заполняет всю сумму и заменяет введённое распределение.
+              {props.mixedPaymentEnabled
+                ? " В смешанной оплате укажите суммы частей; прежние значения сохраняются."
+                : " Разрешён только один способ оплаты."}
+            </p>
+          )}
           {(["cash", "card", "qr"] as const)
             .filter(
               (method) =>
@@ -437,7 +491,7 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
       )}
       {intent && (
         <div className="space-y-2">
-          <p>Итого: {intent.plan.request.expected_total_amount} TJS</p>
+          {!props.embedded && <p>Итого: {intent.plan.request.expected_total_amount} TJS</p>}
           {intent.plan.request.payments.map((part) => (
             <p key={part.method}>
               {labels[part.method]}: {part.amount}
@@ -528,9 +582,11 @@ export function PhysicalPaymentPreparationPanel(props: Props): JSX.Element {
             }}
           />
         )}
-      <Button type="button" disabled={disabled} onClick={() => void run(recover)}>
-        Проверить результат подготовки
-      </Button>
+      {(!props.embedded || blocked) && (
+        <Button type="button" disabled={disabled} onClick={() => void run(recover)}>
+          Проверить результат подготовки
+        </Button>
+      )}
     </section>
   );
 }

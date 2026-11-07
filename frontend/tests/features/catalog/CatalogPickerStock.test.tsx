@@ -70,6 +70,6 @@ describe("CatalogPicker — stock badge", () => {
     );
     expect(zeroLegacyStock).toBeEnabled();
     fireEvent.click(zeroLegacyStock);
-    expect(onChange).toHaveBeenCalledWith("c2", "Аскорбинка");
+    expect(onChange).toHaveBeenCalledWith("c2", "Аскорбинка", items[1]);
   });
 });
